@@ -1,0 +1,34 @@
+#include "common_defines.h"
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+static portMUX_TYPE furi_critical_mutex = portMUX_INITIALIZER_UNLOCKED;
+
+__FuriCriticalInfo __furi_critical_enter(void) {
+    __FuriCriticalInfo info;
+
+    info.isrm = 0;
+    info.from_isr = FURI_IS_ISR();
+    info.kernel_running = (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING);
+
+    if(info.from_isr) {
+        info.isrm = taskENTER_CRITICAL_FROM_ISR();
+    } else if(info.kernel_running) {
+        taskENTER_CRITICAL(&furi_critical_mutex);
+    } else {
+        portDISABLE_INTERRUPTS();
+    }
+
+    return info;
+}
+
+void __furi_critical_exit(__FuriCriticalInfo info) {
+    if(info.from_isr) {
+        taskEXIT_CRITICAL_FROM_ISR(info.isrm);
+    } else if(info.kernel_running) {
+        taskEXIT_CRITICAL(&furi_critical_mutex);
+    } else {
+        portENABLE_INTERRUPTS();
+    }
+}

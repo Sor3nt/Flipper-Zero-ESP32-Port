@@ -1,0 +1,10 @@
+App(
+    appid="esp_now",
+    name="ESP-Now",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="esp_now_app",
+    stack_size=4 * 1024,
+    icon="A_Sub1ghz_14",
+    order=65,
+    fap_libs=["assets"],
+)
