@@ -39,3 +39,6 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # FAT filesystem: enable Long File Names (stored on heap)
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+
+# NFC needs 3DES (felica, mf_ultralight)
+CONFIG_MBEDTLS_DES_C=y
