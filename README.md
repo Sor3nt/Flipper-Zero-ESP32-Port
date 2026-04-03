@@ -2,6 +2,8 @@
 
 A port of the [Flipper Zero](https://flipperzero.one/) firmware to ESP32-based development boards. This project brings the Flipper Zero UI, services, and application framework to affordable ESP32 hardware — no Flipper Zero required.
 
+![img](pic1.jpg)
+
 ## Supported Boards
 
 | Board                                   | MCU | Display | Input | SubGHz | NFC | IR | SD Card |
