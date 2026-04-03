@@ -14,7 +14,6 @@ idf_component_register(
         "../../lib/subghz/blocks"
         "../../lib/subghz/devices"
         "../../lib/subghz/protocols"
-        "../../lib/subghz/protocols/vehicle"
     REQUIRES furi furi_hal toolbox mlib flipper_application storage flipper_format rpc
 )
 
