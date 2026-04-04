@@ -34,7 +34,10 @@ void wifi_app_scene_connect_on_enter(void* context) {
     WifiApRecord* ap = &app->ap_records[app->selected_index];
 
     char password[65] = {0};
-    if(ap->has_password) {
+    if(app->password_input[0]) {
+        strncpy(password, app->password_input, sizeof(password) - 1);
+        app->password_input[0] = '\0';
+    } else if(ap->has_password) {
         wifi_password_read(ap->ssid, password, sizeof(password));
     }
 

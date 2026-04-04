@@ -41,14 +41,11 @@ void wifi_app_scene_ap_detail_on_enter(void* context) {
         app->widget, 0, 2, AlignLeft, AlignTop, FontSecondary,
         furi_string_get_cstr(app->text_buf));
 
-    // Connect button if AP is connectable
+    // Connect button (always shown)
     if(app->selected_index < app->ap_count) {
-        WifiApRecord* ap = &app->ap_records[app->selected_index];
-        if(ap->is_open || ap->has_password) {
-            widget_add_button_element(
-                app->widget, GuiButtonTypeCenter, "Connect",
-                ap_detail_connect_callback, app);
-        }
+        widget_add_button_element(
+            app->widget, GuiButtonTypeCenter, "Connect",
+            ap_detail_connect_callback, app);
     }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WifiAppViewWidget);
@@ -63,7 +60,12 @@ bool wifi_app_scene_ap_detail_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(app->scene_manager, WifiAppSceneDeauther);
             consumed = true;
         } else if(event.event == WifiAppCustomEventConnect) {
-            scene_manager_next_scene(app->scene_manager, WifiAppSceneConnect);
+            WifiApRecord* ap = &app->ap_records[app->selected_index];
+            if(ap->is_open || ap->has_password) {
+                scene_manager_next_scene(app->scene_manager, WifiAppSceneConnect);
+            } else {
+                scene_manager_next_scene(app->scene_manager, WifiAppScenePasswordInput);
+            }
             consumed = true;
         }
     }

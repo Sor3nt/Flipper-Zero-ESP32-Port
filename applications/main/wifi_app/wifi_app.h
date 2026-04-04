@@ -31,6 +31,7 @@ typedef enum {
     WifiAppCustomEventCrawlerStop,
     WifiAppCustomEventHandshakeToggle,
     WifiAppCustomEventHandshakeDeauth,
+    WifiAppCustomEventPasswordEntered,
 } WifiAppCustomEvent;
 
 /** View IDs */
@@ -110,6 +111,9 @@ typedef struct {
 
     // Deauth mode
     WifiAppDeauthMode deauth_mode;
+
+    // Password input buffer
+    char password_input[65];
 
     // Crawler state
     char crawler_domain[128];
