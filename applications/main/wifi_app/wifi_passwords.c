@@ -36,6 +36,29 @@ bool wifi_password_exists(const char* ssid) {
     return exists;
 }
 
+bool wifi_password_save(const char* ssid, const char* password) {
+    if(!ssid || !ssid[0] || !password || !password[0]) return false;
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    storage_simply_mkdir(storage, "/ext/wifi");
+
+    char path[64];
+    build_password_path(ssid, path, sizeof(path));
+
+    File* file = storage_file_alloc(storage);
+    bool ok = false;
+    if(storage_file_open(file, path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+        size_t len = strlen(password);
+        ok = (storage_file_write(file, password, len) == len);
+        storage_file_close(file);
+    }
+
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
+
+    return ok;
+}
+
 bool wifi_password_read(const char* ssid, char* out_pass, size_t max_len) {
     if(!ssid || !ssid[0] || !out_pass || max_len == 0) return false;
 

@@ -52,9 +52,8 @@ static void ap_list_draw_callback(Canvas* canvas, void* _model) {
                  ssid, ap->rssi, ap->channel);
         canvas_draw_str(canvas, 2, y + 9, line);
 
-        // Lock/Unlock icon
-        bool connectable = ap->is_open || ap->has_password;
-        const Icon* icon = connectable ? &I_Unlock_7x8 : &I_Lock_7x8;
+        // Lock/Unlock icon (open vs encrypted)
+        const Icon* icon = ap->is_open ? &I_Unlock_7x8 : &I_Lock_7x8;
         canvas_draw_icon(canvas, 109, y + 2, icon);
 
         if(idx == model->selected) {

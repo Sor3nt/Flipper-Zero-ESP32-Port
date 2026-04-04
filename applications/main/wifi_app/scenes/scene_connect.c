@@ -11,6 +11,7 @@ static uint32_t s_tick_count;
 static uint32_t s_done_tick;  // tick when connect finished (success or fail)
 static bool s_connect_success;
 static bool s_connect_done;
+static char s_used_password[65];  // password used for this connection attempt
 
 void wifi_app_scene_connect_on_enter(void* context) {
     WifiApp* app = context;
@@ -19,6 +20,7 @@ void wifi_app_scene_connect_on_enter(void* context) {
     s_done_tick = 0;
     s_connect_success = false;
     s_connect_done = false;
+    s_used_password[0] = '\0';
 
     widget_reset(app->widget);
     widget_add_string_multiline_element(
@@ -40,6 +42,8 @@ void wifi_app_scene_connect_on_enter(void* context) {
     } else if(ap->has_password) {
         wifi_password_read(ap->ssid, password, sizeof(password));
     }
+
+    strncpy(s_used_password, password, sizeof(s_used_password) - 1);
 
     ESP_LOGI(TAG, "Connecting to '%s' (open=%d, has_pw=%d)", ap->ssid, ap->is_open, ap->has_password);
 
@@ -64,6 +68,12 @@ bool wifi_app_scene_connect_on_event(void* context, SceneManagerEvent event) {
             // Store connected AP info
             WifiApRecord* ap = &app->ap_records[app->selected_index];
             memcpy(&app->connected_ap, ap, sizeof(WifiApRecord));
+
+            // Save password to SD card for future use
+            if(s_used_password[0] && !ap->is_open) {
+                wifi_password_save(ap->ssid, s_used_password);
+                ap->has_password = true;
+            }
 
             // Get IP info
             esp_netif_ip_info_t ip_info = {0};

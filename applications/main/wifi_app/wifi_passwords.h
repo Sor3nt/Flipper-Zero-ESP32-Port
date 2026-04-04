@@ -14,3 +14,10 @@ bool wifi_password_exists(const char* ssid);
  *  @param max_len    size of out_pass buffer
  *  @return true if password was read successfully */
 bool wifi_password_read(const char* ssid, char* out_pass, size_t max_len);
+
+/** Save password for SSID to SD card.
+ *  Creates /ext/wifi/<ssid>.txt with the given password.
+ *  @param ssid       SSID to save for
+ *  @param password   password to store
+ *  @return true if password was saved successfully */
+bool wifi_password_save(const char* ssid, const char* password);

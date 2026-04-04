@@ -38,7 +38,8 @@ Connect your board, click flash, done.
 - Bad USB over BLE HID (keyboard/mouse/consumer)
 
 **WiFi**
-- Connect to WiFi networks
+- Connect to WiFi networks (password prompt for protected networks)
+- Saved passwords on SD card (`/wifi/<SSID>.txt`) — entered passwords are saved automatically after successful connect
 - Network scanner
 - Deauther
 - Handshake capture
@@ -72,8 +73,10 @@ Connect your board, click flash, done.
 
 ### Prerequisites
 
-- [ESP-IDF v5.4](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/get-started/)
+- **[ESP-IDF v5.4.1](https://docs.espressif.com/projects/esp-idf/en/v5.4.1/esp32s3/get-started/)** (exact version required)
 - ESP-IDF export script sourced (default: `~/esp/esp-idf/export.sh`)
+
+> **Important:** This project must be built with ESP-IDF **v5.4.1**. Newer versions (v5.5+) ship with a different toolchain (e.g. `xtensa-esp-elf 14.2.0`) that introduces linker errors. If you see `undefined reference` errors during linking, you are likely using the wrong ESP-IDF version.
 
 ### Build & Flash (T-Embed CC1101)
 
