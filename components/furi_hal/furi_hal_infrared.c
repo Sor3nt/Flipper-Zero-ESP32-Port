@@ -162,8 +162,12 @@ void furi_hal_infrared_async_rx_start(void) {
 
     /* Configure receive parameters */
     ir_rx.rx_config.signal_range_min_ns = 1250;  /* glitch filter: ignore < 1.25us */
-    ir_rx.rx_config.signal_range_max_ns = ir_rx.timeout_us > 0 ?
-        ir_rx.timeout_us * 1000 : 150000 * 1000; /* default 150ms silence = end of signal */
+    /* RMT idle threshold: silence longer than this ends the frame.
+       Max at 1 MHz resolution is ~32.7 ms (RMT_LL_MAX_IDLE_VALUE=32767).
+       Use 20 ms default which covers all common IR protocols. */
+    uint32_t max_ns = ir_rx.timeout_us > 0 ? ir_rx.timeout_us * 1000 : 20000 * 1000;
+    if(max_ns > 32000 * 1000) max_ns = 32000 * 1000; /* clamp to RMT HW limit */
+    ir_rx.rx_config.signal_range_max_ns = max_ns;
     ir_rx.rx_config.flags.en_partial_rx = false;
 
     ir_state = InfraredStateAsyncRx;
