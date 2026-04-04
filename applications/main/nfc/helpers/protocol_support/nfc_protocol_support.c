@@ -120,6 +120,41 @@ const char* nfc_protocol_support_plugin_names[NfcProtocolNum] = {
     /* Add new protocol support plugin names here */
 };
 
+/* Static protocol support lookup — ESP32 port doesn't use FAP plugins */
+extern const NfcProtocolSupportBase nfc_protocol_support_iso14443_3a;
+extern const NfcProtocolSupportBase nfc_protocol_support_iso14443_3b;
+extern const NfcProtocolSupportBase nfc_protocol_support_iso14443_4a;
+extern const NfcProtocolSupportBase nfc_protocol_support_iso14443_4b;
+extern const NfcProtocolSupportBase nfc_protocol_support_iso15693_3;
+extern const NfcProtocolSupportBase nfc_protocol_support_felica;
+extern const NfcProtocolSupportBase nfc_protocol_support_mf_ultralight;
+extern const NfcProtocolSupportBase nfc_protocol_support_mf_classic;
+extern const NfcProtocolSupportBase nfc_protocol_support_mf_plus;
+extern const NfcProtocolSupportBase nfc_protocol_support_mf_desfire;
+extern const NfcProtocolSupportBase nfc_protocol_support_slix;
+extern const NfcProtocolSupportBase nfc_protocol_support_st25tb;
+extern const NfcProtocolSupportBase nfc_protocol_support_ntag4xx;
+extern const NfcProtocolSupportBase nfc_protocol_support_type_4_tag;
+extern const NfcProtocolSupportBase nfc_protocol_support_emv;
+
+static const NfcProtocolSupportBase* const nfc_protocol_support_static[NfcProtocolNum] = {
+    [NfcProtocolIso14443_3a] = &nfc_protocol_support_iso14443_3a,
+    [NfcProtocolIso14443_3b] = &nfc_protocol_support_iso14443_3b,
+    [NfcProtocolIso14443_4a] = &nfc_protocol_support_iso14443_4a,
+    [NfcProtocolIso14443_4b] = &nfc_protocol_support_iso14443_4b,
+    [NfcProtocolIso15693_3] = &nfc_protocol_support_iso15693_3,
+    [NfcProtocolFelica] = &nfc_protocol_support_felica,
+    [NfcProtocolMfUltralight] = &nfc_protocol_support_mf_ultralight,
+    [NfcProtocolMfClassic] = &nfc_protocol_support_mf_classic,
+    [NfcProtocolMfPlus] = &nfc_protocol_support_mf_plus,
+    [NfcProtocolMfDesfire] = &nfc_protocol_support_mf_desfire,
+    [NfcProtocolSlix] = &nfc_protocol_support_slix,
+    [NfcProtocolSt25tb] = &nfc_protocol_support_st25tb,
+    [NfcProtocolNtag4xx] = &nfc_protocol_support_ntag4xx,
+    [NfcProtocolType4Tag] = &nfc_protocol_support_type_4_tag,
+    [NfcProtocolEmv] = &nfc_protocol_support_emv,
+};
+
 void nfc_protocol_support_alloc(NfcProtocol protocol, void* context) {
     furi_assert(context);
 
@@ -127,38 +162,15 @@ void nfc_protocol_support_alloc(NfcProtocol protocol, void* context) {
 
     NfcProtocolSupport* protocol_support = malloc(sizeof(NfcProtocolSupport));
     protocol_support->protocol = protocol;
+    protocol_support->plugin_manager = NULL;
 
-    const char* protocol_name = nfc_protocol_support_plugin_names[protocol];
-    FuriString* plugin_path =
-        furi_string_alloc_printf(APP_ASSETS_PATH("plugins/nfc_%s.fal"), protocol_name);
-    FURI_LOG_D(TAG, "Loading %s", furi_string_get_cstr(plugin_path));
-
-    protocol_support->plugin_manager = plugin_manager_alloc(
-        NFC_PROTOCOL_SUPPORT_PLUGIN_APP_ID,
-        NFC_PROTOCOL_SUPPORT_PLUGIN_API_VERSION,
-        composite_api_resolver_get(instance->api_resolver));
-    do {
-        if(plugin_manager_load_single(
-               protocol_support->plugin_manager, furi_string_get_cstr(plugin_path)) !=
-           PluginManagerErrorNone) {
-            break;
-        }
-        const NfcProtocolSupportPlugin* plugin =
-            plugin_manager_get_ep(protocol_support->plugin_manager, 0);
-
-        if(plugin->protocol != protocol) {
-            break;
-        }
-
-        protocol_support->base = plugin->base;
-    } while(false);
-    if(!protocol_support->base) {
+    if(protocol < NfcProtocolNum && nfc_protocol_support_static[protocol]) {
+        protocol_support->base = nfc_protocol_support_static[protocol];
+        FURI_LOG_I(TAG, "Protocol %d support loaded (static)", protocol);
+    } else {
         protocol_support->base = &nfc_protocol_support_empty;
-        plugin_manager_free(protocol_support->plugin_manager);
-        protocol_support->plugin_manager = NULL;
+        FURI_LOG_W(TAG, "Protocol %d has no support", protocol);
     }
-
-    furi_string_free(plugin_path);
 
     instance->protocol_support = protocol_support;
 }
@@ -306,7 +318,6 @@ static void nfc_protocol_support_scene_read_on_enter(NfcApp* instance) {
     instance->poller = nfc_poller_alloc(instance->nfc, protocol);
 
     view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
-    //nfc_supported_cards_load_cache(instance->nfc_supported_cards);
 
     // Start poller with the appropriate callback
     nfc_protocol_support_get(protocol, instance)->scene_read.on_enter(instance);

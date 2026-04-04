@@ -583,7 +583,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         pn532_rx_buf[0] = sak;
         crc_a_append(pn532_rx_buf, 1);
         pn532_rx_bits = 24;
-        FURI_LOG_D(TAG, "SELECT CL%d SAK=%02X", cascade + 1, sak);
+        FURI_LOG_I(TAG, "SELECT CL%d SAK=%02X", cascade + 1, sak);
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
                 FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
@@ -598,7 +598,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         pn532_rx_bits = (pn532_cached_ats_len + 2) * 8;
         pn532_iso_dep_mode = true;
         pn532_block_number = 0;
-        FURI_LOG_D(TAG, "RATS → cached ATS (%d bytes)", pn532_cached_ats_len);
+        FURI_LOG_I(TAG, "RATS -> ATS (%d bytes)", pn532_cached_ats_len);
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
                 FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
@@ -689,12 +689,22 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         }
     }
 
-    FURI_LOG_D(TAG, "InDataExchange: %u bytes, dep=%d", (unsigned)payload_len, pn532_iso_dep_mode);
+    /* No target listed → return timeout immediately (non-14443A tech polls) */
+    if(pn532_target_number == 0) {
+        if(nfc_event_flags)
+            furi_event_flag_set(nfc_event_flags,
+                FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
+        return FuriHalNfcErrorCommunicationTimeout;
+    }
+
+    FURI_LOG_I(TAG, "TRX: %u bytes dep=%d cmd=%02X",
+        (unsigned)payload_len, pn532_iso_dep_mode,
+        payload_len > 0 ? payload[0] : 0);
 
     /* Build InDataExchange command */
     uint8_t cmd[payload_len + 2];
     cmd[0] = PN532_CMD_INDATAEXCHANGE;
-    cmd[1] = pn532_target_number > 0 ? pn532_target_number : 1;
+    cmd[1] = pn532_target_number;
     if(payload_len > 0) memcpy(&cmd[2], payload, payload_len);
 
     uint8_t resp[256];
@@ -725,13 +735,18 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
                 pn532_rx_bits = (data_len + 2) * 8;
             }
 
-            FURI_LOG_D(TAG, "InDataExchange OK: %u bits", (unsigned)pn532_rx_bits);
+            FURI_LOG_I(TAG, "TRX OK: %u bits [%02X %02X %02X %02X...]",
+                (unsigned)pn532_rx_bits,
+                pn532_rx_buf[0],
+                pn532_rx_bits > 8 ? pn532_rx_buf[1] : 0,
+                pn532_rx_bits > 16 ? pn532_rx_buf[2] : 0,
+                pn532_rx_bits > 24 ? pn532_rx_buf[3] : 0);
             if(nfc_event_flags)
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
         } else {
             err = pn532_status_to_error(status);
-            FURI_LOG_D(TAG, "InDataExchange error: %02X", status);
+            FURI_LOG_I(TAG, "TRX err: %02X", status);
             if(nfc_event_flags)
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);

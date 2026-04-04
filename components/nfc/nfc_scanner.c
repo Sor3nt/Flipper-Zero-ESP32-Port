@@ -192,7 +192,15 @@ void nfc_scanner_state_handler_complete(NfcScanner* instance) {
     };
 
     instance->callback(event, instance->context);
-    furi_delay_ms(100);
+
+    /* Signal the worker loop to stop. The callback above sends a custom event
+     * to the view dispatcher which will eventually trigger nfc_scanner_stop().
+     * We must NOT spin here because on FreeRTOS with preemptive scheduling,
+     * the main thread (higher priority) may process the event synchronously
+     * during our callback — calling nfc_scanner_stop() → furi_thread_join()
+     * which would deadlock (scanner thread can't join itself).
+     * Instead, just set session_state so the worker loop exits naturally. */
+    instance->session_state = NfcScannerSessionStateStopRequest;
 }
 
 static NfcScannerStateHandler nfc_scanner_state_handlers[NfcScannerStateNum] = {
