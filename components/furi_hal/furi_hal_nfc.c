@@ -208,22 +208,26 @@ static bool pn532_wait_ready(uint32_t timeout_ms) {
 #endif
 }
 
-/** Read a PN532 I2C response frame (single read, includes RDY byte). */
+/** Read a PN532 I2C response frame.
+ *
+ * PN532 I2C delivers the complete response in a single read transaction,
+ * prepended with a RDY byte. We read enough bytes to capture the full frame.
+ * Frame: [RDY(1)] [00 00 FF] [LEN] [LCS] [TFI] [CMD] [payload...] [DCS] [00]
+ */
 static FuriHalNfcError pn532_read_response(uint8_t* response, size_t* response_len, size_t max_len) {
-    /* PN532 I2C prepends a RDY byte to every read, so the entire frame must be
-     * read in a single I2C transaction. We read a fixed-size buffer large enough
-     * for any expected response. */
-    uint8_t rx_buf[max_len + 10]; /* RDY + preamble(3) + len + lcs + TFI + cmd + data + DCS + postamble */
-    size_t read_len = sizeof(rx_buf);
-    if(read_len > 255) read_len = 255; /* I2C single-read limit */
+    /* Read enough for: RDY(1) + preamble(3) + LEN(1) + LCS(1) + data(max_len) + DCS(1) + postamble(1) */
+    size_t read_len = max_len + 8;
+    if(read_len > 255) read_len = 255;
 
+    uint8_t rx_buf[read_len];
     esp_err_t err = i2c_master_read_from_device(
         BOARD_NFC_I2C_PORT, PN532_I2C_ADDR, rx_buf, read_len, pdMS_TO_TICKS(200));
     if(err != ESP_OK) return FuriHalNfcErrorCommunication;
 
-    /* Validate frame: [RDY=0x01] [00] [00] [FF] [LEN] [LCS] [TFI=0xD5] [CMD+1] [data...] [DCS] [00] */
+    /* Validate: [RDY=0x01] [00] [00] [FF] [LEN] [LCS] [TFI=0xD5] ... */
     if(rx_buf[0] != 0x01) return FuriHalNfcErrorCommunication;
-    if(rx_buf[1] != 0x00 || rx_buf[2] != 0x00 || rx_buf[3] != 0xFF) return FuriHalNfcErrorDataFormat;
+    if(rx_buf[1] != 0x00 || rx_buf[2] != 0x00 || rx_buf[3] != 0xFF)
+        return FuriHalNfcErrorDataFormat;
 
     uint8_t data_len = rx_buf[4];
     if(data_len < 2) return FuriHalNfcErrorDataFormat;
@@ -707,7 +711,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     cmd[1] = pn532_target_number;
     if(payload_len > 0) memcpy(&cmd[2], payload, payload_len);
 
-    uint8_t resp[256];
+    uint8_t resp[128];
     size_t resp_len = sizeof(resp);
 
     FuriHalNfcError err = pn532_send_command(cmd, payload_len + 2, resp, &resp_len, 2000);
@@ -792,7 +796,7 @@ FuriHalNfcError furi_hal_nfc_listener_rx(uint8_t* rx_data, size_t rx_data_size, 
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
 
     uint8_t cmd[] = {PN532_CMD_TGGETDATA};
-    uint8_t resp[256];
+    uint8_t resp[128];
     size_t resp_len = sizeof(resp);
     FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
     if(err == FuriHalNfcErrorNone && resp_len >= 1) {
