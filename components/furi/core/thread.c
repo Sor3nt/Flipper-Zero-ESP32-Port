@@ -301,8 +301,9 @@ void furi_thread_set_stack_size(FuriThread* thread, size_t stack_size) {
     /* ESP32 needs larger stacks than STM32 (deeper SPI/FATFS call chains) */
     if(stack_size < 4096) stack_size = 4096;
 
-    /* With CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY, stacks can be in PSRAM */
-    thread->stack_buffer = malloc(stack_size);
+    /* Stack must be in internal SRAM — flash/NVS operations disable the SPI bus
+       that PSRAM uses, so a PSRAM-resident stack causes a DoubleException. */
+    thread->stack_buffer = heap_caps_malloc(stack_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     thread->stack_size = stack_size;
 }
 
