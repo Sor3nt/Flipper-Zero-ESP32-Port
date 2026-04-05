@@ -187,6 +187,15 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
         SubGhzViewIdReadRAW,
         subghz_read_raw_get_view(subghz->subghz_read_raw));
 
+    if(!alloc_for_tx_only) {
+        // Jammer
+        subghz->subghz_jammer = subghz_jammer_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdJammer,
+            subghz_jammer_get_view(subghz->subghz_jammer));
+    }
+
     //init threshold rssi
     subghz->threshold_rssi = subghz_threshold_rssi_alloc();
 
@@ -296,6 +305,11 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // Frequency Analyzer
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdFrequencyAnalyzer);
         subghz_frequency_analyzer_free(subghz->subghz_frequency_analyzer);
+    }
+    if(!alloc_for_tx_only) {
+        // Jammer
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdJammer);
+        subghz_jammer_free(subghz->subghz_jammer);
     }
     // Read RAW
     view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdReadRAW);
