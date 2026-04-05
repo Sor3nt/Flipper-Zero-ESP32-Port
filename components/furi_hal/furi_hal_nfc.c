@@ -1080,9 +1080,12 @@ FuriHalNfcError furi_hal_nfc_iso14443a_listener_set_col_res_data(
     cmd[idx++] = 0x00;
     cmd[idx++] = 0x00;
 
-    /* Don't wait for response yet — TgInitAsTarget blocks until a reader selects us.
-     * We'll send this command when the listener worker starts waiting for events.
-     * For now, just cache the params. */
+    esp_err_t err = i2c_master_write_to_device(BOARD_NFC_I2C_PORT, PN532_I2C_ADDR, cmd, idx, pdMS_TO_TICKS(1000));
+
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "I2C write failed: %s", esp_err_to_name(err));
+        return FuriHalNfcErrorCommunication;
+    }
 
     return FuriHalNfcErrorNone;
 }

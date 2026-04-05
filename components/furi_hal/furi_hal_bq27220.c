@@ -16,9 +16,6 @@
 
 static const char* TAG = "BQ27220";
 
-/* BQ27220 I2C address */
-#define BQ27220_ADDR            0x55
-
 /* Registers */
 #define BQ27220_REG_TEMP        0x06
 #define BQ27220_REG_VOLT        0x08
@@ -32,9 +29,6 @@ static const char* TAG = "BQ27220";
 
 /* I2C configuration — shared with NFC (PN532) and Qwiic */
 #if defined(BOARD_PIN_QWIIC_SDA) && defined(BOARD_PIN_QWIIC_SCL)
-#define BQ_I2C_PORT     I2C_NUM_0
-#define BQ_I2C_SDA      BOARD_PIN_QWIIC_SDA
-#define BQ_I2C_SCL      BOARD_PIN_QWIIC_SCL
 #define BQ_I2C_FREQ_HZ  100000
 #define BQ_I2C_TIMEOUT  (1000 / portTICK_PERIOD_MS)
 #else
