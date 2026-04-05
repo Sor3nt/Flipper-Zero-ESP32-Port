@@ -412,9 +412,24 @@ bool furi_thread_join(FuriThread* thread) {
     furi_check(!thread->is_service);
     furi_check(furi_thread_get_current() != thread);
 
+    /* Temporarily lower our priority to allow the target thread to run.
+     * Without this, a higher-priority thread waiting in this loop can
+     * starve the target thread (priority inversion), causing a deadlock
+     * when the join is triggered by synchronous event dispatch. */
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    UBaseType_t my_prio = uxTaskPriorityGet(self);
+    TaskHandle_t target = (TaskHandle_t)thread;
+    UBaseType_t target_prio = uxTaskPriorityGet(target);
+    if(my_prio > target_prio) {
+        vTaskPrioritySet(self, target_prio);
+    }
+
     while(thread->state != FuriThreadStateStopped) {
         furi_delay_tick(2);
     }
+
+    /* Restore original priority */
+    vTaskPrioritySet(self, my_prio);
 
     return true;
 }

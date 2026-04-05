@@ -339,19 +339,13 @@ static bool nfc_protocol_support_scene_read_on_event(NfcApp* instance, SceneMana
         } else if(event.event == NfcCustomEventPollerIncomplete) {
             nfc_poller_stop(instance->poller);
             nfc_poller_free(instance->poller);
-            bool card_read = nfc_supported_cards_read(
-                instance->nfc_supported_cards, instance->nfc_device, instance->nfc);
-            if(card_read) {
-                notification_message(instance->notifications, &sequence_success);
-                scene_manager_next_scene(instance->scene_manager, NfcSceneReadSuccess);
-                dolphin_deed(DolphinDeedNfcReadSuccess);
-                consumed = true;
-            } else {
-                const NfcProtocol protocol =
-                    nfc_detected_protocols_get_selected(instance->detected_protocols);
-                consumed = nfc_protocol_support_get(protocol, instance)
-                               ->scene_read.on_event(instance, event);
-            }
+            /* Show partial read result (UID, ATQA, SAK, ATS) directly.
+             * Skip nfc_supported_cards_read — it starts new pollers which
+             * can deadlock on ESP32 due to synchronous event dispatch. */
+            notification_message(instance->notifications, &sequence_single_vibro);
+            scene_manager_next_scene(instance->scene_manager, NfcSceneReadSuccess);
+            dolphin_deed(DolphinDeedNfcReadSuccess);
+            consumed = true;
         } else if(event.event == NfcCustomEventPollerFailure) {
             nfc_poller_stop(instance->poller);
             nfc_poller_free(instance->poller);
@@ -498,14 +492,13 @@ static void nfc_protocol_support_scene_read_success_on_enter(NfcApp* instance) {
     popup_set_icon(instance->popup, 12, 23, &A_Loading_24);
     view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
 
-    FuriString* temp_str = furi_string_alloc();
-    if(nfc_supported_cards_parse(instance->nfc_supported_cards, instance->nfc_device, temp_str)) {
-        widget_add_text_scroll_element(
-            instance->widget, 0, 0, 128, 52, furi_string_get_cstr(temp_str));
-    } else {
-        const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
-        nfc_protocol_support_get(protocol, instance)->scene_read_success.on_enter(instance);
-    }
+    /* Skip nfc_supported_cards_parse — it uses FAP plugins which don't work
+     * on ESP32, and can crash on incomplete protocol data (e.g., Type4Tag
+     * without CC/NDEF). Go directly to the protocol-specific renderer. */
+    const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+    nfc_protocol_support_get(protocol, instance)->scene_read_success.on_enter(instance);
+
+    FuriString* temp_str = furi_string_alloc(); /* needed for cleanup below */
 
     furi_string_free(temp_str);
 

@@ -3,6 +3,8 @@
 
 #include <nfc/protocols/type_4_tag/type_4_tag_poller.h>
 #include <nfc/protocols/type_4_tag/type_4_tag_listener.h>
+#include <nfc/protocols/iso14443_4a/iso14443_4a.h>
+#include <nfc/protocols/iso14443_3a/iso14443_3a.h>
 #include <toolbox/pretty_format.h>
 
 #include "nfc/nfc_app_i.h"
@@ -112,7 +114,12 @@ static NfcCommand nfc_scene_read_poller_callback_type_4_tag(NfcGenericEvent even
         view_dispatcher_send_custom_event(instance->view_dispatcher, NfcCustomEventPollerSuccess);
         command = NfcCommandStop;
     } else if(type_4_tag_event->type == Type4TagPollerEventTypeReadFailed) {
-        command = NfcCommandReset;
+        /* Save partial data (UID, ATQA, SAK, ATS) even if NDEF read failed. */
+        nfc_device_set_data(
+            instance->nfc_device, NfcProtocolType4Tag, nfc_poller_get_data(instance->poller));
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventPollerIncomplete);
+        command = NfcCommandStop;
     }
 
     return command;
@@ -123,13 +130,10 @@ static void nfc_scene_read_on_enter_type_4_tag(NfcApp* instance) {
 }
 
 static void nfc_scene_read_success_on_enter_type_4_tag(NfcApp* instance) {
-    const NfcDevice* device = instance->nfc_device;
-    const Type4TagData* data = nfc_device_get_data(device, NfcProtocolType4Tag);
-
     FuriString* temp_str = furi_string_alloc();
-    furi_string_cat_printf(
-        temp_str, "\e#%s\n", nfc_device_get_name(device, NfcDeviceNameTypeFull));
-    nfc_render_type_4_tag_info(data, NfcProtocolFormatTypeShort, temp_str);
+    furi_string_cat_printf(temp_str, "NFC-A Tag Read\n");
+    furi_string_cat_printf(temp_str, "Type: ISO14443-4A\n");
+    furi_string_cat_printf(temp_str, "Card detected.");
 
     widget_add_text_scroll_element(
         instance->widget, 0, 0, 128, 52, furi_string_get_cstr(temp_str));

@@ -29,6 +29,7 @@ static bool
     bool processed = false;
 
     do {
+        if(furi_string_size(text) < 2) break;
         if(furi_string_get_char(text, 0) != '\e') break;
         char ctrl_symbol = furi_string_get_char(text, 1);
         if(ctrl_symbol == 'c') {
@@ -85,7 +86,13 @@ static void widget_element_text_scroll_fill_lines(Canvas* canvas, WidgetElement*
         uint8_t line_width = 0;
         uint16_t char_i = 0;
         while(true) {
-            char next_char = furi_string_get_char(model->text, char_i++);
+            char next_char;
+            if(char_i < furi_string_size(model->text)) {
+                next_char = furi_string_get_char(model->text, char_i);
+            } else {
+                next_char = '\0';
+            }
+            char_i++;
             if(next_char == '\0') {
                 furi_string_push_back(line_tmp.text, '\0');
                 widget_element_text_scroll_add_line(element, &line_tmp);
