@@ -5,3 +5,4 @@ build_test/
 __pycache__/
 sdkconfig.old
 .DS_Store
+/build_waveshare_c6/
