@@ -12,6 +12,7 @@
 #include <esp_err.h>
 #include <esp_log.h>
 #include <esp_sleep.h>
+#include <soc/soc_caps.h>
 #include <driver/i2c.h>
 #include <esp_system.h>
 #include <esp_timer.h>
@@ -399,7 +400,11 @@ bool furi_hal_power_is_charging_done(void) {
 
 void furi_hal_power_shutdown(void) {
     /* Configure BOOT/encoder button (GPIO0) as wake-up source (active low) */
+#if SOC_PM_SUPPORT_EXT0_WAKEUP
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
+#else
+    esp_deep_sleep_enable_gpio_wakeup(BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
+#endif
     esp_deep_sleep_start();
 }
 
@@ -409,7 +414,11 @@ void furi_hal_power_off(void) {
         return;
     }
 
+#if SOC_PM_SUPPORT_EXT0_WAKEUP
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
+#else
+    esp_deep_sleep_enable_gpio_wakeup(BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
+#endif
     esp_deep_sleep_start();
 }
 
