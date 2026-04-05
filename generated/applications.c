@@ -7,14 +7,17 @@ extern int32_t example_apps_assets_main(void* p);
 extern int32_t example_apps_data_main(void* p);
 extern int32_t example_number_input(void* p);
 extern int32_t subghz_app(void* p);
+extern int32_t backlight_settings_app(void* p);
 extern int32_t about_app(void* p);
 extern int32_t archive_app(void* p);
 extern int32_t cli_vcp_srv(void* p);
 extern int32_t input_srv(void* p);
 extern int32_t power_settings_app(void* p);
 extern int32_t bt_settings_app(void* p);
+extern int32_t lfrfid_app(void* p);
 extern int32_t notification_srv(void* p);
 extern int32_t storage_settings_app(void* p);
+extern int32_t tetris_game_app(void* p);
 extern int32_t gui_srv(void* p);
 extern int32_t nfc_app(void* p);
 extern int32_t desktop_settings_app(void* p);
@@ -25,11 +28,13 @@ extern int32_t dolphin_srv(void* p);
 extern int32_t desktop_srv(void* p);
 extern int32_t loader_srv(void* p);
 extern int32_t wifi_app(void* p);
+extern int32_t ble_spam_app(void* p);
 extern int32_t bad_usb_app(void* p);
 extern int32_t passport_app(void* p);
 extern int32_t clock_app(void* p);
 extern int32_t power_srv(void* p);
 extern int32_t storage_srv(void* p);
+extern int32_t desktop_srv(void* p);
 extern void cli_on_system_start(void);
 extern void storage_on_system_start(void);
 extern void loader_on_system_start(void);
@@ -49,6 +54,7 @@ const FlipperInternalApplication FLIPPER_SERVICES[] = {
     {.app = desktop_srv, .name = "DesktopSrv", .appid = "desktop", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = power_srv, .name = "PowerSrv", .appid = "power", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = storage_srv, .name = "StorageSrv", .appid = "storage", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
+    {.app = desktop_srv, .name = "DesktopSrv", .appid = "desktop", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
 };
 const size_t FLIPPER_SERVICES_COUNT = COUNT_OF(FLIPPER_SERVICES);
 
@@ -73,10 +79,14 @@ const FlipperInternalApplication FLIPPER_SYSTEM_APPS[] = {
     {.app = example_number_input, .name = "Example: Number Input", .appid = "example_number_input", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = about_app, .name = "About", .appid = "about", .stack_size = 4096, .icon = &A_Settings_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = bt_settings_app, .name = "Bluetooth", .appid = "bt_settings", .stack_size = 4096, .icon = &A_Settings_14, .flags = FlipperInternalApplicationFlagDefault},
+-    {.name = "Desktop", .icon = NULL, .path = "desktop_settings"},
+    {.app = lfrfid_app, .name = "125 kHz RFID", .appid = "lfrfid", .stack_size = 4096, .icon = &A_125khz_14, .flags = FlipperInternalApplicationFlagDefault},
+    {.app = tetris_game_app, .name = "Tetris", .appid = "tetris", .stack_size = 4096, .icon = &I_tetris_10px, .flags = FlipperInternalApplicationFlagDefault},
     {.app = nfc_app, .name = "NFC", .appid = "nfc", .stack_size = 5120, .icon = &A_NFC_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = desktop_settings_app, .name = "Desktop", .appid = "desktop_settings", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = infrared_app, .name = "Infrared", .appid = "infrared", .stack_size = 8192, .icon = &A_Infrared_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = wifi_app, .name = "WiFi", .appid = "wifi", .stack_size = 8192, .icon = &A_Sub1ghz_14, .flags = FlipperInternalApplicationFlagDefault},
+    {.app = ble_spam_app, .name = "Bluetooth", .appid = "ble_spam", .stack_size = 8192, .icon = &A_Plugins_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = bad_usb_app, .name = "Bad USB", .appid = "bad_usb", .stack_size = 4096, .icon = &A_BadUsb_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = passport_app, .name = "Passport", .appid = "passport", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = clock_app, .name = "Clock", .appid = "clock", .stack_size = 4096, .icon = &A_Clock_14, .flags = FlipperInternalApplicationFlagDefault},
@@ -88,6 +98,7 @@ const FlipperInternalApplication FLIPPER_DEBUG_APPS[] = {
 const size_t FLIPPER_DEBUG_APPS_COUNT = COUNT_OF(FLIPPER_DEBUG_APPS);
 
 const FlipperInternalApplication FLIPPER_SETTINGS_APPS[] = {
+    {.app = backlight_settings_app, .name = "Backlight", .appid = "backlight_settings", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = power_settings_app, .name = "Power", .appid = "power_settings", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagInsomniaSafe},
     {.app = storage_settings_app, .name = "Storage", .appid = "storage_settings", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
 };
@@ -104,17 +115,20 @@ const FlipperExternalApplication FLIPPER_EXTSETTINGS_APPS[] = {
 const size_t FLIPPER_EXTSETTINGS_APPS_COUNT = COUNT_OF(FLIPPER_EXTSETTINGS_APPS);
 
 const FlipperExternalApplication FLIPPER_EXTERNAL_APPS[] = {
+    {.name = "125 kHz RFID", .icon = &A_125khz_14, .path = "lfrfid"},
     {.name = "NFC", .icon = &A_NFC_14, .path = "nfc"},
+    {.name = "Tetris", .icon = &I_tetris_10px, .path = "tetris"},
     {.name = "Infrared", .icon = &A_Infrared_14, .path = "infrared"},
     {.name = "WiFi", .icon = &A_Sub1ghz_14, .path = "wifi"},
+    {.name = "Bluetooth", .icon = &A_Plugins_14, .path = "ble_spam"},
     {.name = "Bad USB", .icon = &A_BadUsb_14, .path = "bad_usb"},
     {.name = "Clock", .icon = &A_Clock_14, .path = "clock"},
 };
 const size_t FLIPPER_EXTERNAL_APPS_COUNT = COUNT_OF(FLIPPER_EXTERNAL_APPS);
 
 const FlipperExternalApplication FLIPPER_INTERNAL_EXTERNAL_APPS[] = {
-    {.name = "Example: Apps Data", .icon = NULL, .path = "example_apps_data"},
-    {.name = "Example: Apps Assets", .icon = NULL, .path = "example_apps_assets"},
     {.name = "Example: Number Input", .icon = NULL, .path = "example_number_input"},
+    {.name = "Example: Apps Assets", .icon = NULL, .path = "example_apps_assets"},
+    {.name = "Example: Apps Data", .icon = NULL, .path = "example_apps_data"},
 };
 const size_t FLIPPER_INTERNAL_EXTERNAL_APPS_COUNT = COUNT_OF(FLIPPER_INTERNAL_EXTERNAL_APPS);
