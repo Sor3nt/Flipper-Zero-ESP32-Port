@@ -333,7 +333,20 @@ void nfc_stop(Nfc* instance) {
     if(instance->mode == NfcModeListener) {
         furi_hal_nfc_abort();
     }
-    furi_thread_join(instance->worker_thread);
+
+    /* On ESP32 with FreeRTOS preemptive scheduling, view_dispatcher_send_custom_event
+     * from a worker callback can trigger synchronous event processing in the main thread
+     * (higher priority). If the event handler calls nfc_stop, we'd be trying to join
+     * the worker thread from within itself → deadlock.
+     * Skip the join if called from the worker thread; it will exit naturally. */
+    FuriThreadId current = furi_thread_get_current_id();
+    FuriThreadId worker = furi_thread_get_id(instance->worker_thread);
+    FURI_LOG_I("Nfc", "nfc_stop: current=%p worker=%p", (void*)current, (void*)worker);
+    if(current != worker) {
+        furi_thread_join(instance->worker_thread);
+    } else {
+        FURI_LOG_W("Nfc", "nfc_stop: skipping join (same thread)");
+    }
 
     instance->state = NfcStateIdle;
 }
