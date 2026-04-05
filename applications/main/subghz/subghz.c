@@ -194,6 +194,26 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
             subghz->view_dispatcher,
             SubGhzViewIdJammer,
             subghz_jammer_get_view(subghz->subghz_jammer));
+
+        // SubBrute Bruteforcer
+        subghz->subbrute_radio_device = subbrute_radio_device_loader_set(
+            NULL, SubGhzRadioDeviceTypeExternalCC1101);
+        subghz->subbrute_device = subbrute_device_alloc(subghz->subbrute_radio_device);
+        subghz->subbrute_worker = subbrute_worker_alloc(subghz->subbrute_radio_device);
+        subghz->subbrute_settings = subbrute_settings_alloc();
+        subbrute_settings_load(subghz->subbrute_settings);
+
+        subghz->subbrute_main_view = subbrute_main_view_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdBfMain,
+            subbrute_main_view_get_view(subghz->subbrute_main_view));
+
+        subghz->subbrute_attack_view = subbrute_attack_view_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdBfAttack,
+            subbrute_attack_view_get_view(subghz->subbrute_attack_view));
     }
 
     //init threshold rssi
@@ -307,6 +327,17 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         subghz_frequency_analyzer_free(subghz->subghz_frequency_analyzer);
     }
     if(!alloc_for_tx_only) {
+        // SubBrute Bruteforcer
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdBfMain);
+        subbrute_main_view_free(subghz->subbrute_main_view);
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdBfAttack);
+        subbrute_attack_view_free(subghz->subbrute_attack_view);
+
+        subbrute_worker_stop(subghz->subbrute_worker);
+        subbrute_worker_free(subghz->subbrute_worker);
+        subbrute_device_free(subghz->subbrute_device);
+        subbrute_settings_free(subghz->subbrute_settings);
+
         // Jammer
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdJammer);
         subghz_jammer_free(subghz->subghz_jammer);
