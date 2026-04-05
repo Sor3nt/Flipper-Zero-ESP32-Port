@@ -97,13 +97,12 @@ bool furi_hal_bq25896_init(void) {
     /* Set charge voltage limit to 4.208V (default safe for most Li-ion) */
     furi_hal_bq25896_set_vreg_voltage_mv(4208);
 
-    /* Set charge current limit (REG04): 512mA — safe for T-Embed battery
+    /* Set charge current limit (REG04): 1200mA — safe for T-Embed battery
      * Default is 2048mA which is too high for small batteries, causing
      * premature charge termination (current drops below ITERM immediately) */
-    uint8_t reg04 = 0;
-    bq25896_read_reg(REG04, &reg04);
+    uint8_t reg04 = bq25896_read_reg(REG04, &reg04);
     reg04 &= 0x80; /* preserve EN_PUMPX (bit 7) */
-    reg04 |= 0x08; /* ICHG = 512mA (bits 6:0 = 0001000, each bit = 64mA, 8*64=512) */
+    reg04 |= (BQ25896_CHARGE_LIMIT >> 6); /* divide by 64, steps of 64mA */
     bq25896_write_reg(REG04, reg04);
 
     /* Set pre-charge and termination current (REG05):
