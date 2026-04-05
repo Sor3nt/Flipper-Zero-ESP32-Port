@@ -25,13 +25,17 @@ detect_usbmodem_port() {
     fi
 
     if [[ "${#matches[@]}" -eq 0 ]]; then
-        echo "No /dev/cu.usbmodem* device found. Use --port or set ESPPORT." >&2
+        if [[ "${BUILD_ONLY}" -eq 0 ]]; then
+            echo "No /dev/cu.usbmodem* device found. Use --port or set ESPPORT." >&2
+            return 1
+        else 
+            return 0
+        fi
     else
         echo "Multiple /dev/cu.usbmodem* devices found: ${matches[*]}" >&2
         echo "Use --port or set ESPPORT." >&2
+        return 1
     fi
-
-    return 1
 }
 
 usage() {
@@ -82,7 +86,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "${PORT}" ]]; then
+if [[ -z "${PORT}" && "${BUILD_ONLY}" -eq 0 ]]; then
     PORT="$(detect_usbmodem_port)"
 fi
 
