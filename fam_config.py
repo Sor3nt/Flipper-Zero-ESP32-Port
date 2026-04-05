@@ -46,6 +46,8 @@ APPS = [
     "wifi",
     "ble_spam",
     "proto_pirate",
+    "tetris",
+    "pocsag_pager",
 ]
 
 # Boards without NFC / IR hardware – exclude the corresponding apps
