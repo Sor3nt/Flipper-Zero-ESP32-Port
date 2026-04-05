@@ -134,3 +134,12 @@
 #define BOARD_HAS_NFC           1
 #define BOARD_HAS_SUBGHZ        1       /* Built-in CC1101 */
 #define BOARD_HAS_MIC           1
+
+/* Battery Charger */
+#define BQ27220_ADDR            0x55
+#define BQ_I2C_PORT     I2C_NUM_0
+#define BQ_I2C_SDA      BOARD_PIN_QWIIC_SDA
+#define BQ_I2C_SCL      BOARD_PIN_QWIIC_SCL
+#define HIGH_DRAIN_CURRENT_THRESHOLD (-200)
+#define FURI_HAL_POWER_VIRTUAL_CAPACITY_MAH     (1300U)
+#define BQ25896_CHARGE_LIMIT  1280
