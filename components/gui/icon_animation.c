@@ -73,10 +73,11 @@ void icon_animation_start(IconAnimation* instance) {
     if(!instance->animating) {
         instance->animating = true;
         furi_assert(instance->icon->frame_rate);
-        furi_check(
-            furi_timer_start(
-                instance->timer,
-                (furi_kernel_get_tick_frequency() / instance->icon->frame_rate)) == FuriStatusOk);
+        if (instance->icon->frame_rate != 0) 
+            furi_check(
+                furi_timer_start(
+                    instance->timer,
+                    (furi_kernel_get_tick_frequency() / instance->icon->frame_rate)) == FuriStatusOk);
     }
 }
 
