@@ -2,14 +2,15 @@
 
 A port of the [Flipper Zero](https://flipperzero.one/) firmware to ESP32-based development boards. This project brings the Flipper Zero UI, services, and application framework to affordable ESP32 hardware — no Flipper Zero required.
 
-![img](pic1.jpg)
 
 ## Supported Boards
+![img](pic1.jpg)
 
 | Board                                   | MCU | Display | Input | SubGHz | NFC | IR | SD Card |
 |-----------------------------------------|-----|---------|-------|--------|-----|-----|---------|
 | **LilyGo T-Embed CC1101**               | ESP32-S3 (Xtensa LX7) | ST7789 320x170 | Rotary encoder + button | CC1101 | PN532 (I2C) | TX + RX | SPI |
-| **Waveshare ESP32-C6-LCD-1.9 (BROKEN)** | ESP32-C6 (RISC-V) | ST7789V2 320x172 | CST816S touch | — | — | — | SPI |
+| **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320x172 | CST816S touch | — | — | — | SPI |
+![img](pic2.jpg)
 
 ## How to Flash
 
