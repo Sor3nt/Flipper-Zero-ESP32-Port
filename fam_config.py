@@ -1,3 +1,5 @@
+import os
+
 MANIFEST_ROOTS = [
     "components",
     "applications",
@@ -45,6 +47,17 @@ APPS = [
     "ble_spam",
     "proto_pirate",
 ]
+
+# Boards without NFC / IR hardware – exclude the corresponding apps
+_board = os.environ.get("FLIPPER_BOARD", "")
+_boards_without_nfc = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+_boards_without_ir = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+
+if _board in _boards_without_nfc:
+    APPS = [a for a in APPS if a != "nfc"]
+
+if _board in _boards_without_ir:
+    APPS = [a for a in APPS if a != "infrared"]
 
 EXTRA_EXT_APPS = []
 TARGET_HW = 32
