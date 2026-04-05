@@ -9,6 +9,12 @@
 #include "views/subghz_frequency_analyzer.h"
 #include "views/subghz_read_raw.h"
 #include "views/subghz_jammer.h"
+#include "views/subbrute_main_view.h"
+#include "views/subbrute_attack_view.h"
+#include "helpers/subbrute_device.h"
+#include "helpers/subbrute_worker.h"
+#include "helpers/subbrute_settings.h"
+#include "helpers/subbrute_radio_device_loader.h"
 
 #include <gui/gui.h>
 #include <assets_icons.h>
@@ -73,6 +79,15 @@ struct SubGhz {
     SubGhzFrequencyAnalyzer* subghz_frequency_analyzer;
     SubGhzReadRAW* subghz_read_raw;
     SubGhzJammer* subghz_jammer;
+
+    // SubBrute Bruteforcer
+    SubBruteMainView* subbrute_main_view;
+    SubBruteAttackView* subbrute_attack_view;
+    SubBruteDevice* subbrute_device;
+    SubBruteWorker* subbrute_worker;
+    SubBruteSettings* subbrute_settings;
+    const SubGhzDevice* subbrute_radio_device;
+
     bool raw_send_only;
 
     bool save_datetime_set;
