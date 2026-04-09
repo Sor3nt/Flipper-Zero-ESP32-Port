@@ -1,11 +1,21 @@
 #include "../subghz_i.h"
 #include "../views/subghz_read_raw.h"
+#include "../helpers/subghz_usb_export.h"
 #include <dolphin/dolphin.h>
 #include <lib/subghz/protocols/raw.h>
+#include <lib/subghz/blocks/generic.h>
 #include <toolbox/path.h>
 
 #define RAW_FILE_NAME "RAW_"
 #define TAG           "SubGhzSceneReadRAW"
+
+static void subghz_scene_read_raw_usb_export_callback(
+    const int32_t* data,
+    uint16_t count,
+    void* context) {
+    UNUSED(context);
+    subghz_usb_export_send_data(data, count);
+}
 
 bool subghz_scene_read_raw_update_filename(SubGhz* subghz) {
     bool ret = false;
@@ -140,6 +150,10 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
             subghz_txrx_stop(subghz->txrx);
             //Stop save file
             subghz_protocol_raw_save_to_file_stop(decoder_raw);
+            if(subghz->export_to_usb) {
+                subghz_usb_export_stop();
+                subghz_protocol_decoder_raw_set_data_callback(decoder_raw, NULL, NULL);
+            }
             subghz->state_notifications = SubGhzNotificationStateIDLE;
             //needed save?
             if((subghz_rx_key_state_get(subghz) == SubGhzRxKeyStateAddKey) ||
@@ -262,6 +276,10 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
             size_t spl_count = subghz_protocol_raw_get_sample_write(decoder_raw);
 
             subghz_protocol_raw_save_to_file_stop(decoder_raw);
+            if(subghz->export_to_usb) {
+                subghz_usb_export_stop();
+                subghz_protocol_decoder_raw_set_data_callback(decoder_raw, NULL, NULL);
+            }
 
             FuriString* temp_str = furi_string_alloc();
             furi_string_printf(
@@ -294,6 +312,18 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
             } else {
                 SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
                 if(subghz_protocol_raw_save_to_file_init(decoder_raw, RAW_FILE_NAME, &preset)) {
+                    if(subghz->export_to_usb) {
+                        FuriString* preset_str = furi_string_alloc();
+                        subghz_block_generic_get_preset_name(
+                            furi_string_get_cstr(preset.name), preset_str);
+                        subghz_usb_export_start(
+                            preset.frequency, furi_string_get_cstr(preset_str));
+                        furi_string_free(preset_str);
+                        subghz_protocol_decoder_raw_set_data_callback(
+                            decoder_raw,
+                            subghz_scene_read_raw_usb_export_callback,
+                            NULL);
+                    }
                     dolphin_deed(DolphinDeedSubGhzRawRec);
                     subghz_txrx_rx_start(subghz->txrx);
                     subghz->state_notifications = SubGhzNotificationStateRx;

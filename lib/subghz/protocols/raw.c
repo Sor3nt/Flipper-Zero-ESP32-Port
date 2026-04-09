@@ -31,6 +31,8 @@ struct SubGhzProtocolDecoderRAW {
     size_t sample_write;
     bool last_level;
     bool pause;
+    SubGhzProtocolDecoderRAWDataCallback data_callback;
+    void* data_callback_context;
 };
 
 struct SubGhzProtocolEncoderRAW {
@@ -178,6 +180,12 @@ static bool subghz_protocol_raw_save_to_file_write(SubGhzProtocolDecoderRAW* ins
                instance->flipper_file, "RAW_Data", instance->upload_raw, instance->ind_write)) {
             FURI_LOG_E(TAG, "Unable to add RAW_Data");
         } else {
+            if(instance->data_callback) {
+                instance->data_callback(
+                    instance->upload_raw,
+                    instance->ind_write,
+                    instance->data_callback_context);
+            }
             instance->sample_write += instance->ind_write;
             instance->ind_write = 0;
             is_write = true;
@@ -210,6 +218,15 @@ void subghz_protocol_raw_save_to_file_pause(SubGhzProtocolDecoderRAW* instance, 
     }
 }
 
+void subghz_protocol_decoder_raw_set_data_callback(
+    SubGhzProtocolDecoderRAW* instance,
+    SubGhzProtocolDecoderRAWDataCallback callback,
+    void* context) {
+    furi_check(instance);
+    instance->data_callback = callback;
+    instance->data_callback_context = context;
+}
+
 size_t subghz_protocol_raw_get_sample_write(SubGhzProtocolDecoderRAW* instance) {
     furi_check(instance);
     return instance->sample_write + instance->ind_write;
@@ -224,6 +241,8 @@ void* subghz_protocol_decoder_raw_alloc(SubGhzEnvironment* environment) {
     instance->last_level = false;
     instance->file_is_open = RAWFileIsOpenClose;
     instance->file_name = furi_string_alloc();
+    instance->data_callback = NULL;
+    instance->data_callback_context = NULL;
 
     return instance;
 }
