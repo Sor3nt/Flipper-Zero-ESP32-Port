@@ -89,6 +89,7 @@ struct SubGhz {
     const SubGhzDevice* subbrute_radio_device;
 
     bool raw_send_only;
+    bool export_to_usb;
 
     bool save_datetime_set;
     DateTime save_datetime;

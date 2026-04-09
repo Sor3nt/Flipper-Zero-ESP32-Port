@@ -18,6 +18,7 @@ enum SubGhzSettingIndex {
     SubGhzSettingIndexResetToDefault,
     SubGhzSettingIndexLock,
     SubGhzSettingIndexRAWThresholdRSSI,
+    SubGhzSettingIndexExportToUSB,
 };
 
 #define RAW_THRESHOLD_RSSI_COUNT 11
@@ -293,6 +294,14 @@ static void subghz_scene_receiver_config_set_bin_raw(VariableItem* item) {
 
     // We can set here, but during subghz_last_settings_save filter was changed to ignore BinRAW
     subghz->last_settings->filter = subghz->filter;
+}
+
+static void subghz_scene_receiver_config_set_export_to_usb(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, combobox_text[index]);
+    subghz->export_to_usb = (index == 1);
 }
 
 static void subghz_scene_receiver_config_set_raw_threshold_rssi(VariableItem* item) {
@@ -574,6 +583,16 @@ void subghz_scene_receiver_config_on_enter(void* context) {
             RAW_THRESHOLD_RSSI_COUNT);
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, raw_threshold_rssi_text[value_index]);
+
+        item = variable_item_list_add(
+            subghz->variable_item_list,
+            "Export to USB",
+            COMBO_BOX_COUNT,
+            subghz_scene_receiver_config_set_export_to_usb,
+            subghz);
+        value_index = subghz->export_to_usb ? 1 : 0;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, combobox_text[value_index]);
     }
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdVariableItemList);
 }

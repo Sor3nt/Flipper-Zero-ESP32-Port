@@ -10,12 +10,28 @@ extern "C" {
 
 typedef void (*SubGhzProtocolEncoderRAWCallbackEnd)(void* context);
 
+typedef void (*SubGhzProtocolDecoderRAWDataCallback)(
+    const int32_t* data,
+    uint16_t count,
+    void* context);
+
 typedef struct SubGhzProtocolDecoderRAW SubGhzProtocolDecoderRAW;
 typedef struct SubGhzProtocolEncoderRAW SubGhzProtocolEncoderRAW;
 
 extern const SubGhzProtocolDecoder subghz_protocol_raw_decoder;
 extern const SubGhzProtocolEncoder subghz_protocol_raw_encoder;
 extern const SubGhzProtocol subghz_protocol_raw;
+
+/**
+ * Set callback for raw data export (called when buffer is flushed).
+ * @param instance Pointer to a SubGhzProtocolDecoderRAW instance
+ * @param callback Callback function
+ * @param context Context for callback
+ */
+void subghz_protocol_decoder_raw_set_data_callback(
+    SubGhzProtocolDecoderRAW* instance,
+    SubGhzProtocolDecoderRAWDataCallback callback,
+    void* context);
 
 /**
  * Open file for writing
