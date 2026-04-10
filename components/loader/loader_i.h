@@ -10,9 +10,12 @@
 #include "loader_menu.h"
 #include "loader_applications.h"
 
+typedef struct FlipperApplication FlipperApplication;
+
 typedef struct {
     char* args;
     FuriThread* thread;
+    FlipperApplication* fap;
     bool insomniac;
 } LoaderAppData;
 
