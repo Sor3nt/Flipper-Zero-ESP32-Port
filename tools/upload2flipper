@@ -37,6 +37,9 @@ import sys
 import os
 import time
 import json
+import logging
+
+log = logging.getLogger("upload2flipper")
 
 try:
     from bleak import BleakClient, BleakScanner
@@ -301,48 +304,63 @@ class FlipperBLE:
     # ── Callbacks ──
 
     def _on_data(self, _sender, data):
+        log.debug(f"BLE RX: {len(data)} bytes")
         self._rxq.put_nowait(bytes(data))
 
     def _on_flow(self, _sender, data):
         if len(data) >= 4:
+            old = self._buf_free
             self._buf_free = struct.unpack("<I", data[:4])[0]
+            log.debug(f"Flow control: buf_free {old} -> {self._buf_free}")
             self._flow_evt.set()
 
     # ── Connection ──
 
+    def _on_disconnect(self, client):
+        log.warning(f"BLE DISCONNECTED (was connected to {client.address})")
+
     async def connect(self, addr):
         print(f"Connecting to {addr}...")
-        self.client = BleakClient(addr)
+        self.client = BleakClient(addr, disconnected_callback=self._on_disconnect)
         await self.client.connect()
         print(f"Connected (MTU={self.client.mtu_size})")
+        log.debug(f"BLE connected, MTU={self.client.mtu_size}")
 
         # Subscribe to data notifications (Flipper -> us)
         await self.client.start_notify(CHAR_TX, self._on_data)
+        log.debug("Subscribed to TX notifications")
 
         # Subscribe to flow control
         await self.client.start_notify(CHAR_FLOW, self._on_flow)
         try:
             fc = await self.client.read_gatt_char(CHAR_FLOW)
             self._buf_free = struct.unpack("<I", fc[:4])[0]
-        except Exception:
+            log.debug(f"Initial flow control buf_free={self._buf_free}")
+        except Exception as e:
             self._buf_free = 1024
+            log.debug(f"Flow control read failed ({e}), defaulting buf_free=1024")
 
         # Activate RPC session
         try:
             await self.client.write_gatt_char(
                 CHAR_RPC, struct.pack("<I", 1), response=True
             )
-        except Exception:
-            pass  # Some FW versions start RPC implicitly
+            log.debug("RPC session activated via CHAR_RPC")
+        except Exception as e:
+            log.debug(f"RPC activation skipped ({e})")
 
         await asyncio.sleep(0.3)
 
     async def disconnect(self):
         if self.client and self.client.is_connected:
+            log.debug("BLE disconnect: disconnecting...")
             try:
                 await self.client.disconnect()
-            except Exception:
-                pass
+                log.debug("BLE disconnect: done")
+            except Exception as e:
+                log.debug(f"BLE disconnect: {e}")
+        else:
+            log.debug(f"BLE disconnect: already disconnected (client={self.client is not None}, connected={self.client.is_connected if self.client else 'N/A'})")
 
     async def pair(self, addr):
         """Pair/bond with Flipper Zero."""
@@ -366,27 +384,45 @@ class FlipperBLE:
         """Send a length-prefixed protobuf message over BLE serial."""
         frame = _ve(len(msg_bytes)) + msg_bytes
         chunk_size = min(self.client.mtu_size - 3, 512) if self.client else 128
+        log.debug(f"BLE TX: frame={len(frame)}B, msg={len(msg_bytes)}B, ble_chunk={chunk_size}B")
+
+        # Check connection before sending
+        if not self.client.is_connected:
+            log.error("BLE TX aborted: not connected!")
+            raise RuntimeError("BLE connection lost before send")
 
         # Flow control: wait until Flipper has buffer space
         retries = 0
         while self._buf_free < len(frame) and retries < 100:
+            log.debug(f"Flow control: waiting, buf_free={self._buf_free}, need={len(frame)}, retry={retries}")
             self._flow_evt.clear()
             try:
                 await asyncio.wait_for(self._flow_evt.wait(), 0.5)
             except asyncio.TimeoutError:
                 retries += 1
+        if retries >= 100:
+            log.warning(f"Flow control: gave up after {retries} retries, buf_free={self._buf_free}, need={len(frame)}")
 
-        # Send in BLE-sized chunks
-        for i in range(0, len(frame), chunk_size):
-            await self.client.write_gatt_char(
-                CHAR_RX, frame[i:i + chunk_size], response=False
-            )
+        # Send in BLE-sized chunks (response=True to prevent RX overflow on device)
+        ble_chunks = (len(frame) + chunk_size - 1) // chunk_size
+        for idx, i in enumerate(range(0, len(frame), chunk_size)):
+            chunk = frame[i:i + chunk_size]
+            log.debug(f"BLE TX chunk {idx+1}/{ble_chunks}: {len(chunk)}B, connected={self.client.is_connected}")
+            try:
+                await self.client.write_gatt_char(
+                    CHAR_RX, chunk, response=True
+                )
+            except Exception as e:
+                log.error(f"BLE TX chunk {idx+1}/{ble_chunks} FAILED: {e}")
+                raise
 
         self._buf_free = max(0, self._buf_free - len(frame))
+        log.debug(f"BLE TX done, buf_free now={self._buf_free}")
 
     async def recv(self, timeout=10.0):
         """Receive one length-prefixed protobuf message."""
         deadline = time.time() + timeout
+        log.debug(f"BLE recv: waiting (timeout={timeout}s, rxbuf={len(self._rxbuf)}B)")
 
         while True:
             # Try to extract a complete message from the buffer
@@ -396,20 +432,26 @@ class FlipperBLE:
                     if len(self._rxbuf) >= hdr_size + msg_len:
                         msg = bytes(self._rxbuf[hdr_size:hdr_size + msg_len])
                         del self._rxbuf[:hdr_size + msg_len]
+                        log.debug(f"BLE recv: got message {len(msg)}B (rxbuf remaining={len(self._rxbuf)}B)")
                         return msg
+                    else:
+                        log.debug(f"BLE recv: partial message, have {len(self._rxbuf)}B, need {hdr_size + msg_len}B")
                 except ValueError:
                     pass
 
             remaining = deadline - time.time()
             if remaining <= 0:
+                log.error(f"BLE recv: TIMEOUT after {timeout}s, rxbuf={len(self._rxbuf)}B, connected={self.client.is_connected if self.client else 'N/A'}")
                 raise TimeoutError("No response from Flipper")
 
             try:
                 chunk = await asyncio.wait_for(
                     self._rxq.get(), timeout=min(remaining, 2.0)
                 )
+                log.debug(f"BLE recv: got {len(chunk)}B from queue, rxbuf now={len(self._rxbuf) + len(chunk)}B")
                 self._rxbuf.extend(chunk)
             except asyncio.TimeoutError:
+                log.debug(f"BLE recv: queue timeout, {remaining:.1f}s remaining, connected={self.client.is_connected if self.client else 'N/A'}")
                 continue
 
 
@@ -430,11 +472,13 @@ class FlipperRPC:
 
     async def _call(self, msg, timeout=10.0):
         """Send message, collect all response parts (handling has_next)."""
+        log.debug(f"RPC _call: sending {len(msg)}B, timeout={timeout}s")
         await self.ble.send(msg)
         resps = []
         while True:
             data = await self.ble.recv(timeout=timeout)
             r = parse_main(data)
+            log.debug(f"RPC _call: response part {len(resps)+1}, status={r['status']}, has_next={r['has_next']}, cmd_id={r['cmd_id']}")
             resps.append(r)
             if not r["has_next"]:
                 break
@@ -506,9 +550,13 @@ class FlipperRPC:
         total = len(data)
         offset = 0
         chunk_num = 0
+        total_chunks = (total + CHUNK_SIZE - 1) // CHUNK_SIZE if total > 0 else 1
+
+        log.info(f"storage_write: path={remote_path}, size={total}B, chunks={total_chunks}, chunk_size={CHUNK_SIZE}B, cmd_id={cid}")
 
         if total == 0:
             # Empty file
+            log.debug("storage_write: empty file")
             await self.ble.send(msg_write(cid, path=remote_path, data=b""))
         else:
             while offset < total:
@@ -523,19 +571,29 @@ class FlipperRPC:
                     data=chunk,
                     has_next=not is_last,
                 )
-                await self.ble.send(m)
                 chunk_num += 1
+                log.debug(f"storage_write: chunk {chunk_num}/{total_chunks}, {len(chunk)}B, offset={offset}/{total}, has_next={not is_last}, connected={self.ble.client.is_connected}")
+
+                try:
+                    await self.ble.send(m)
+                except Exception as e:
+                    log.error(f"storage_write: SEND FAILED at chunk {chunk_num}/{total_chunks}, offset={offset}/{total}: {e}")
+                    raise
 
                 if progress_cb:
                     progress_cb(offset, total)
 
-                # BLE rate limiting
-                if not is_last:
-                    await asyncio.sleep(0.05 if chunk_num % 4 == 0 else 0.02)
+                # Small delay every 8 chunks to let device process
+                if not is_last and chunk_num % 8 == 0:
+                    log.debug(f"storage_write: processing delay 0.01s")
+                    await asyncio.sleep(0.01)
 
         # Wait for write response
+        log.info(f"storage_write: all {chunk_num} chunks sent, waiting for response...")
         resp_data = await self.ble.recv(timeout=30.0)
         resp = parse_main(resp_data)
+
+        log.info(f"storage_write: response status={resp['status']} ({STATUS_NAMES.get(resp['status'], '?')}), has_next={resp['has_next']}")
 
         if resp["status"] != 0:
             raise RuntimeError(
@@ -1105,6 +1163,7 @@ def main():
   upload2flipper info""",
     )
     parser.add_argument("-a", "--address", help="BLE address (skip auto-scan)")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug logging")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -1160,6 +1219,19 @@ def main():
 
     args = parser.parse_args()
 
+    # Setup logging
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    else:
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="[%(levelname)s] %(message)s",
+        )
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
@@ -1186,7 +1258,7 @@ def main():
         sys.exit(130)
     except Exception as e:
         print(f"\nError: {e}")
-        if "--debug" in sys.argv:
+        if args.debug:
             import traceback
             traceback.print_exc()
         sys.exit(1)

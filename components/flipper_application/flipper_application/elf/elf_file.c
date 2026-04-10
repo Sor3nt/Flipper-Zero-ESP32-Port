@@ -197,9 +197,18 @@ static Elf32_Addr elf_address_of(ELFFile* elf, Elf32_Sym* sym, const char* sName
         ELFSection* symSec = elf_section_of(elf, sym->st_shndx);
         if(symSec) {
             Elf32_Addr addr = ((Elf32_Addr)symSec->data) + sym->st_value;
-            /* If symbol is a function (in executable section), convert to instruction bus */
+            /* Convert addresses in executable sections to instruction bus.
+             * STT_FUNC: named function symbols → code, needs instruction bus
+             * STT_SECTION for .text: section-relative refs that may be function
+             *   pointers (callbacks) → also needs instruction bus.
+             * On ESP32-S3, instruction bus (0x42...) is also readable via icache
+             * for data, so this is safe for both code and data access patterns. */
             if(ELF32_ST_TYPE(sym->st_info) == STT_FUNC) {
                 addr = PSRAM_DATA_TO_INST(addr);
+            } else if(ELF32_ST_TYPE(sym->st_info) == STT_SECTION) {
+                if(sName[0] == '.' && sName[1] == 't' && sName[2] == 'e') {
+                    addr = PSRAM_DATA_TO_INST(addr);
+                }
             }
             return addr;
         }
@@ -356,7 +365,12 @@ static bool
 
     switch(type) {
     case R_XTENSA_32:
-        *((uint32_t*)relAddr) = symAddr + addend;
+        /* Xtensa R_XTENSA_32: result = S + A + existing_value
+         * Unlike standard RELA where existing value is ignored,
+         * Xtensa adds the pre-existing content to S + A.
+         * This is critical for section-relative refs where the offset
+         * is stored in the memory and the section base comes from S+A. */
+        *((uint32_t*)relAddr) += symAddr + addend;
         FURI_LOG_D(TAG, "  R_XTENSA_32 relocated is 0x%08X", (unsigned int)*((uint32_t*)relAddr));
         break;
     case R_XTENSA_SLOT0_OP:
@@ -500,7 +514,21 @@ static ELFLoadSectionResult
         return ELFLoadSectionResultSuccess;
     }
 
+#ifdef ESP_PLATFORM
+    /* Force PSRAM allocation so PSRAM_DATA_TO_INST (0x3C->0x42) works.
+     * Internal DRAM (0x3FC...) has a different instruction bus mapping
+     * that our simple offset conversion doesn't handle. */
+    section->data = heap_caps_aligned_alloc(
+        section_header->sh_addralign,
+        section_header->sh_size,
+        MALLOC_CAP_SPIRAM);
+    if(!section->data) {
+        /* Fallback to any available memory */
+        section->data = aligned_malloc(section_header->sh_size, section_header->sh_addralign);
+    }
+#else
     section->data = aligned_malloc(section_header->sh_size, section_header->sh_addralign);
+#endif
     section->size = section_header->sh_size;
 
     if(section_header->sh_type == SHT_NOBITS) {
@@ -703,7 +731,11 @@ void elf_file_free(ELFFile* elf) {
         for(ELFSectionDict_it(it, elf->sections); !ELFSectionDict_end_p(it);
             ELFSectionDict_next(it)) {
             const ELFSectionDict_itref_t* itref = ELFSectionDict_cref(it);
+#ifdef ESP_PLATFORM
+            if(itref->value.data) heap_caps_free(itref->value.data);
+#else
             aligned_free(itref->value.data);
+#endif
             free((void*)itref->key);
         }
 
