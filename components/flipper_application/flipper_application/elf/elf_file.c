@@ -153,6 +153,20 @@ static bool elf_read_section(
 }
 
 static bool elf_read_symbol(ELFFile* elf, int n, Elf32_Sym* sym, FuriString* name) {
+    /* Fast path: read from cached symbol table + string table (no SD card I/O) */
+    if(elf->sym_cache && (size_t)n < elf->symbol_count) {
+        *sym = elf->sym_cache[n];
+        if(sym->st_name && elf->str_cache && sym->st_name < elf->str_cache_size) {
+            furi_string_set(name, &elf->str_cache[sym->st_name]);
+            return true;
+        } else if(sym->st_name == 0) {
+            /* Section symbol - read section name (still needs file I/O but rare) */
+            Elf32_Shdr shdr;
+            return elf_read_section(elf, sym->st_shndx, &shdr, name);
+        }
+    }
+
+    /* Slow path: read from file */
     bool success = false;
     off_t old = storage_file_tell(elf->fd);
     off_t pos = elf->symbol_table + n * sizeof(Elf32_Sym);
@@ -401,34 +415,40 @@ static bool
 
 static bool elf_relocate(ELFFile* elf, ELFSection* s) {
     if(s->data) {
-        Elf32_Rela rela;
         size_t relEntries = s->rel_count;
-        size_t relCount;
-        (void)storage_file_seek(elf->fd, s->rel_offset, true);
-        FURI_LOG_D(TAG, " Offset   Info     Type             Name");
+
+        /* Read ALL relocation entries at once into RAM (bulk read).
+         * This avoids thousands of individual 12-byte SD card reads. */
+        size_t rela_size = relEntries * sizeof(Elf32_Rela);
+        Elf32_Rela* rela_table = malloc(rela_size);
+        if(!rela_table) {
+            FURI_LOG_E(TAG, "Failed to alloc %u bytes for RELA table", (unsigned)rela_size);
+            return false;
+        }
+
+        if(!storage_file_seek(elf->fd, s->rel_offset, true) ||
+           storage_file_read(elf->fd, rela_table, rela_size) != rela_size) {
+            FURI_LOG_E(TAG, "Failed to read RELA table");
+            free(rela_table);
+            return false;
+        }
 
         int relocate_result = true;
         size_t resolved_ok = 0;
         size_t resolved_fail = 0;
-        FuriString* symbol_name;
-        symbol_name = furi_string_alloc();
+        FuriString* symbol_name = furi_string_alloc();
 
-        for(relCount = 0; relCount < relEntries; relCount++) {
+        for(size_t relCount = 0; relCount < relEntries; relCount++) {
             if(relCount % RESOLVER_THREAD_YIELD_STEP == 0) {
                 furi_delay_tick(1);
             }
 
-            if(storage_file_read(elf->fd, &rela, sizeof(Elf32_Rela)) != sizeof(Elf32_Rela)) {
-                FURI_LOG_E(TAG, "  reloc read fail");
-                furi_string_free(symbol_name);
-                return false;
-            }
-
+            Elf32_Rela* rela = &rela_table[relCount];
             Elf32_Addr symAddr;
 
-            int symEntry = ELF32_R_SYM(rela.r_info);
-            int relType = ELF32_R_TYPE(rela.r_info);
-            Elf32_Addr relAddr = ((Elf32_Addr)s->data) + rela.r_offset;
+            int symEntry = ELF32_R_SYM(rela->r_info);
+            int relType = ELF32_R_TYPE(rela->r_info);
+            Elf32_Addr relAddr = ((Elf32_Addr)s->data) + rela->r_offset;
 
             if(!address_cache_get(elf->relocation_cache, symEntry, &symAddr)) {
                 Elf32_Sym sym;
@@ -436,6 +456,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
                 if(!elf_read_symbol(elf, symEntry, &sym, symbol_name)) {
                     FURI_LOG_E(TAG, "  symbol read fail for entry %d", symEntry);
                     furi_string_free(symbol_name);
+                    free(rela_table);
                     return false;
                 }
 
@@ -448,7 +469,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
             }
 
             if(symAddr != ELF_INVALID_ADDRESS) {
-                if(!elf_relocate_symbol(elf, relAddr, relType, symAddr, rela.r_addend)) {
+                if(!elf_relocate_symbol(elf, relAddr, relType, symAddr, rela->r_addend)) {
                     relocate_result = false;
                 } else {
                     resolved_ok++;
@@ -459,6 +480,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
             }
         }
         furi_string_free(symbol_name);
+        free(rela_table);
 
         FURI_LOG_I(TAG, "Relocation: %u OK, %u FAILED out of %u",
             (unsigned)resolved_ok, (unsigned)resolved_fail, (unsigned)relEntries);
@@ -642,6 +664,17 @@ static SectionTypeInfo elf_preload_section(
         elf->symbol_table = section_header->sh_offset;
         elf->symbol_count = section_header->sh_size / sizeof(Elf32_Sym);
 
+        /* Cache entire symbol table in RAM for fast lookup */
+        elf->sym_cache = malloc(section_header->sh_size);
+        if(elf->sym_cache) {
+            if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
+               storage_file_read(elf->fd, elf->sym_cache, section_header->sh_size) !=
+                   section_header->sh_size) {
+                free(elf->sym_cache);
+                elf->sym_cache = NULL;
+            }
+        }
+
         info.type = SectionTypeSymTab;
         info.result = ELFLoadSectionResultSuccess;
         return info;
@@ -651,6 +684,19 @@ static SectionTypeInfo elf_preload_section(
     if(strcmp(name, ".strtab") == 0) {
         FURI_LOG_D(TAG, "Found .strtab section");
         elf->symbol_table_strings = section_header->sh_offset;
+
+        /* Cache entire string table in RAM */
+        elf->str_cache_size = section_header->sh_size;
+        elf->str_cache = malloc(section_header->sh_size);
+        if(elf->str_cache) {
+            if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
+               storage_file_read(elf->fd, elf->str_cache, section_header->sh_size) !=
+                   section_header->sh_size) {
+                free(elf->str_cache);
+                elf->str_cache = NULL;
+                elf->str_cache_size = 0;
+            }
+        }
 
         info.type = SectionTypeStrTab;
         info.result = ELFLoadSectionResultSuccess;
@@ -745,6 +791,9 @@ void elf_file_free(ELFFile* elf) {
     if(elf->debug_link_info.debug_link) {
         free(elf->debug_link_info.debug_link);
     }
+
+    if(elf->sym_cache) free(elf->sym_cache);
+    if(elf->str_cache) free(elf->str_cache);
 
     elf_file_maybe_release_fd(elf);
     free(elf);
