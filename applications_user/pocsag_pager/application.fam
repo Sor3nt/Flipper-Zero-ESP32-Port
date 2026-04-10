@@ -1,7 +1,7 @@
 App(
     appid="pocsag_pager",
     name="POCSAG Pager",
-    apptype=FlipperAppType.MENUEXTERNAL,
+    apptype=FlipperAppType.EXTERNAL,
     entry_point="pocsag_pager_app",
     requires=["gui"],
     stack_size=4 * 1024,

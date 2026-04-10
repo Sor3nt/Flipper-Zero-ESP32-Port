@@ -10,7 +10,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 
 APP_DIR="$1"
 
@@ -255,7 +255,7 @@ build_for_target() {
         [ -n "$DETECTED" ] && ICON_STEM="$DETECTED"
 
         mkdir -p "$ICONS_GEN_DIR"
-        python3 "$SCRIPT_DIR/fam/compile_icons.py" icons \
+        python3 "$SCRIPT_DIR/tools/fam/compile_icons.py" icons \
             --filename "$ICON_STEM" \
             "$ICON_ASSETS_DIR" "$ICONS_GEN_DIR" 2>/dev/null || true
         if [ -f "$ICONS_GEN_DIR/${ICON_STEM}.h" ]; then
@@ -289,7 +289,7 @@ build_for_target() {
 
     # Link
     echo "  Linking ${#OBJECTS[@]} objects (entry=$ENTRY_POINT)"
-    "$LD" -r -T "$SCRIPT_DIR/fap.ld" --entry="$ENTRY_POINT" -o "$BUILD_DIR/app.elf" "${OBJECTS[@]}"
+    "$LD" -r -T "$SCRIPT_DIR/tools/fap.ld" --entry="$ENTRY_POINT" -o "$BUILD_DIR/app.elf" "${OBJECTS[@]}"
     local SECTIONS=$("$READELF" -S "$BUILD_DIR/app.elf" | grep -c '^\s*\[')
 
     # Manifest with icon
@@ -297,7 +297,7 @@ build_for_target() {
     if [ -n "$APP_ICON" ] && [ -f "$APP_ICON" ]; then
         ICON_ARG="--icon $APP_ICON"
     fi
-    python3 "$SCRIPT_DIR/fap_manifest.py" \
+    python3 "$SCRIPT_DIR/tools/fap_manifest.py" \
         --name "$APP_NAME" \
         --api-major 1 --api-minor 0 \
         --target 32 \
