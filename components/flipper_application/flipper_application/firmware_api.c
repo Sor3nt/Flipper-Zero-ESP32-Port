@@ -346,6 +346,8 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0xfbd7a5eb, .address = (uint32_t)subghz_devices_load_preset }, /* subghz_devices_load_preset */
     { .hash = 0xfbfdcf2a, .address = (uint32_t)furi_hal_power_enable_otg }, /* furi_hal_power_enable_otg */
     { .hash = 0xfc6ad6de, .address = (uint32_t)flipper_format_read_uint32 }, /* flipper_format_read_uint32 */
+    { .hash = 0xfdf5a8c7, .address = (uint32_t)view_dispatcher_free }, /* view_dispatcher_free */
+    { .hash = 0xfea5c5ed, .address = (uint32_t)subghz_devices_start_async_rx }, /* subghz_devices_start_async_rx */
 };
 /* clang-format on */
 
