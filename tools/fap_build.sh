@@ -240,26 +240,34 @@ build_for_target() {
 
     TARGET_CFLAGS+=(-DFAP_VERSION=\"1.0\")
 
-    # Check for pre-generated icon files (search multiple locations)
-    local ICON_DIR=""
-    for candidate in \
-        "$BUILD_DIR/icons" \
-        "$PROJECT_DIR/$FW_BUILD_DIR/esp-idf/main/generated/icons/proto_pirate" \
-        "$PROJECT_DIR/build/fap_build/$(basename "$APP_DIR")/icons" \
-        "$PROJECT_DIR/build_t_embed/esp-idf/main/generated/icons/proto_pirate" \
-        "$PROJECT_DIR/build_waveshare_c6/esp-idf/main/generated/icons/proto_pirate"; do
-        if [ -d "$candidate" ]; then
-            ICON_DIR="$candidate"
-            TARGET_INCLUDES+=(-I"$ICON_DIR")
-            break
+    # Generate icon assets from fap_icon_assets if defined in application.fam
+    local ICON_ASSETS_DIR=""
+    if [ -f "$APP_DIR/application.fam" ]; then
+        local IAD=$(grep 'fap_icon_assets=' "$APP_DIR/application.fam" | sed 's/.*fap_icon_assets="\([^"]*\)".*/\1/' | head -1)
+        [ -n "$IAD" ] && ICON_ASSETS_DIR="$APP_DIR/$IAD"
+    fi
+
+    local ICONS_GEN_DIR="$BUILD_DIR/icons"
+    if [ -n "$ICON_ASSETS_DIR" ] && [ -d "$ICON_ASSETS_DIR" ]; then
+        # Detect icon filename from source includes (e.g. #include "proto_pirate_icons.h")
+        local ICON_STEM="${APP_ID}_icons"
+        local DETECTED=$(grep -rh '#include ".*_icons\.h"' "$APP_DIR" 2>/dev/null | head -1 | sed 's/.*"\(.*\)\.h".*/\1/')
+        [ -n "$DETECTED" ] && ICON_STEM="$DETECTED"
+
+        mkdir -p "$ICONS_GEN_DIR"
+        python3 "$SCRIPT_DIR/fam/compile_icons.py" icons \
+            --filename "$ICON_STEM" \
+            "$ICON_ASSETS_DIR" "$ICONS_GEN_DIR" 2>/dev/null || true
+        if [ -f "$ICONS_GEN_DIR/${ICON_STEM}.h" ]; then
+            TARGET_INCLUDES+=(-I"$ICONS_GEN_DIR")
         fi
-    done
+    fi
 
     # Find source files
     local -a SOURCES=($(find "$APP_DIR" -name '*.c' -type f))
-    # Add icon .c files if found
-    if [ -n "$ICON_DIR" ]; then
-        for icon_src in "$ICON_DIR"/*.c; do
+    # Add generated icon .c files
+    if [ -d "$ICONS_GEN_DIR" ]; then
+        for icon_src in "$ICONS_GEN_DIR"/*.c; do
             [ -f "$icon_src" ] && SOURCES+=("$icon_src")
         done
     fi
