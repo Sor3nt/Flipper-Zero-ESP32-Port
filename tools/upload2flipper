@@ -1,0 +1,1196 @@
+#!/usr/bin/env python3
+"""
+upload2flipper - Upload files to Flipper Zero via Bluetooth LE
+
+Uses the Flipper Zero protobuf RPC protocol over BLE serial.
+BLE UUIDs and protocol from the firmware source (assets/protobuf/).
+
+Usage:
+    upload2flipper scan                          # Find Flipper devices
+    upload2flipper pair                          # Pair with Flipper
+    upload2flipper upload <local> <remote>       # Upload file
+    upload2flipper <local> <remote>              # Upload (shorthand)
+    upload2flipper download <remote> [local]     # Download file
+    upload2flipper fap <file.fap> [category]     # Upload FAP to /ext/apps/<cat>
+    upload2flipper ls [path]                     # List directory
+    upload2flipper info                          # Device & storage info
+    upload2flipper mkdir <path>                  # Create directory
+    upload2flipper delete <path> [-r]            # Delete file or directory
+    upload2flipper test-fs [-s SIZE]              # Upload/download round-trip test
+    upload2flipper log [LEVEL]                   # Stream debug logs via BLE RPC (debug/info/warn/error/trace)
+
+Options:
+    -a, --address ADDR    BLE address (skip auto-scan)
+
+Paths:
+    /sdcard/... is automatically mapped to /ext/...
+    Paths without /ext or /int prefix default to /ext/
+
+Requirements:
+    pip install bleak
+"""
+
+import asyncio
+import argparse
+import struct
+import sys
+import os
+import time
+import json
+
+try:
+    from bleak import BleakClient, BleakScanner
+except ImportError:
+    print("Missing dependency. Install with:")
+    print("  pip install bleak")
+    sys.exit(1)
+
+
+# ── BLE UUIDs (from firmware: targets/f7/ble_glue/services/serial_service_uuid.inc) ──
+
+SERVICE   = "8fe5b3d5-2e7f-4a98-2a48-7acc60fe0000"
+CHAR_TX   = "19ed82ae-ed21-4c9d-4145-228e61fe0000"   # Flipper -> Client (notify)
+CHAR_RX   = "19ed82ae-ed21-4c9d-4145-228e62fe0000"   # Client -> Flipper (write)
+CHAR_FLOW = "19ed82ae-ed21-4c9d-4145-228e63fe0000"   # Flow control (notify/read)
+CHAR_RPC  = "19ed82ae-ed21-4c9d-4145-228e64fe0000"   # RPC status
+
+# Max file data bytes per protobuf chunk (from assets/protobuf/storage.options)
+CHUNK_SIZE = 512
+
+CONFIG_PATH = os.path.expanduser("~/.config/upload2flipper/device.json")
+
+
+# ════════════════════════════════════════════════════════════
+# Minimal Protobuf Wire Format (no protobuf dependency needed)
+# ════════════════════════════════════════════════════════════
+
+def _ve(v):
+    """Encode varint."""
+    out = bytearray()
+    while v > 0x7F:
+        out.append((v & 0x7F) | 0x80)
+        v >>= 7
+    out.append(v & 0x7F)
+    return bytes(out)
+
+
+def _vd(data, pos=0):
+    """Decode varint -> (value, new_pos)."""
+    r, s = 0, 0
+    while pos < len(data):
+        b = data[pos]
+        r |= (b & 0x7F) << s
+        pos += 1
+        if not (b & 0x80):
+            return r, pos
+        s += 7
+    raise ValueError("incomplete varint")
+
+
+def _fv(fn, v):
+    """Encode varint field."""
+    return _ve((fn << 3) | 0) + _ve(v)
+
+
+def _fb(fn, d):
+    """Encode length-delimited field (bytes/string/embedded message)."""
+    return _ve((fn << 3) | 2) + _ve(len(d)) + d
+
+
+def _fs(fn, s):
+    """Encode string field."""
+    return _fb(fn, s.encode("utf-8"))
+
+
+def _dm(data):
+    """Decode protobuf message -> {field_number: [values]}."""
+    fields = {}
+    pos = 0
+    while pos < len(data):
+        tag, pos = _vd(data, pos)
+        fn, wt = tag >> 3, tag & 7
+        if wt == 0:
+            val, pos = _vd(data, pos)
+        elif wt == 2:
+            ln, pos = _vd(data, pos)
+            val = data[pos:pos + ln]
+            pos += ln
+        elif wt == 5:
+            val = struct.unpack_from("<I", data, pos)[0]
+            pos += 4
+        elif wt == 1:
+            val = struct.unpack_from("<Q", data, pos)[0]
+            pos += 8
+        else:
+            break
+        fields.setdefault(fn, []).append(val)
+    return fields
+
+
+# ════════════════════════════════════════════════════════════
+# RPC Message Builders (field numbers from assets/protobuf/)
+# ════════════════════════════════════════════════════════════
+
+# Main message field numbers (flipper.proto)
+F_CMD_ID = 1
+F_STATUS = 2
+F_HAS_NEXT = 3
+F_PING_REQ = 5
+F_LIST_REQ = 7
+F_LIST_RESP = 8
+F_READ_REQ = 9
+F_READ_RESP = 10
+F_WRITE_REQ = 11
+F_DELETE_REQ = 12
+F_MKDIR_REQ = 13
+F_INFO_REQ = 28
+F_INFO_RESP = 29
+F_DEVINFO_REQ = 32
+F_DEVINFO_RESP = 33
+F_LOG_START_REQ = 76
+F_LOG_STOP_REQ = 77
+F_LOG_FRAME = 78
+
+STATUS_NAMES = {
+    0: "OK", 1: "ERROR", 2: "ERROR_DECODE", 3: "NOT_IMPLEMENTED",
+    4: "BUSY", 5: "STORAGE_NOT_READY", 6: "STORAGE_EXIST",
+    7: "STORAGE_NOT_EXIST", 8: "STORAGE_INVALID_PARAM",
+    9: "STORAGE_DENIED", 10: "STORAGE_INVALID_NAME",
+    11: "STORAGE_INTERNAL", 12: "STORAGE_NOT_IMPL",
+    13: "STORAGE_ALREADY_OPEN", 14: "CONTINUOUS_CMD_INTERRUPTED",
+    15: "INVALID_PARAMETERS", 18: "STORAGE_DIR_NOT_EMPTY",
+}
+
+
+def _main(cmd_id, field_no, inner, has_next=False):
+    """Build a Main RPC message."""
+    m = _fv(F_CMD_ID, cmd_id)
+    if has_next:
+        m += _fv(F_HAS_NEXT, 1)
+    m += _fb(field_no, inner)
+    return m
+
+
+def msg_ping(cid):
+    return _main(cid, F_PING_REQ, _fb(1, b"\x00"))
+
+
+def msg_devinfo(cid):
+    return _main(cid, F_DEVINFO_REQ, b"")
+
+
+def msg_list(cid, path):
+    return _main(cid, F_LIST_REQ, _fs(1, path))
+
+
+def msg_info(cid, path):
+    return _main(cid, F_INFO_REQ, _fs(1, path))
+
+
+def msg_mkdir(cid, path):
+    return _main(cid, F_MKDIR_REQ, _fs(1, path))
+
+
+def msg_read(cid, path):
+    return _main(cid, F_READ_REQ, _fs(1, path))
+
+
+def msg_delete(cid, path, recursive=False):
+    inner = _fs(1, path)
+    if recursive:
+        inner += _fv(2, 1)
+    return _main(cid, F_DELETE_REQ, inner)
+
+
+def msg_write(cid, path, data=b"", has_next=False):
+    """Build storage_write_request.
+
+    Path must be included in every chunk (firmware validates it each time).
+    Last chunk has has_next=False.
+    """
+    file_msg = _fb(4, data)            # File { data }
+    wr = _fs(1, path)                  # WriteRequest.path
+    wr += _fb(2, file_msg)             # WriteRequest.file
+    return _main(cid, F_WRITE_REQ, wr, has_next=has_next)
+
+
+def msg_log_start(cid, level=""):
+    """Build StartLogStreamRequest."""
+    inner = _fs(1, level) if level else b""
+    return _main(cid, F_LOG_START_REQ, inner)
+
+
+def msg_log_stop(cid):
+    """Build StopLogStreamRequest."""
+    return _main(cid, F_LOG_STOP_REQ, b"")
+
+
+# ════════════════════════════════════════════════════════════
+# Response Parsers
+# ════════════════════════════════════════════════════════════
+
+def parse_main(data):
+    """Parse a Main response."""
+    f = _dm(data)
+    return {
+        "cmd_id": f.get(F_CMD_ID, [0])[0],
+        "status": f.get(F_STATUS, [0])[0],
+        "has_next": bool(f.get(F_HAS_NEXT, [0])[0]),
+        "content": {k: v for k, v in f.items() if k > 3},
+    }
+
+
+def parse_files(list_resp_data):
+    """Parse StorageListResponse -> list of file dicts."""
+    fields = _dm(list_resp_data)
+    files = []
+    for fd in fields.get(1, []):   # repeated File
+        if isinstance(fd, (bytes, bytearray)):
+            ff = _dm(fd)
+            name = ff.get(2, [b""])[0]
+            if isinstance(name, (bytes, bytearray)):
+                name = name.decode("utf-8", errors="replace")
+            files.append({
+                "type": "DIR" if ff.get(1, [0])[0] == 1 else "FILE",
+                "name": name,
+                "size": ff.get(3, [0])[0],
+            })
+    return files
+
+
+# ════════════════════════════════════════════════════════════
+# BLE Transport
+# ════════════════════════════════════════════════════════════
+
+class FlipperBLE:
+    """Low-level BLE serial transport for Flipper Zero RPC."""
+
+    def __init__(self):
+        self.client = None
+        self._rxbuf = bytearray()
+        self._rxq = asyncio.Queue()
+        self._buf_free = 0
+        self._flow_evt = asyncio.Event()
+
+    # ── Scanning ──
+
+    async def scan(self, timeout=5.0, all_devices=False):
+        print(f"Scanning ({timeout}s)...")
+
+        if not all_devices:
+            # Try with service UUID filter first
+            found = []
+            try:
+                devs = await BleakScanner.discover(
+                    timeout=timeout, service_uuids=[SERVICE]
+                )
+                found = [d for d in devs if d.name]
+            except Exception:
+                pass
+
+            # Fallback: scan all, filter by name
+            if not found:
+                devs = await BleakScanner.discover(timeout=timeout)
+                found = [d for d in devs if d.name and "flipper" in d.name.lower()]
+            return found
+        else:
+            # Show all BLE devices
+            devs = await BleakScanner.discover(timeout=timeout)
+            return [d for d in devs if d.name]
+
+    # ── Callbacks ──
+
+    def _on_data(self, _sender, data):
+        self._rxq.put_nowait(bytes(data))
+
+    def _on_flow(self, _sender, data):
+        if len(data) >= 4:
+            self._buf_free = struct.unpack("<I", data[:4])[0]
+            self._flow_evt.set()
+
+    # ── Connection ──
+
+    async def connect(self, addr):
+        print(f"Connecting to {addr}...")
+        self.client = BleakClient(addr)
+        await self.client.connect()
+        print(f"Connected (MTU={self.client.mtu_size})")
+
+        # Subscribe to data notifications (Flipper -> us)
+        await self.client.start_notify(CHAR_TX, self._on_data)
+
+        # Subscribe to flow control
+        await self.client.start_notify(CHAR_FLOW, self._on_flow)
+        try:
+            fc = await self.client.read_gatt_char(CHAR_FLOW)
+            self._buf_free = struct.unpack("<I", fc[:4])[0]
+        except Exception:
+            self._buf_free = 1024
+
+        # Activate RPC session
+        try:
+            await self.client.write_gatt_char(
+                CHAR_RPC, struct.pack("<I", 1), response=True
+            )
+        except Exception:
+            pass  # Some FW versions start RPC implicitly
+
+        await asyncio.sleep(0.3)
+
+    async def disconnect(self):
+        if self.client and self.client.is_connected:
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+
+    async def pair(self, addr):
+        """Pair/bond with Flipper Zero."""
+        print(f"Pairing with {addr}...")
+        self.client = BleakClient(addr)
+        await self.client.connect()
+        try:
+            await self.client.pair()
+            print("Paired successfully!")
+        except NotImplementedError:
+            print("macOS handles pairing automatically on first connection.")
+            print("If prompted, confirm on your Flipper Zero.")
+        except Exception as e:
+            print(f"Pairing note: {e}")
+            print("Connection established - should be paired now.")
+        await self.client.disconnect()
+
+    # ── Send / Receive ──
+
+    async def send(self, msg_bytes):
+        """Send a length-prefixed protobuf message over BLE serial."""
+        frame = _ve(len(msg_bytes)) + msg_bytes
+        chunk_size = min(self.client.mtu_size - 3, 512) if self.client else 128
+
+        # Flow control: wait until Flipper has buffer space
+        retries = 0
+        while self._buf_free < len(frame) and retries < 100:
+            self._flow_evt.clear()
+            try:
+                await asyncio.wait_for(self._flow_evt.wait(), 0.5)
+            except asyncio.TimeoutError:
+                retries += 1
+
+        # Send in BLE-sized chunks
+        for i in range(0, len(frame), chunk_size):
+            await self.client.write_gatt_char(
+                CHAR_RX, frame[i:i + chunk_size], response=False
+            )
+
+        self._buf_free = max(0, self._buf_free - len(frame))
+
+    async def recv(self, timeout=10.0):
+        """Receive one length-prefixed protobuf message."""
+        deadline = time.time() + timeout
+
+        while True:
+            # Try to extract a complete message from the buffer
+            if self._rxbuf:
+                try:
+                    msg_len, hdr_size = _vd(bytes(self._rxbuf))
+                    if len(self._rxbuf) >= hdr_size + msg_len:
+                        msg = bytes(self._rxbuf[hdr_size:hdr_size + msg_len])
+                        del self._rxbuf[:hdr_size + msg_len]
+                        return msg
+                except ValueError:
+                    pass
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError("No response from Flipper")
+
+            try:
+                chunk = await asyncio.wait_for(
+                    self._rxq.get(), timeout=min(remaining, 2.0)
+                )
+                self._rxbuf.extend(chunk)
+            except asyncio.TimeoutError:
+                continue
+
+
+# ════════════════════════════════════════════════════════════
+# RPC Client
+# ════════════════════════════════════════════════════════════
+
+class FlipperRPC:
+    """High-level Flipper Zero RPC over BLE."""
+
+    def __init__(self, ble: FlipperBLE):
+        self.ble = ble
+        self._cid = 0
+
+    def _next_id(self):
+        self._cid += 1
+        return self._cid
+
+    async def _call(self, msg, timeout=10.0):
+        """Send message, collect all response parts (handling has_next)."""
+        await self.ble.send(msg)
+        resps = []
+        while True:
+            data = await self.ble.recv(timeout=timeout)
+            r = parse_main(data)
+            resps.append(r)
+            if not r["has_next"]:
+                break
+        return resps
+
+    def _check(self, resps, op="Operation"):
+        s = resps[-1]["status"]
+        if s != 0:
+            raise RuntimeError(f"{op}: {STATUS_NAMES.get(s, f'error {s}')}")
+
+    async def ping(self):
+        resps = await self._call(msg_ping(self._next_id()))
+        return resps[0]["status"] == 0
+
+    async def device_info(self):
+        resps = await self._call(msg_devinfo(self._next_id()), timeout=15.0)
+        info = {}
+        for r in resps:
+            for d in r["content"].get(F_DEVINFO_RESP, []):
+                if isinstance(d, (bytes, bytearray)):
+                    f = _dm(d)
+                    k = f.get(1, [b""])[0]
+                    v = f.get(2, [b""])[0]
+                    if isinstance(k, bytes):
+                        k = k.decode(errors="replace")
+                    if isinstance(v, bytes):
+                        v = v.decode(errors="replace")
+                    if k:
+                        info[k] = v
+        return info
+
+    async def storage_info(self, path="/ext"):
+        resps = await self._call(msg_info(self._next_id(), path))
+        self._check(resps, "storage_info")
+        for r in resps:
+            for d in r["content"].get(F_INFO_RESP, []):
+                if isinstance(d, (bytes, bytearray)):
+                    f = _dm(d)
+                    return f.get(1, [0])[0], f.get(2, [0])[0]
+        return 0, 0
+
+    async def storage_list(self, path):
+        resps = await self._call(msg_list(self._next_id(), path), timeout=15.0)
+        self._check(resps, "ls")
+        files = []
+        for r in resps:
+            for d in r["content"].get(F_LIST_RESP, []):
+                if isinstance(d, (bytes, bytearray)):
+                    files.extend(parse_files(d))
+        return files
+
+    async def storage_mkdir(self, path):
+        resps = await self._call(msg_mkdir(self._next_id(), path))
+        s = resps[-1]["status"]
+        if s not in (0, 6):  # OK or ALREADY_EXISTS
+            raise RuntimeError(f"mkdir: {STATUS_NAMES.get(s, f'error {s}')}")
+
+    async def storage_mkdir_p(self, path):
+        """Recursively create directories (like mkdir -p)."""
+        parts = path.strip("/").split("/")
+        for i in range(2, len(parts) + 1):  # Start at 2 to skip mount points (/ext, /int)
+            p = "/" + "/".join(parts[:i])
+            await self.storage_mkdir(p)
+            await asyncio.sleep(0.05)
+
+    async def storage_write(self, remote_path, data, progress_cb=None):
+        """Write file to Flipper storage. Chunks data for BLE transfer."""
+        cid = self._next_id()
+        total = len(data)
+        offset = 0
+        chunk_num = 0
+
+        if total == 0:
+            # Empty file
+            await self.ble.send(msg_write(cid, path=remote_path, data=b""))
+        else:
+            while offset < total:
+                chunk = data[offset:offset + CHUNK_SIZE]
+                is_first = (offset == 0)
+                offset += len(chunk)
+                is_last = (offset >= total)
+
+                m = msg_write(
+                    cid,
+                    path=remote_path,
+                    data=chunk,
+                    has_next=not is_last,
+                )
+                await self.ble.send(m)
+                chunk_num += 1
+
+                if progress_cb:
+                    progress_cb(offset, total)
+
+                # BLE rate limiting
+                if not is_last:
+                    await asyncio.sleep(0.05 if chunk_num % 4 == 0 else 0.02)
+
+        # Wait for write response
+        resp_data = await self.ble.recv(timeout=30.0)
+        resp = parse_main(resp_data)
+
+        if resp["status"] != 0:
+            raise RuntimeError(
+                f"Write failed: {STATUS_NAMES.get(resp['status'], resp['status'])}"
+            )
+
+    async def storage_read(self, remote_path, progress_cb=None):
+        """Read file from Flipper storage. Returns bytes."""
+        resps = await self._call(
+            msg_read(self._next_id(), remote_path), timeout=30.0
+        )
+        self._check(resps, "Read")
+
+        data = bytearray()
+        for r in resps:
+            for d in r["content"].get(F_READ_RESP, []):
+                if isinstance(d, (bytes, bytearray)):
+                    f = _dm(d)
+                    # File message field 1 -> nested File, data is field 4
+                    for file_msg in f.get(1, []):
+                        if isinstance(file_msg, (bytes, bytearray)):
+                            ff = _dm(file_msg)
+                            for chunk in ff.get(4, []):
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    data.extend(chunk)
+                    # data might also be directly in field 4
+                    for chunk in f.get(4, []):
+                        if isinstance(chunk, (bytes, bytearray)):
+                            data.extend(chunk)
+            if progress_cb and data:
+                progress_cb(len(data), 0)
+
+        return bytes(data)
+
+    async def storage_delete(self, remote_path, recursive=False):
+        """Delete a file or directory on Flipper storage."""
+        resps = await self._call(
+            msg_delete(self._next_id(), remote_path, recursive=recursive)
+        )
+        self._check(resps, "Delete")
+
+
+# ════════════════════════════════════════════════════════════
+# Config (save/load last used device)
+# ════════════════════════════════════════════════════════════
+
+def load_config():
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+# ════════════════════════════════════════════════════════════
+# CLI Helpers
+# ════════════════════════════════════════════════════════════
+
+def fmt_size(n):
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+def progress_bar(cur, total, width=40):
+    pct = cur / total if total else 1.0
+    filled = int(width * pct)
+    bar = "#" * filled + "-" * (width - filled)
+    sys.stdout.write(f"\r  [{bar}] {pct * 100:.0f}% {fmt_size(cur)}/{fmt_size(total)}")
+    sys.stdout.flush()
+    if cur >= total:
+        print()
+
+
+def normalize_path(path):
+    """Map /sdcard/ -> /ext/, ensure valid Flipper path."""
+    if path.startswith("/sdcard"):
+        path = "/ext" + path[7:]
+    if not (path.startswith("/ext") or path.startswith("/int")):
+        path = "/ext/" + path.lstrip("/")
+    return path
+
+
+async def resolve_address(args):
+    """Get Flipper BLE address from args, config, or auto-scan."""
+    if getattr(args, "address", None):
+        return args.address
+
+    cfg = load_config()
+    if cfg.get("address"):
+        name = cfg.get("name", "Flipper")
+        print(f"Using saved device: {name} ({cfg['address']})")
+        return cfg["address"]
+
+    # Auto-scan
+    ble = FlipperBLE()
+    devs = await ble.scan()
+
+    if not devs:
+        print("No Flipper Zero found.")
+        print("  - Is Bluetooth ON on your Flipper?")
+        print("  - Is Flipper on the home screen?")
+        print("  - Does Terminal have Bluetooth permission? (macOS)")
+        sys.exit(1)
+
+    if len(devs) == 1:
+        d = devs[0]
+        print(f"Found: {d.name} ({d.address})")
+        save_config({"address": d.address, "name": d.name})
+        return d.address
+
+    print("Multiple Flippers found:")
+    for i, d in enumerate(devs):
+        rssi = getattr(d, "rssi", "?")
+        print(f"  [{i}] {d.name:20s}  {d.address}  RSSI: {rssi}")
+
+    try:
+        choice = input(f"\nSelect device [0-{len(devs)-1}]: ").strip()
+        if choice.isdigit():
+            idx = int(choice)
+            if 0 <= idx < len(devs):
+                d = devs[idx]
+                save_config({"address": d.address, "name": d.name})
+                return d.address
+        print("Invalid selection.")
+    except (EOFError, KeyboardInterrupt):
+        print()
+    sys.exit(1)
+
+
+# ════════════════════════════════════════════════════════════
+# Commands
+# ════════════════════════════════════════════════════════════
+
+async def cmd_scan(args):
+    ble = FlipperBLE()
+    timeout = getattr(args, "timeout", 5.0) or 5.0
+    all_devices = getattr(args, "all", False)
+    devs = await ble.scan(timeout, all_devices=all_devices)
+
+    if not devs:
+        print("\nNo BLE devices found.")
+        print("Tips:")
+        print("  - Bluetooth must be ON on your Flipper (Settings -> Bluetooth)")
+        print("  - Flipper should be on the home screen")
+        print("  - On macOS: Terminal needs Bluetooth permission")
+        return
+
+    print(f"\nFound {len(devs)} device(s):")
+    for i, d in enumerate(devs):
+        rssi = getattr(d, "rssi", "?")
+        print(f"  [{i}] {d.name:20s}  {d.address}  RSSI: {rssi}")
+
+    if len(devs) == 1:
+        save_config({"address": devs[0].address, "name": devs[0].name})
+        print(f"\nSaved '{devs[0].name}' as default device.")
+    else:
+        # Let user pick a device
+        try:
+            choice = input(f"\nSelect device [0-{len(devs)-1}] (Enter to skip): ").strip()
+            if choice.isdigit():
+                idx = int(choice)
+                if 0 <= idx < len(devs):
+                    d = devs[idx]
+                    save_config({"address": d.address, "name": d.name})
+                    print(f"Saved '{d.name}' ({d.address}) as default device.")
+                else:
+                    print("Invalid selection.")
+        except (EOFError, KeyboardInterrupt):
+            print()
+
+
+async def cmd_pair(args):
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+    await ble.pair(addr)
+    save_config({"address": addr, "name": "Flipper"})
+    print(f"Device saved. Future commands will auto-connect.")
+
+
+async def cmd_upload(args):
+    local_file = args.local_file
+    remote_path = normalize_path(args.remote_path)
+
+    if not os.path.isfile(local_file):
+        print(f"Error: File not found: {local_file}")
+        sys.exit(1)
+
+    with open(local_file, "rb") as f:
+        data = f.read()
+
+    print(f"File: {local_file} ({fmt_size(len(data))})")
+    print(f"  -> {remote_path}")
+
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        if await rpc.ping():
+            print("RPC session active")
+
+        # Create parent directories if needed (recursive)
+        parent = os.path.dirname(remote_path)
+        if parent and parent not in ("/ext", "/int"):
+            await rpc.storage_mkdir_p(parent)
+
+        # Upload
+        print("Uploading...")
+        t0 = time.time()
+        await rpc.storage_write(remote_path, data, progress_cb=progress_bar)
+        dt = time.time() - t0
+
+        speed = len(data) / dt if dt > 0 else 0
+        print(f"Done! {fmt_size(len(data))} in {dt:.1f}s ({speed:.0f} B/s)")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_ls(args):
+    path = normalize_path(getattr(args, "path", None) or "/ext")
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        print(f"\n{path}/")
+        files = await rpc.storage_list(path)
+
+        if not files:
+            print("  (empty)")
+            return
+
+        files.sort(key=lambda f: (0 if f["type"] == "DIR" else 1, f["name"]))
+
+        for f in files:
+            if f["type"] == "DIR":
+                print(f"  [DIR]  {f['name']}/")
+            else:
+                print(f"  [FILE] {f['name']:30s}  {fmt_size(f['size'])}")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_info(args):
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        info = await rpc.device_info()
+
+        print("\nDevice:")
+        keys = [
+            "hardware.name", "hardware.model",
+            "firmware.version", "firmware.build.date",
+            "firmware.target", "radio.stack.type",
+        ]
+        for k in keys:
+            if k in info:
+                print(f"  {k}: {info[k]}")
+
+        # Print all other keys not in the important list
+        other = {k: v for k, v in info.items() if k not in keys}
+        if other:
+            print("\n  All properties:")
+            for k in sorted(other):
+                print(f"    {k}: {other[k]}")
+
+        try:
+            total, free = await rpc.storage_info("/ext")
+            if total:
+                used = total - free
+                pct = used / total * 100
+                print(f"\nSD Card:")
+                print(f"  Total: {fmt_size(total)}")
+                print(f"  Free:  {fmt_size(free)}")
+                print(f"  Used:  {fmt_size(used)} ({pct:.0f}%)")
+        except Exception:
+            print("\nSD Card: not available")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_fap(args):
+    local_file = args.fap_file
+    category = args.category
+
+    if not os.path.isfile(local_file):
+        print(f"Error: File not found: {local_file}")
+        sys.exit(1)
+
+    filename = os.path.basename(local_file)
+    remote_path = f"/ext/apps/{category}/{filename}"
+
+    with open(local_file, "rb") as f:
+        data = f.read()
+
+    print(f"FAP: {local_file} ({fmt_size(len(data))})")
+    print(f"  -> {remote_path}")
+
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        if await rpc.ping():
+            print("RPC session active")
+
+        # Ensure target directory exists (recursive)
+        await rpc.storage_mkdir_p(f"/ext/apps/{category}")
+
+        print("Uploading...")
+        t0 = time.time()
+        await rpc.storage_write(remote_path, data, progress_cb=progress_bar)
+        dt = time.time() - t0
+
+        speed = len(data) / dt if dt > 0 else 0
+        print(f"Done! {fmt_size(len(data))} in {dt:.1f}s ({speed:.0f} B/s)")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_test_fs(args):
+    """Upload a test file, download it back, and validate integrity."""
+    import hashlib
+    import random
+
+    size = getattr(args, "size", 512) or 512
+    remote_path = "/ext/.upload2flipper_test"
+
+    # Generate random test data
+    test_data = bytes(random.getrandbits(8) for _ in range(size))
+    test_hash = hashlib.md5(test_data).hexdigest()
+
+    print(f"Test file: {fmt_size(size)} of random data")
+    print(f"  MD5: {test_hash}")
+    print(f"  Remote: {remote_path}")
+
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        if await rpc.ping():
+            print("RPC session active")
+
+        # Upload
+        print("\n[1/3] Uploading...")
+        t0 = time.time()
+        await rpc.storage_write(remote_path, test_data, progress_cb=progress_bar)
+        dt_up = time.time() - t0
+        speed_up = size / dt_up if dt_up > 0 else 0
+        print(f"  Upload: {dt_up:.1f}s ({speed_up:.0f} B/s)")
+
+        # Download
+        print("\n[2/3] Downloading...")
+        t0 = time.time()
+        dl_data = await rpc.storage_read(remote_path)
+        dt_dl = time.time() - t0
+        dl_hash = hashlib.md5(dl_data).hexdigest()
+        speed_dl = len(dl_data) / dt_dl if dt_dl > 0 else 0
+        print(f"  Downloaded: {fmt_size(len(dl_data))} in {dt_dl:.1f}s ({speed_dl:.0f} B/s)")
+        print(f"  MD5: {dl_hash}")
+
+        # Validate
+        print("\n[3/3] Validating...")
+        ok = True
+
+        if len(dl_data) != size:
+            print(f"  FAIL: Size mismatch! Sent {size}, got {len(dl_data)}")
+            ok = False
+
+        if dl_hash != test_hash:
+            print(f"  FAIL: Hash mismatch!")
+            print(f"    Sent:     {test_hash}")
+            print(f"    Received: {dl_hash}")
+            # Find first differing byte
+            for i in range(min(len(test_data), len(dl_data))):
+                if test_data[i] != dl_data[i]:
+                    print(f"    First diff at byte {i}: sent 0x{test_data[i]:02x}, got 0x{dl_data[i]:02x}")
+                    break
+            ok = False
+
+        if ok:
+            print(f"  OK! Round-trip verified ({fmt_size(size)})")
+
+        # Cleanup
+        try:
+            await rpc.storage_delete(remote_path)
+            print(f"\nCleaned up {remote_path}")
+        except Exception as e:
+            print(f"\nWarning: cleanup failed: {e}")
+
+        if not ok:
+            sys.exit(1)
+
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_log(args):
+    """Stream Flipper debug logs via BLE RPC."""
+    level = args.level or ""
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        if await rpc.ping():
+            print("RPC session active")
+
+        # Send StartLogStreamRequest
+        cid = rpc._next_id()
+        await ble.send(msg_log_start(cid, level))
+        resp_data = await ble.recv(timeout=5.0)
+        resp = parse_main(resp_data)
+        if resp["status"] != 0:
+            raise RuntimeError(
+                f"StartLogStream: {STATUS_NAMES.get(resp['status'], resp['status'])}"
+            )
+
+        print(f"Streaming logs (level: {level or 'default'})... Press Ctrl+C to stop.\n")
+
+        # Receive log frames
+        while True:
+            try:
+                data = await ble.recv(timeout=2.0)
+            except TimeoutError:
+                continue
+            msg = parse_main(data)
+            for frame_data in msg["content"].get(F_LOG_FRAME, []):
+                if isinstance(frame_data, (bytes, bytearray)):
+                    # Parse LogStreamFrame: field 1 = bytes data
+                    fields = _dm(frame_data)
+                    for chunk in fields.get(1, []):
+                        if isinstance(chunk, (bytes, bytearray)):
+                            sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+                            sys.stdout.flush()
+
+    except KeyboardInterrupt:
+        print("\n\nStopping log...")
+        try:
+            stop_cid = rpc._next_id()
+            await ble.send(msg_log_stop(stop_cid))
+            resp_data = await ble.recv(timeout=3.0)
+        except Exception:
+            pass
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_download(args):
+    remote_path = normalize_path(args.remote_path)
+
+    # Derive local filename from remote path if not specified
+    local_file = args.local_file
+    if not local_file:
+        local_file = os.path.basename(remote_path)
+
+    print(f"Downloading: {remote_path}")
+    print(f"  -> {local_file}")
+
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+
+        if await rpc.ping():
+            print("RPC session active")
+
+        print("Downloading...")
+        t0 = time.time()
+        data = await rpc.storage_read(remote_path)
+        dt = time.time() - t0
+
+        with open(local_file, "wb") as f:
+            f.write(data)
+
+        speed = len(data) / dt if dt > 0 else 0
+        print(f"Done! {fmt_size(len(data))} in {dt:.1f}s ({speed:.0f} B/s)")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_mkdir(args):
+    path = normalize_path(args.path)
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+        await rpc.storage_mkdir(path)
+        print(f"Created: {path}")
+    finally:
+        await ble.disconnect()
+
+
+async def cmd_delete(args):
+    path = normalize_path(args.path)
+    recursive = args.recursive
+    addr = await resolve_address(args)
+    ble = FlipperBLE()
+
+    try:
+        await ble.connect(addr)
+        rpc = FlipperRPC(ble)
+        await rpc.storage_delete(path, recursive=recursive)
+        print(f"Deleted: {path}")
+    finally:
+        await ble.disconnect()
+
+
+# ════════════════════════════════════════════════════════════
+# Entry Point
+# ════════════════════════════════════════════════════════════
+
+COMMANDS = ["scan", "pair", "upload", "download", "fap", "ls", "info", "mkdir", "delete", "rm", "test-fs", "log"]
+
+
+def main():
+    # Support shorthand: upload2flipper file.txt /ext/file.txt (no subcommand)
+    if (
+        len(sys.argv) >= 3
+        and sys.argv[1] not in COMMANDS
+        and not sys.argv[1].startswith("-")
+    ):
+        sys.argv.insert(1, "upload")
+
+    parser = argparse.ArgumentParser(
+        prog="upload2flipper",
+        description="Flipper Zero BLE file transfer tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  upload2flipper scan
+  upload2flipper pair
+  upload2flipper my_signal.sub /ext/subghz/my_signal.sub
+  upload2flipper upload firmware.bin /ext/update/firmware.bin
+  upload2flipper download /ext/subghz/signal.sub
+  upload2flipper download /ext/subghz/signal.sub local_copy.sub
+  upload2flipper fap myApp.fap                  # -> /ext/apps/Tools/myApp.fap
+  upload2flipper fap myApp.fap GPIO             # -> /ext/apps/GPIO/myApp.fap
+  upload2flipper ls /ext/subghz
+  upload2flipper info""",
+    )
+    parser.add_argument("-a", "--address", help="BLE address (skip auto-scan)")
+
+    sub = parser.add_subparsers(dest="command")
+
+    p_scan = sub.add_parser("scan", help="Scan for Flipper Zero devices")
+    p_scan.add_argument(
+        "-t", "--timeout", type=float, default=5.0, help="Scan timeout (default: 5s)"
+    )
+    p_scan.add_argument(
+        "-A", "--all", action="store_true",
+        help="Show all BLE devices (not just Flipper)",
+    )
+
+    sub.add_parser("pair", help="Pair with Flipper Zero via BLE")
+
+    p_up = sub.add_parser("upload", help="Upload file to Flipper")
+    p_up.add_argument("local_file", help="Local file path")
+    p_up.add_argument("remote_path", help="Remote path (e.g. /ext/subghz/file.sub)")
+
+    p_dl = sub.add_parser("download", help="Download file from Flipper")
+    p_dl.add_argument("remote_path", help="Remote path (e.g. /ext/subghz/file.sub)")
+    p_dl.add_argument("local_file", nargs="?", default=None, help="Local file path (default: filename from remote)")
+
+    p_fap = sub.add_parser("fap", help="Upload FAP app to Flipper")
+    p_fap.add_argument("fap_file", help="Local .fap file")
+    p_fap.add_argument(
+        "category", nargs="?", default="Tools",
+        help="App category folder (default: Tools)",
+    )
+
+    p_ls = sub.add_parser("ls", help="List directory on Flipper")
+    p_ls.add_argument("path", nargs="?", default="/ext", help="Path (default: /ext)")
+
+    sub.add_parser("info", help="Show device info and storage")
+
+    p_mk = sub.add_parser("mkdir", help="Create directory on Flipper")
+    p_mk.add_argument("path", help="Directory path")
+
+    p_del = sub.add_parser("delete", aliases=["rm"], help="Delete file or directory on Flipper")
+    p_del.add_argument("path", help="File or directory path")
+    p_del.add_argument("-r", "--recursive", action="store_true", help="Delete directory recursively")
+
+    p_test = sub.add_parser("test-fs", help="Upload/download test to validate BLE transfer")
+    p_test.add_argument(
+        "-s", "--size", type=int, default=512,
+        help="Test file size in bytes (default: 512)",
+    )
+
+    p_log = sub.add_parser("log", help="Stream Flipper debug logs via BLE RPC")
+    p_log.add_argument(
+        "level", nargs="?", default="debug",
+        help="Log level: debug, info, warn, error, trace (default: debug)",
+    )
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    cmd_map = {
+        "scan": cmd_scan,
+        "pair": cmd_pair,
+        "upload": cmd_upload,
+        "download": cmd_download,
+        "fap": cmd_fap,
+        "ls": cmd_ls,
+        "info": cmd_info,
+        "mkdir": cmd_mkdir,
+        "delete": cmd_delete,
+        "rm": cmd_delete,
+        "test-fs": cmd_test_fs,
+        "log": cmd_log,
+    }
+
+    try:
+        asyncio.run(cmd_map[args.command](args))
+    except KeyboardInterrupt:
+        print("\nAborted.")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\nError: {e}")
+        if "--debug" in sys.argv:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

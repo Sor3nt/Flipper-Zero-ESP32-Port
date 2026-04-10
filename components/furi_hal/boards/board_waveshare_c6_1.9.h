@@ -77,3 +77,8 @@
 #define BOARD_HAS_RFID          0
 #define BOARD_HAS_NFC           0
 #define BOARD_HAS_SUBGHZ        0   /* External CC1101 possible but not built-in */
+
+/* ---- Power Management (not present on this board) ---- */
+#define BQ27220_ADDR                    0x55
+#define BQ25896_CHARGE_LIMIT            1280
+#define FURI_HAL_POWER_VIRTUAL_CAPACITY_MAH (1300U)

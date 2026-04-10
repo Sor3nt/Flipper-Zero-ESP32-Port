@@ -7,6 +7,7 @@ idf_component_register(
         "flipper_application/plugins/plugin_manager.c"
         "flipper_application/firmware_api.c"
         "flipper_application/nfc_app_api.c"
+        "flipper_application/api_hashtable/api_hashtable.c"
     INCLUDE_DIRS "."
-    REQUIRES furi furi_hal storage toolbox
+    REQUIRES furi furi_hal storage toolbox gui notification dialogs flipper_format subghz assets
 )
