@@ -199,11 +199,23 @@ for src in "${SOURCES[@]}"; do
         -c "$src" -o "$obj"
 done
 
-# Detect entry point from application.fam
+# Parse application.fam for entry point, name, icon, stack size
 ENTRY_POINT="main"
+APP_NAME="App"
+APP_ICON=""
+APP_STACK=16384
 if [ -f "$APP_DIR/application.fam" ]; then
     EP=$(grep 'entry_point=' "$APP_DIR/application.fam" | sed 's/.*entry_point="\([^"]*\)".*/\1/' | head -1)
     [ -n "$EP" ] && ENTRY_POINT="$EP"
+    NM=$(grep '^\s*name=' "$APP_DIR/application.fam" | sed 's/.*name="\([^"]*\)".*/\1/' | head -1)
+    [ -n "$NM" ] && APP_NAME="$NM"
+    IC=$(grep 'fap_icon=' "$APP_DIR/application.fam" | sed 's/.*fap_icon="\([^"]*\)".*/\1/' | head -1)
+    [ -n "$IC" ] && APP_ICON="$APP_DIR/$IC"
+    SK=$(grep 'stack_size=' "$APP_DIR/application.fam" | sed 's/.*stack_size=\([0-9*  ]*\).*/\1/' | head -1)
+    if [ -n "$SK" ]; then
+        PARSED_SK=$(python3 -c "print(max(int($SK), 16384))" 2>/dev/null || echo 16384)
+        APP_STACK=$PARSED_SK
+    fi
 fi
 echo "=== Linking ${#OBJECTS[@]} objects (entry=$ENTRY_POINT) ==="
 # Link as relocatable ELF (partial link) with section merging
@@ -212,15 +224,21 @@ echo "=== Linking ${#OBJECTS[@]} objects (entry=$ENTRY_POINT) ==="
 # Show section count
 echo "Sections: $(${TOOLCHAIN_PREFIX}-readelf -S "$BUILD_DIR/app.elf" | grep -c '^\s*\[')"
 
-echo "=== Generating manifest ==="
+echo "=== Generating manifest (name=$APP_NAME, stack=$APP_STACK) ==="
 # Generate the .fapmeta section
+ICON_ARG=""
+if [ -n "$APP_ICON" ] && [ -f "$APP_ICON" ]; then
+    ICON_ARG="--icon $APP_ICON"
+    echo "Icon: $APP_ICON"
+fi
 python3 "$SCRIPT_DIR/fap_manifest.py" \
-    --name "ProtoPirate" \
+    --name "$APP_NAME" \
     --api-major 1 \
     --api-minor 0 \
     --target 32 \
-    --stack-size 16384 \
+    --stack-size "$APP_STACK" \
     --app-version 1 \
+    $ICON_ARG \
     --output "$BUILD_DIR/manifest.bin"
 
 # Inject .fapmeta section into ELF
