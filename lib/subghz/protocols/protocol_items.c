@@ -30,7 +30,7 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_beninca_arc,   &subghz_protocol_jarolift,
     &subghz_protocol_ditec_gol4,    &subghz_protocol_keyfinder,
     // Vehicle protocols
-//    &subghz_protocol_audi_v1,       &subghz_protocol_audi_v2,
+    &subghz_protocol_audi_v1,      // &subghz_protocol_audi_v2,
 //    &subghz_protocol_bmw_v2,        &subghz_protocol_bmw_v3,
 ////    &subghz_protocol_chevrolet_v0,  &subghz_protocol_ducato_v0,
 //    &subghz_protocol_fiat_v0,       &subghz_protocol_fiat,

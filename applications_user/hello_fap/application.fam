@@ -1,0 +1,12 @@
+App(
+    appid="hello_fap",
+    name="HelloFAP",
+    apptype=FlipperAppType.EXTERNAL,
+    targets=["f7"],
+    entry_point="hello_fap_app",
+    requires=["gui"],
+    stack_size=4 * 1024,
+    fap_description="Minimal FAP test",
+    fap_version="1.0",
+    fap_category="Tools",
+)

@@ -58,4 +58,5 @@
 #include "jarolift.h"
 #include "ditec_gol4.h"
 #include "keyfinder.h"
+#include "audi_v1.h"
 

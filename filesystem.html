@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flipper Zero - SD Card Manager</title>
+<script type="module">
+
+let port = null;
+let reader = null;
+let writer = null;
+let readBuffer = '';
+let currentPath = '/ext';
+let connected = false;
+
+const $ = id => document.getElementById(id);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// Strip ANSI escape sequences from string
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+            .replace(/\x1b\[\?[0-9;]*[A-Za-z]/g, '')
+            .replace(/\x1b\][^\x07]*\x07/g, '')
+            .replace(/\x1b[()][A-Za-z]/g, '');
+}
+
+// ── Serial helpers ──
+
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    // DTR must be set to activate the CLI shell on the device
+    await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+    reader = port.readable.getReader();
+    writer = port.writable.getWriter();
+    connected = true;
+    $('connect-btn').textContent = 'Disconnect';
+    $('connect-btn').classList.add('connected');
+    $('status').textContent = 'Connected';
+    $('status').className = 'status online';
+
+    console.log('[connect] port opened, readable:', !!port.readable, 'writable:', !!port.writable);
+    console.log('[connect] port info:', port.getInfo());
+
+    startReading();
+
+    // Wait for the shell to boot after DTR was set
+    console.log('[connect] waiting for shell to start after DTR...');
+    await sleep(1000);
+
+    // Try sending Enter multiple times to wake the CLI
+    for (let i = 0; i < 3; i++) {
+      await sendRaw('\r\n');
+      await sleep(500);
+      if (readBuffer.length > 0) {
+        console.log('[connect] got response after attempt', i + 1);
+        break;
+      }
+      console.log('[connect] no response yet, attempt', i + 1);
+    }
+
+    // Toggle DTR in case the device needs a fresh connection signal
+    if (readBuffer.length === 0) {
+      console.log('[connect] no data received, toggling DTR...');
+      await port.setSignals({ dataTerminalReady: false });
+      await sleep(200);
+      await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+      await sleep(1000);
+      await sendRaw('\r\n');
+      await sleep(500);
+    }
+
+    console.log('[connect] buffer after init:', JSON.stringify(readBuffer));
+    await waitForPrompt(3000);
+    readBuffer = '';
+
+    await listDir(currentPath);
+  } catch (e) {
+    setError('Connection failed: ' + e.message);
+  }
+}
+
+async function disconnect() {
+  connected = false;
+  try {
+    if (reader) { await reader.cancel(); reader.releaseLock(); reader = null; }
+    if (writer) { writer.releaseLock(); writer = null; }
+    if (port) { await port.close(); port = null; }
+  } catch (_) {}
+  $('connect-btn').textContent = 'Connect';
+  $('connect-btn').classList.remove('connected');
+  $('status').textContent = 'Disconnected';
+  $('status').className = 'status offline';
+  $('file-list').innerHTML = '';
+  $('breadcrumb').textContent = '';
+}
+
+async function startReading() {
+  console.log('[startReading] started, readable:', !!port?.readable, 'reader:', !!reader);
+  try {
+    while (connected && reader) {
+      const { value, done } = await reader.read();
+      if (done) { console.log('[startReading] done signal'); break; }
+      const chunk = decoder.decode(value, { stream: true });
+      console.log('[startReading] received', value.byteLength, 'bytes:', JSON.stringify(chunk));
+      readBuffer += chunk;
+    }
+  } catch (e) { console.error('[startReading] error:', e); }
+}
+
+async function sendRaw(data) {
+  if (!writer) return;
+  const bytes = encoder.encode(data);
+  console.log('[sendRaw] sending', bytes.byteLength, 'bytes:', JSON.stringify(data));
+  await writer.write(bytes);
+}
+
+async function sendCommand(cmd) {
+  readBuffer = '';
+  await sendRaw(cmd + '\r');
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function waitForPrompt(timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clean = stripAnsi(readBuffer);
+    if (clean.includes('>: ')) {
+      const result = readBuffer;
+      readBuffer = '';
+      console.log('[waitForPrompt] raw:', JSON.stringify(result));
+      console.log('[waitForPrompt] clean:', stripAnsi(result));
+      return stripAnsi(result);
+    }
+    await sleep(50);
+  }
+  const result = readBuffer;
+  readBuffer = '';
+  console.log('[waitForPrompt] TIMEOUT, raw:', JSON.stringify(result));
+  console.log('[waitForPrompt] TIMEOUT, clean:', stripAnsi(result));
+  return stripAnsi(result);
+}
+
+async function waitForString(str, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (stripAnsi(readBuffer).includes(str)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  console.log('[waitForString] TIMEOUT waiting for:', str, 'buffer:', JSON.stringify(readBuffer));
+  return false;
+}
+
+// ── Storage commands ──
+
+async function listDir(path) {
+  if (!connected) return;
+  currentPath = path;
+  updateBreadcrumb();
+
+  setLoading(true);
+  await sendCommand('storage list ' + path);
+  const response = await waitForPrompt();
+  setLoading(false);
+
+  console.log('[listDir] response lines:', response.split(/\r?\n/));
+
+  const lines = response.split(/\r?\n/);
+  const entries = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const dirMatch = trimmed.match(/\[D\]\s+(.+)$/);
+    const fileMatch = trimmed.match(/\[F\]\s+(.+?)\s+(\d+)b$/);
+    if (dirMatch) {
+      entries.push({ name: dirMatch[1], type: 'dir', size: 0 });
+    } else if (fileMatch) {
+      entries.push({ name: fileMatch[1], type: 'file', size: parseInt(fileMatch[2]) });
+    }
+  }
+
+  console.log('[listDir] parsed entries:', entries);
+  renderFileList(entries);
+}
+
+async function downloadFile(path, filename, fileSize) {
+  if (!connected) return;
+  setStatus('Downloading ' + filename + '...');
+
+  const chunkSize = 512;
+  readBuffer = '';
+  await sendCommand('storage read_chunks ' + path + ' ' + chunkSize);
+
+  // Wait for "Size: <n>" line
+  await waitForString('Size:', 3000);
+  await sleep(100);
+
+  const sizeMatch = readBuffer.match(/Size:\s*(\d+)/);
+  const size = sizeMatch ? parseInt(sizeMatch[1]) : fileSize;
+
+  const chunks = [];
+  let received = 0;
+
+  while (received < size) {
+    // Wait for "Ready?"
+    await waitForString('Ready?', 5000);
+    await sleep(50);
+    readBuffer = '';
+
+    // Send char to trigger chunk
+    await sendRaw('\r');
+    await sleep(100);
+
+    // Wait for data
+    const expectedBytes = Math.min(chunkSize, size - received);
+    const start = Date.now();
+    while (readBuffer.length < expectedBytes && Date.now() - start < 5000) {
+      await sleep(50);
+    }
+
+    // Collect binary data - we need raw bytes
+    const chunkData = readBuffer.substring(0, expectedBytes);
+    chunks.push(chunkData);
+    received += expectedBytes;
+    readBuffer = readBuffer.substring(expectedBytes);
+
+    const pct = Math.round((received / size) * 100);
+    setStatus('Downloading ' + filename + '... ' + pct + '%');
+  }
+
+  // Wait for prompt to return
+  await waitForPrompt(3000);
+
+  // Create blob and download
+  const fullData = chunks.join('');
+  const bytes = new Uint8Array(fullData.length);
+  for (let i = 0; i < fullData.length; i++) {
+    bytes[i] = fullData.charCodeAt(i) & 0xff;
+  }
+
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  setStatus('Downloaded ' + filename + ' (' + formatSize(size) + ')');
+}
+
+async function uploadFile() {
+  if (!connected) return;
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async () => {
+    for (const file of input.files) {
+      await uploadSingleFile(file);
+    }
+    await listDir(currentPath);
+  };
+  input.click();
+}
+
+async function uploadSingleFile(file) {
+  const remotePath = currentPath + '/' + file.name;
+  setStatus('Uploading ' + file.name + '...');
+
+  // First remove existing file (ignore errors)
+  await sendCommand('storage remove ' + remotePath);
+  await waitForPrompt(3000);
+
+  const data = new Uint8Array(await file.arrayBuffer());
+  const totalSize = data.length;
+
+  readBuffer = '';
+  await sendCommand('storage write_chunk ' + remotePath + ' ' + totalSize);
+
+  // Wait for "Ready"
+  const ready = await waitForString('Ready', 5000);
+  if (!ready) {
+    setError('Device did not respond with Ready');
+    return;
+  }
+  await sleep(100);
+  readBuffer = '';
+
+  // Send data in chunks
+  const sendChunkSize = 512;
+  let sent = 0;
+
+  while (sent < totalSize) {
+    const end = Math.min(sent + sendChunkSize, totalSize);
+    const chunk = data.slice(sent, end);
+    await writer.write(chunk);
+    sent = end;
+
+    const pct = Math.round((sent / totalSize) * 100);
+    setStatus('Uploading ' + file.name + '... ' + pct + '%');
+
+    // Small delay to not overwhelm the serial buffer
+    await sleep(20);
+  }
+
+  // Wait for command to finish
+  await waitForPrompt(10000);
+  setStatus('Uploaded ' + file.name + ' (' + formatSize(totalSize) + ')');
+}
+
+async function createDir() {
+  if (!connected) return;
+  const name = prompt('Directory name:');
+  if (!name) return;
+
+  await sendCommand('storage mkdir ' + currentPath + '/' + name);
+  await waitForPrompt();
+  await listDir(currentPath);
+}
+
+async function deleteEntry(name, type) {
+  if (!confirm('Delete ' + (type === 'dir' ? 'directory' : 'file') + ' "' + name + '"?')) return;
+
+  setStatus('Deleting ' + name + '...');
+  await sendCommand('storage remove ' + currentPath + '/' + name);
+  await waitForPrompt();
+  await listDir(currentPath);
+  setStatus('Deleted ' + name);
+}
+
+// ── UI ──
+
+function renderFileList(entries) {
+  const list = $('file-list');
+  list.innerHTML = '';
+
+  // Parent directory entry
+  if (currentPath !== '/ext') {
+    const row = createRow('..', 'parent', '');
+    row.querySelector('.entry-name').onclick = () => {
+      const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/ext';
+      listDir(parent);
+    };
+    list.appendChild(row);
+  }
+
+  // Sort: dirs first, then files
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const entry of entries) {
+    const row = createRow(entry.name, entry.type, entry.type === 'file' ? formatSize(entry.size) : '');
+    const nameEl = row.querySelector('.entry-name');
+
+    if (entry.type === 'dir') {
+      nameEl.onclick = () => listDir(currentPath + '/' + entry.name);
+    } else {
+      nameEl.onclick = () => downloadFile(currentPath + '/' + entry.name, entry.name, entry.size);
+    }
+
+    const deleteBtn = row.querySelector('.btn-delete');
+    deleteBtn.onclick = () => deleteEntry(entry.name, entry.type);
+
+    list.appendChild(row);
+  }
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="empty">Empty directory</div>';
+  }
+}
+
+function createRow(name, type, size) {
+  const row = document.createElement('div');
+  row.className = 'file-row';
+
+  const icon = type === 'dir' ? '\u{1F4C1}' : type === 'parent' ? '\u{1F519}' : '\u{1F4C4}';
+  row.innerHTML = `
+    <span class="entry-icon">${icon}</span>
+    <span class="entry-name">${escHtml(name)}</span>
+    <span class="entry-size">${size}</span>
+    ${type !== 'parent' ? '<button class="btn-delete" title="Delete">&#x2715;</button>' : ''}
+  `;
+  return row;
+}
+
+function updateBreadcrumb() {
+  const parts = currentPath.split('/').filter(Boolean);
+  let html = '';
+  let path = '';
+  for (let i = 0; i < parts.length; i++) {
+    path += '/' + parts[i];
+    const p = path;
+    if (i < parts.length - 1) {
+      html += `<span class="crumb" onclick="window._nav('${p}')">${escHtml(parts[i])}</span> / `;
+    } else {
+      html += `<span class="crumb active">${escHtml(parts[i])}</span>`;
+    }
+  }
+  $('breadcrumb').innerHTML = html;
+}
+
+function setStatus(msg) {
+  $('action-status').textContent = msg;
+}
+
+function setError(msg) {
+  $('action-status').textContent = msg;
+  $('action-status').style.color = '#ff5555';
+  setTimeout(() => { $('action-status').style.color = ''; }, 3000);
+}
+
+function setLoading(on) {
+  $('loading').style.display = on ? 'block' : 'none';
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Init ──
+
+window._nav = (path) => listDir(path);
+
+$('connect-btn').onclick = () => {
+  if (connected) disconnect(); else connect();
+};
+$('btn-upload').onclick = uploadFile;
+$('btn-mkdir').onclick = createDir;
+$('btn-refresh').onclick = () => listDir(currentPath);
+
+if (!('serial' in navigator)) {
+  setError('WebSerial not supported. Use Chrome or Edge on desktop.');
+  $('connect-btn').disabled = true;
+}
+
+</script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .container {
+    max-width: 640px;
+    width: 100%;
+    padding: 32px 24px;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #ff8c00;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: #666;
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+  }
+
+  /* Header bar */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .status {
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  .status.offline { background: #2a0000; color: #ff5555; }
+  .status.online { background: #002a00; color: #00c853; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #ff8c00;
+    color: #000;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn:hover:not(:disabled) { background: #ff9f2e; transform: scale(1.02); }
+  .btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .btn.connected { background: #444; color: #ccc; }
+  .btn.connected:hover { background: #555; }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .toolbar .btn {
+    font-size: 0.8rem;
+    padding: 6px 14px;
+    background: #1a1a1a;
+    color: #ccc;
+    border: 1px solid #333;
+  }
+  .toolbar .btn:hover:not(:disabled) { background: #2a2a2a; border-color: #ff8c00; color: #ff8c00; transform: none; }
+
+  /* Breadcrumb */
+  #breadcrumb {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 12px;
+    min-height: 1.2em;
+  }
+  .crumb { cursor: pointer; color: #ff8c00; }
+  .crumb:hover { text-decoration: underline; }
+  .crumb.active { color: #ccc; cursor: default; }
+  .crumb.active:hover { text-decoration: none; }
+
+  /* File list */
+  #file-list {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 12px;
+    overflow: hidden;
+    min-height: 200px;
+  }
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #1a1a1a;
+    transition: background 0.15s;
+  }
+  .file-row:last-child { border-bottom: none; }
+  .file-row:hover { background: #1a1400; }
+  .entry-icon { font-size: 1.1rem; flex-shrink: 0; }
+  .entry-name {
+    flex: 1;
+    cursor: pointer;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .entry-name:hover { color: #ff8c00; }
+  .entry-size {
+    color: #666;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    min-width: 60px;
+    text-align: right;
+  }
+  .btn-delete {
+    background: none;
+    border: none;
+    color: #555;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .btn-delete:hover { color: #ff5555; background: #2a0000; }
+
+  .empty {
+    text-align: center;
+    color: #555;
+    padding: 40px;
+    font-size: 0.9rem;
+  }
+
+  /* Loading */
+  #loading {
+    display: none;
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-size: 0.85rem;
+  }
+  #loading::after {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #333;
+    border-top-color: #ff8c00;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Action status */
+  #action-status {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 12px;
+    min-height: 1.2em;
+    transition: color 0.3s;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Flipper Zero</h1>
+    <p class="subtitle">SD Card File Manager</p>
+
+    <div class="header">
+      <button id="connect-btn" class="btn">Connect</button>
+      <span id="status" class="status offline">Disconnected</span>
+    </div>
+
+    <div class="toolbar">
+      <button id="btn-upload" class="btn">Upload Files</button>
+      <button id="btn-mkdir" class="btn">New Folder</button>
+      <button id="btn-refresh" class="btn">Refresh</button>
+    </div>
+
+    <div id="breadcrumb"></div>
+    <div id="loading">Loading...</div>
+    <div id="file-list"></div>
+    <div id="action-status"></div>
+  </div>
+</body>
+</html>

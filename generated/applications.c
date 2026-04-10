@@ -20,12 +20,11 @@ extern int32_t storage_settings_app(void* p);
 extern int32_t tetris_game_app(void* p);
 extern int32_t gui_srv(void* p);
 extern int32_t nfc_app(void* p);
-extern int32_t desktop_settings_app(void* p);
 extern int32_t dialogs_srv(void* p);
 extern int32_t infrared_app(void* p);
 extern int32_t bt_srv(void* p);
 extern int32_t dolphin_srv(void* p);
-extern int32_t desktop_srv(void* p);
+extern int32_t pocsag_pager_app(void* p);
 extern int32_t loader_srv(void* p);
 extern int32_t wifi_app(void* p);
 extern int32_t ble_spam_app(void* p);
@@ -51,7 +50,6 @@ const FlipperInternalApplication FLIPPER_SERVICES[] = {
     {.app = bt_srv, .name = "BtSrv", .appid = "bt", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = dolphin_srv, .name = "DolphinSrv", .appid = "dolphin", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = loader_srv, .name = "LoaderSrv", .appid = "loader", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
-    {.app = desktop_srv, .name = "DesktopSrv", .appid = "desktop", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = power_srv, .name = "PowerSrv", .appid = "power", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = storage_srv, .name = "StorageSrv", .appid = "storage", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = desktop_srv, .name = "DesktopSrv", .appid = "desktop", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
@@ -79,12 +77,11 @@ const FlipperInternalApplication FLIPPER_SYSTEM_APPS[] = {
     {.app = example_number_input, .name = "Example: Number Input", .appid = "example_number_input", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = about_app, .name = "About", .appid = "about", .stack_size = 4096, .icon = &A_Settings_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = bt_settings_app, .name = "Bluetooth", .appid = "bt_settings", .stack_size = 4096, .icon = &A_Settings_14, .flags = FlipperInternalApplicationFlagDefault},
--    {.name = "Desktop", .icon = NULL, .path = "desktop_settings"},
     {.app = lfrfid_app, .name = "125 kHz RFID", .appid = "lfrfid", .stack_size = 4096, .icon = &A_125khz_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = tetris_game_app, .name = "Tetris", .appid = "tetris", .stack_size = 4096, .icon = &I_tetris_10px, .flags = FlipperInternalApplicationFlagDefault},
     {.app = nfc_app, .name = "NFC", .appid = "nfc", .stack_size = 5120, .icon = &A_NFC_14, .flags = FlipperInternalApplicationFlagDefault},
-    {.app = desktop_settings_app, .name = "Desktop", .appid = "desktop_settings", .stack_size = 4096, .icon = NULL, .flags = FlipperInternalApplicationFlagDefault},
     {.app = infrared_app, .name = "Infrared", .appid = "infrared", .stack_size = 8192, .icon = &A_Infrared_14, .flags = FlipperInternalApplicationFlagDefault},
+    {.app = pocsag_pager_app, .name = "POCSAG Pager", .appid = "pocsag_pager", .stack_size = 4096, .icon = &I_pocsag_pager_10px, .flags = FlipperInternalApplicationFlagDefault},
     {.app = wifi_app, .name = "WiFi", .appid = "wifi", .stack_size = 8192, .icon = &A_Sub1ghz_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = ble_spam_app, .name = "Bluetooth", .appid = "ble_spam", .stack_size = 8192, .icon = &A_Plugins_14, .flags = FlipperInternalApplicationFlagDefault},
     {.app = bad_usb_app, .name = "Bad USB", .appid = "bad_usb", .stack_size = 4096, .icon = &A_BadUsb_14, .flags = FlipperInternalApplicationFlagDefault},
@@ -109,16 +106,16 @@ const FlipperInternalApplication FLIPPER_ARCHIVE =     {.app = archive_app, .nam
 const FlipperExternalApplication FLIPPER_EXTSETTINGS_APPS[] = {
     {.name = "About", .icon = &A_Settings_14, .path = "about"},
     {.name = "Bluetooth", .icon = &A_Settings_14, .path = "bt_settings"},
-    {.name = "Desktop", .icon = NULL, .path = "desktop_settings"},
     {.name = "Passport", .icon = NULL, .path = "passport"},
 };
 const size_t FLIPPER_EXTSETTINGS_APPS_COUNT = COUNT_OF(FLIPPER_EXTSETTINGS_APPS);
 
 const FlipperExternalApplication FLIPPER_EXTERNAL_APPS[] = {
+    {.name = "Tetris", .icon = &I_tetris_10px, .path = "tetris"},
     {.name = "125 kHz RFID", .icon = &A_125khz_14, .path = "lfrfid"},
     {.name = "NFC", .icon = &A_NFC_14, .path = "nfc"},
-    {.name = "Tetris", .icon = &I_tetris_10px, .path = "tetris"},
     {.name = "Infrared", .icon = &A_Infrared_14, .path = "infrared"},
+    {.name = "POCSAG Pager", .icon = &I_pocsag_pager_10px, .path = "pocsag_pager"},
     {.name = "WiFi", .icon = &A_Sub1ghz_14, .path = "wifi"},
     {.name = "Bluetooth", .icon = &A_Plugins_14, .path = "ble_spam"},
     {.name = "Bad USB", .icon = &A_BadUsb_14, .path = "bad_usb"},
@@ -127,8 +124,8 @@ const FlipperExternalApplication FLIPPER_EXTERNAL_APPS[] = {
 const size_t FLIPPER_EXTERNAL_APPS_COUNT = COUNT_OF(FLIPPER_EXTERNAL_APPS);
 
 const FlipperExternalApplication FLIPPER_INTERNAL_EXTERNAL_APPS[] = {
+    {.name = "Example: Apps Data", .icon = NULL, .path = "example_apps_data"},
     {.name = "Example: Number Input", .icon = NULL, .path = "example_number_input"},
     {.name = "Example: Apps Assets", .icon = NULL, .path = "example_apps_assets"},
-    {.name = "Example: Apps Data", .icon = NULL, .path = "example_apps_data"},
 };
 const size_t FLIPPER_INTERNAL_EXTERNAL_APPS_COUNT = COUNT_OF(FLIPPER_INTERNAL_EXTERNAL_APPS);
