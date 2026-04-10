@@ -3,6 +3,11 @@
 #include "strint.h"
 #include "m-core.h"
 #include <errno.h>
+#include <math.h>
+
+#ifndef round
+extern double round(double);
+#endif
 
 size_t args_get_first_word_length(FuriString* args) {
     size_t ws = furi_string_search_char(args, ' ');

@@ -15,6 +15,23 @@ extern "C" {
 
 typedef struct ELFFile ELFFile;
 
+typedef struct {
+    const char* name;
+    uint32_t address;
+} ELFMemoryMapEntry;
+
+typedef struct {
+    uint32_t debug_link_size;
+    uint8_t* debug_link;
+} ELFDebugLinkInfo;
+
+typedef struct {
+    uint32_t mmap_entry_count;
+    ELFMemoryMapEntry* mmap_entries;
+    ELFDebugLinkInfo debug_link_info;
+    off_t entry;
+} ELFDebugInfo;
+
 typedef enum {
     ELFFileLoadStatusSuccess = 0,
     ELFFileLoadStatusUnspecifiedError,
@@ -45,6 +62,9 @@ bool elf_file_is_init_complete(ELFFile* elf);
 void* elf_file_get_entry_point(ELFFile* elf_file);
 void elf_file_call_fini(ELFFile* elf);
 const ElfApiInterface* elf_file_get_api_interface(ELFFile* elf_file);
+void elf_file_init_debug_info(ELFFile* elf_file, ELFDebugInfo* debug_info);
+void elf_file_clear_debug_info(ELFDebugInfo* debug_info);
+
 ElfProcessSectionResult elf_process_section(
     ELFFile* elf_file,
     const char* name,

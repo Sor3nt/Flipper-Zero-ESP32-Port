@@ -45,7 +45,6 @@ APPS = [
     "lfrfid",
     "wifi",
     "ble_spam",
-    "proto_pirate",
     "tetris",
     "pocsag_pager",
 ]

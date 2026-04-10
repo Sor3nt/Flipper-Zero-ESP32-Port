@@ -2,7 +2,11 @@
 #include "loader_i.h"
 #include <applications.h>
 #include <flipper_application/flipper_application.h>
+#include <flipper_application/api_hashtable/api_hashtable.h>
 #include <storage/storage.h>
+#include <toolbox/path.h>
+
+extern const ElfApiInterface* const firmware_api_interface;
 
 #define TAG "Loader"
 
@@ -249,64 +253,104 @@ static LoaderStatus loader_start_external_fap(
     const char* path,
     const char* args,
     FuriString* error_message) {
-    UNUSED(loader);
-    UNUSED(args);
-
     LoaderStatus status = LoaderStatusErrorInternal;
     Storage* storage = furi_record_open(RECORD_STORAGE);
-    FlipperApplication* app = flipper_application_alloc(storage, NULL);
+    FlipperApplication* app = flipper_application_alloc(storage, firmware_api_interface);
 
-    if(!app) {
-        if(error_message) {
-            furi_string_set(error_message, "Failed to allocate FAP loader");
+    do {
+        if(!app) {
+            if(error_message) {
+                furi_string_set(error_message, "Failed to allocate FAP loader");
+            }
+            break;
         }
-        furi_record_close(RECORD_STORAGE);
-        return status;
-    }
 
-    FlipperApplicationPreloadStatus preload_status =
-        flipper_application_preload_manifest(app, path);
-    const FlipperApplicationManifest* manifest = flipper_application_get_manifest(app);
+        FURI_LOG_I(TAG, "Loading FAP %s", path);
 
-    switch(preload_status) {
-    case FlipperApplicationPreloadStatusSuccess:
-        if(error_message) {
-            furi_string_printf(
-                error_message,
-                "External FAP execution is not implemented on ESP32-C6 yet: %s",
-                manifest->name);
-        }
-        FURI_LOG_W(TAG, "External FAP execution not implemented yet: %s", path);
-        break;
-    case FlipperApplicationPreloadStatusTargetMismatch:
-        if(error_message) {
-            furi_string_printf(
-                error_message,
-                "FAP \"%s\" targets Flipper hardware %u and cannot run on ESP32-C6",
-                manifest->name,
-                manifest->base.hardware_target_id);
-        }
-        FURI_LOG_W(TAG, "FAP target mismatch for %s", path);
-        break;
-    default:
-        if(error_message) {
-            furi_string_printf(
-                error_message,
-                "Failed to preload FAP \"%s\": %s",
+        FlipperApplicationPreloadStatus preload_status =
+            flipper_application_preload(app, path);
+
+        if(preload_status != FlipperApplicationPreloadStatusSuccess) {
+            const FlipperApplicationManifest* manifest = flipper_application_get_manifest(app);
+            if(error_message) {
+                furi_string_printf(
+                    error_message,
+                    "Preload failed for \"%s\": %s",
+                    manifest->name[0] ? manifest->name : path,
+                    flipper_application_preload_status_to_string(preload_status));
+            }
+            FURI_LOG_E(
+                TAG,
+                "Preload failed for %s: %s",
                 path,
                 flipper_application_preload_status_to_string(preload_status));
+
+            if(preload_status == FlipperApplicationPreloadStatusApiTooOld ||
+               preload_status == FlipperApplicationPreloadStatusApiTooNew) {
+                status = LoaderStatusErrorInternal;
+            }
+            break;
         }
-        FURI_LOG_W(
-            TAG,
-            "Failed to preload external FAP %s: %s",
-            path,
-            flipper_application_preload_status_to_string(preload_status));
-        break;
+
+        FURI_LOG_I(TAG, "Mapping FAP to memory");
+
+        FlipperApplicationLoadStatus load_status =
+            flipper_application_map_to_memory(app);
+
+        if(load_status != FlipperApplicationLoadStatusSuccess) {
+            if(error_message) {
+                furi_string_printf(
+                    error_message,
+                    "Load failed: %s",
+                    flipper_application_load_status_to_string(load_status));
+            }
+            FURI_LOG_E(
+                TAG,
+                "Load failed for %s: %s",
+                path,
+                flipper_application_load_status_to_string(load_status));
+            break;
+        }
+
+        FURI_LOG_I(TAG, "Starting FAP thread");
+
+        loader->app.fap = app;
+        FuriThread* thread = flipper_application_alloc_thread(app, args);
+
+        if(!thread) {
+            if(error_message) {
+                furi_string_set(error_message, "Failed to allocate FAP thread");
+            }
+            FURI_LOG_E(TAG, "Failed to allocate thread for %s", path);
+            loader->app.fap = NULL;
+            break;
+        }
+
+        FuriString* app_name = furi_string_alloc();
+        path_extract_filename_no_ext(path, app_name);
+        furi_thread_set_appid(thread, furi_string_get_cstr(app_name));
+        furi_string_free(app_name);
+
+        loader->app.thread = thread;
+
+        /* Start the FAP thread (internal apps use loader_start_app_thread,
+         * but for FAPs we start directly here) */
+        furi_thread_set_state_callback(thread, loader_thread_state_callback);
+        furi_thread_set_state_context(thread, loader);
+        furi_thread_start(thread);
+
+        FURI_LOG_I(TAG, "FAP thread started");
+        status = LoaderStatusOk;
+
+    } while(0);
+
+    if(status != LoaderStatusOk) {
+        if(app) {
+            flipper_application_free(app);
+        }
     }
 
-    flipper_application_free(app);
     furi_record_close(RECORD_STORAGE);
-
     return status;
 }
 
@@ -424,7 +468,12 @@ static void loader_do_app_closed(Loader* loader) {
         loader->app.args = NULL;
     }
 
-    furi_thread_free(loader->app.thread);
+    if(loader->app.fap) {
+        flipper_application_free(loader->app.fap);
+        loader->app.fap = NULL;
+    } else {
+        furi_thread_free(loader->app.thread);
+    }
     loader->app.thread = NULL;
 
     FURI_LOG_I(

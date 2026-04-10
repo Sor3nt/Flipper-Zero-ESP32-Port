@@ -8,6 +8,8 @@
 #include "icon_animation_i.h"
 
 #include <furi.h>
+#include <math.h>
+extern float ceilf(float);
 
 #include <math.h>
 #include <string.h>

@@ -1,18 +1,67 @@
 #include "flipper_application.h"
-
 #include "elf/elf_file.h"
 
 #include <toolbox/path.h>
 
 #include <string.h>
 
-#define TAG "FlipperApplication"
+#define TAG "Fap"
 
 struct FlipperApplication {
-    Storage* storage;
+    ELFDebugInfo state;
     FlipperApplicationManifest manifest;
     ELFFile* elf;
+    FuriThread* thread;
+    void* ep_thread_args;
 };
+
+FlipperApplication*
+    flipper_application_alloc(Storage* storage, const ElfApiInterface* api_interface) {
+    furi_check(storage);
+
+    FlipperApplication* app = calloc(1, sizeof(FlipperApplication));
+    furi_check(app);
+
+    app->elf = elf_file_alloc(storage, api_interface);
+    if(!app->elf) {
+        free(app);
+        return NULL;
+    }
+
+    app->thread = NULL;
+    app->ep_thread_args = NULL;
+
+    return app;
+}
+
+bool flipper_application_is_plugin(FlipperApplication* app) {
+    furi_check(app);
+    return app->manifest.stack_size == 0;
+}
+
+void flipper_application_free(FlipperApplication* app) {
+    if(!app) return;
+
+    if(app->thread) {
+        furi_thread_join(app->thread);
+        furi_thread_free(app->thread);
+    }
+
+    elf_file_clear_debug_info(&app->state);
+
+    if(elf_file_is_init_complete(app->elf)) {
+        elf_file_call_fini(app->elf);
+    }
+
+    elf_file_free(app->elf);
+
+    if(app->ep_thread_args) {
+        free(app->ep_thread_args);
+        app->ep_thread_args = NULL;
+    }
+
+    free(app);
+}
 
 static FlipperApplicationPreloadStatus flipper_application_validate_manifest(
     FlipperApplication* app) {
@@ -61,49 +110,49 @@ static bool flipper_application_process_manifest_section(
 }
 
 static FlipperApplicationPreloadStatus
-    flipper_application_load_manifest_data(FlipperApplication* app, const char* path) {
-    furi_check(app);
-    furi_check(path);
+    flipper_application_load(FlipperApplication* app, const char* path, bool load_full) {
+    FURI_LOG_I(TAG, "Loading FAP: %s (full=%d)", path, load_full);
 
     if(!elf_file_open(app->elf, path)) {
+        FURI_LOG_E(TAG, "elf_file_open failed for %s", path);
         return FlipperApplicationPreloadStatusInvalidFile;
     }
 
-    if(elf_process_section(
-           app->elf, ".fapmeta", flipper_application_process_manifest_section, &app->manifest) !=
-       ElfProcessSectionResultSuccess) {
+    // if we are loading full file
+    if(load_full) {
+        FURI_LOG_I(TAG, "Loading section table...");
+        ElfLoadSectionTableResult load_result = elf_file_load_section_table(app->elf);
+        if(load_result == ElfLoadSectionTableResultError) {
+            FURI_LOG_E(TAG, "Section table load failed");
+            return FlipperApplicationPreloadStatusInvalidFile;
+        } else if(load_result == ElfLoadSectionTableResultNoMemory) {
+            FURI_LOG_E(TAG, "Not enough memory for section table");
+            return FlipperApplicationPreloadStatusNotEnoughMemory;
+        }
+        FURI_LOG_I(TAG, "Section table loaded OK");
+    }
+
+    // load manifest section
+    FURI_LOG_I(TAG, "Looking for .fapmeta section...");
+    ElfProcessSectionResult meta_result = elf_process_section(
+        app->elf, ".fapmeta", flipper_application_process_manifest_section, &app->manifest);
+    if(meta_result != ElfProcessSectionResultSuccess) {
+        FURI_LOG_E(TAG, ".fapmeta section result: %d (0=NotFound, 1=CannotProcess, 2=Success)", meta_result);
         return FlipperApplicationPreloadStatusInvalidFile;
     }
 
-    if(!flipper_application_manifest_is_valid(&app->manifest)) {
-        return FlipperApplicationPreloadStatusInvalidManifest;
-    }
+    FURI_LOG_I(
+        TAG,
+        "Manifest: magic=0x%08lX ver=%lu api=%u.%u target=%u stack=%u name='%s'",
+        (unsigned long)app->manifest.base.manifest_magic,
+        (unsigned long)app->manifest.base.manifest_version,
+        app->manifest.base.api_version.major,
+        app->manifest.base.api_version.minor,
+        app->manifest.base.hardware_target_id,
+        app->manifest.stack_size,
+        app->manifest.name);
 
-    return FlipperApplicationPreloadStatusSuccess;
-}
-
-FlipperApplication*
-    flipper_application_alloc(Storage* storage, const ElfApiInterface* api_interface) {
-    furi_check(storage);
-
-    FlipperApplication* app = calloc(1, sizeof(FlipperApplication));
-    furi_check(app);
-
-    app->storage = storage;
-    app->elf = elf_file_alloc(storage, api_interface);
-    if(!app->elf) {
-        free(app);
-        return NULL;
-    }
-
-    return app;
-}
-
-void flipper_application_free(FlipperApplication* app) {
-    if(!app) return;
-
-    elf_file_free(app->elf);
-    free(app);
+    return flipper_application_validate_manifest(app);
 }
 
 FlipperApplicationPreloadStatus
@@ -111,19 +160,14 @@ FlipperApplicationPreloadStatus
     furi_check(app);
     furi_check(path);
 
-    FlipperApplicationPreloadStatus status = flipper_application_load_manifest_data(app, path);
-    if(status != FlipperApplicationPreloadStatusSuccess) {
-        return status;
-    }
-
-    return flipper_application_validate_manifest(app);
+    return flipper_application_load(app, path, false);
 }
 
 FlipperApplicationPreloadStatus flipper_application_preload(FlipperApplication* app, const char* path) {
     furi_check(app);
     furi_check(path);
 
-    return flipper_application_preload_manifest(app, path);
+    return flipper_application_load(app, path, true);
 }
 
 const FlipperApplicationManifest* flipper_application_get_manifest(FlipperApplication* app) {
@@ -135,60 +179,130 @@ const FlipperApplicationManifest* flipper_application_get_manifest(FlipperApplic
 FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplication* app) {
     furi_check(app);
 
-    return FlipperApplicationLoadStatusUnspecifiedError;
+    ELFFileLoadStatus status = elf_file_load_sections(app->elf);
+
+    switch(status) {
+    case ELFFileLoadStatusSuccess:
+        elf_file_init_debug_info(app->elf, &app->state);
+
+        /* Cache coherency: relocated values were written via data cache.
+         * 1. Write back data cache to PSRAM (so PSRAM has the new values)
+         * 2. Invalidate instruction cache (so CPU fetches fresh code from PSRAM) */
+#if defined(ESP_PLATFORM)
+        extern void Cache_WriteBack_All(void);
+        extern void Cache_Invalidate_ICache_All(void);
+        Cache_WriteBack_All();
+        Cache_Invalidate_ICache_All();
+        FURI_LOG_I(TAG, "Cache flushed: DCache writeback + ICache invalidate");
+#endif
+
+        return FlipperApplicationLoadStatusSuccess;
+    case ELFFileLoadStatusMissingImports:
+        return FlipperApplicationLoadStatusMissingImports;
+    default:
+        return FlipperApplicationLoadStatusUnspecifiedError;
+    }
+}
+
+static int32_t flipper_application_thread(void* context) {
+    furi_check(context);
+    FlipperApplication* app = (FlipperApplication*)context;
+
+    FURI_LOG_I(TAG, "FAP thread started, calling init arrays...");
+    elf_file_call_init(app->elf);
+
+    FlipperApplicationEntryPoint entry_point = elf_file_get_entry_point(app->elf);
+    FURI_LOG_I(TAG, "FAP entry point: %p, calling...", entry_point);
+
+    FURI_LOG_I(TAG, "Calling FAP entry point %p", entry_point);
+    int32_t ret_code = entry_point(app->ep_thread_args);
+
+    FURI_LOG_I(TAG, "FAP returned: %ld, calling fini arrays...", (long)ret_code);
+    elf_file_call_fini(app->elf);
+
+    return ret_code;
 }
 
 FuriThread* flipper_application_alloc_thread(FlipperApplication* app, const char* args) {
     furi_check(app);
-    UNUSED(args);
+    furi_check(app->thread == NULL);
+    furi_check(!flipper_application_is_plugin(app));
 
-    return NULL;
-}
+    if(app->ep_thread_args) {
+        free(app->ep_thread_args);
+    }
 
-bool flipper_application_is_plugin(FlipperApplication* app) {
-    furi_check(app);
+    if(args) {
+        app->ep_thread_args = strdup(args);
+    } else {
+        app->ep_thread_args = NULL;
+    }
 
-    return false;
+    const FlipperApplicationManifest* manifest = flipper_application_get_manifest(app);
+    app->thread = furi_thread_alloc_ex(
+        manifest->name, manifest->stack_size, flipper_application_thread, app);
+
+    return app->thread;
 }
 
 const FlipperAppPluginDescriptor*
     flipper_application_plugin_get_descriptor(FlipperApplication* app) {
     furi_check(app);
 
-    return NULL;
+    if(!flipper_application_is_plugin(app)) {
+        return NULL;
+    }
+
+    if(!elf_file_is_init_complete(app->elf)) {
+        elf_file_call_init(app->elf);
+    }
+
+    typedef const FlipperAppPluginDescriptor* (*get_lib_descriptor_t)(void);
+    get_lib_descriptor_t lib_ep = elf_file_get_entry_point(app->elf);
+    furi_check(lib_ep);
+
+    const FlipperAppPluginDescriptor* lib_descriptor = lib_ep();
+
+    FURI_LOG_D(
+        TAG,
+        "Library for %s, API v. %lu loaded",
+        lib_descriptor->appid,
+        lib_descriptor->ep_api_version);
+
+    return lib_descriptor;
 }
 
 const char* flipper_application_preload_status_to_string(FlipperApplicationPreloadStatus status) {
     switch(status) {
     case FlipperApplicationPreloadStatusSuccess:
-        return "success";
+        return "Success";
     case FlipperApplicationPreloadStatusInvalidFile:
-        return "invalid file";
+        return "Invalid file";
     case FlipperApplicationPreloadStatusNotEnoughMemory:
-        return "not enough memory";
+        return "Not enough memory";
     case FlipperApplicationPreloadStatusInvalidManifest:
-        return "invalid manifest";
+        return "Invalid file manifest";
     case FlipperApplicationPreloadStatusApiTooOld:
-        return "app is too old";
+        return "Update Application to use with this Firmware (ApiTooOld)";
     case FlipperApplicationPreloadStatusApiTooNew:
-        return "app is too new";
+        return "Update Firmware to use with this Application (ApiTooNew)";
     case FlipperApplicationPreloadStatusTargetMismatch:
-        return "hardware target mismatch";
+        return "Hardware target mismatch";
     default:
-        return "unknown preload status";
+        return "Unknown error";
     }
 }
 
 const char* flipper_application_load_status_to_string(FlipperApplicationLoadStatus status) {
     switch(status) {
     case FlipperApplicationLoadStatusSuccess:
-        return "success";
+        return "Success";
     case FlipperApplicationLoadStatusUnspecifiedError:
-        return "unspecified error";
+        return "Unknown error";
     case FlipperApplicationLoadStatusMissingImports:
-        return "missing imports";
+        return "Update Firmware to use with this Application (MissingImports)";
     default:
-        return "unknown load status";
+        return "Unknown error";
     }
 }
 
@@ -208,7 +322,7 @@ bool flipper_application_load_name_and_icon(
     }
 
     FlipperApplicationPreloadStatus preload_res =
-        flipper_application_load_manifest_data(app, furi_string_get_cstr(path));
+        flipper_application_preload_manifest(app, furi_string_get_cstr(path));
 
     bool load_success = false;
 
