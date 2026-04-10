@@ -15,7 +15,42 @@ The manifest format matches FlipperApplicationManifestV1:
   - icon:                char[32]
 """
 import argparse
+import io
 import struct
+import sys
+from pathlib import Path
+
+FAP_MANIFEST_MAX_ICON_SIZE = 32
+
+
+def png_to_icon_data(png_path: str) -> bytes:
+    """Convert a 10x10 PNG icon to XBM binary format for the FAP manifest."""
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        print(f"WARNING: PIL not installed, skipping icon {png_path}", file=sys.stderr)
+        return b""
+
+    with Image.open(png_path) as image:
+        with io.BytesIO() as output:
+            bw = ImageOps.invert(image.convert("1"))
+            bw.save(output, format="XBM")
+            xbm = output.getvalue().decode().strip()
+
+    lines = xbm.splitlines()
+    data = "".join(lines[2:]).replace(" ", "").split("=")[1][1:-2]
+    data_hex = data.replace(",", " ").replace("0x", "")
+    raw = bytearray.fromhex(data_hex)
+
+    # Prepend frame header byte (0x00 = uncompressed)
+    icon_data = bytearray([0x00]) + raw
+
+    if len(icon_data) > FAP_MANIFEST_MAX_ICON_SIZE:
+        print(f"WARNING: icon data {len(icon_data)} bytes exceeds {FAP_MANIFEST_MAX_ICON_SIZE}, truncating",
+              file=sys.stderr)
+        icon_data = icon_data[:FAP_MANIFEST_MAX_ICON_SIZE]
+
+    return bytes(icon_data)
 
 
 def main():
@@ -26,6 +61,7 @@ def main():
     parser.add_argument("--target", type=int, default=32, help="Hardware target ID")
     parser.add_argument("--stack-size", type=int, default=4096, help="Stack size in bytes")
     parser.add_argument("--app-version", type=int, default=1, help="Application version")
+    parser.add_argument("--icon", default=None, help="Path to 10x10 PNG icon file")
     parser.add_argument("--output", required=True, help="Output binary file")
     args = parser.parse_args()
 
@@ -36,9 +72,17 @@ def main():
     name_bytes = args.name.encode("utf-8")[:32]
     name_bytes = name_bytes + b"\x00" * (32 - len(name_bytes))
 
-    # No icon
+    # Process icon
     has_icon = 0
-    icon_bytes = b"\x00" * 32
+    icon_bytes = b"\x00" * FAP_MANIFEST_MAX_ICON_SIZE
+
+    if args.icon and Path(args.icon).exists():
+        icon_data = png_to_icon_data(args.icon)
+        if icon_data:
+            has_icon = 1
+            padded = icon_data + b"\x00" * (FAP_MANIFEST_MAX_ICON_SIZE - len(icon_data))
+            icon_bytes = padded[:FAP_MANIFEST_MAX_ICON_SIZE]
+            print(f"Icon: {args.icon} ({len(icon_data)} bytes)")
 
     # struct FlipperApplicationManifestV1 (packed)
     data = struct.pack(
@@ -69,7 +113,7 @@ def main():
 
     print(f"Manifest: {args.name}, API {args.api_major}.{args.api_minor}, "
           f"target {args.target}, stack {args.stack_size}, "
-          f"size {len(data)} bytes")
+          f"icon={'yes' if has_icon else 'no'}, size {len(data)} bytes")
 
 
 if __name__ == "__main__":
