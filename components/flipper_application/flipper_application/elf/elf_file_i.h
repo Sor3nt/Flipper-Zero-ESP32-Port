@@ -36,6 +36,11 @@ struct ELFFile {
     off_t symbol_table;
     off_t symbol_table_strings;
     off_t entry;
+
+    /* Cached symbol table and string table (loaded once, used for all relocations) */
+    Elf32_Sym* sym_cache;
+    char* str_cache;
+    size_t str_cache_size;
     ELFSectionDict_t sections;
 
     AddressCache_t relocation_cache;
