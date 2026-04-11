@@ -51,7 +51,7 @@ FAP_FILENAME="${APP_ID}.fap"
 #           BOARD_NAME              IDF_TARGET  TOOLCHAIN_PREFIX        BUILD_DIR
 TARGETS=(
     "lilygo_t_embed_cc1101      esp32s3     xtensa-esp32s3-elf      build_t_embed"
-    "waveshare_c6_1.9           esp32c6     riscv32-esp-elf         build_waveshare_c6"
+#    "waveshare_c6_1.9           esp32c6     riscv32-esp-elf         build_waveshare_c6"
 )
 
 # ── Common include paths (project-level) ────────────────────────────
