@@ -15,13 +15,27 @@ def elf_gnu_hash(s: str) -> int:
 
 
 def load_api_hashes(api_file: str) -> set[int]:
-    """Extract all hash values from firmware_api.c"""
+    """Extract all hash values from firmware_api.c and verify sort order."""
     hashes = set()
+    prev_hash = -1
+    prev_line_no = 0
+    sort_errors = []
     with open(api_file) as f:
-        for line in f:
+        for line_no, line in enumerate(f, 1):
             m = re.search(r'\.hash\s*=\s*(0x[0-9a-fA-F]+)', line)
             if m:
-                hashes.add(int(m.group(1), 16))
+                h = int(m.group(1), 16)
+                if h <= prev_hash:
+                    sort_errors.append(
+                        f"  line {line_no}: 0x{h:08x} <= previous 0x{prev_hash:08x} (line {prev_line_no})"
+                    )
+                prev_hash = h
+                prev_line_no = line_no
+                hashes.add(h)
+    if sort_errors:
+        print(f"  ⚠ API table sort errors (binary search will fail at runtime!):")
+        for err in sort_errors:
+            print(err)
     return hashes
 
 
