@@ -312,6 +312,13 @@ build_for_target() {
         "$BUILD_DIR/app.elf" "$OUTPUT"
 
     local SIZE=$(wc -c < "$OUTPUT")
+
+    # Verify all symbols can be resolved by the firmware API table
+    local API_FILE="$PROJECT_DIR/components/flipper_application/flipper_application/firmware_api.c"
+    local NM="${TOOLCHAIN}-nm"
+    "$NM" -u "$OUTPUT" 2>/dev/null | grep "^         U " | sed 's/^         U //' | sort -u > "$BUILD_DIR/undef_syms.txt"
+    python3 "$PROJECT_DIR/tools/check_fap_symbols.py" "$API_FILE" "$BUILD_DIR/undef_syms.txt"
+
     echo "  ✓ $OUTPUT ($SIZE bytes, $SECTIONS sections)"
 }
 
