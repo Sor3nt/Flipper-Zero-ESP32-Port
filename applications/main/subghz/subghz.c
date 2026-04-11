@@ -195,6 +195,13 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
             SubGhzViewIdJammer,
             subghz_jammer_get_view(subghz->subghz_jammer));
 
+        // Playlist
+        subghz->subghz_playlist = subghz_playlist_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdPlaylist,
+            subghz_playlist_get_view(subghz->subghz_playlist));
+
         // SubBrute Bruteforcer
         subghz->subbrute_radio_device = subbrute_radio_device_loader_set(
             NULL, SubGhzRadioDeviceTypeExternalCC1101);
@@ -341,6 +348,10 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // Jammer
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdJammer);
         subghz_jammer_free(subghz->subghz_jammer);
+
+        // Playlist
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdPlaylist);
+        subghz_playlist_free(subghz->subghz_playlist);
     }
     // Read RAW
     view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdReadRAW);

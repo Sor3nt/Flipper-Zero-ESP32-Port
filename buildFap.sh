@@ -126,6 +126,8 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/driver/deprecated"
     -I"$IDF/driver/i2c/include"
     -I"$IDF/esp_adc/include"
+    -I"$IDF/mbedtls/port/include"
+    -I"$IDF/mbedtls/mbedtls/include"
 )
 
 # ── Common compiler flags ───────────────────────────────────────────

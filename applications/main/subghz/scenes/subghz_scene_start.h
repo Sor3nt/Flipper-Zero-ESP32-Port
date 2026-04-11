@@ -11,4 +11,5 @@ enum SubmenuIndex {
     SubmenuIndexBruteforce,
     SubmenuIndexExtSettings,
     SubmenuIndexRadioSetting,
+    SubmenuIndexPlaylist,
 };

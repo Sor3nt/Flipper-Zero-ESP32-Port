@@ -9,6 +9,7 @@
 #include "views/subghz_frequency_analyzer.h"
 #include "views/subghz_read_raw.h"
 #include "views/subghz_jammer.h"
+#include "views/subghz_playlist.h"
 #include "views/subbrute_main_view.h"
 #include "views/subbrute_attack_view.h"
 #include "helpers/subbrute_device.h"
@@ -79,6 +80,7 @@ struct SubGhz {
     SubGhzFrequencyAnalyzer* subghz_frequency_analyzer;
     SubGhzReadRAW* subghz_read_raw;
     SubGhzJammer* subghz_jammer;
+    SubGhzPlaylist* subghz_playlist;
 
     // SubBrute Bruteforcer
     SubBruteMainView* subbrute_main_view;
