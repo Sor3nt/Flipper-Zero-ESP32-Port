@@ -45,8 +45,6 @@ APPS = [
     "lfrfid",
     "wifi",
     "ble_spam",
-    "tetris",
-    "pocsag_pager",
 ]
 
 # Boards without NFC / IR hardware – exclude the corresponding apps
