@@ -608,6 +608,7 @@ SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, (ViewDrawCallback)subghz_read_raw_draw);
     view_set_input_callback(instance->view, subghz_read_raw_input);
+    view_set_input_mode(instance->view, ViewInputModeLeftRight);
     view_set_enter_callback(instance->view, subghz_read_raw_enter);
     view_set_exit_callback(instance->view, subghz_read_raw_exit);
 

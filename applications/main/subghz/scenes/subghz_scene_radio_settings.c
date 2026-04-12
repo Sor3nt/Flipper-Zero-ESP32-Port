@@ -80,20 +80,6 @@ const char* const tx_power_text[TX_POWER_COUNT] = {
     "-30dBm",
 };
 
-static void subghz_scene_radio_settings_set_device(VariableItem* item) {
-    SubGhz* subghz = variable_item_get_context(item);
-    uint8_t index = variable_item_get_current_value_index(item);
-
-    if(!subghz_txrx_radio_device_is_external_connected(
-           subghz->txrx, SUBGHZ_DEVICE_CC1101_EXT_NAME) &&
-       radio_device_value[index] == SubGhzRadioDeviceTypeExternalCC1101) {
-        //ToDo correct if there is more than 1 module
-        index = 0;
-    }
-    variable_item_set_current_value_text(item, radio_device_text[index]);
-    subghz_txrx_radio_device_set(subghz->txrx, radio_device_value[index]);
-}
-
 // Frequency offset: -500kHz to +500kHz in 10kHz steps = 101 values, center at index 50
 #define FREQ_OFFSET_COUNT 101
 #define FREQ_OFFSET_CENTER 50

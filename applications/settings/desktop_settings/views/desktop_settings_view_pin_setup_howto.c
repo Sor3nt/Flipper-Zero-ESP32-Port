@@ -60,6 +60,7 @@ DesktopSettingsViewPinSetupHowto* desktop_settings_view_pin_setup_howto_alloc(vo
     view_set_context(view->view, view);
     view_set_draw_callback(view->view, desktop_settings_view_pin_setup_howto_draw);
     view_set_input_callback(view->view, desktop_settings_view_pin_setup_howto_input);
+    view_set_input_mode(view->view, ViewInputModeLeftRight);
 
     return view;
 }

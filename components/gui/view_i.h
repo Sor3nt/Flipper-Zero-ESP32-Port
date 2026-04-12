@@ -23,6 +23,7 @@ struct View {
     ViewCallback enter_callback;
     ViewCallback exit_callback;
     ViewOrientation orientation;
+    ViewInputMode input_mode;
 
     ViewUpdateCallback update_callback;
     void* update_callback_context;

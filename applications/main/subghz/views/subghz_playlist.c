@@ -674,6 +674,7 @@ SubGhzPlaylist* subghz_playlist_alloc(void) {
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, subghz_playlist_draw_callback);
     view_set_input_callback(instance->view, subghz_playlist_input_callback);
+    view_set_input_mode(instance->view, ViewInputModeLeftRight);
 
     with_view_model(
         instance->view,

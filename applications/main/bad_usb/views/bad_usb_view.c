@@ -220,6 +220,7 @@ BadUsb* bad_usb_view_alloc(void) {
     view_set_context(bad_usb->view, bad_usb);
     view_set_draw_callback(bad_usb->view, bad_usb_draw_callback);
     view_set_input_callback(bad_usb->view, bad_usb_input_callback);
+    view_set_input_mode(bad_usb->view, ViewInputModeLeftRight);
     with_view_model(
         bad_usb->view,
         BadUsbModel * model,

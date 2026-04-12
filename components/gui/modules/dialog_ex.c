@@ -149,6 +149,7 @@ DialogEx* dialog_ex_alloc(void) {
     view_allocate_model(dialog_ex->view, ViewModelTypeLocking, sizeof(DialogExModel));
     view_set_draw_callback(dialog_ex->view, dialog_ex_view_draw_callback);
     view_set_input_callback(dialog_ex->view, dialog_ex_view_input_callback);
+    view_set_input_mode(dialog_ex->view, ViewInputModeLeftRight);
     with_view_model(
         dialog_ex->view,
         DialogExModel * model,
