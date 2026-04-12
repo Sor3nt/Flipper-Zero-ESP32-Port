@@ -14,6 +14,7 @@
 #include <string.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <driver/spi_master.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_vendor.h>
@@ -43,9 +44,9 @@ static const char* TAG = "FuriHalDisplay";
 #define MARGIN_X ((LCD_H_RES - SCALED_WIDTH) / 2)
 #define MARGIN_Y ((LCD_V_RES - SCALED_HEIGHT) / 2)
 
-/* Colors from board config */
-#define FG_COLOR BOARD_LCD_FG_COLOR
+/* Colors from board config — fg_color is set at runtime based on reset reason */
 #define BG_COLOR BOARD_LCD_BG_COLOR
+static uint16_t fg_color;
 
 /* SPI configuration from board config */
 #define LCD_SPI_HOST   BOARD_LCD_SPI_HOST
@@ -180,6 +181,20 @@ void furi_hal_display_init(void) {
     /* Turn on display */
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
+    /* After a flash-reset the ST7789 retains stale register state (R/B swapped)
+     * while after a full power-cycle it starts fresh (RGB correct).
+     * Choose the matching foreground colour at runtime. */
+#ifdef BOARD_LCD_FG_COLOR_RB
+    if(esp_reset_reason() == ESP_RST_POWERON) {
+        fg_color = BOARD_LCD_FG_COLOR;
+    } else {
+        fg_color = BOARD_LCD_FG_COLOR_RB;
+        ESP_LOGW(TAG, "Non-power-on reset — using R/B-swapped foreground colour");
+    }
+#else
+    fg_color = BOARD_LCD_FG_COLOR;
+#endif
+
     furi_hal_display_init_scale_lut();
 
     /* Allocate DMA-capable RGB565 stripe buffer (STRIPE_HEIGHT lines only) */
@@ -192,7 +207,7 @@ void furi_hal_display_init(void) {
     }
 
     /* Clear entire screen to background (unset pixels = FG) */
-    display_fill_color(FG_COLOR);
+    display_fill_color(fg_color);
 
     ESP_LOGI(TAG, "Display initialized (%dx%d, scaled %dx%d, stripe=%d lines, buf=%d bytes)",
              FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
@@ -231,7 +246,7 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
             for(size_t sx = 0; sx < SCALED_WIDTH; sx++) {
                 const uint8_t mono_x = x_scale_lut[sx];
                 const bool pixel_set = (data[page * FB_WIDTH + mono_x] & bit_mask) != 0;
-                dst[sx] = pixel_set ? BG_COLOR : FG_COLOR;
+                dst[sx] = pixel_set ? BG_COLOR : fg_color;
             }
         }
 

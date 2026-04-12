@@ -56,6 +56,7 @@
 
 /* Flipper framebuffer → display color mapping (RGB565, native byte order) */
 #define BOARD_LCD_FG_COLOR      0xA0FD  /* Flipper Orange 0xFDA0 byte-swapped for S3 SPI */
+#define BOARD_LCD_FG_COLOR_RB   0x5F03  /* Same orange with R/B swapped (0x035F swapped) — for post-flash BGR state */
 #define BOARD_LCD_BG_COLOR      0x0000  /* Black */
 
 /* ---- SD Card Pins (shared SPI bus with LCD and CC1101) ---- */
