@@ -1,4 +1,4 @@
-#include "protocol_items.h" // IWYU pragma: keep
+#include "protocol_items.h"
 
 const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_gate_tx,       &subghz_protocol_keeloq,
@@ -29,23 +29,6 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_elplast,       &subghz_protocol_treadmill37,
     &subghz_protocol_beninca_arc,   &subghz_protocol_jarolift,
     &subghz_protocol_ditec_gol4,    &subghz_protocol_keyfinder,
-    // Vehicle protocols
-    &subghz_protocol_audi_v1,      // &subghz_protocol_audi_v2,
-//    &subghz_protocol_bmw_v2,        &subghz_protocol_bmw_v3,
-////    &subghz_protocol_chevrolet_v0,  &subghz_protocol_ducato_v0,
-//    &subghz_protocol_fiat_v0,       &subghz_protocol_fiat,
-//    &subghz_protocol_ford_v0,       &subghz_protocol_mazda_v0,
-//    &subghz_protocol_ford_v1,       &subghz_protocol_ford_v2,
-//    &subghz_protocol_honda_v0,      &subghz_protocol_honda_v1,
-//    &subghz_protocol_honda_v2_v3,   &subghz_protocol_honda_v4,
-//    &subghz_protocol_honda_v5,      &subghz_protocol_honda_v6,
-//    &subghz_protocol_kia_v0,        &subghz_protocol_kia_v1,
-//    &subghz_protocol_kia_v2,        &subghz_protocol_kia_v3_v4,
-//    &subghz_protocol_kia_v5,        &subghz_protocol_kia_v6,
-//    &subghz_protocol_mercedes_v0,   &subghz_protocol_psa,
-//    &subghz_protocol_renault,       &subghz_protocol_subaru,
-//    &subghz_protocol_suzuki_v0,     //&subghz_protocol_unknown_v0,
-//    &subghz_protocol_vag,
 };
 
 const SubGhzProtocolRegistry subghz_protocol_registry = {

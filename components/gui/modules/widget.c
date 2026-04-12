@@ -70,6 +70,7 @@ Widget* widget_alloc(void) {
 
 void widget_reset(Widget* widget) {
     furi_check(widget);
+    view_set_input_mode(widget->view, ViewInputModeUpDown);
 
     with_view_model(
         widget->view,
@@ -186,6 +187,7 @@ void widget_add_button_element(
     WidgetElement* button_element =
         widget_element_button_create(button_type, text, callback, context);
     widget_add_element(widget, button_element);
+    view_set_input_mode(widget->view, ViewInputModeLeftRight);
 }
 
 void widget_add_icon_element(Widget* widget, uint8_t x, uint8_t y, const Icon* icon) {

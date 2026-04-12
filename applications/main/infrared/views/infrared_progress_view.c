@@ -152,6 +152,7 @@ InfraredProgressView* infrared_progress_view_alloc(void) {
     view_commit_model(instance->view, false);
     view_set_draw_callback(instance->view, infrared_progress_view_draw_callback);
     view_set_input_callback(instance->view, infrared_progress_view_input_callback);
+    view_set_input_mode(instance->view, ViewInputModeLeftRight);
     view_set_context(instance->view, instance);
 
     return instance;

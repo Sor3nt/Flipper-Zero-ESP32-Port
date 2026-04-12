@@ -272,6 +272,18 @@ void view_dispatcher_handle_input(ViewDispatcher* view_dispatcher, InputEvent* e
         view_dispatcher->ongoing_input_view = view_dispatcher->current_view;
     }
 
+    // Remap encoder input based on view's input mode
+    if(view_dispatcher->current_view &&
+       event->sequence_source == INPUT_SEQUENCE_SOURCE_HARDWARE) {
+        ViewInputMode mode = view_get_input_mode(view_dispatcher->current_view);
+        if(mode == ViewInputModeLeftRight) {
+            if(event->key == InputKeyUp) event->key = InputKeyLeft;
+            else if(event->key == InputKeyDown) event->key = InputKeyRight;
+            else if(event->key == InputKeyLeft) event->key = InputKeyDown;
+            else if(event->key == InputKeyRight) event->key = InputKeyUp;
+        }
+    }
+
     // Deliver event
     if(view_dispatcher->current_view &&
        view_dispatcher->ongoing_input_view == view_dispatcher->current_view) {

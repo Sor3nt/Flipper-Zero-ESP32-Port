@@ -186,6 +186,9 @@ void subghz_view_receiver_add_item_to_menu(
             item_menu->time = furi_string_alloc_set(time);
             item_menu->item_str = furi_string_alloc_set(name);
             item_menu->type = type;
+            if(model->history_item == 0) {
+                view_set_input_mode(subghz_receiver->view, ViewInputModeUpDown);
+            }
             if(model->idx == model->history_item - 1) {
                 model->history_item++;
                 model->idx++;
@@ -533,6 +536,7 @@ void subghz_view_receiver_enter(void* context) {
 void subghz_view_receiver_exit(void* context) {
     furi_assert(context);
     SubGhzViewReceiver* subghz_receiver = context;
+    view_set_input_mode(subghz_receiver->view, ViewInputModeLeftRight);
     with_view_model(
         subghz_receiver->view,
         SubGhzViewReceiverModel * model,
@@ -573,6 +577,7 @@ SubGhzViewReceiver* subghz_view_receiver_alloc(void) {
     view_set_context(subghz_receiver->view, subghz_receiver);
     view_set_draw_callback(subghz_receiver->view, (ViewDrawCallback)subghz_view_receiver_draw);
     view_set_input_callback(subghz_receiver->view, subghz_view_receiver_input);
+    view_set_input_mode(subghz_receiver->view, ViewInputModeLeftRight);
     view_set_enter_callback(subghz_receiver->view, subghz_view_receiver_enter);
     view_set_exit_callback(subghz_receiver->view, subghz_view_receiver_exit);
 

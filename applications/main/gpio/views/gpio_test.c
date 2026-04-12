@@ -119,6 +119,7 @@ GpioTest* gpio_test_alloc(GPIOItems* gpio_items) {
     view_set_context(gpio_test->view, gpio_test);
     view_set_draw_callback(gpio_test->view, gpio_test_draw_callback);
     view_set_input_callback(gpio_test->view, gpio_test_input_callback);
+    view_set_input_mode(gpio_test->view, ViewInputModeLeftRight);
 
     return gpio_test;
 }
