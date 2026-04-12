@@ -489,6 +489,39 @@ FuriHalNfcError furi_hal_nfc_felica_listener_set_sensf_res_data(
     const uint8_t pmm_len,
     const uint16_t sys_code);
 
+/**
+ * @brief ESP32/PN532: Perform native Mifare Classic authentication.
+ *
+ * The PN532 cannot do raw Crypto1 (no custom parity support).
+ * This function uses InDataExchange to authenticate natively.
+ * After successful auth, all subsequent InDataExchange calls
+ * handle Crypto1 transparently.
+ *
+ * @param block_num block to authenticate
+ * @param key 6-byte key
+ * @param key_type 0 = Key A, 1 = Key B
+ * @param uid card UID
+ * @param uid_len UID length (4 bytes used for auth)
+ * @return FuriHalNfcErrorNone on success
+ */
+FuriHalNfcError furi_hal_nfc_pn532_mf_auth(
+    uint8_t block_num,
+    const uint8_t* key,
+    uint8_t key_type,
+    const uint8_t* uid,
+    uint8_t uid_len);
+
+/**
+ * @brief Check if PN532 native Mifare Classic auth is active.
+ * @return true if authenticated via pn532_mf_auth
+ */
+bool furi_hal_nfc_pn532_mf_is_authed(void);
+
+/**
+ * @brief Clear PN532 Mifare Classic auth state.
+ */
+void furi_hal_nfc_pn532_mf_deauth(void);
+
 #ifdef __cplusplus
 }
 #endif
