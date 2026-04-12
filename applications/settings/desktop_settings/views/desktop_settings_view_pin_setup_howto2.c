@@ -82,6 +82,7 @@ DesktopSettingsViewPinSetupHowto2* desktop_settings_view_pin_setup_howto2_alloc(
     view_set_context(view->view, view);
     view_set_draw_callback(view->view, desktop_settings_view_pin_setup_howto2_draw);
     view_set_input_callback(view->view, desktop_settings_view_pin_setup_howto2_input);
+    view_set_input_mode(view->view, ViewInputModeLeftRight);
 
     return view;
 }

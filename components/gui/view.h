@@ -30,6 +30,12 @@ typedef enum {
     ViewOrientationVerticalFlip,
 } ViewOrientation;
 
+/** View input mode for encoder remapping */
+typedef enum {
+    ViewInputModeUpDown, /**< Default: encoder sends Up/Down */
+    ViewInputModeLeftRight, /**< Encoder sends Left/Right (for horizontal button views) */
+} ViewInputMode;
+
 /** View, anonymous type */
 typedef struct View View;
 
@@ -177,6 +183,20 @@ void view_set_context(View* view, void* context);
  * @param      orientation  either vertical or horizontal
  */
 void view_set_orientation(View* view, ViewOrientation orientation);
+
+/** Set View Input Mode (for encoder remapping)
+ *
+ * @param      view        View instance
+ * @param      input_mode  ViewInputModeUpDown or ViewInputModeLeftRight
+ */
+void view_set_input_mode(View* view, ViewInputMode input_mode);
+
+/** Get View Input Mode
+ *
+ * @param      view  View instance
+ * @return     current ViewInputMode
+ */
+ViewInputMode view_get_input_mode(View* view);
 
 /** Allocate view model.
  *

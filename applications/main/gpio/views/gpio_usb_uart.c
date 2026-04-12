@@ -110,6 +110,7 @@ GpioUsbUart* gpio_usb_uart_alloc(void) {
     view_set_context(usb_uart->view, usb_uart);
     view_set_draw_callback(usb_uart->view, gpio_usb_uart_draw_callback);
     view_set_input_callback(usb_uart->view, gpio_usb_uart_input_callback);
+    view_set_input_mode(usb_uart->view, ViewInputModeLeftRight);
 
     return usb_uart;
 }

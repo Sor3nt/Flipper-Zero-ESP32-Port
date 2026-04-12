@@ -72,6 +72,16 @@ void view_set_orientation(View* view, ViewOrientation orientation) {
     view->orientation = orientation;
 }
 
+void view_set_input_mode(View* view, ViewInputMode input_mode) {
+    furi_check(view);
+    view->input_mode = input_mode;
+}
+
+ViewInputMode view_get_input_mode(View* view) {
+    furi_check(view);
+    return view->input_mode;
+}
+
 void view_allocate_model(View* view, ViewModelType type, size_t size) {
     furi_check(view);
     furi_check(size > 0);

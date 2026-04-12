@@ -137,6 +137,7 @@ HidMouseJiggler* hid_mouse_jiggler_alloc(Hid* hid) {
         hid_mouse_jiggler->view, ViewModelTypeLocking, sizeof(HidMouseJigglerModel));
     view_set_draw_callback(hid_mouse_jiggler->view, hid_mouse_jiggler_draw_callback);
     view_set_input_callback(hid_mouse_jiggler->view, hid_mouse_jiggler_input_callback);
+    view_set_input_mode(hid_mouse_jiggler->view, ViewInputModeLeftRight);
     view_set_exit_callback(hid_mouse_jiggler->view, hid_mouse_jiggler_exit_callback);
 
     hid_mouse_jiggler->hid = hid;
