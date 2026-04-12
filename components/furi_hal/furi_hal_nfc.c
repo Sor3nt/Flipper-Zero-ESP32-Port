@@ -155,6 +155,9 @@ static uint8_t felica_pmm[8];
 static uint16_t felica_sys_code;
 static bool felica_listener_configured = false;
 
+/* PN532 Mifare Classic native auth state */
+static bool pn532_mf_authed = false;
+
 /* ──────────────────────────── Timer Callbacks ────────────────────────────── */
 
 static void fwt_timer_cb(void* arg) {
@@ -469,6 +472,7 @@ FuriHalNfcError furi_hal_nfc_reset_mode(void) {
     pn532_target_number = 0;
     pn532_iso_dep_mode = false;
     pn532_block_number = 0;
+    pn532_mf_authed = false;
     listener_configured = false;
     listener_activated = false;
     listener_rx_len = 0;
@@ -1383,6 +1387,53 @@ FuriHalNfcError furi_hal_nfc_felica_listener_set_sensf_res_data(
     return FuriHalNfcErrorNone;
 }
 
+/* ──────────────────────────── PN532 Mifare Classic Native Auth ─────────── */
+
+FuriHalNfcError furi_hal_nfc_pn532_mf_auth(
+    uint8_t block_num,
+    const uint8_t* key,
+    uint8_t key_type,
+    const uint8_t* uid,
+    uint8_t uid_len) {
+    if(!nfc_hal_ready || pn532_target_number == 0) return FuriHalNfcErrorCommunication;
+
+    /* PN532 InDataExchange Mifare auth format:
+     * [CMD] [Tg] [AuthCmd] [BlockAddr] [Key 6B] [UID 4B] */
+    uint8_t cmd[14];
+    cmd[0] = PN532_CMD_INDATAEXCHANGE;
+    cmd[1] = pn532_target_number;
+    cmd[2] = (key_type == 1) ? 0x61 : 0x60; /* AUTH_KEY_B : AUTH_KEY_A */
+    cmd[3] = block_num;
+    memcpy(&cmd[4], key, 6);
+    /* Use first 4 bytes of UID for auth (Mifare Classic always uses 4B) */
+    size_t copy_len = (uid_len >= 4) ? 4 : uid_len;
+    memcpy(&cmd[10], uid, copy_len);
+    if(copy_len < 4) memset(&cmd[10 + copy_len], 0, 4 - copy_len);
+
+    uint8_t resp[4];
+    size_t resp_len = sizeof(resp);
+    FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
+
+    if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] == PN532_STATUS_OK) {
+        pn532_mf_authed = true;
+        FURI_LOG_I(TAG, "MF auth OK: block=%d key_type=%d", block_num, key_type);
+        return FuriHalNfcErrorNone;
+    }
+
+    FURI_LOG_W(TAG, "MF auth FAILED: block=%d err=%d status=%02X",
+        block_num, (int)err, resp_len > 0 ? resp[0] : 0xFF);
+    pn532_mf_authed = false;
+    return FuriHalNfcErrorCommunication;
+}
+
+bool furi_hal_nfc_pn532_mf_is_authed(void) {
+    return pn532_mf_authed;
+}
+
+void furi_hal_nfc_pn532_mf_deauth(void) {
+    pn532_mf_authed = false;
+}
+
 #else /* !BOARD_HAS_NFC */
 
 /* ── No NFC hardware: all functions return errors or no-ops ────────────── */
@@ -1452,5 +1503,11 @@ FuriHalNfcError furi_hal_nfc_felica_listener_set_sensf_res_data(
     const uint8_t* i, const uint8_t il, const uint8_t* p, const uint8_t pl, const uint16_t s) {
     UNUSED(i); UNUSED(il); UNUSED(p); UNUSED(pl); UNUSED(s); return FuriHalNfcErrorCommunication;
 }
+
+FuriHalNfcError furi_hal_nfc_pn532_mf_auth(uint8_t b, const uint8_t* k, uint8_t kt, const uint8_t* u, uint8_t ul) {
+    UNUSED(b); UNUSED(k); UNUSED(kt); UNUSED(u); UNUSED(ul); return FuriHalNfcErrorCommunication;
+}
+bool furi_hal_nfc_pn532_mf_is_authed(void) { return false; }
+void furi_hal_nfc_pn532_mf_deauth(void) {}
 
 #endif /* BOARD_HAS_NFC */

@@ -2,6 +2,7 @@
 
 #include <furi.h>
 #include <furi_hal_random.h>
+#include <furi_hal_nfc.h>
 
 #include <helpers/iso14443_crc.h>
 
@@ -132,6 +133,29 @@ MfClassicError mf_classic_poller_auth_common(
             instance->data->iso14443_3a_data,
             iso14443_3a_poller_get_data(instance->iso14443_3a_poller));
 
+        /* ESP32/PN532: Use native Mifare Classic authentication.
+         * The PN532 cannot do raw Crypto1 (no custom parity support).
+         * Instead, use InDataExchange which handles auth internally. */
+        if(!is_nested && !backdoor_auth && !early_ret) {
+            const Iso14443_3aData* iso_data = instance->data->iso14443_3a_data;
+            FuriHalNfcError hal_err = furi_hal_nfc_pn532_mf_auth(
+                block_num,
+                key->data,
+                (key_type == MfClassicKeyTypeB) ? 1 : 0,
+                iso_data->uid,
+                iso_data->uid_len);
+            if(hal_err == FuriHalNfcErrorNone) {
+                instance->auth_state = MfClassicAuthStatePassed;
+                if(data) {
+                    memset(&data->nt, 0, sizeof(MfClassicNt));
+                    memset(&data->nr, 0, sizeof(MfClassicNr));
+                }
+                break;
+            }
+            /* If PN532 auth fails, fall through to standard auth attempt */
+            FURI_LOG_W(TAG, "PN532 native auth failed, trying standard auth");
+        }
+
         MfClassicNt nt = {};
         if(is_nested) {
             ret =
@@ -229,14 +253,23 @@ MfClassicError mf_classic_poller_halt(MfClassicPoller* instance) {
         bit_buffer_copy_bytes(instance->tx_plain_buffer, halt_cmd, sizeof(halt_cmd));
         iso14443_crc_append(Iso14443CrcTypeA, instance->tx_plain_buffer);
 
-        crypto1_encrypt(
-            instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
-
-        error = iso14443_3a_poller_txrx_custom_parity(
-            instance->iso14443_3a_poller,
-            instance->tx_encrypted_buffer,
-            instance->rx_encrypted_buffer,
-            MF_CLASSIC_FWT_FC);
+        if(furi_hal_nfc_pn532_mf_is_authed()) {
+            /* PN532: send HALT as standard frame, deauth */
+            error = iso14443_3a_poller_send_standard_frame(
+                instance->iso14443_3a_poller,
+                instance->tx_plain_buffer,
+                instance->rx_plain_buffer,
+                MF_CLASSIC_FWT_FC);
+            furi_hal_nfc_pn532_mf_deauth();
+        } else {
+            crypto1_encrypt(
+                instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
+            error = iso14443_3a_poller_txrx_custom_parity(
+                instance->iso14443_3a_poller,
+                instance->tx_encrypted_buffer,
+                instance->rx_encrypted_buffer,
+                MF_CLASSIC_FWT_FC);
+        }
         if(error != Iso14443_3aErrorTimeout) {
             ret = mf_classic_process_error(error);
             break;
@@ -263,26 +296,41 @@ MfClassicError mf_classic_poller_read_block(
         bit_buffer_copy_bytes(instance->tx_plain_buffer, read_block_cmd, sizeof(read_block_cmd));
         iso14443_crc_append(Iso14443CrcTypeA, instance->tx_plain_buffer);
 
-        crypto1_encrypt(
-            instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
+        /* PN532 native auth: send plaintext, PN532 handles Crypto1 internally */
+        if(furi_hal_nfc_pn532_mf_is_authed()) {
+            error = iso14443_3a_poller_send_standard_frame(
+                instance->iso14443_3a_poller,
+                instance->tx_plain_buffer,
+                instance->rx_plain_buffer,
+                MF_CLASSIC_FWT_FC);
+        } else {
+            crypto1_encrypt(
+                instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
 
-        error = iso14443_3a_poller_txrx_custom_parity(
-            instance->iso14443_3a_poller,
-            instance->tx_encrypted_buffer,
-            instance->rx_encrypted_buffer,
-            MF_CLASSIC_FWT_FC);
+            error = iso14443_3a_poller_txrx_custom_parity(
+                instance->iso14443_3a_poller,
+                instance->tx_encrypted_buffer,
+                instance->rx_encrypted_buffer,
+                MF_CLASSIC_FWT_FC);
+        }
         if(error != Iso14443_3aErrorNone) {
             ret = mf_classic_process_error(error);
             break;
         }
-        if(bit_buffer_get_size_bytes(instance->rx_encrypted_buffer) !=
+
+        BitBuffer* result_buf = furi_hal_nfc_pn532_mf_is_authed() ?
+            instance->rx_plain_buffer : instance->rx_encrypted_buffer;
+
+        if(bit_buffer_get_size_bytes(result_buf) !=
            (sizeof(MfClassicBlock) + 2)) {
             ret = MfClassicErrorProtocol;
             break;
         }
 
-        crypto1_decrypt(
-            instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
+        if(!furi_hal_nfc_pn532_mf_is_authed()) {
+            crypto1_decrypt(
+                instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
+        }
 
         if(!iso14443_crc_check(Iso14443CrcTypeA, instance->rx_plain_buffer)) {
             FURI_LOG_D(TAG, "CRC error");
@@ -306,61 +354,82 @@ MfClassicError mf_classic_poller_write_block(
 
     MfClassicError ret = MfClassicErrorNone;
     Iso14443_3aError error = Iso14443_3aErrorNone;
+    bool pn532_auth = furi_hal_nfc_pn532_mf_is_authed();
 
     do {
+        /* Phase 1: Send write command */
         uint8_t write_block_cmd[2] = {MF_CLASSIC_CMD_WRITE_BLOCK, block_num};
         bit_buffer_copy_bytes(instance->tx_plain_buffer, write_block_cmd, sizeof(write_block_cmd));
         iso14443_crc_append(Iso14443CrcTypeA, instance->tx_plain_buffer);
 
-        crypto1_encrypt(
-            instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
-
-        error = iso14443_3a_poller_txrx_custom_parity(
-            instance->iso14443_3a_poller,
-            instance->tx_encrypted_buffer,
-            instance->rx_encrypted_buffer,
-            MF_CLASSIC_FWT_FC);
+        if(pn532_auth) {
+            error = iso14443_3a_poller_send_standard_frame(
+                instance->iso14443_3a_poller,
+                instance->tx_plain_buffer,
+                instance->rx_plain_buffer,
+                MF_CLASSIC_FWT_FC);
+        } else {
+            crypto1_encrypt(
+                instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
+            error = iso14443_3a_poller_txrx_custom_parity(
+                instance->iso14443_3a_poller,
+                instance->tx_encrypted_buffer,
+                instance->rx_encrypted_buffer,
+                MF_CLASSIC_FWT_FC);
+        }
         if(error != Iso14443_3aErrorNone) {
             ret = mf_classic_process_error(error);
             break;
         }
-        if(bit_buffer_get_size(instance->rx_encrypted_buffer) != 4) {
+
+        BitBuffer* ack_buf = pn532_auth ? instance->rx_plain_buffer : instance->rx_encrypted_buffer;
+        if(bit_buffer_get_size(ack_buf) != 4) {
             ret = MfClassicErrorProtocol;
             break;
         }
-
-        crypto1_decrypt(
-            instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
-
+        if(!pn532_auth) {
+            crypto1_decrypt(
+                instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
+        }
         if(bit_buffer_get_byte(instance->rx_plain_buffer, 0) != MF_CLASSIC_CMD_ACK) {
             FURI_LOG_D(TAG, "Not ACK received");
             ret = MfClassicErrorProtocol;
             break;
         }
 
+        /* Phase 2: Send data */
         bit_buffer_copy_bytes(instance->tx_plain_buffer, data->data, sizeof(MfClassicBlock));
         iso14443_crc_append(Iso14443CrcTypeA, instance->tx_plain_buffer);
 
-        crypto1_encrypt(
-            instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
-
-        error = iso14443_3a_poller_txrx_custom_parity(
-            instance->iso14443_3a_poller,
-            instance->tx_encrypted_buffer,
-            instance->rx_encrypted_buffer,
-            MF_CLASSIC_FWT_FC);
+        if(pn532_auth) {
+            error = iso14443_3a_poller_send_standard_frame(
+                instance->iso14443_3a_poller,
+                instance->tx_plain_buffer,
+                instance->rx_plain_buffer,
+                MF_CLASSIC_FWT_FC);
+        } else {
+            crypto1_encrypt(
+                instance->crypto, NULL, instance->tx_plain_buffer, instance->tx_encrypted_buffer);
+            error = iso14443_3a_poller_txrx_custom_parity(
+                instance->iso14443_3a_poller,
+                instance->tx_encrypted_buffer,
+                instance->rx_encrypted_buffer,
+                MF_CLASSIC_FWT_FC);
+        }
         if(error != Iso14443_3aErrorNone) {
             ret = mf_classic_process_error(error);
             break;
         }
-        if(bit_buffer_get_size(instance->rx_encrypted_buffer) != 4) {
+
+        ack_buf = pn532_auth ? instance->rx_plain_buffer : instance->rx_encrypted_buffer;
+        if(bit_buffer_get_size(ack_buf) != 4) {
             ret = MfClassicErrorProtocol;
             break;
         }
-
-        crypto1_decrypt(
-            instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
-
+        if(!pn532_auth) {
+            crypto1_decrypt(
+                instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
+        }
         if(bit_buffer_get_byte(instance->rx_plain_buffer, 0) != MF_CLASSIC_CMD_ACK) {
             FURI_LOG_D(TAG, "Not ACK received");
             ret = MfClassicErrorProtocol;
