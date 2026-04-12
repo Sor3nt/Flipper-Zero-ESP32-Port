@@ -142,6 +142,18 @@ static uint8_t listener_uid[10];
 static uint8_t listener_uid_len;
 static uint8_t listener_atqa[2];
 static uint8_t listener_sak;
+static bool listener_configured = false;   /* TgInitAsTarget params cached */
+static bool listener_activated = false;    /* PN532 target mode active (reader present) */
+
+/* Listener RX buffer: stores data from TgInitAsTarget or TgGetData responses */
+static uint8_t listener_rx_buf[253];
+static size_t listener_rx_len = 0;
+
+/* FeliCa listener configuration state */
+static uint8_t felica_idm[8];
+static uint8_t felica_pmm[8];
+static uint16_t felica_sys_code;
+static bool felica_listener_configured = false;
 
 /* ──────────────────────────── Timer Callbacks ────────────────────────────── */
 
@@ -436,6 +448,11 @@ FuriHalNfcError furi_hal_nfc_set_mode(FuriHalNfcMode mode, FuriHalNfcTech tech) 
     pn532_iso_dep_mode = false;
     pn532_block_number = 0;
 
+    /* Log unsupported technologies */
+    if(tech == FuriHalNfcTechIso15693) {
+        FURI_LOG_W(TAG, "ISO15693 (NFC-V) not supported by PN532 hardware");
+    }
+
     /* For poller mode, use short passive-activation retries so InListPassiveTarget
      * doesn't block too long when no card is present, but still retries enough
      * for reliable detection. */
@@ -450,6 +467,12 @@ FuriHalNfcError furi_hal_nfc_reset_mode(void) {
     nfc_current_mode = FuriHalNfcModeNum;
     nfc_current_tech = FuriHalNfcTechInvalid;
     pn532_target_number = 0;
+    pn532_iso_dep_mode = false;
+    pn532_block_number = 0;
+    listener_configured = false;
+    listener_activated = false;
+    listener_rx_len = 0;
+    felica_listener_configured = false;
     /* Turn off RF field */
     uint8_t cmd[] = {PN532_CMD_RFCONFIGURATION, PN532_RFCFG_FIELD, 0x00};
     pn532_send_command(cmd, sizeof(cmd), NULL, NULL, 500);
@@ -493,6 +516,93 @@ FuriHalNfcEvent furi_hal_nfc_poller_wait_event(uint32_t timeout_ms) {
 }
 
 FuriHalNfcEvent furi_hal_nfc_listener_wait_event(uint32_t timeout_ms) {
+    if(!nfc_hal_ready) return FuriHalNfcEventTimeout;
+
+    /* Check for abort request first */
+    if(nfc_event_flags) {
+        uint32_t flags = furi_event_flag_wait(
+            nfc_event_flags, FuriHalNfcEventAbortRequest, FuriFlagWaitAny, 0);
+        if(!(flags & FuriFlagError) && (flags & FuriHalNfcEventAbortRequest)) {
+            furi_event_flag_clear(nfc_event_flags, FuriHalNfcEventAbortRequest);
+            return FuriHalNfcEventAbortRequest;
+        }
+    }
+
+    if(!listener_activated && listener_configured) {
+        /* First call: send TgInitAsTarget to wait for a reader.
+         * This blocks until a reader activates us or timeout. */
+        uint8_t cmd[40];
+        size_t idx = 0;
+        cmd[idx++] = PN532_CMD_TGINITASTARGET;
+        cmd[idx++] = 0x05; /* Mode: passive 106kbps, PICC only */
+
+        /* Mifare params: SENS_RES (2) + NFCID1 (3) + SEL_RES (1) */
+        cmd[idx++] = listener_atqa[0];
+        cmd[idx++] = listener_atqa[1];
+        cmd[idx++] = (listener_uid_len >= 1) ? listener_uid[0] : 0x00;
+        cmd[idx++] = (listener_uid_len >= 2) ? listener_uid[1] : 0x00;
+        cmd[idx++] = (listener_uid_len >= 3) ? listener_uid[2] : 0x00;
+        cmd[idx++] = listener_sak;
+
+        /* FeliCa params (18 bytes): zeros */
+        for(int i = 0; i < 18; i++) cmd[idx++] = 0x00;
+        /* NFCID3t (10 bytes) */
+        for(int i = 0; i < 10; i++)
+            cmd[idx++] = (i < listener_uid_len) ? listener_uid[i] : 0x00;
+        /* General Bytes len = 0, Historical Bytes len = 0 */
+        cmd[idx++] = 0x00;
+        cmd[idx++] = 0x00;
+
+        uint8_t resp[64];
+        size_t resp_len = sizeof(resp);
+        FuriHalNfcError err = pn532_send_command(cmd, idx, resp, &resp_len, timeout_ms);
+
+        if(err == FuriHalNfcErrorNone && resp_len >= 1) {
+            FURI_LOG_I(TAG, "Listener activated: mode=%02X", resp[0]);
+            listener_activated = true;
+
+            /* Cache initial command data from reader (if present after Mode byte) */
+            if(resp_len > 1) {
+                listener_rx_len = resp_len - 1;
+                if(listener_rx_len > sizeof(listener_rx_buf))
+                    listener_rx_len = sizeof(listener_rx_buf);
+                memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+            }
+
+            return (FuriHalNfcEvent)(FuriHalNfcEventFieldOn | FuriHalNfcEventListenerActive);
+        }
+
+        return FuriHalNfcEventTimeout;
+    }
+
+    if(listener_activated) {
+        /* Subsequent calls: get next command from reader via TgGetData */
+        uint8_t cmd[] = {PN532_CMD_TGGETDATA};
+        uint8_t resp[253];
+        size_t resp_len = sizeof(resp);
+        FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, timeout_ms);
+
+        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] == PN532_STATUS_OK) {
+            /* Cache reader data for listener_rx */
+            listener_rx_len = (resp_len > 1) ? (resp_len - 1) : 0;
+            if(listener_rx_len > sizeof(listener_rx_buf))
+                listener_rx_len = sizeof(listener_rx_buf);
+            if(listener_rx_len > 0)
+                memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+
+            return (FuriHalNfcEvent)(FuriHalNfcEventRxEnd);
+        }
+
+        /* Reader left or error */
+        if(err == FuriHalNfcErrorCommunicationTimeout) {
+            return FuriHalNfcEventTimeout;
+        }
+        /* Field lost */
+        listener_activated = false;
+        return FuriHalNfcEventFieldOff;
+    }
+
+    /* Not configured yet — just wait for any event flags */
     return furi_hal_nfc_poller_wait_event(timeout_ms);
 }
 
@@ -655,14 +765,18 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         if(saved_pcb & 0x08) hdr_len++; /* CID follows */
         if(saved_pcb & 0x04) hdr_len++; /* NAD follows */
 
-        /* S-block (WTX etc.): PN532 handles internally, just ACK */
+        /* S-block (WTX, DESELECT): PN532 handles internally.
+         * Return S-block response with matching INF field. */
         if((saved_pcb & 0xC0) == 0xC0) {
-            FURI_LOG_D(TAG, "poller_tx: S-block %02X handled internally", saved_pcb);
-            pn532_rx_buf[0] = saved_pcb; /* Echo S-block */
-            if(payload_len > hdr_len) {
-                memcpy(&pn532_rx_buf[1], &payload[hdr_len], payload_len - hdr_len);
+            FURI_LOG_D(TAG, "poller_tx: S-block PCB=%02X", saved_pcb);
+            /* S(DESELECT) = 0xC2: respond with S(DESELECT) */
+            /* S(WTX) = 0xF2: respond with S(WTX) echoing the WTXM value */
+            pn532_rx_buf[0] = saved_pcb; /* Echo S-block PCB */
+            size_t inf_len = (payload_len > hdr_len) ? (payload_len - hdr_len) : 0;
+            if(inf_len > 0) {
+                memcpy(&pn532_rx_buf[1], &payload[hdr_len], inf_len);
             }
-            size_t resp_sz = payload_len;
+            size_t resp_sz = 1 + inf_len;
             crc_a_append(pn532_rx_buf, resp_sz);
             pn532_rx_bits = (resp_sz + 2) * 8;
             if(nfc_event_flags)
@@ -671,11 +785,16 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
             return FuriHalNfcErrorNone;
         }
 
-        /* R-block (ACK/NAK): PN532 handles internally */
+        /* R-block (ACK/NAK): PN532 manages retransmission internally.
+         * If the Flipper stack sends R(ACK) it means the previous I-block was
+         * received OK and it wants the next chained block.
+         * If R(NAK) it wants retransmission.
+         * Since InDataExchange handles this transparently, we return R(ACK)
+         * with the current block number to keep the stack in sync. */
         if((saved_pcb & 0xC0) == 0x80) {
-            FURI_LOG_D(TAG, "poller_tx: R-block %02X handled internally", saved_pcb);
-            /* Don't send to card, just return ACK to stack */
-            pn532_rx_buf[0] = saved_pcb & 0xFE; /* R-ACK */
+            FURI_LOG_D(TAG, "poller_tx: R-block %02X", saved_pcb);
+            uint8_t r_ack = 0xA2 | (pn532_block_number & 1); /* R(ACK) + block num */
+            pn532_rx_buf[0] = r_ack;
             crc_a_append(pn532_rx_buf, 1);
             pn532_rx_bits = 24;
             if(nfc_event_flags)
@@ -693,7 +812,87 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         }
     }
 
-    /* No target listed → return timeout immediately (non-14443A tech polls) */
+    /* === 6. FeliCa POLLING interception: detect card via InListPassiveTarget === */
+    if(pn532_target_number == 0 && nfc_current_tech == FuriHalNfcTechFelica &&
+       payload_len >= 5 && payload[1] == 0x04) {
+        /* FeliCa POLLING frame: [LEN] [0x04] [SysCode_HI] [SysCode_LO] [ReqCode] [TimeSlot] */
+        FURI_LOG_I(TAG, "FeliCa POLLING: sys=%02X%02X", payload[2], payload[3]);
+
+        /* Build InListPassiveTarget for FeliCa 212kbps:
+         * [CMD] [MaxTg=1] [BrTy=0x01] [payload (initiator data)] */
+        uint8_t ilpt_cmd[payload_len + 3];
+        ilpt_cmd[0] = PN532_CMD_INLISTPASSIVETARGET;
+        ilpt_cmd[1] = 0x01; /* MaxTg = 1 */
+        ilpt_cmd[2] = PN532_BRTY_FELICA_212; /* 212 kbps */
+        memcpy(&ilpt_cmd[3], payload, payload_len); /* POLLING frame as initiator data */
+
+        uint8_t resp[64];
+        size_t resp_len = sizeof(resp);
+        FuriHalNfcError err = pn532_send_command(ilpt_cmd, payload_len + 3, resp, &resp_len, 500);
+
+        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] > 0) {
+            /* Response: [NbTg] [Tg] [LEN] [ResponseCode=0x01] [IDm(8)] [PMm(8)] [RD...] */
+            pn532_target_number = resp[1];
+            size_t felica_resp_len = (resp_len >= 3) ? resp[2] : 0;
+
+            /* Build POLLING_RESPONSE for the stack:
+             * [LEN] [0x01] [IDm(8)] [PMm(8)] [RD(0 or 2)] */
+            if(felica_resp_len > 0 && felica_resp_len <= sizeof(pn532_rx_buf)) {
+                memcpy(pn532_rx_buf, &resp[2], felica_resp_len);
+                pn532_rx_bits = felica_resp_len * 8;
+            } else {
+                pn532_rx_bits = 0;
+            }
+
+            FURI_LOG_I(TAG, "FeliCa detected: target=%d resp_len=%u",
+                pn532_target_number, (unsigned)felica_resp_len);
+            if(nfc_event_flags)
+                furi_event_flag_set(nfc_event_flags,
+                    FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
+            return FuriHalNfcErrorNone;
+        }
+
+        /* No FeliCa card found */
+        if(nfc_event_flags)
+            furi_event_flag_set(nfc_event_flags,
+                FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
+        return FuriHalNfcErrorCommunicationTimeout;
+    }
+
+    /* === 7. ISO14443B detection via InListPassiveTarget === */
+    if(pn532_target_number == 0 && nfc_current_tech == FuriHalNfcTechIso14443b &&
+       payload_len >= 3 && payload[0] == 0x05) {
+        /* REQB/WUPB: [APF=0x05] [AFI] [PARAM] */
+        FURI_LOG_I(TAG, "ISO14443B REQB/WUPB");
+
+        uint8_t ilpt_cmd[] = {PN532_CMD_INLISTPASSIVETARGET, 0x01, PN532_BRTY_ISO14443B};
+        uint8_t resp[64];
+        size_t resp_len = sizeof(resp);
+        FuriHalNfcError err = pn532_send_command(ilpt_cmd, sizeof(ilpt_cmd), resp, &resp_len, 300);
+
+        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] > 0) {
+            pn532_target_number = resp[1];
+            /* Return ATQB to stack: everything after NbTg and Tg */
+            if(resp_len > 2) {
+                size_t data_len = resp_len - 2;
+                if(data_len > sizeof(pn532_rx_buf)) data_len = sizeof(pn532_rx_buf);
+                memcpy(pn532_rx_buf, &resp[2], data_len);
+                pn532_rx_bits = data_len * 8;
+            }
+            FURI_LOG_I(TAG, "ISO14443B detected: target=%d", pn532_target_number);
+            if(nfc_event_flags)
+                furi_event_flag_set(nfc_event_flags,
+                    FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
+            return FuriHalNfcErrorNone;
+        }
+
+        if(nfc_event_flags)
+            furi_event_flag_set(nfc_event_flags,
+                FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
+        return FuriHalNfcErrorCommunicationTimeout;
+    }
+
+    /* No target listed → return timeout immediately */
     if(pn532_target_number == 0) {
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
@@ -711,10 +910,10 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     cmd[1] = pn532_target_number;
     if(payload_len > 0) memcpy(&cmd[2], payload, payload_len);
 
-    uint8_t resp[128];
+    uint8_t resp[253];
     size_t resp_len = sizeof(resp);
 
-    FuriHalNfcError err = pn532_send_command(cmd, payload_len + 2, resp, &resp_len, 2000);
+    FuriHalNfcError err = pn532_send_command(cmd, payload_len + 2, resp, &resp_len, 5000);
 
     if(err == FuriHalNfcErrorNone && resp_len >= 1) {
         uint8_t status = resp[0];
@@ -795,8 +994,21 @@ FuriHalNfcError furi_hal_nfc_listener_tx(const uint8_t* tx_data, size_t tx_bits)
 FuriHalNfcError furi_hal_nfc_listener_rx(uint8_t* rx_data, size_t rx_data_size, size_t* rx_bits) {
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
 
+    /* Return data cached by listener_wait_event (from TgInitAsTarget or TgGetData) */
+    if(listener_rx_len > 0) {
+        if(listener_rx_len > rx_data_size) {
+            *rx_bits = 0;
+            return FuriHalNfcErrorBufferOverflow;
+        }
+        memcpy(rx_data, listener_rx_buf, listener_rx_len);
+        *rx_bits = listener_rx_len * 8;
+        listener_rx_len = 0;
+        return FuriHalNfcErrorNone;
+    }
+
+    /* No cached data — try TgGetData directly as fallback */
     uint8_t cmd[] = {PN532_CMD_TGGETDATA};
-    uint8_t resp[128];
+    uint8_t resp[253];
     size_t resp_len = sizeof(resp);
     FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
     if(err == FuriHalNfcErrorNone && resp_len >= 1) {
@@ -814,10 +1026,16 @@ FuriHalNfcError furi_hal_nfc_listener_rx(uint8_t* rx_data, size_t rx_data_size, 
 }
 
 FuriHalNfcError furi_hal_nfc_listener_sleep(void) {
+    /* Re-enter idle state so next listener_wait_event re-runs TgInitAsTarget */
+    listener_activated = false;
+    listener_rx_len = 0;
     return FuriHalNfcErrorNone;
 }
 
 FuriHalNfcError furi_hal_nfc_listener_idle(void) {
+    /* Re-enter idle state so next listener_wait_event re-runs TgInitAsTarget */
+    listener_activated = false;
+    listener_rx_len = 0;
     return FuriHalNfcErrorNone;
 }
 
@@ -997,17 +1215,57 @@ FuriHalNfcError furi_hal_nfc_iso14443a_tx_sdd_frame(const uint8_t* tx_data, size
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
             }
         } else if(tx_data[1] == 0x70) {
-            /* Full SELECT command — return SAK */
-            pn532_rx_buf[0] = pn532_target_sak;
-            pn532_rx_bits = 8;
+            /* Full SELECT command — return SAK + CRC_A */
+            uint8_t max_cascade = (pn532_target_uid_len <= 4) ? 0 :
+                                  (pn532_target_uid_len <= 7) ? 1 : 2;
+            uint8_t sak = (cascade < max_cascade) ? 0x04 : pn532_target_sak;
+            pn532_rx_buf[0] = sak;
+            crc_a_append(pn532_rx_buf, 1);
+            pn532_rx_bits = 24; /* SAK (8 bits) + CRC_A (16 bits) */
+            FURI_LOG_D(TAG, "SDD SELECT CL%d -> SAK=%02X", cascade + 1, sak);
             if(nfc_event_flags) {
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
             }
         } else {
-            /* Partial SDD with some known bits — return remaining UID + BCC */
-            /* This is a simplification: return full UID for the cascade level */
-            pn532_rx_bits = 0;
+            /* Partial SDD (NVB between 0x20 and 0x70): PN532 already resolved
+             * collisions, so return the full UID for this cascade level.
+             * The Flipper stack will merge partial results. */
+            FURI_LOG_D(TAG, "SDD partial NVB=%02X CL%d -> return full UID", tx_data[1], cascade + 1);
+
+            if(pn532_target_uid_len <= 4) {
+                memcpy(pn532_rx_buf, pn532_target_uid, 4);
+                pn532_rx_buf[4] = pn532_rx_buf[0] ^ pn532_rx_buf[1] ^
+                                  pn532_rx_buf[2] ^ pn532_rx_buf[3];
+                pn532_rx_bits = 40;
+            } else if(pn532_target_uid_len <= 7) {
+                if(cascade == 0) {
+                    pn532_rx_buf[0] = 0x88;
+                    memcpy(&pn532_rx_buf[1], pn532_target_uid, 3);
+                    pn532_rx_buf[4] = pn532_rx_buf[0] ^ pn532_rx_buf[1] ^
+                                      pn532_rx_buf[2] ^ pn532_rx_buf[3];
+                    pn532_rx_bits = 40;
+                } else {
+                    memcpy(pn532_rx_buf, &pn532_target_uid[3], 4);
+                    pn532_rx_buf[4] = pn532_rx_buf[0] ^ pn532_rx_buf[1] ^
+                                      pn532_rx_buf[2] ^ pn532_rx_buf[3];
+                    pn532_rx_bits = 40;
+                }
+            } else {
+                if(cascade == 0) {
+                    pn532_rx_buf[0] = 0x88;
+                    memcpy(&pn532_rx_buf[1], pn532_target_uid, 3);
+                } else if(cascade == 1) {
+                    pn532_rx_buf[0] = 0x88;
+                    memcpy(&pn532_rx_buf[1], &pn532_target_uid[3], 3);
+                } else {
+                    memcpy(pn532_rx_buf, &pn532_target_uid[6], 4);
+                }
+                pn532_rx_buf[4] = pn532_rx_buf[0] ^ pn532_rx_buf[1] ^
+                                  pn532_rx_buf[2] ^ pn532_rx_buf[3];
+                pn532_rx_bits = 40;
+            }
+
             if(nfc_event_flags) {
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
@@ -1047,45 +1305,17 @@ FuriHalNfcError furi_hal_nfc_iso14443a_listener_set_col_res_data(
     uint8_t sak) {
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
 
-    /* Cache for TgInitAsTarget */
-    memcpy(listener_uid, uid, uid_len);
+    /* Cache for TgInitAsTarget — actual activation happens in listener_wait_event */
+    memcpy(listener_uid, uid, uid_len > sizeof(listener_uid) ? sizeof(listener_uid) : uid_len);
     listener_uid_len = uid_len;
     memcpy(listener_atqa, atqa, 2);
     listener_sak = sak;
+    listener_configured = true;
+    listener_activated = false;
+    listener_rx_len = 0;
 
-    /* Configure PN532 as ISO14443A target using TgInitAsTarget */
-    uint8_t cmd[40];
-    size_t idx = 0;
-    cmd[idx++] = PN532_CMD_TGINITASTARGET;
-    cmd[idx++] = 0x00; /* Mode: 0=passive only, b0=106kbps passive, b2=DEP, b3=PICC only */
-
-    /* Mifare params (6 bytes): SENS_RES (2) + NFCID1 (3) + SEL_RES (1) */
-    cmd[idx++] = atqa[0]; /* SENS_RES byte 1 */
-    cmd[idx++] = atqa[1]; /* SENS_RES byte 2 */
-    /* NFCID1: first 3 bytes of UID */
-    cmd[idx++] = (uid_len >= 1) ? uid[0] : 0x00;
-    cmd[idx++] = (uid_len >= 2) ? uid[1] : 0x00;
-    cmd[idx++] = (uid_len >= 3) ? uid[2] : 0x00;
-    cmd[idx++] = sak; /* SEL_RES */
-
-    /* FeliCa params (18 bytes): NFCID2 (8) + PAD (8) + System Code (2) — set to zeros */
-    for(int i = 0; i < 18; i++) cmd[idx++] = 0x00;
-
-    /* NFCID3t (10 bytes) — use UID padded with zeros */
-    for(int i = 0; i < 10; i++) {
-        cmd[idx++] = (i < uid_len) ? uid[i] : 0x00;
-    }
-
-    /* General Bytes length = 0, Historical Bytes length = 0 */
-    cmd[idx++] = 0x00;
-    cmd[idx++] = 0x00;
-
-    esp_err_t err = i2c_master_write_to_device(BOARD_NFC_I2C_PORT, PN532_I2C_ADDR, cmd, idx, pdMS_TO_TICKS(1000));
-
-    if(err != ESP_OK) {
-        FURI_LOG_E(TAG, "I2C write failed: %s", esp_err_to_name(err));
-        return FuriHalNfcErrorCommunication;
-    }
+    FURI_LOG_I(TAG, "Listener configured: ATQA=%02X%02X SAK=%02X UID=%dB",
+        atqa[0], atqa[1], sak, uid_len);
 
     return FuriHalNfcErrorNone;
 }
@@ -1101,19 +1331,20 @@ FuriHalNfcError furi_hal_nfc_iso14443a_listener_tx_custom_parity(
 
 /* ──────────────────────────── ISO15693 ───────────────────────────────────── */
 
+/* NOTE: The PN532 does NOT support ISO15693 (NFC-V).
+ * It only supports ISO14443A, ISO14443B, and FeliCa.
+ * These functions return success as no-ops so the stack doesn't crash,
+ * but ISO15693 cards cannot be read or emulated with PN532 hardware. */
+
 FuriHalNfcError furi_hal_nfc_iso15693_listener_tx_sof(void) {
-    /* PN532 supports ISO15693 via InCommunicateThru with appropriate RF config.
-     * SOF is handled automatically by the PN532 when configured for ISO15693. */
     return FuriHalNfcErrorNone;
 }
 
 FuriHalNfcError furi_hal_nfc_iso15693_detect_mode(void) {
-    /* PN532 auto-detects ISO15693 coding mode */
     return FuriHalNfcErrorNone;
 }
 
 FuriHalNfcError furi_hal_nfc_iso15693_force_1outof4(void) {
-    /* PN532 doesn't expose coding mode control — auto-detects */
     return FuriHalNfcErrorNone;
 }
 
@@ -1129,14 +1360,26 @@ FuriHalNfcError furi_hal_nfc_felica_listener_set_sensf_res_data(
     const uint8_t* pmm,
     const uint8_t pmm_len,
     const uint16_t sys_code) {
-    UNUSED(idm);
-    UNUSED(idm_len);
-    UNUSED(pmm);
-    UNUSED(pmm_len);
-    UNUSED(sys_code);
-    /* FeliCa listener data would be configured in TgInitAsTarget's FeliCa params.
-     * The params are set during set_col_res equivalent for FeliCa.
-     * TODO: Implement FeliCa target mode configuration. */
+    if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
+
+    /* Cache FeliCa params for TgInitAsTarget.
+     * Activation happens in listener_wait_event when tech == FeliCa. */
+    memset(felica_idm, 0, sizeof(felica_idm));
+    memset(felica_pmm, 0, sizeof(felica_pmm));
+    if(idm && idm_len > 0) {
+        size_t copy_len = idm_len > sizeof(felica_idm) ? sizeof(felica_idm) : idm_len;
+        memcpy(felica_idm, idm, copy_len);
+    }
+    if(pmm && pmm_len > 0) {
+        size_t copy_len = pmm_len > sizeof(felica_pmm) ? sizeof(felica_pmm) : pmm_len;
+        memcpy(felica_pmm, pmm, copy_len);
+    }
+    felica_sys_code = sys_code;
+    felica_listener_configured = true;
+
+    FURI_LOG_I(TAG, "FeliCa listener configured: IDm=%02X%02X%02X... sys=%04X",
+        felica_idm[0], felica_idm[1], felica_idm[2], sys_code);
+
     return FuriHalNfcErrorNone;
 }
 
