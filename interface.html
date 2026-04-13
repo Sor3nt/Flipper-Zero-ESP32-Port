@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flipper Zero - ESP 32 Port Flash Tool</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<title>Flipper Zero - ESP32 Port Flash Tool</title>
 <script type="module">
 import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
 
 const BOARDS = {
-  't-embed': {
+  'T-Embed': {
     name: 'LilyGo T-Embed CC1101',
     chip: 'ESP32-S3',
     flashSize: '16MB',
@@ -18,7 +19,7 @@ const BOARDS = {
       { path: 't-embed/latest/furi_esp32.bin', offset: 0x10000 },
     ],
   },
-  'waveshare-c6': {
+  'Waveshare-C6': {
     name: 'Waveshare ESP32-C6-LCD-1.9',
     chip: 'ESP32-C6',
     flashSize: '8MB',
@@ -207,7 +208,7 @@ window.goBack = goBack;
 // Check WebSerial support
 if (!('serial' in navigator)) {
   document.querySelectorAll('.board-card').forEach(c => c.style.pointerEvents = 'none');
-  setError('Use Chrome or Edge on desktop to flash.');
+  setError('Use Google Chrome or Edge on desktop to flash.');
 }
 </script>
 <style>
@@ -414,12 +415,33 @@ if (!('serial' in navigator)) {
     color: #666;
     font-size: 0.9rem;
   }
+  /* Discord button */
+.discord-btn {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: #ff8c00;
+  color: #000;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.discord-btn:hover {
+  background: #ff9f2e;
+  transform: translateX(-50%) scale(1.05);
+}
 </style>
 </head>
 <body>
   <div class="container">
     <h1>Flipper Zero</h1>
-    <p class="subtitle">ESP32 Port</p>
+    <p class="subtitle">ESP-32 Port</p>
 
     <div id="error-banner"></div>
 
@@ -478,5 +500,10 @@ if (!('serial' in navigator)) {
       <p class="success-sub">Firmware flashed successfully.<br>Your device is rebooting.</p>
     </div>
   </div>
+  <center>
+<a href="https://discord.gg/y7rdnHZHa6" target="_blank" class="discord-btn">
+  Discord
+</a>
+</center>
 </body>
 </html>
