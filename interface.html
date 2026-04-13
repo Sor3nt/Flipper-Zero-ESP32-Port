@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flipper Zero - ESP 32 Port Flash Tool</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<title>Flipper Zero - ESP32 Port Flash Tool</title>
 <script type="module">
 import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
 
@@ -207,7 +208,7 @@ window.goBack = goBack;
 // Check WebSerial support
 if (!('serial' in navigator)) {
   document.querySelectorAll('.board-card').forEach(c => c.style.pointerEvents = 'none');
-  setError('Use Chrome or Edge on desktop to flash.');
+  setError('Use Google Chrome or Edge on desktop to flash.');
 }
 </script>
 <style>
@@ -221,7 +222,13 @@ if (!('serial' in navigator)) {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-  }
+    margin: 0;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden;
+    background: black;
+}
+
   .container {
     text-align: center;
     max-width: 480px;
@@ -414,12 +421,82 @@ if (!('serial' in navigator)) {
     color: #666;
     font-size: 0.9rem;
   }
+  /* Discord button */
+.discord-btn {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: #ff8c00;
+  color: #000;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.discord-btn:hover {
+  background: #ff9f2e;
+  transform: translateX(-50%) scale(1.05);
+}
+
+ /* background element*/
+/* Background container */
+.stars {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+}
+/* Individual star */
+.star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    opacity: 0;
+    animation: twinkle linear infinite;
+}
+/* Twinkle animation */
+@keyframes twinkle {
+    0%   { opacity: 0; }
+    50%  { opacity: 1; }
+    100% { opacity: 0; }
+}
 </style>
 </head>
 <body>
+<!-- Night Background Element -->
+  <div class="stars" id="stars"></div>
+<script>
+const container = document.getElementById("stars");
+const starCount = 200;
+const centerX = window.innerWidth / 2;
+const centerY = window.innerHeight / 2;
+const radius = 200;
+for (let i = 0; i < starCount; i++) {
+    let x, y;
+    do {
+        x = Math.random() * window.innerWidth;
+        y = Math.random() * window.innerHeight;
+    } while (Math.hypot(x - centerX, y - centerY) < radius);
+    const star = document.createElement("div");
+    star.className = "star";
+    star.style.left = x + "px";
+    star.style.top = y + "px";
+    star.style.animationDuration = (2 + Math.random() * 3) + "s";
+    star.style.animationDelay = (Math.random() * 5) + "s";
+    container.appendChild(star);
+}
+</script>
+<!-- End of Night Background Element -->
+  
   <div class="container">
     <h1>Flipper Zero</h1>
-    <p class="subtitle">ESP32 Port</p>
+    <p class="subtitle">ESP-32 Port</p>
 
     <div id="error-banner"></div>
 
@@ -475,8 +552,13 @@ if (!('serial' in navigator)) {
     <div id="screen-success" class="screen">
       <div class="success-icon">&#10003;</div>
       <div class="success-text">Success!</div>
-      <p class="success-sub">Firmware flashed successfully.<br>Your device is rebooting.</p>
+      <p class="success-sub">Firmware flashed successfully!.<br>Your device is rebooting.</p>
     </div>
   </div>
+  <center>
+<a href="https://discord.gg/y7rdnHZHa6" target="_blank" class="discord-btn">
+  Discord
+</a>
+</center>
 </body>
 </html>
