@@ -26,7 +26,7 @@ APPS = [
     "power_settings",
     "loader",
     "loader_start",
-    "backlight_settings",
+    "notification_settings",
     "desktop",
     "archive",
     "about",

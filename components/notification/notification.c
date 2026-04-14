@@ -6,8 +6,9 @@
 #include <furi.h>
 #include <furi_hal_display.h>
 #include <furi_hal_rtc.h>
+#include <furi_hal_speaker.h>
 #include <input.h>
-#include "notification.h"
+#include "notification_app.h"
 #include "notification_messages.h"
 
 #define TAG "NotificationSrv"
@@ -17,6 +18,7 @@
 typedef enum {
     NotificationLayerMessage,
     InternalLayerMessage,
+    SaveSettingsMessage,
 } NotificationAppMessageType;
 
 typedef struct {
@@ -24,38 +26,6 @@ typedef struct {
     NotificationAppMessageType type;
     FuriEventFlag* back_event;
 } NotificationAppMessage;
-
-typedef enum {
-    LayerInternal = 0,
-    LayerNotification = 1,
-    LayerMAX = 2,
-} NotificationLedLayerIndex;
-
-typedef struct {
-    uint8_t value[LayerMAX];
-    NotificationLedLayerIndex index;
-} NotificationDisplayLayer;
-
-typedef struct {
-    float display_brightness;
-    uint32_t display_off_delay_ms;
-    float night_shift;
-    uint32_t night_shift_start;
-    uint32_t night_shift_end;
-} NotificationSettings;
-
-struct NotificationApp {
-    FuriMessageQueue* queue;
-    FuriPubSub* event_record;
-    FuriTimer* display_timer;
-    FuriTimer* night_shift_timer;
-
-    NotificationDisplayLayer display;
-    bool display_led_lock;
-
-    NotificationSettings settings;
-    float current_night_shift;
-};
 
 static bool lcd_backlight_is_on = false;
 
@@ -135,7 +105,13 @@ static void notification_display_timer(void* context) {
     notification_message(app, &sequence_display_backlight_off);
 }
 
-static void night_shift_timer_start(NotificationApp* app) {
+static void night_shift_demo_timer_callback(void* context) {
+    furi_assert(context);
+    NotificationApp* app = context;
+    notification_message(app, &sequence_display_backlight_force_on);
+}
+
+void night_shift_timer_start(NotificationApp* app) {
     if(app->settings.night_shift != 1.0f) {
         if(furi_timer_is_running(app->night_shift_timer)) {
             furi_timer_stop(app->night_shift_timer);
@@ -144,7 +120,7 @@ static void night_shift_timer_start(NotificationApp* app) {
     }
 }
 
-static void night_shift_timer_stop(NotificationApp* app) {
+void night_shift_timer_stop(NotificationApp* app) {
     if(furi_timer_is_running(app->night_shift_timer)) {
         furi_timer_stop(app->night_shift_timer);
     }
@@ -173,6 +149,8 @@ static void notification_process_notification_message(
 
     bool reset_notifications = true;
     float display_brightness_setting = app->settings.display_brightness;
+    float speaker_volume_setting = app->settings.speaker_volume;
+    bool force_volume = false;
     bool reset_display = false;
 
     while(notification_message != NULL) {
@@ -233,11 +211,30 @@ static void notification_process_notification_message(
                 FURI_LOG_E(TAG, "Incorrect BacklightEnforceAuto usage");
             }
             break;
+        case NotificationMessageTypeSoundOn:
+            if(!furi_hal_rtc_is_flag_set(FuriHalRtcFlagStealthMode) || force_volume) {
+                float vol = notification_message->data.sound.volume * speaker_volume_setting;
+                if(furi_hal_speaker_is_mine() || furi_hal_speaker_acquire(30)) {
+                    furi_hal_speaker_start(
+                        notification_message->data.sound.frequency, vol);
+                }
+            }
+            break;
+        case NotificationMessageTypeSoundOff:
+            if(furi_hal_speaker_is_mine()) {
+                furi_hal_speaker_stop();
+                furi_hal_speaker_release();
+            }
+            break;
         case NotificationMessageTypeDelay:
             furi_delay_ms(notification_message->data.delay.length);
             break;
         case NotificationMessageTypeDoNotReset:
             reset_notifications = false;
+            break;
+        case NotificationMessageTypeForceSpeakerVolumeSetting:
+            speaker_volume_setting = notification_message->data.forced_settings.speaker_volume;
+            force_volume = true;
             break;
         case NotificationMessageTypeForceDisplayBrightnessSetting:
             display_brightness_setting =
@@ -310,9 +307,12 @@ static NotificationApp* notification_app_alloc(void) {
     app->queue = furi_message_queue_alloc(8, sizeof(NotificationAppMessage));
     app->display_timer = furi_timer_alloc(notification_display_timer, FuriTimerTypeOnce, app);
     app->night_shift_timer = furi_timer_alloc(night_shift_timer_callback, FuriTimerTypePeriodic, app);
+    app->night_shift_demo_timer = furi_timer_alloc(night_shift_demo_timer_callback, FuriTimerTypeOnce, app);
 
     app->settings.display_brightness = 1.0f;
     app->settings.display_off_delay_ms = 30000;
+    app->settings.speaker_volume = 1.0f;
+    app->settings.vibro_on = true;
     app->settings.night_shift = 1.0f;
     app->settings.night_shift_start = 1020;
     app->settings.night_shift_end = 300;
@@ -356,6 +356,12 @@ int32_t notification_srv(void* p) {
         case InternalLayerMessage:
             notification_process_internal_message(app, &message);
             break;
+        case SaveSettingsMessage:
+            /* Settings are only in RAM on ESP32 — no persistent save yet.
+             * The message type exists so notification_message_save_settings()
+             * can be called from the settings app without crashing. */
+            FURI_LOG_I(TAG, "Settings updated (RAM only)");
+            break;
         }
 
         if(message.back_event != NULL) {
@@ -392,4 +398,9 @@ void notification_internal_message_block(
     furi_event_flag_wait(
         back_event, NOTIFICATION_EVENT_COMPLETE, FuriFlagWaitAny, FuriWaitForever);
     furi_event_flag_free(back_event);
+}
+
+void notification_message_save_settings(NotificationApp* app) {
+    furi_assert(app);
+    notification_message_send(app, SaveSettingsMessage, &sequence_empty, NULL);
 }

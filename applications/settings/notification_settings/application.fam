@@ -1,11 +1,9 @@
 App(
     appid="notification_settings",
-    name="LCD and Notifications",
-    apptype=FlipperAppType.EXTSETTINGS,
+    name="Sound & Display",
+    apptype=FlipperAppType.SETTINGS,
     entry_point="notification_settings_app",
     requires=["notification"],
     stack_size=1 * 1024,
     order=70,
-    fap_libs=["assets"],
-    fap_category="assets",
 )
