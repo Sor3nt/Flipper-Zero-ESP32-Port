@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_vendor.h>
@@ -166,9 +167,25 @@ void furi_hal_display_init(void) {
 #endif
         .bits_per_pixel = 16,
     };
+    /* Hard-reset the ST7789 *before* creating the panel driver.
+     * After a flash-reset the ESP32 GPIOs float during early boot, so the
+     * display controller may never have seen a clean reset edge.  Toggling
+     * the pin here (with generous timing) guarantees that the ST7789
+     * registers — including MADCTL/color-order — are in their power-on
+     * default state, regardless of how the ESP32 was reset. */
+    gpio_config_t rst_cfg = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << gpio_lcd_rst.pin,
+    };
+    gpio_config(&rst_cfg);
+    gpio_set_level((gpio_num_t)gpio_lcd_rst.pin, 0);   /* assert reset (active low) */
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level((gpio_num_t)gpio_lcd_rst.pin, 1);   /* release reset */
+    vTaskDelay(pdMS_TO_TICKS(120));                     /* ST7789 needs ≥5ms, use 120ms to be safe */
+
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
 
-    /* Reset and initialize */
+    /* Reset and initialize (the esp_lcd driver reset is redundant now but harmless) */
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
@@ -181,19 +198,7 @@ void furi_hal_display_init(void) {
     /* Turn on display */
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
-    /* After a flash-reset the ST7789 retains stale register state (R/B swapped)
-     * while after a full power-cycle it starts fresh (RGB correct).
-     * Choose the matching foreground colour at runtime. */
-#ifdef BOARD_LCD_FG_COLOR_RB
-    if(esp_reset_reason() == ESP_RST_POWERON) {
-        fg_color = BOARD_LCD_FG_COLOR;
-    } else {
-        fg_color = BOARD_LCD_FG_COLOR_RB;
-        ESP_LOGW(TAG, "Non-power-on reset — using R/B-swapped foreground colour");
-    }
-#else
     fg_color = BOARD_LCD_FG_COLOR;
-#endif
 
     furi_hal_display_init_scale_lut();
 
