@@ -7,7 +7,7 @@ ESP32_DIR="${SCRIPT_DIR}"
 PORT="${ESPPORT:-}"
 RUN_MONITOR=0
 BUILD_ONLY=0
-EXPORT_SCRIPT="${ESP_IDF_EXPORT_SCRIPT:-/Users/matthias/esp/esp-idf/export.sh}"
+EXPORT_SCRIPT="${ESP_IDF_EXPORT_SCRIPT:-${HOME}/esp/esp-idf/export.sh}"
 
 BOARD="waveshare_c6_1.9"
 BUILD_DIR="build_waveshare_c6"
