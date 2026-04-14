@@ -449,8 +449,8 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
         contents.append(")")
         if app.cdefines:
             contents.append(f"target_compile_definitions({app_target} PRIVATE {' '.join(app.cdefines)})")
-        # Relax warnings for user apps (FAP ports may use implicit declarations, etc.)
-        if "/applications_user/" in getattr(app, "_manifest_path", ""):
+        # Relax warnings for user apps and js_app modules
+        if "/applications_user/" in getattr(app, "_manifest_path", "") or app.appid.startswith("js_"):
             contents.append(f"target_compile_options({app_target} PRIVATE -Wno-error=implicit-function-declaration -Wno-error=incompatible-pointer-types)")
         contents.append(f"list(APPEND ESP32_FAM_PORTED_OBJECT_TARGETS {app_target})")
         contents.append("")

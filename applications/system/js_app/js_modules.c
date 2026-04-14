@@ -9,6 +9,66 @@
 #include "modules/js_tests.h"
 #endif
 
+#ifdef ESP_PLATFORM
+#include <flipper_application/plugins/plugin_manager.h>
+
+// Forward-declare entry points for statically linked JS modules
+const FlipperAppPluginDescriptor* js_event_loop_ep(void);
+const FlipperAppPluginDescriptor* js_gui_ep(void);
+const FlipperAppPluginDescriptor* js_view_loading_ep(void);
+const FlipperAppPluginDescriptor* js_view_empty_screen_ep(void);
+const FlipperAppPluginDescriptor* js_view_submenu_ep(void);
+const FlipperAppPluginDescriptor* js_view_text_input_ep(void);
+const FlipperAppPluginDescriptor* js_view_number_input_ep(void);
+const FlipperAppPluginDescriptor* js_view_button_panel_ep(void);
+const FlipperAppPluginDescriptor* js_view_popup_ep(void);
+const FlipperAppPluginDescriptor* js_view_button_menu_ep(void);
+const FlipperAppPluginDescriptor* js_view_menu_ep(void);
+const FlipperAppPluginDescriptor* js_view_vi_list_ep(void);
+const FlipperAppPluginDescriptor* js_view_byte_input_ep(void);
+const FlipperAppPluginDescriptor* js_view_text_box_ep(void);
+const FlipperAppPluginDescriptor* js_view_dialog_ep(void);
+const FlipperAppPluginDescriptor* js_gui_file_picker_ep(void);
+const FlipperAppPluginDescriptor* js_view_widget_ep(void);
+const FlipperAppPluginDescriptor* js_gui_icon_ep(void);
+const FlipperAppPluginDescriptor* js_notification_ep(void);
+const FlipperAppPluginDescriptor* js_math_ep(void);
+const FlipperAppPluginDescriptor* js_storage_ep(void);
+const FlipperAppPluginDescriptor* js_subghz_ep(void);
+const FlipperAppPluginDescriptor* js_infrared_ep(void);
+const FlipperAppPluginDescriptor* js_blebeacon_ep(void);
+// js_serial, js_gpio, js_i2c, js_spi excluded - need HAL porting
+
+typedef const FlipperAppPluginDescriptor* (*JsPluginEpFunc)(void);
+
+static const JsPluginEpFunc static_plugins[] = {
+    js_event_loop_ep,
+    js_gui_ep,
+    js_view_loading_ep,
+    js_view_empty_screen_ep,
+    js_view_submenu_ep,
+    js_view_text_input_ep,
+    js_view_number_input_ep,
+    js_view_button_panel_ep,
+    js_view_popup_ep,
+    js_view_button_menu_ep,
+    js_view_menu_ep,
+    js_view_vi_list_ep,
+    js_view_byte_input_ep,
+    js_view_text_box_ep,
+    js_view_dialog_ep,
+    js_gui_file_picker_ep,
+    js_view_widget_ep,
+    js_gui_icon_ep,
+    js_notification_ep,
+    js_math_ep,
+    js_storage_ep,
+    js_subghz_ep,
+    js_infrared_ep,
+    js_blebeacon_ep,
+};
+#endif // ESP_PLATFORM
+
 #define TAG "JS modules"
 
 // Absolute path is used to make possible plugin load from CLI
@@ -116,6 +176,33 @@ mjs_val_t js_module_require(JsModules* modules, const char* name, size_t name_le
 
     // External module load
     if(!module_found) {
+#ifdef ESP_PLATFORM
+        // On ESP32, modules are statically linked - look up by name
+        FuriString* deslashed_name = furi_string_alloc_set_str(name);
+        furi_string_replace_all_str(deslashed_name, "/", "__");
+        for(size_t i = 0; i < COUNT_OF(static_plugins); i++) {
+            const FlipperAppPluginDescriptor* desc = static_plugins[i]();
+            const JsModuleDescriptor* plugin = desc->entry_point;
+            if(strcmp(furi_string_get_cstr(deslashed_name), plugin->name) == 0) {
+                FURI_LOG_I(TAG, "Using static module %s", plugin->name);
+                JsModuleData module = {
+                    .create = plugin->create,
+                    .destroy = plugin->destroy,
+                    .name = furi_string_alloc_set_str(name),
+                };
+                JsModuleArray_push_at(modules->modules, 0, module);
+
+                if(plugin->api_interface) {
+                    FURI_LOG_I(TAG, "Added module API to composite resolver: %s", plugin->name);
+                    composite_api_resolver_add(modules->resolver, plugin->api_interface);
+                }
+
+                module_found = true;
+                break;
+            }
+        }
+        furi_string_free(deslashed_name);
+#else
         FuriString* deslashed_name = furi_string_alloc_set_str(name);
         furi_string_replace_all_str(deslashed_name, "/", "__");
         FuriString* module_path = furi_string_alloc();
@@ -158,6 +245,7 @@ mjs_val_t js_module_require(JsModules* modules, const char* name, size_t name_le
         } while(0);
         furi_string_free(module_path);
         furi_string_free(deslashed_name);
+#endif // ESP_PLATFORM
     }
 
     // Run module constructor

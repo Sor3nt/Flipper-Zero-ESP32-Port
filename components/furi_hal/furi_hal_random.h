@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define FURI_HAL_RANDOM_MAX 0xFFFFFFFFU
+
 #ifdef __cplusplus
 extern "C" {
 #endif
