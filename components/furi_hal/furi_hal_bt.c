@@ -224,3 +224,161 @@ void furi_hal_bt_set_key_storage_change_callback(
     (void)callback;
     (void)context;
 }
+
+/* ---- Extra Beacon (non-connectable advertising) ---- */
+
+#include <extra_beacon.h>
+#include <esp_gap_ble_api.h>
+#include <esp_bt_main.h>
+#include <furi_hal_random.h>
+
+static GapExtraBeaconState s_beacon_state = GapExtraBeaconStateStopped;
+static GapExtraBeaconConfig s_beacon_config;
+static uint8_t s_beacon_data[EXTRA_BEACON_MAX_DATA_SIZE];
+static uint8_t s_beacon_data_len;
+static volatile bool s_beacon_adv_data_set = false;
+
+static esp_ble_adv_params_t s_beacon_adv_params = {
+    .adv_int_min = 0x00A0, // 100ms default
+    .adv_int_max = 0x00A0,
+    .adv_type = ADV_TYPE_NONCONN_IND,
+    .own_addr_type = BLE_ADDR_TYPE_RANDOM,
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
+
+static void beacon_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
+    switch(event) {
+    case ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT:
+        s_beacon_adv_data_set = true;
+        if(param->adv_data_raw_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            esp_ble_gap_start_advertising(&s_beacon_adv_params);
+        }
+        break;
+    case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+        if(param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            s_beacon_state = GapExtraBeaconStateStarted;
+        }
+        break;
+    case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+        s_beacon_state = GapExtraBeaconStateStopped;
+        break;
+    default:
+        break;
+    }
+}
+
+void gap_extra_beacon_init(void) {
+    s_beacon_state = GapExtraBeaconStateStopped;
+    memset(&s_beacon_config, 0, sizeof(s_beacon_config));
+    s_beacon_data_len = 0;
+}
+
+GapExtraBeaconState gap_extra_beacon_get_state(void) {
+    return s_beacon_state;
+}
+
+bool gap_extra_beacon_set_config(const GapExtraBeaconConfig* config) {
+    if(!config) return false;
+    memcpy(&s_beacon_config, config, sizeof(GapExtraBeaconConfig));
+
+    // Convert intervals from ms to BLE units (0.625ms)
+    s_beacon_adv_params.adv_int_min = (config->min_adv_interval_ms * 1000) / 625;
+    s_beacon_adv_params.adv_int_max = (config->max_adv_interval_ms * 1000) / 625;
+    if(s_beacon_adv_params.adv_int_min < 0x20) s_beacon_adv_params.adv_int_min = 0x20;
+    if(s_beacon_adv_params.adv_int_max < s_beacon_adv_params.adv_int_min)
+        s_beacon_adv_params.adv_int_max = s_beacon_adv_params.adv_int_min;
+
+    // Channel map
+    s_beacon_adv_params.channel_map = (esp_ble_adv_channel_t)config->adv_channel_map;
+
+    // Address type
+    s_beacon_adv_params.own_addr_type =
+        (config->address_type == GapAddressTypePublic) ? BLE_ADDR_TYPE_PUBLIC :
+                                                         BLE_ADDR_TYPE_RANDOM;
+
+    // Set random address if configured
+    if(config->address_type == GapAddressTypeRandom) {
+        esp_bd_addr_t addr;
+        memcpy(addr, config->address, 6);
+        addr[0] = (addr[0] & 0x3F) | 0xC0; // Ensure valid random static format
+        esp_ble_gap_set_rand_addr(addr);
+    }
+
+    return true;
+}
+
+const GapExtraBeaconConfig* gap_extra_beacon_get_config(void) {
+    return &s_beacon_config;
+}
+
+bool gap_extra_beacon_set_data(const uint8_t* data, uint8_t length) {
+    if(length > EXTRA_BEACON_MAX_DATA_SIZE) return false;
+    memcpy(s_beacon_data, data, length);
+    s_beacon_data_len = length;
+    return true;
+}
+
+uint8_t gap_extra_beacon_get_data(uint8_t* data) {
+    if(data) {
+        memcpy(data, s_beacon_data, s_beacon_data_len);
+    }
+    return s_beacon_data_len;
+}
+
+bool gap_extra_beacon_start(void) {
+    if(s_beacon_state == GapExtraBeaconStateStarted) return true;
+    if(esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED) return false;
+
+    esp_ble_gap_register_callback(beacon_gap_cb);
+
+    s_beacon_adv_data_set = false;
+    esp_err_t err = esp_ble_gap_config_adv_data_raw(s_beacon_data, s_beacon_data_len);
+    if(err != ESP_OK) return false;
+
+    // Wait for advertising data to be set and advertising to start
+    for(int i = 0; i < 50 && s_beacon_state != GapExtraBeaconStateStarted; i++) {
+        furi_delay_ms(10);
+    }
+    return s_beacon_state == GapExtraBeaconStateStarted;
+}
+
+bool gap_extra_beacon_stop(void) {
+    if(s_beacon_state != GapExtraBeaconStateStarted) return true;
+
+    esp_err_t err = esp_ble_gap_stop_advertising();
+    if(err != ESP_OK) return false;
+
+    for(int i = 0; i < 50 && s_beacon_state != GapExtraBeaconStateStopped; i++) {
+        furi_delay_ms(10);
+    }
+    return s_beacon_state == GapExtraBeaconStateStopped;
+}
+
+bool furi_hal_bt_extra_beacon_is_active(void) {
+    return gap_extra_beacon_get_state() == GapExtraBeaconStateStarted;
+}
+
+bool furi_hal_bt_extra_beacon_set_config(const GapExtraBeaconConfig* config) {
+    return gap_extra_beacon_set_config(config);
+}
+
+const GapExtraBeaconConfig* furi_hal_bt_extra_beacon_get_config(void) {
+    return gap_extra_beacon_get_config();
+}
+
+bool furi_hal_bt_extra_beacon_set_data(const uint8_t* data, uint8_t len) {
+    return gap_extra_beacon_set_data(data, len);
+}
+
+uint8_t furi_hal_bt_extra_beacon_get_data(uint8_t* data) {
+    return gap_extra_beacon_get_data(data);
+}
+
+bool furi_hal_bt_extra_beacon_start(void) {
+    return gap_extra_beacon_start();
+}
+
+bool furi_hal_bt_extra_beacon_stop(void) {
+    return gap_extra_beacon_stop();
+}

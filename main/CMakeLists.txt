@@ -65,6 +65,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         idf::toolbox
         idf::esp_http_client
         idf::lfrfid
+        idf::mjs
     )
 
     foreach(esp32_fam_target IN LISTS ESP32_FAM_PORTED_OBJECT_TARGETS)
@@ -80,6 +81,8 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
             "${ESP32_DIR}/lib/lfrfid"
             "${ESP32_DIR}/lib/lfrfid/protocols"
             "${ESP32_DIR}/lib/lfrfid/tools"
+            "${ESP32_DIR}/lib/mjs"
+            "${ESP32_DIR}/lib/mjs/common"
             "${ESP32_DIR}"
             "${ESP32_DIR}/applications"
             "${ESP32_DIR}/applications/main"

@@ -126,6 +126,18 @@ void furi_hal_bt_set_key_storage_change_callback(
     BleGlueKeyStorageChangedCallback callback,
     void* context);
 
+/* ---- Extra Beacon (non-connectable advertising) ---- */
+
+#include <extra_beacon.h>
+
+bool furi_hal_bt_extra_beacon_is_active(void);
+bool furi_hal_bt_extra_beacon_set_config(const GapExtraBeaconConfig* config);
+const GapExtraBeaconConfig* furi_hal_bt_extra_beacon_get_config(void);
+bool furi_hal_bt_extra_beacon_set_data(const uint8_t* data, uint8_t len);
+uint8_t furi_hal_bt_extra_beacon_get_data(uint8_t* data);
+bool furi_hal_bt_extra_beacon_start(void);
+bool furi_hal_bt_extra_beacon_stop(void);
+
 #ifdef __cplusplus
 }
 #endif

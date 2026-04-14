@@ -57,13 +57,8 @@ typedef enum {
     GapStateConnected,
 } GapState;
 
-typedef struct {
-    uint16_t adv_int_min;
-    uint16_t adv_int_max;
-    uint8_t address[GAP_MAC_ADDR_SIZE];
-    uint8_t data[31];
-    uint8_t data_len;
-} GapExtraBeaconConfig;
+// Full GapExtraBeaconConfig definition in extra_beacon.h
+#include <extra_beacon.h>
 
 /** Callback fired when BLE key storage changes (STM32: NVM SRAM).
  *  On ESP32, Bluedroid manages bonding via NVS — this is never called. */

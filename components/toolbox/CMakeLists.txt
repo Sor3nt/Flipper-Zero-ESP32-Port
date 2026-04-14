@@ -38,6 +38,7 @@ idf_component_register(
         "../../lib/toolbox/pulse_protocols/pulse_glue.c"
         "../../lib/toolbox/buffer_stream.c"
         "../../lib/toolbox/varint.c"
+        "../../lib/toolbox/str_buffer.c"
     INCLUDE_DIRS "." "stream" "../../lib/toolbox/protocols" "../../lib/toolbox/pulse_protocols" "../.."
     REQUIRES mlib furi storage flipper_application loader gui archive mbedtls
     PRIV_REQUIRES heatshrink

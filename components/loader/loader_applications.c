@@ -172,8 +172,9 @@ static int32_t loader_applications_thread(void* p) {
 
     while(loader_applications_select_app(app)) {
         if(furi_string_end_with(app->file_path, ".js")) {
-            loader_applications_trace("js_not_supported");
-            loader_applications_show_js_not_supported(app);
+            loader_applications_trace("launch_js");
+            loader_applications_start_app(
+                app, "js_app", furi_string_get_cstr(app->file_path));
         } else {
             loader_applications_trace("launch_fap");
             loader_applications_start_app(app, furi_string_get_cstr(app->file_path), NULL);

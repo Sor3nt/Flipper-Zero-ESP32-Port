@@ -1,6 +1,14 @@
 #include "../js_modules.h"
 #include "furi_hal_random.h"
+#include <math.h>
 #include <float.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#ifndef M_E
+#define M_E 2.71828182845904523536
+#endif
 
 #define JS_MATH_PI      ((double)M_PI)
 #define JS_MATH_E       ((double)M_E)
