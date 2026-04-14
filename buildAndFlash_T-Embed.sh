@@ -7,7 +7,7 @@ ESP32_DIR="${SCRIPT_DIR}"
 PORT="${ESPPORT:-}"
 RUN_MONITOR=0
 BUILD_ONLY=0
-EXPORT_SCRIPT="${ESP_IDF_EXPORT_SCRIPT:-/Users/matthias/esp/esp-idf/export.sh}"
+EXPORT_SCRIPT="${ESP_IDF_EXPORT_SCRIPT:-~/esp/esp-idf/export.sh}"
 
 BOARD="lilygo_t_embed_cc1101"
 BUILD_DIR="build_t_embed"
