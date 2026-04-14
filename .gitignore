@@ -7,3 +7,4 @@ __pycache__/
 sdkconfig.old
 .DS_Store
 build_waveshare_c6/
+/tmp
