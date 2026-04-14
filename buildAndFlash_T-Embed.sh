@@ -16,7 +16,7 @@ IDF_TARGET="esp32s3"
 detect_usbmodem_port() {
     local matches=()
     shopt -s nullglob
-    matches=(/dev/cu.usbmodem*)
+    matches=(/dev/cu.usbmodem* /dev/ttyACM*)
     shopt -u nullglob
 
     if [[ "${#matches[@]}" -eq 1 ]]; then
@@ -26,13 +26,13 @@ detect_usbmodem_port() {
 
     if [[ "${#matches[@]}" -eq 0 ]]; then
         if [[ "${BUILD_ONLY}" -eq 0 ]]; then
-            echo "No /dev/cu.usbmodem* device found. Use --port or set ESPPORT." >&2
+            echo "No serial device found (searched /dev/cu.usbmodem* and /dev/ttyACM*). Use --port or set ESPPORT." >&2
             return 1
-        else 
+        else
             return 0
         fi
     else
-        echo "Multiple /dev/cu.usbmodem* devices found: ${matches[*]}" >&2
+        echo "Multiple serial devices found: ${matches[*]}" >&2
         echo "Use --port or set ESPPORT." >&2
         return 1
     fi
@@ -45,7 +45,7 @@ Usage: $(basename "$0") [--port <device>] [--monitor] [--build-only]
 Builds and flashes the ESP32-S3 firmware for LilyGo T-Embed CC1101.
 
 Options:
-  --port <device>  Serial device to flash. Default: auto-detect /dev/cu.usbmodem*
+  --port <device>  Serial device to flash. Default: auto-detect /dev/cu.usbmodem* (macOS) or /dev/ttyACM* (Linux)
   --monitor        Open idf.py monitor after flashing
   --build-only     Build only, skip flashing
 
