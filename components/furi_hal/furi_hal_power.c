@@ -16,6 +16,7 @@
 #include <driver/i2c.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <driver/gpio.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -398,6 +399,17 @@ bool furi_hal_power_is_charging_done(void) {
 }
 
 void furi_hal_power_shutdown(void) {
+    /* Wait for button release to avoid immediate wakeup */
+    while(gpio_get_level((gpio_num_t)BOARD_PIN_BUTTON_BOOT) == 0) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    vTaskDelay(pdMS_TO_TICKS(200)); /* debounce */
+
+    /* Power down peripherals (CC1101 + WS2812) */
+#ifdef BOARD_PIN_PWR_EN
+    gpio_set_level((gpio_num_t)BOARD_PIN_PWR_EN, 0);
+#endif
+
     /* Configure BOOT/encoder button (GPIO0) as wake-up source (active low) */
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
@@ -408,17 +420,7 @@ void furi_hal_power_shutdown(void) {
 }
 
 void furi_hal_power_off(void) {
-    furi_hal_power_refresh_sample();
-    if(furi_hal_power_is_usb_present()) {
-        return;
-    }
-
-#if SOC_PM_SUPPORT_EXT0_WAKEUP
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
-#else
-    esp_deep_sleep_enable_gpio_wakeup(BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
-#endif
-    esp_deep_sleep_start();
+    furi_hal_power_shutdown();
 }
 
 FURI_NORETURN void furi_hal_power_reset(void) {

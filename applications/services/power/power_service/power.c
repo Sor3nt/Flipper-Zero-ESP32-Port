@@ -360,13 +360,11 @@ void power_trigger_ui_update(Power* power) {
 }
 
 static void power_handle_shutdown(Power* power) {
+    UNUSED(power);
     furi_hal_power_off();
-    // Notify user if USB is plugged
-    view_holder_send_to_front(power->view_holder);
-    view_holder_set_view(
-        power->view_holder, power_unplug_usb_get_view(power->view_power_unplug_usb));
-    furi_delay_ms(100);
-    furi_halt("Disconnect USB for safe shutdown");
+    /* furi_hal_power_off() should not return (enters deep sleep).
+     * If it does, halt as fallback. */
+    furi_halt("Power off failed");
 }
 
 static void power_handle_reboot(PowerBootMode mode) {
