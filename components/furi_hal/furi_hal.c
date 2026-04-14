@@ -39,6 +39,7 @@ void furi_hal_init(void) {
     furi_hal_usb_init();
     furi_hal_light_init();
     furi_hal_display_init();
+    furi_hal_speaker_init();
     furi_hal_nfc_init();
     ESP_LOGI(TAG, "Init complete");
 }

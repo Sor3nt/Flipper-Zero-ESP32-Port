@@ -1,6 +1,6 @@
 /**
  * @file furi_hal_speaker.h
- * Speaker HAL (ESP32 stub)
+ * Speaker HAL — I2S tone generation (T-Embed) / no-op stubs (other boards)
  */
 #pragma once
 
