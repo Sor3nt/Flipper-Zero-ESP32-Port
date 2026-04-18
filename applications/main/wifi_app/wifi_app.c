@@ -8,6 +8,7 @@
 #include "views/handshake_channel_view.h"
 #include "views/airsnitch_view.h"
 #include "views/netscan_view.h"
+#include "views/beacon_view.h"
 
 static bool wifi_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -29,88 +30,52 @@ static void wifi_app_tick_event_callback(void* context) {
 
 static WifiApp* wifi_app_alloc(void) {
     WifiApp* app = malloc(sizeof(WifiApp));
-
     app->gui = furi_record_open(RECORD_GUI);
-
     app->scene_manager = scene_manager_alloc(&wifi_app_scene_handlers, app);
     app->view_dispatcher = view_dispatcher_alloc();
-
     view_dispatcher_set_event_callback_context(app->view_dispatcher, app);
     view_dispatcher_set_custom_event_callback(app->view_dispatcher, wifi_app_custom_event_callback);
-    view_dispatcher_set_navigation_event_callback(
-        app->view_dispatcher, wifi_app_back_event_callback);
-    view_dispatcher_set_tick_event_callback(
-        app->view_dispatcher, wifi_app_tick_event_callback, 250);
-    view_dispatcher_attach_to_gui(
-        app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
-
-    // Submenu (for top-level menu only)
+    view_dispatcher_set_navigation_event_callback(app->view_dispatcher, wifi_app_back_event_callback);
+    view_dispatcher_set_tick_event_callback(app->view_dispatcher, wifi_app_tick_event_callback, 250);
+    view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
     app->submenu = submenu_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewSubmenu, submenu_get_view(app->submenu));
-
-    // Widget (for AP detail)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewSubmenu, submenu_get_view(app->submenu));
     app->widget = widget_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewWidget, widget_get_view(app->widget));
-
-    // Loading (for scan progress)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewWidget, widget_get_view(app->widget));
     app->loading = loading_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewLoading, loading_get_view(app->loading));
-
-    // Custom views
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewLoading, loading_get_view(app->loading));
     app->view_ap_list = ap_list_alloc();
     ap_list_set_view_dispatcher(app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewApList, app->view_ap_list);
-
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewApList, app->view_ap_list);
     app->view_deauther = deauther_view_alloc();
     view_set_context(app->view_deauther, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewDeauther, app->view_deauther);
-
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewDeauther, app->view_deauther);
     app->view_sniffer = sniffer_view_alloc();
     view_set_context(app->view_sniffer, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewSniffer, app->view_sniffer);
-
-    // Text input (for crawler domain)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewSniffer, app->view_sniffer);
     app->text_input = text_input_alloc();
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewTextInput, text_input_get_view(app->text_input));
-
-    // Crawler view
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewTextInput, text_input_get_view(app->text_input));
     app->view_crawler = crawler_view_alloc();
     crawler_view_set_view_dispatcher(app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewCrawler, app->view_crawler);
-
-    // Handshake capture view (single target)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewCrawler, app->view_crawler);
     app->view_handshake = handshake_view_alloc();
     view_set_context(app->view_handshake, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewHandshake, app->view_handshake);
-
-    // Handshake channel view (multi target)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewHandshake, app->view_handshake);
     app->view_handshake_channel = handshake_channel_view_alloc();
     view_set_context(app->view_handshake_channel, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewHandshakeChannel, app->view_handshake_channel);
-
-    // AirSnitch view (ARP scan results)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewHandshakeChannel, app->view_handshake_channel);
     app->view_airsnitch = airsnitch_view_alloc();
     view_set_context(app->view_airsnitch, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewAirSnitch, app->view_airsnitch);
-
-    // Network scanner view (IP list + port scan)
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewAirSnitch, app->view_airsnitch);
     app->view_netscan = netscan_view_alloc();
     view_set_context(app->view_netscan, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, WifiAppViewNetscan, app->view_netscan);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewNetscan, app->view_netscan);
 
-    // Data
+    // Beacon view allocation
+    app->beacon_view_obj = beacon_view_alloc();
+    app->view_beacon = beacon_view_get_view(app->beacon_view_obj);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewBeacon, app->view_beacon);
+
     app->ap_records = malloc(sizeof(WifiApRecord) * WIFI_APP_MAX_APS);
     app->ap_count = 0;
     app->selected_index = 0;
@@ -129,19 +94,16 @@ static WifiApp* wifi_app_alloc(void) {
     app->scanner_next_scene = WifiAppSceneApDetail;
     memset(app->crawler_domain, 0, sizeof(app->crawler_domain));
     memset(&app->crawler_state, 0, sizeof(app->crawler_state));
-
+    memset(app->single_ssid, 0, sizeof(app->single_ssid));
     return app;
 }
 
 static void wifi_app_free(WifiApp* app) {
-    // Keep WiFi alive if connected, otherwise full cleanup
     if(wifi_hal_is_connected()) {
         wifi_hal_cleanup_keep_connection();
     } else {
         wifi_hal_cleanup();
     }
-
-    // Remove views
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewSubmenu);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewWidget);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewLoading);
@@ -154,8 +116,7 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewHandshakeChannel);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewAirSnitch);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewNetscan);
-
-    // Free GUI modules (must use proper free functions!)
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewBeacon);
     submenu_free(app->submenu);
     widget_free(app->widget);
     loading_free(app->loading);
@@ -168,23 +129,20 @@ static void wifi_app_free(WifiApp* app) {
     handshake_channel_view_free(app->view_handshake_channel);
     airsnitch_view_free(app->view_airsnitch);
     netscan_view_free(app->view_netscan);
-
+    beacon_view_free(app->beacon_view_obj);
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
-
     free(app->ap_records);
     furi_string_free(app->text_buf);
-
     furi_record_close(RECORD_GUI);
     app->gui = NULL;
-
     free(app);
 }
 
 int32_t wifi_app(void* args) {
     WifiApp* app = wifi_app_alloc();
-
-    // Direct scene launch via argument (e.g. from desktop quick menu)
+    wifi_hal_preinit();
+    wifi_hal_start();
     if(args && strcmp((const char*)args, "handshake_channel") == 0) {
         scene_manager_next_scene(app->scene_manager, WifiAppSceneHandshakeChannel);
     } else if(args && strcmp((const char*)args, "channel_deauth") == 0) {
@@ -194,7 +152,6 @@ int32_t wifi_app(void* args) {
         scene_manager_next_scene(app->scene_manager, WifiAppSceneMenu);
     }
     view_dispatcher_run(app->view_dispatcher);
-
     wifi_app_free(app);
     return 0;
 }
