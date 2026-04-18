@@ -1,6 +1,6 @@
 #include "../wifi_app.h"
 
-static void ap_detail_deauth_callback(GuiButtonType result, InputType type, void* context) {
+static void __attribute__((unused)) ap_detail_deauth_callback(GuiButtonType result, InputType type, void* context) {
     WifiApp* app = context;
     if(type == InputTypeShort && result == GuiButtonTypeRight) {
         view_dispatcher_send_custom_event(app->view_dispatcher, WifiAppCustomEventDeauthToggle);

@@ -83,6 +83,8 @@ void variable_item_list_set_selected_item(VariableItemList* variable_item_list, 
 
 uint8_t variable_item_list_get_selected_item_index(VariableItemList* variable_item_list);
 
+void variable_item_list_set_header(VariableItemList* variable_item_list, const char* header);
+
 /** Set item current selected index
  *
  * @param      item                 VariableItem* instance
