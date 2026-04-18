@@ -1,6 +1,10 @@
 #include "furi_hal_rtc.h"
 
+#include <nvs.h>
 #include <time.h>
+
+#define FURI_RTC_NVS_NAMESPACE "furi"
+#define FURI_RTC_NVS_KEY_OFFSET "rtc_off"
 
 typedef struct {
     FuriHalRtcHeapTrackMode heap_track_mode;
@@ -18,6 +22,9 @@ typedef struct {
     FuriHalRtcLocaleUnits locale_units;
 } FuriHalRtcState;
 
+static DateTime furi_hal_rtc_alarm_time;
+static bool furi_hal_rtc_alarm_enabled;
+
 static FuriHalRtcState furi_hal_rtc = {
     .heap_track_mode = FuriHalRtcHeapTrackModeNone,
     .boot_mode = FuriHalRtcBootModeNormal,
@@ -34,6 +41,29 @@ static FuriHalRtcState furi_hal_rtc = {
     .locale_units = FuriHalRtcLocaleUnitsMetric,
 };
 
+static void furi_hal_rtc_load_offset_from_nvs(void) {
+    nvs_handle_t handle;
+    if(nvs_open(FURI_RTC_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return;
+    }
+    int64_t stored = 0;
+    esp_err_t err = nvs_get_i64(handle, FURI_RTC_NVS_KEY_OFFSET, &stored);
+    nvs_close(handle);
+    if(err == ESP_OK) {
+        furi_hal_rtc.time_offset = stored;
+    }
+}
+
+static void furi_hal_rtc_save_offset_to_nvs(void) {
+    nvs_handle_t handle;
+    if(nvs_open(FURI_RTC_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    nvs_set_i64(handle, FURI_RTC_NVS_KEY_OFFSET, furi_hal_rtc.time_offset);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
 static time_t furi_hal_rtc_now(void) {
     return time(NULL) + (time_t)furi_hal_rtc.time_offset;
 }
@@ -45,6 +75,7 @@ void furi_hal_rtc_deinit_early(void) {
 }
 
 void furi_hal_rtc_init(void) {
+    furi_hal_rtc_load_offset_from_nvs();
 }
 
 void furi_hal_rtc_prepare_for_shutdown(void) {
@@ -173,11 +204,33 @@ void furi_hal_rtc_set_datetime(DateTime* datetime) {
     const time_t target = mktime(&desired);
     if(target != (time_t)-1) {
         furi_hal_rtc.time_offset = (int64_t)target - (int64_t)time(NULL);
+        furi_hal_rtc_save_offset_to_nvs();
     }
 }
 
 uint32_t furi_hal_rtc_get_timestamp(void) {
     return (uint32_t)furi_hal_rtc_now();
+}
+
+void furi_hal_rtc_set_alarm(const DateTime* datetime, bool enabled) {
+    if(enabled && datetime) {
+        furi_hal_rtc_alarm_time = *datetime;
+        furi_hal_rtc_alarm_enabled = true;
+    } else {
+        furi_hal_rtc_alarm_enabled = false;
+    }
+}
+
+bool furi_hal_rtc_get_alarm(DateTime* datetime) {
+    if(datetime) {
+        *datetime = furi_hal_rtc_alarm_time;
+    }
+    return furi_hal_rtc_alarm_enabled;
+}
+
+void furi_hal_rtc_set_alarm_callback(FuriHalRtcAlarmCallback callback, void* context) {
+    (void)callback;
+    (void)context;
 }
 
 FuriHalRtcLocaleTimeFormat furi_hal_rtc_get_locale_timeformat(void) {

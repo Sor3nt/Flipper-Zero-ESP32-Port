@@ -1,4 +1,5 @@
 ADD_SCENE(desktop_settings, start, Start)
+ADD_SCENE(desktop_settings, asset_pack, AssetPack)
 ADD_SCENE(desktop_settings, favorite, Favorite)
 ADD_SCENE(desktop_settings, pin_menu, PinMenu)
 

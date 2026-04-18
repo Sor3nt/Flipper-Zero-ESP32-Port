@@ -1,6 +1,6 @@
 #include "variable_item_list.h"
-#include <gui/elements.h>
-#include <gui/canvas.h>
+#include "../elements.h"
+#include "../canvas.h"
 #include <furi.h>
 #include <assets_icons.h>
 #include <m-array.h>
@@ -31,23 +31,36 @@ typedef struct {
     VariableItemArray_t items;
     uint8_t position;
     uint8_t window_position;
+    FuriString* header;
     size_t scroll_counter;
     bool locked_message_visible;
+    bool editing; // true when user has pressed Ok to edit the selected item's value
 } VariableItemListModel;
+
+static uint8_t variable_item_list_items_on_screen(const VariableItemListModel* model) {
+    size_t res = 4;
+    return (uint8_t)((furi_string_empty(model->header)) ? res : res - 1);
+}
 
 static void variable_item_list_process_up(VariableItemList* variable_item_list);
 static void variable_item_list_process_down(VariableItemList* variable_item_list);
 static void variable_item_list_process_left(VariableItemList* variable_item_list);
 static void variable_item_list_process_right(VariableItemList* variable_item_list);
 static void variable_item_list_process_ok(VariableItemList* variable_item_list);
+VariableItem* variable_item_list_get_selected_item(VariableItemListModel* model);
 
 static void variable_item_list_draw_callback(Canvas* canvas, void* _model) {
     VariableItemListModel* model = _model;
 
     const uint8_t item_height = 16;
-    const uint8_t item_width = 123;
+    uint8_t item_width = canvas_width(canvas) - 5;
 
     canvas_clear(canvas);
+
+    if(!furi_string_empty(model->header)) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str(canvas, 4, 11, furi_string_get_cstr(model->header));
+    }
 
     uint8_t position = 0;
     VariableItemArray_it_t it;
@@ -56,8 +69,8 @@ static void variable_item_list_draw_callback(Canvas* canvas, void* _model) {
     for(VariableItemArray_it(it, model->items); !VariableItemArray_end_p(it);
         VariableItemArray_next(it)) {
         uint8_t item_position = position - model->window_position;
-        uint8_t items_on_screen = 4;
-        uint8_t y_offset = 0;
+        uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+        uint8_t y_offset = furi_string_empty(model->header) ? 0 : item_height;
 
         if(item_position < items_on_screen) {
             const VariableItem* item = VariableItemArray_cref(it);
@@ -103,8 +116,10 @@ static void variable_item_list_draw_callback(Canvas* canvas, void* _model) {
             if(item->locked) {
                 canvas_draw_icon(canvas, 110, item_text_y - 8, &I_Lock_7x8);
             } else {
+                bool is_editing = (position == model->position) && model->editing;
+
                 if(item->current_value_index > 0) {
-                    canvas_draw_str(canvas, temp_x_default, item_text_y, "<");
+                    canvas_draw_str(canvas, temp_x_default, item_text_y, is_editing ? "[" : "<");
                 }
 
                 elements_scrollable_text_line_str(
@@ -118,7 +133,7 @@ static void variable_item_list_draw_callback(Canvas* canvas, void* _model) {
                     true);
 
                 if(item->current_value_index < (item->values_count - 1)) {
-                    canvas_draw_str(canvas, 115, item_text_y, ">");
+                    canvas_draw_str(canvas, 115, item_text_y, is_editing ? "]" : ">");
                 }
             }
         }
@@ -153,7 +168,10 @@ void variable_item_list_set_selected_item(VariableItemList* variable_item_list, 
         VariableItemListModel * model,
         {
             uint8_t position = index;
-            if(position >= VariableItemArray_size(model->items)) {
+            const size_t items_count = VariableItemArray_size(model->items);
+            uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+
+            if(position >= items_count) {
                 position = 0;
             }
 
@@ -164,11 +182,12 @@ void variable_item_list_set_selected_item(VariableItemList* variable_item_list, 
                 model->window_position -= 1;
             }
 
-            if(VariableItemArray_size(model->items) <= 4) {
+            if(items_count <= items_on_screen) {
                 model->window_position = 0;
             } else {
-                if(model->window_position >= (VariableItemArray_size(model->items) - 4)) {
-                    model->window_position = (VariableItemArray_size(model->items) - 4);
+                const size_t pos = items_count - items_on_screen;
+                if(model->window_position > pos) {
+                    model->window_position = (uint8_t)pos;
                 }
             }
         },
@@ -181,6 +200,22 @@ uint8_t variable_item_list_get_selected_item_index(VariableItemList* variable_it
     uint8_t idx = model->position;
     view_commit_model(variable_item_list->view, false);
     return idx;
+}
+
+void variable_item_list_set_header(VariableItemList* variable_item_list, const char* header) {
+    furi_check(variable_item_list);
+
+    with_view_model(
+        variable_item_list->view,
+        VariableItemListModel * model,
+        {
+            if(header == NULL) {
+                furi_string_reset(model->header);
+            } else {
+                furi_string_set_str(model->header, header);
+            }
+        },
+        true);
 }
 
 static bool variable_item_list_input_callback(InputEvent* event, void* context) {
@@ -258,20 +293,38 @@ void variable_item_list_process_up(VariableItemList* variable_item_list) {
         variable_item_list->view,
         VariableItemListModel * model,
         {
-            uint8_t items_on_screen = 4;
-            if(model->position > 0) {
-                model->position--;
-
-                if((model->position == model->window_position) && (model->window_position > 0)) {
-                    model->window_position--;
+            if(model->editing) {
+                // In editing mode: spin CCW decreases value
+                VariableItem* item = variable_item_list_get_selected_item(model);
+                if(item->locked) {
+                    model->locked_message_visible = true;
+                    furi_timer_start(
+                        variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
+                } else if(item->current_value_index > 0) {
+                    item->current_value_index--;
+                    model->scroll_counter = 0;
+                    if(item->change_callback) {
+                        item->change_callback(item);
+                    }
                 }
             } else {
-                model->position = VariableItemArray_size(model->items) - 1;
-                if(model->position > (items_on_screen - 1)) {
-                    model->window_position = model->position - (items_on_screen - 1);
+                // Normal mode: spin CCW scrolls up through items
+                model->editing = false;
+                uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+                if(model->position > 0) {
+                    model->position--;
+                    if((model->position == model->window_position) &&
+                       (model->window_position > 0)) {
+                        model->window_position--;
+                    }
+                } else {
+                    model->position = VariableItemArray_size(model->items) - 1;
+                    if(model->position > (items_on_screen - 1)) {
+                        model->window_position = model->position - (items_on_screen - 1);
+                    }
                 }
+                model->scroll_counter = 0;
             }
-            model->scroll_counter = 0;
         },
         true);
 }
@@ -281,19 +334,37 @@ void variable_item_list_process_down(VariableItemList* variable_item_list) {
         variable_item_list->view,
         VariableItemListModel * model,
         {
-            uint8_t items_on_screen = 4;
-            if(model->position < (VariableItemArray_size(model->items) - 1)) {
-                model->position++;
-                if((model->position - model->window_position) > (items_on_screen - 2) &&
-                   model->window_position <
-                       (VariableItemArray_size(model->items) - items_on_screen)) {
-                    model->window_position++;
+            if(model->editing) {
+                // In editing mode: spin CW increases value
+                VariableItem* item = variable_item_list_get_selected_item(model);
+                if(item->locked) {
+                    model->locked_message_visible = true;
+                    furi_timer_start(
+                        variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
+                } else if(item->current_value_index < (item->values_count - 1)) {
+                    item->current_value_index++;
+                    model->scroll_counter = 0;
+                    if(item->change_callback) {
+                        item->change_callback(item);
+                    }
                 }
             } else {
-                model->position = 0;
-                model->window_position = 0;
+                // Normal mode: spin CW scrolls down through items
+                model->editing = false;
+                uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+                if(model->position < (VariableItemArray_size(model->items) - 1)) {
+                    model->position++;
+                    if((model->position - model->window_position) > (items_on_screen - 2) &&
+                       model->window_position <
+                           (VariableItemArray_size(model->items) - items_on_screen)) {
+                        model->window_position++;
+                    }
+                } else {
+                    model->position = 0;
+                    model->window_position = 0;
+                }
+                model->scroll_counter = 0;
             }
-            model->scroll_counter = 0;
         },
         true);
 }
@@ -369,7 +440,14 @@ void variable_item_list_process_ok(VariableItemList* variable_item_list) {
                 model->locked_message_visible = true;
                 furi_timer_start(
                     variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
+            } else if(model->editing) {
+                // Second Ok press: exit editing mode
+                model->editing = false;
+            } else if(item->values_count > 1) {
+                // Item has values to edit: enter editing mode
+                model->editing = true;
             } else if(variable_item_list->callback) {
+                // Item has no values (it's a pure action): call enter callback
                 variable_item_list->callback(variable_item_list->context, model->position);
             }
         },
@@ -415,7 +493,9 @@ VariableItemList* variable_item_list_alloc(void) {
             VariableItemArray_init(model->items);
             model->position = 0;
             model->window_position = 0;
+            model->header = furi_string_alloc();
             model->scroll_counter = 0;
+            model->editing = false;
         },
         true);
     variable_item_list->scroll_timer = furi_timer_alloc(
@@ -439,6 +519,7 @@ void variable_item_list_free(VariableItemList* variable_item_list) {
                 furi_string_free(VariableItemArray_ref(it)->locked_message);
             }
             VariableItemArray_clear(model->items);
+            furi_string_free(model->header);
         },
         false);
     furi_timer_stop(variable_item_list->scroll_timer);
@@ -463,6 +544,7 @@ void variable_item_list_reset(VariableItemList* variable_item_list) {
                 furi_string_free(VariableItemArray_ref(it)->locked_message);
             }
             VariableItemArray_reset(model->items);
+            furi_string_reset(model->header);
         },
         false);
 }

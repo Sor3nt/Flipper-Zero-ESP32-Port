@@ -196,6 +196,7 @@ static uint8_t calculate_luhn(uint64_t number) {
 
 static uint64_t hex_num(uint64_t hex) {
     uint64_t result = 0;
+    uint64_t place = 1;
     for(uint8_t i = 0; i < 8; ++i) {
         uint8_t half_byte = hex & 0x0F;
         uint64_t num = 0;
@@ -203,7 +204,8 @@ static uint64_t hex_num(uint64_t hex) {
             num += (half_byte & 0x1) * (1 << j);
             half_byte = half_byte >> 1;
         }
-        result += num * pow(10, i);
+        result += num * place;
+        place *= 10;
         hex = hex >> 4;
     }
     return result;

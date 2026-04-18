@@ -27,13 +27,17 @@ void subghz_view_receiver_free(SubGhzViewReceiver* subghz_receiver);
 
 View* subghz_view_receiver_get_view(SubGhzViewReceiver* subghz_receiver);
 
+/** Call once per RX decode before updating list/status; coalesces gui_update under signal bursts. */
+bool subghz_view_receiver_begin_rx_gui_frame(SubGhzViewReceiver* subghz_receiver);
+
 void subghz_view_receiver_add_data_statusbar(
     SubGhzViewReceiver* subghz_receiver,
     const char* frequency_str,
     const char* preset_str,
     const char* history_stat_str,
     bool hopping_enabled,
-    bool bin_raw_enabled);
+    bool bin_raw_enabled,
+    bool commit_gui);
 
 void subghz_view_receiver_set_radio_device_type(
     SubGhzViewReceiver* subghz_receiver,
@@ -47,7 +51,8 @@ void subghz_view_receiver_add_item_to_menu(
     SubGhzViewReceiver* subghz_receiver,
     const char* name,
     const char* time,
-    uint8_t type);
+    uint8_t type,
+    bool commit_gui);
 
 uint16_t subghz_view_receiver_get_idx_menu(SubGhzViewReceiver* subghz_receiver);
 

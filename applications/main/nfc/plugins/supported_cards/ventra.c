@@ -23,7 +23,7 @@
 DateTime ventra_exp_date = {0}, ventra_validity_date = {0};
 uint8_t ventra_high_seq = 0, ventra_cur_blk = 0, ventra_mins_active = 0;
 
-uint32_t time_now() {
+static uint32_t time_now(void) {
     return furi_hal_rtc_get_timestamp();
 }
 

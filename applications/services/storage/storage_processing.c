@@ -4,6 +4,8 @@
 #include "storage_processing.h"
 #include "storage_internal_dirname_i.h"
 
+#include <ext_defaults_embedded.h>
+
 #define TAG "Storage"
 
 #define STORAGE_PATH_PREFIX_LEN 4u
@@ -477,6 +479,9 @@ static FS_Error storage_process_sd_mount(Storage* app) {
 
         ret = sd_mount_card(storage, true);
         storage_data_timestamp(storage);
+        if(ret == FSE_OK && storage_data_status(storage) == StorageStatusOK) {
+            storage_ext_try_seed_defaults(app);
+        }
     } while(false);
 
     return ret;
@@ -509,6 +514,56 @@ static FS_Error storage_process_sd_status(Storage* app) {
         ret = FSE_INTERNAL;
         break;
     }
+
+    return ret;
+}
+
+static FS_Error storage_process_sd_suspend_usb_msc(Storage* app) {
+    FS_Error ret = FSE_OK;
+
+    do {
+        StorageData* storage = &app->storage[ST_EXT];
+        if(storage_data_status(storage) == StorageStatusNotReady) {
+            ret = FSE_NOT_READY;
+            break;
+        }
+
+        if(storage_open_files_count(storage)) {
+            ret = FSE_DENIED;
+            break;
+        }
+
+        ret = sd_suspend_for_usb_msc(storage);
+        if(ret != FSE_OK) break;
+
+        StorageEvent event = {.type = StorageEventTypeCardUnmount};
+        furi_pubsub_publish(app->pubsub, &event);
+    } while(false);
+
+    return ret;
+}
+
+static FS_Error storage_process_sd_resume_usb_msc(Storage* app) {
+    FS_Error ret = FSE_OK;
+
+    do {
+        StorageData* storage = &app->storage[ST_EXT];
+        if(storage_data_status(storage) != StorageStatusNotReady) {
+            ret = FSE_OK;
+            break;
+        }
+
+        ret = sd_resume_after_usb_msc(storage);
+        if(ret != FSE_OK) {
+            StorageEvent event = {.type = StorageEventTypeCardMountError};
+            furi_pubsub_publish(app->pubsub, &event);
+            break;
+        }
+
+        storage_ext_try_seed_defaults(app);
+        StorageEvent event = {.type = StorageEventTypeCardMount};
+        furi_pubsub_publish(app->pubsub, &event);
+    } while(false);
 
     return ret;
 }
@@ -736,6 +791,12 @@ void storage_process_message_internal(Storage* app, StorageMessage* message) {
         break;
     case StorageCommandSDStatus:
         message->return_data->error_value = storage_process_sd_status(app);
+        break;
+    case StorageCommandSDSuspendUsbMsc:
+        message->return_data->error_value = storage_process_sd_suspend_usb_msc(app);
+        break;
+    case StorageCommandSDResumeUsbMsc:
+        message->return_data->error_value = storage_process_sd_resume_usb_msc(app);
         break;
     }
 

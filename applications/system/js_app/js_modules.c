@@ -11,6 +11,7 @@
 
 #ifdef ESP_PLATFORM
 #include <flipper_application/plugins/plugin_manager.h>
+#include "esp32_js_static_plugins.h"
 
 // Forward-declare entry points for statically linked JS modules
 const FlipperAppPluginDescriptor* js_event_loop_ep(void);
@@ -34,8 +35,12 @@ const FlipperAppPluginDescriptor* js_gui_icon_ep(void);
 const FlipperAppPluginDescriptor* js_notification_ep(void);
 const FlipperAppPluginDescriptor* js_math_ep(void);
 const FlipperAppPluginDescriptor* js_storage_ep(void);
+#if FLIPPER_JS_STATIC_HAVE_SUBGHZ
 const FlipperAppPluginDescriptor* js_subghz_ep(void);
+#endif
+#if FLIPPER_JS_STATIC_HAVE_INFRARED
 const FlipperAppPluginDescriptor* js_infrared_ep(void);
+#endif
 const FlipperAppPluginDescriptor* js_blebeacon_ep(void);
 // js_serial, js_gpio, js_i2c, js_spi excluded - need HAL porting
 
@@ -63,8 +68,12 @@ static const JsPluginEpFunc static_plugins[] = {
     js_notification_ep,
     js_math_ep,
     js_storage_ep,
+#if FLIPPER_JS_STATIC_HAVE_SUBGHZ
     js_subghz_ep,
+#endif
+#if FLIPPER_JS_STATIC_HAVE_INFRARED
     js_infrared_ep,
+#endif
     js_blebeacon_ep,
 };
 #endif // ESP_PLATFORM

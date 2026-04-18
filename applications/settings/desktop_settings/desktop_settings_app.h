@@ -53,4 +53,7 @@ typedef struct {
 
     uint8_t menu_idx;
     uint32_t pin_menu_idx;
+
+    char asset_pack_pick_names[DESKTOP_ASSET_PACK_MENU_MAX - 1][DESKTOP_ASSET_PACK_NAME_LEN];
+    uint8_t asset_pack_pick_count;
 } DesktopSettingsApp;

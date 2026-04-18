@@ -296,12 +296,9 @@ void expansion_on_system_start(void* arg) {
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
     furi_pubsub_subscribe(storage_get_pubsub(storage), expansion_storage_callback, instance);
+    furi_record_close(RECORD_STORAGE);
 
-    if(storage_sd_status(storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
-        return;
-    }
-
+    /* Expansion module settings are NVS-backed; enable even without SD. */
     expansion_enable(instance);
 }
 

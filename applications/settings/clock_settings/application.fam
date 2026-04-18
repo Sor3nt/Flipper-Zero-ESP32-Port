@@ -1,14 +1,12 @@
 App(
     appid="clock_settings",
-    name="Clock & Alarm",
-    apptype=FlipperAppType.EXTSETTINGS,
+    name="Date & time",
+    apptype=FlipperAppType.SETTINGS,
     entry_point="clock_settings",
-    requires=["gui"],
+    requires=["gui", "notification"],
     provides=["clock_settings_start"],
-    stack_size=1 * 1024,
-    order=30,
-    fap_libs=["assets"],
-    fap_category="assets",
+    stack_size=2 * 1024,
+    order=45,
 )
 
 App(

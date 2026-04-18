@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <furi.h>
 
+struct sdmmc_card;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,6 +66,18 @@ bool furi_hal_sd_unmount(void);
 
 /** Check if SD card is currently mounted */
 bool furi_hal_sd_is_mounted(void);
+
+/**
+ * Unmount FatFs from the SD volume but keep the card powered and the SDSPI
+ * host initialized (e.g. before handing the block device to USB MSC).
+ */
+bool furi_hal_sd_fatfs_detach_keep_card(void);
+
+/** Remount FatFs after USB MSC releases the card. */
+bool furi_hal_sd_fatfs_remount_after_usb(void);
+
+/** Raw SD/MMC card handle for USB MSC (NULL if card is not initialized). */
+struct sdmmc_card* furi_hal_sd_get_mmc_card(void);
 
 #ifdef __cplusplus
 }

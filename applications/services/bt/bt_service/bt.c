@@ -521,14 +521,15 @@ static void bt_init_keys_settings(Bt* bt) {
     furi_pubsub_subscribe(storage_get_pubsub(storage), bt_storage_callback, bt);
 
     if(storage_sd_status(storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
-
-        // Just start the BLE serial application without loading the keys or settings
+        FURI_LOG_D(TAG, "SD Card not ready — BLE keys skipped, loading NVS BT settings");
         bt_start_application(bt);
+        bt_load_settings(bt);
+        furi_record_close(RECORD_STORAGE);
         return;
     }
 
     bt_handle_reload_keys_settings(bt);
+    furi_record_close(RECORD_STORAGE);
 }
 
 int32_t bt_srv(void* p) {

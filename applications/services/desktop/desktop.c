@@ -12,7 +12,11 @@
 #include "scenes/desktop_scene.h"
 #include "scenes/desktop_scene_locked.h"
 
+#include "animations/animation_storage.h"
+
 #include "furi_hal_power.h"
+#include <namespoof.h>
+#include <settings.h>
 
 #define TAG "Desktop"
 
@@ -40,6 +44,8 @@ static void desktop_storage_callback(const void* message, void* context) {
     const StorageEvent* event = message;
 
     if(event->type == StorageEventTypeCardMount) {
+        namespoof_init();
+        momentum_settings_load();
         view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalReloadSettings);
     }
 }
@@ -158,6 +164,7 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop_apply_settings(desktop);
 
     } else if(event == DesktopGlobalReloadSettings) {
+        momentum_settings_load();
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
 
@@ -244,8 +251,10 @@ static void desktop_apply_settings(Desktop* desktop) {
     // Dummy mode disabled on ESP32 port — always use normal mode
     desktop_main_set_dummy_mode_state(desktop->main_view, false);
 
+    animation_handler_select_manifest();
     if(!desktop->app_running && !desktop->locked) {
         desktop_auto_lock_arm(desktop);
+        animation_manager_new_idle_process(desktop->animation_manager);
     }
 
     desktop->in_transition = false;
@@ -254,11 +263,8 @@ static void desktop_apply_settings(Desktop* desktop) {
 static void desktop_init_settings(Desktop* desktop) {
     furi_pubsub_subscribe(storage_get_pubsub(desktop->storage), desktop_storage_callback, desktop);
 
-    if(storage_sd_status(desktop->storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
-        return;
-    }
-
+    /* Settings live in NVS (saved_struct), not on SD — load even without a card. */
+    momentum_settings_load();
     desktop_settings_load(&desktop->settings);
     desktop_apply_settings(desktop);
 }

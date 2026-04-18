@@ -52,6 +52,10 @@
 #define INFRARED_DEFAULT_REMOTE_NAME "Remote"
 #define INFRARED_LOG_TAG             "InfraredApp"
 
+/* Button names for easy learning mode (see Momentum / stock Flipper IR app) */
+extern const char* const easy_mode_button_names[];
+extern const size_t easy_mode_button_count;
+
 /**
  * @brief Enumeration of invalid remote button indices.
  */
@@ -85,9 +89,13 @@ typedef struct {
     bool is_debug_enabled; /**< Whether to enable or disable debugging features. */
     bool is_transmitting; /**< Whether a signal is currently being transmitted. */
     bool is_otg_enabled; /**< Whether OTG power (external 5V) is enabled. */
+    bool is_easy_mode; /**< Easy learning mode: predefined button names + Skip. */
+    bool is_decode_enabled; /**< Try to decode protocols (Auto) when true. */
+    bool is_decode_forced; /**< Decode only: ignore raw capture (Decode). */
     InfraredEditTarget edit_target : 8; /**< Selected editing target (a remote or a button). */
     InfraredEditMode edit_mode     : 8; /**< Selected editing operation (rename or delete). */
-    int32_t current_button_index; /**< Selected button index (move destination). */
+    int32_t current_button_index; /**< Selected button index (move destination / easy mode). */
+    int32_t existing_remote_button_index; /**< Next easy-mode name index for existing remote. */
     int32_t prev_button_index; /**< Previous button index (move source). */
     uint32_t last_transmit_time; /**< Lat time a signal was transmitted. */
     FuriHalInfraredTxPin tx_pin;

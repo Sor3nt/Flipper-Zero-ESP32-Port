@@ -5,6 +5,7 @@ enum SubmenuIndex {
     SubmenuIndexConnect,
     SubmenuIndexSsidAttack,
     SubmenuIndexChannelAttack,
+    SubmenuIndexSpamSSIDs,
     SubmenuIndexDisconnect,
 };
 
@@ -16,32 +17,21 @@ static void wifi_app_scene_menu_submenu_callback(void* context, uint32_t index) 
 void wifi_app_scene_menu_on_enter(void* context) {
     WifiApp* app = context;
 
-    // Stop WiFi if returning from a WiFi feature (but not if connected)
     if(wifi_hal_is_started() && !wifi_hal_is_connected()) {
         wifi_hal_stop();
     }
 
     if(wifi_hal_is_connected()) {
-        // Connected menu: <SSID> Attack, Channel Attack, Disconnect
         char label[48];
         snprintf(label, sizeof(label), "%s Attack", app->connected_ap.ssid);
-        submenu_add_item(
-            app->submenu, label, SubmenuIndexSsidAttack,
-            wifi_app_scene_menu_submenu_callback, app);
-        submenu_add_item(
-            app->submenu, "Channel Attack", SubmenuIndexChannelAttack,
-            wifi_app_scene_menu_submenu_callback, app);
-        submenu_add_item(
-            app->submenu, "Disconnect", SubmenuIndexDisconnect,
-            wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, label, SubmenuIndexSsidAttack, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Channel Attack", SubmenuIndexChannelAttack, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Spam SSIDs", SubmenuIndexSpamSSIDs, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Disconnect", SubmenuIndexDisconnect, wifi_app_scene_menu_submenu_callback, app);
     } else {
-        // Not connected menu: Connect to WiFi, Channel Attack
-        submenu_add_item(
-            app->submenu, "Connect to WiFi", SubmenuIndexConnect,
-            wifi_app_scene_menu_submenu_callback, app);
-        submenu_add_item(
-            app->submenu, "Channel Attack", SubmenuIndexChannelAttack,
-            wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Connect to WiFi", SubmenuIndexConnect, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Channel Attack", SubmenuIndexChannelAttack, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Spam SSIDs", SubmenuIndexSpamSSIDs, wifi_app_scene_menu_submenu_callback, app);
     }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WifiAppViewSubmenu);
@@ -59,19 +49,21 @@ bool wifi_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case SubmenuIndexSsidAttack:
-            scene_manager_next_scene(app->scene_manager, WifiAppSceneSsidAttackMenu);
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneSpamSSIDsMenu);
             consumed = true;
             break;
         case SubmenuIndexChannelAttack:
             scene_manager_next_scene(app->scene_manager, WifiAppSceneChannelAttackMenu);
             consumed = true;
             break;
+        case SubmenuIndexSpamSSIDs:
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneSpamSSIDsMenu);
+            consumed = true;
+            break;
         case SubmenuIndexDisconnect:
             wifi_hal_disconnect();
             wifi_hal_stop();
-            // Reload menu to show not-connected state
-            scene_manager_search_and_switch_to_previous_scene(
-                app->scene_manager, WifiAppSceneMenu);
+            scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WifiAppSceneMenu);
             consumed = true;
             break;
         }

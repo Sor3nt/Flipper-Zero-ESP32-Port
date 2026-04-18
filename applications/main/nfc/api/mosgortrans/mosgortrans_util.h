@@ -16,6 +16,7 @@ void render_section_header(
     uint8_t prefix_separator_cnt,
     uint8_t suffix_separator_cnt);
 bool mosgortrans_parse_transport_block(const MfClassicBlock* block, FuriString* result);
+void from_minutes_to_datetime(uint32_t minutes, DateTime* datetime, uint16_t start_year);
 
 #ifdef __cplusplus
 }

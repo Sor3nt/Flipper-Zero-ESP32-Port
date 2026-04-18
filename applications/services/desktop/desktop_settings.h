@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 
+#define DESKTOP_ASSET_PACK_NAME_LEN 32
+#define DESKTOP_ASSET_PACK_MENU_MAX 32
+
 #define DISPLAY_BATTERY_BAR              0
 #define DISPLAY_BATTERY_PERCENT          1
 #define DISPLAY_BATTERY_INVERTED_PERCENT 2
@@ -47,6 +50,7 @@ typedef struct {
     uint8_t displayBatteryPercentage;
     uint8_t dummy_mode;
     uint8_t display_clock;
+    char asset_pack[DESKTOP_ASSET_PACK_NAME_LEN];
     FavoriteApp favorite_apps[FavoriteAppNumber];
     FavoriteApp dummy_apps[DummyAppNumber];
 } DesktopSettings;

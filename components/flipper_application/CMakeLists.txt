@@ -8,6 +8,6 @@ idf_component_register(
         "flipper_application/firmware_api.c"
         "flipper_application/nfc_app_api.c"
         "flipper_application/api_hashtable/api_hashtable.c"
-    INCLUDE_DIRS "."
+    INCLUDE_DIRS "legacy_include" "."
     REQUIRES furi furi_hal storage toolbox gui notification dialogs flipper_format subghz assets mjs
 )

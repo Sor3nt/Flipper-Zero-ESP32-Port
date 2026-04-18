@@ -12,6 +12,28 @@ endif()
 
 set(ENV{FLIPPER_BOARD} "${FLIPPER_BOARD}")
 
+# Re-run CMake configure when FAM inputs change so execute_process() regenerates
+# ported_apps.cmake (not allowed in ESP-IDF script-mode includes; see CMAKE_SCRIPT_MODE_FILE).
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    file(GLOB _esp32_fam_dep1 CONFIGURE_DEPENDS "${ESP32_DIR}/fam_config.py")
+    file(GLOB _esp32_fam_dep2 CONFIGURE_DEPENDS "${ESP32_DIR}/tools/fam/generate.py")
+    file(GLOB _esp32_fam_dep3 CONFIGURE_DEPENDS "${ESP32_DIR}/tools/fam/appmanifest.py")
+    file(GLOB _esp32_fam_m1 CONFIGURE_DEPENDS "${ESP32_DIR}/applications/*/application.fam")
+    file(GLOB _esp32_fam_m2 CONFIGURE_DEPENDS "${ESP32_DIR}/applications/*/*/application.fam")
+    file(GLOB _esp32_fam_m3 CONFIGURE_DEPENDS "${ESP32_DIR}/applications/*/*/*/application.fam")
+    file(GLOB _esp32_fam_m4 CONFIGURE_DEPENDS "${ESP32_DIR}/applications/*/*/*/*/application.fam")
+    file(GLOB _esp32_fam_m5 CONFIGURE_DEPENDS "${ESP32_DIR}/applications/*/*/*/*/*/application.fam")
+    file(GLOB _esp32_fam_u1 CONFIGURE_DEPENDS "${ESP32_DIR}/applications_user/*/application.fam")
+    file(GLOB _esp32_fam_u2 CONFIGURE_DEPENDS "${ESP32_DIR}/applications_user/*/*/application.fam")
+    file(GLOB _esp32_fam_c1 CONFIGURE_DEPENDS "${ESP32_DIR}/components/*/application.fam")
+    file(GLOB _esp32_fam_c2 CONFIGURE_DEPENDS "${ESP32_DIR}/components/*/*/application.fam")
+    set(_ESP32_FAM_CONFIGURE_DEPENDS
+        ${_esp32_fam_dep1} ${_esp32_fam_dep2} ${_esp32_fam_dep3}
+        ${_esp32_fam_m1} ${_esp32_fam_m2} ${_esp32_fam_m3} ${_esp32_fam_m4} ${_esp32_fam_m5}
+        ${_esp32_fam_u1} ${_esp32_fam_u2}
+        ${_esp32_fam_c1} ${_esp32_fam_c2})
+endif()
+
 execute_process(
     COMMAND
         ${Python3_EXECUTABLE}
@@ -64,13 +86,14 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         idf::subghz
         idf::toolbox
         idf::esp_http_client
-        idf::lfrfid
         idf::mjs
+        idf::momentum
     )
 
     foreach(esp32_fam_target IN LISTS ESP32_FAM_PORTED_OBJECT_TARGETS)
         target_link_libraries(${esp32_fam_target} PRIVATE ${ESP32_FAM_PORTED_COMPONENT_LIBS})
         target_include_directories(${esp32_fam_target} PRIVATE
+            "${ESP32_FAM_GENERATED_DIR}"
             "${ESP32_DIR}/components"
             "${ESP32_DIR}/lib"
             "${ESP32_DIR}/lib/subghz"
@@ -78,9 +101,6 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
             "${ESP32_DIR}/lib/infrared/encoder_decoder"
             "${ESP32_DIR}/lib/infrared/signal"
             "${ESP32_DIR}/lib/infrared/worker"
-            "${ESP32_DIR}/lib/lfrfid"
-            "${ESP32_DIR}/lib/lfrfid/protocols"
-            "${ESP32_DIR}/lib/lfrfid/tools"
             "${ESP32_DIR}/lib/mjs"
             "${ESP32_DIR}/lib/mjs/common"
             "${ESP32_DIR}"

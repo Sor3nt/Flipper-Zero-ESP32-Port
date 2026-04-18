@@ -1,0 +1,26 @@
+dependencies:
+  idf: '>=5.0'
+description: TinyUSB ported to Espressif's SoCs
+documentation: https://docs.tinyusb.org/en/latest/
+files:
+  exclude:
+  - docs/**/*
+  - tools/**/*
+  - lib/embedded-cli/**/*
+  - lib/fatfs/**/*
+  - lib/SEGGER_RTT/**/*
+issues: https://github.com/hathach/tinyusb/issues
+repository: git://github.com/espressif/tinyusb.git
+repository_info:
+  commit_sha: c64589db1a2af04a6726f03744999d00fa70c892
+  path: .
+tags:
+- usb
+- usb_device
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+- esp32h4
+url: https://docs.tinyusb.org/en/latest/
+version: 0.19.0~2

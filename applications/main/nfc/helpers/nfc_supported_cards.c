@@ -9,6 +9,7 @@
 #include <furi.h>
 #include <path.h>
 #include <m-array.h>
+#include <string.h>
 
 #define TAG "NfcSupportedCards"
 
@@ -99,12 +100,156 @@ static void nfc_supported_cards_load_context_free(NfcSupportedCardsLoadContext* 
     free(instance);
 }
 
+#ifdef ESP_PLATFORM
+
+typedef const FlipperAppPluginDescriptor* (*NfcSupportedCardsEp)(void);
+
+extern const FlipperAppPluginDescriptor* all_in_one_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* smartrider_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* microel_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* mizip_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* hi_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* opal_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* myki_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* troika_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* social_moscow_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* plantain_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* two_cities_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* umarsh_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* metromoney_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* charliecard_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* kazan_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* aime_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* bip_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* saflok_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* mykey_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* zolotaya_korona_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* zolotaya_korona_online_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* gallagher_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* clipper_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* hid_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* washcity_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* emv_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* ndef_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* itso_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* skylanders_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* hworld_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* trt_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* disney_infinity_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* sonicare_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* csc_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* ventra_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* banapass_plugin_ep(void);
+extern const FlipperAppPluginDescriptor* aic_plugin_ep(void);
+
+static const struct {
+    const char* name;
+    NfcSupportedCardsEp ep;
+} nfc_supported_cards_esp32_table[] = {
+    {"all_in_one", all_in_one_plugin_ep},
+    {"smartrider", smartrider_plugin_ep},
+    {"microel", microel_plugin_ep},
+    {"mizip", mizip_plugin_ep},
+    {"hi", hi_plugin_ep},
+    {"opal", opal_plugin_ep},
+    {"myki", myki_plugin_ep},
+    {"troika", troika_plugin_ep},
+    {"social_moscow", social_moscow_plugin_ep},
+    {"plantain", plantain_plugin_ep},
+    {"two_cities", two_cities_plugin_ep},
+    {"umarsh", umarsh_plugin_ep},
+    {"metromoney", metromoney_plugin_ep},
+    {"charliecard", charliecard_plugin_ep},
+    {"kazan", kazan_plugin_ep},
+    {"aime", aime_plugin_ep},
+    {"bip", bip_plugin_ep},
+    {"saflok_mfc", saflok_plugin_ep},
+    {"mykey", mykey_plugin_ep},
+    {"zolotaya_korona", zolotaya_korona_plugin_ep},
+    {"zolotaya_korona_online", zolotaya_korona_online_plugin_ep},
+    {"gallagher", gallagher_plugin_ep},
+    {"clipper", clipper_plugin_ep},
+    {"hid", hid_plugin_ep},
+    {"washcity", washcity_plugin_ep},
+    {"emv", emv_plugin_ep},
+    {"ndef_ul", ndef_plugin_ep},
+    {"itso", itso_plugin_ep},
+    {"skylanders", skylanders_plugin_ep},
+    {"hworld", hworld_plugin_ep},
+    {"trt", trt_plugin_ep},
+    {"disney_infinity", disney_infinity_plugin_ep},
+    {"sonicare", sonicare_plugin_ep},
+    {"csc", csc_plugin_ep},
+    {"ventra", ventra_plugin_ep},
+    {"banapass", banapass_plugin_ep},
+    {"aic", aic_plugin_ep},
+};
+
+static const NfcSupportedCardsPlugin* nfc_supported_cards_get_plugin_esp32(const char* name) {
+    for(size_t i = 0; i < COUNT_OF(nfc_supported_cards_esp32_table); i++) {
+        if(strcmp(nfc_supported_cards_esp32_table[i].name, name) != 0) continue;
+
+        const FlipperAppPluginDescriptor* descriptor = nfc_supported_cards_esp32_table[i].ep();
+        if(descriptor == NULL) continue;
+        if(strcmp(descriptor->appid, NFC_SUPPORTED_CARD_PLUGIN_APP_ID) != 0) continue;
+        if(descriptor->ep_api_version != NFC_SUPPORTED_CARD_PLUGIN_API_VERSION) continue;
+
+        return (const NfcSupportedCardsPlugin*)descriptor->entry_point;
+    }
+    return NULL;
+}
+
+static bool nfc_supported_cards_try_load_cache_esp32(NfcSupportedCards* instance) {
+    for(size_t i = 0; i < COUNT_OF(nfc_supported_cards_esp32_table); i++) {
+        const FlipperAppPluginDescriptor* descriptor = nfc_supported_cards_esp32_table[i].ep();
+        if(descriptor == NULL) continue;
+        if(strcmp(descriptor->appid, NFC_SUPPORTED_CARD_PLUGIN_APP_ID) != 0) continue;
+        if(descriptor->ep_api_version != NFC_SUPPORTED_CARD_PLUGIN_API_VERSION) continue;
+
+        const NfcSupportedCardsPlugin* plugin =
+            (const NfcSupportedCardsPlugin*)descriptor->entry_point;
+
+        NfcSupportedCardsPluginCache plugin_cache = {};
+        plugin_cache.name = furi_string_alloc_set(nfc_supported_cards_esp32_table[i].name);
+        plugin_cache.protocol = plugin->protocol;
+        if(plugin->verify) {
+            plugin_cache.feature |= NfcSupportedCardsPluginFeatureHasVerify;
+        }
+        if(plugin->read) {
+            plugin_cache.feature |= NfcSupportedCardsPluginFeatureHasRead;
+        }
+        if(plugin->parse) {
+            plugin_cache.feature |= NfcSupportedCardsPluginFeatureHasParse;
+        }
+        NfcSupportedCardsPluginCache_push_back(instance->plugins_cache_arr, plugin_cache);
+    }
+
+    size_t plugins_loaded = NfcSupportedCardsPluginCache_size(instance->plugins_cache_arr);
+    if(plugins_loaded == 0) {
+        return false;
+    }
+
+    FURI_LOG_I(TAG, "ESP32: loaded %zu supported-card parsers (static)", plugins_loaded);
+    instance->load_state = NfcSupportedCardsLoadStateSuccess;
+    return true;
+}
+
+#endif /* ESP_PLATFORM */
+
 static const NfcSupportedCardsPlugin* nfc_supported_cards_get_plugin(
     NfcSupportedCardsLoadContext* instance,
     const char* name,
     const ElfApiInterface* api_interface) {
     furi_assert(instance);
     furi_assert(name);
+
+#ifdef ESP_PLATFORM
+    const NfcSupportedCardsPlugin* esp_plugin = nfc_supported_cards_get_plugin_esp32(name);
+    if(esp_plugin) {
+        UNUSED(api_interface);
+        return esp_plugin;
+    }
+#endif
 
     const NfcSupportedCardsPlugin* plugin = NULL;
     FuriString* plugin_path = furi_string_alloc_printf(
@@ -172,6 +317,12 @@ void nfc_supported_cards_load_cache(NfcSupportedCards* instance) {
         if((instance->load_state == NfcSupportedCardsLoadStateSuccess) ||
            (instance->load_state == NfcSupportedCardsLoadStateFail))
             break;
+
+#ifdef ESP_PLATFORM
+        if(nfc_supported_cards_try_load_cache_esp32(instance)) {
+            break;
+        }
+#endif
 
         instance->load_context = nfc_supported_cards_load_context_alloc();
 

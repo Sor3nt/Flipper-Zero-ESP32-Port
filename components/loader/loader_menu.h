@@ -1,9 +1,12 @@
 #pragma once
 #include <furi.h>
+#include <storage/storage.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define MAINMENU_APPS_PATH INT_PATH(".mainmenu_apps.txt")
 
 typedef struct LoaderMenu LoaderMenu;
 

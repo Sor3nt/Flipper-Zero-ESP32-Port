@@ -32,3 +32,12 @@ CONFIG_SPIRAM_RODATA=y
 
 # NFC needs 3DES (felica, mf_ultralight)
 CONFIG_MBEDTLS_DES_C=y
+
+# ---------------------------------------------------------------------------
+# USB device — expose SD card as mass storage (TinyUSB MSC on USB OTG)
+# UART stays the primary console; disable secondary USB-JTAG console to avoid
+# TinyUSB / console warnings (see ESP-IDF tusb_msc example).
+# ---------------------------------------------------------------------------
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_TINYUSB=y
+CONFIG_TINYUSB_MSC_ENABLED=y

@@ -4,7 +4,6 @@
 
 extern const Icon A_Levelup1_128x64;
 extern const Icon A_Levelup2_128x64;
-extern const Icon I_125_10px;
 extern const Icon I_Apps_10px;
 extern const Icon I_Nfc_10px;
 extern const Icon I_back_10px;
@@ -170,7 +169,6 @@ extern const Icon I_err_02;
 extern const Icon I_err_03;
 extern const Icon I_err_04;
 extern const Icon I_err_05;
-extern const Icon A_125khz_14;
 extern const Icon A_BadUsb_14;
 extern const Icon A_Clock_14;
 extern const Icon A_Debug_14;

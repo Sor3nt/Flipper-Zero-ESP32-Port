@@ -8,12 +8,139 @@
 #include <furi_hal_rtc.h>
 #include <furi_hal_speaker.h>
 #include <input.h>
+#include <nvs.h>
+#include <nvs_flash.h>
+#include <stdlib.h>
+#include <string.h>
 #include "notification_app.h"
 #include "notification_messages.h"
 
 #define TAG "NotificationSrv"
 
 #define NOTIFICATION_EVENT_COMPLETE 0x00000001U
+
+/** NVS-backed path (basename -> key "notification_settings"); must stay stable. */
+#define NOTIFICATION_SETTINGS_PATH "/int/.notification.settings"
+#define NOTIFICATION_SETTINGS_MAGIC (0x4Eu)
+#define NOTIFICATION_SETTINGS_VER   (1u)
+
+/* Same on-disk/NVS format as components/toolbox/saved_struct.c (no toolbox link — avoids CMake cycle). */
+#define NOTIFICATION_NVS_NAMESPACE "saved_struct"
+
+typedef struct {
+    uint8_t magic;
+    uint8_t version;
+    uint8_t checksum;
+    uint8_t flags;
+    uint32_t timestamp;
+} NotificationSavedHeader;
+
+static void notification_path_to_nvs_key(const char* path, char* key, size_t key_size) {
+    const char* base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    while(*base == '.') base++;
+    size_t i = 0;
+    for(; base[i] && i < key_size - 1; i++) {
+        char c = base[i];
+        if(c == '.' || c == ' ' || c == '/') c = '_';
+        key[i] = c;
+    }
+    key[i] = '\0';
+}
+
+static bool notification_settings_nvs_save(const NotificationSettings* settings) {
+    const size_t payload_size = sizeof(*settings);
+    NotificationSavedHeader header = {
+        .magic = NOTIFICATION_SETTINGS_MAGIC,
+        .version = NOTIFICATION_SETTINGS_VER,
+        .flags = 0,
+        .timestamp = 0,
+    };
+    header.checksum = 0;
+    const uint8_t* src = (const uint8_t*)settings;
+    for(size_t i = 0; i < payload_size; i++) {
+        header.checksum += src[i];
+    }
+
+    size_t blob_size = sizeof(header) + payload_size;
+    uint8_t* blob = malloc(blob_size);
+    if(!blob) {
+        FURI_LOG_E(TAG, "NVS save: alloc failed");
+        return false;
+    }
+    memcpy(blob, &header, sizeof(header));
+    memcpy(blob + sizeof(header), settings, payload_size);
+
+    char key[16];
+    notification_path_to_nvs_key(NOTIFICATION_SETTINGS_PATH, key, sizeof(key));
+
+    nvs_handle_t nvs;
+    bool ok = false;
+    if(nvs_open(NOTIFICATION_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        if(nvs_set_blob(nvs, key, blob, blob_size) == ESP_OK && nvs_commit(nvs) == ESP_OK) {
+            ok = true;
+        }
+        nvs_close(nvs);
+    }
+    free(blob);
+    if(!ok) {
+        FURI_LOG_E(TAG, "NVS save failed for \"%s\"", key);
+    }
+    return ok;
+}
+
+static bool notification_settings_nvs_load(NotificationSettings* settings) {
+    const size_t payload_size = sizeof(*settings);
+    char key[16];
+    notification_path_to_nvs_key(NOTIFICATION_SETTINGS_PATH, key, sizeof(key));
+
+    nvs_handle_t nvs;
+    if(nvs_open(NOTIFICATION_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+
+    size_t expected_size = sizeof(NotificationSavedHeader) + payload_size;
+    size_t blob_size = 0;
+    if(nvs_get_blob(nvs, key, NULL, &blob_size) != ESP_OK || blob_size != expected_size) {
+        nvs_close(nvs);
+        return false;
+    }
+
+    uint8_t* blob = malloc(blob_size);
+    if(!blob) {
+        nvs_close(nvs);
+        return false;
+    }
+
+    esp_err_t err = nvs_get_blob(nvs, key, blob, &blob_size);
+    nvs_close(nvs);
+
+    if(err != ESP_OK) {
+        free(blob);
+        return false;
+    }
+
+    NotificationSavedHeader header;
+    memcpy(&header, blob, sizeof(header));
+    if(header.magic != NOTIFICATION_SETTINGS_MAGIC || header.version != NOTIFICATION_SETTINGS_VER) {
+        free(blob);
+        return false;
+    }
+
+    const uint8_t* payload = blob + sizeof(header);
+    uint8_t checksum = 0;
+    for(size_t i = 0; i < payload_size; i++) {
+        checksum += payload[i];
+    }
+    if(header.checksum != checksum) {
+        free(blob);
+        return false;
+    }
+
+    memcpy(settings, payload, payload_size);
+    free(blob);
+    return true;
+}
 
 typedef enum {
     NotificationLayerMessage,
@@ -253,6 +380,28 @@ static void notification_process_notification_message(
     }
 }
 
+static void notification_load_settings(NotificationApp* app) {
+    furi_assert(app);
+
+    if(notification_settings_nvs_load(&app->settings)) {
+        FURI_LOG_I(TAG, "Loaded notification settings from NVS");
+        return;
+    }
+
+    FURI_LOG_W(TAG, "No saved notification settings, using defaults");
+    if(!notification_settings_nvs_save(&app->settings)) {
+        FURI_LOG_E(TAG, "Failed to persist default notification settings");
+    }
+}
+
+static void notification_save_settings(NotificationApp* app) {
+    furi_assert(app);
+
+    if(!notification_settings_nvs_save(&app->settings)) {
+        FURI_LOG_E(TAG, "Failed to save notification settings");
+    }
+}
+
 static void notification_process_internal_message(
     NotificationApp* app,
     NotificationAppMessage* message) {
@@ -318,6 +467,8 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.night_shift_end = 300;
     app->current_night_shift = 1.0f;
 
+    notification_load_settings(app);
+
     app->display.value[LayerInternal] = 0x00;
     app->display.value[LayerNotification] = 0x00;
     app->display.index = LayerInternal;
@@ -357,10 +508,7 @@ int32_t notification_srv(void* p) {
             notification_process_internal_message(app, &message);
             break;
         case SaveSettingsMessage:
-            /* Settings are only in RAM on ESP32 — no persistent save yet.
-             * The message type exists so notification_message_save_settings()
-             * can be called from the settings app without crashing. */
-            FURI_LOG_I(TAG, "Settings updated (RAM only)");
+            notification_save_settings(app);
             break;
         }
 
@@ -402,5 +550,9 @@ void notification_internal_message_block(
 
 void notification_message_save_settings(NotificationApp* app) {
     furi_assert(app);
-    notification_message_send(app, SaveSettingsMessage, &sequence_empty, NULL);
+    FuriEventFlag* back_event = furi_event_flag_alloc();
+    notification_message_send(app, SaveSettingsMessage, &sequence_empty, back_event);
+    furi_event_flag_wait(
+        back_event, NOTIFICATION_EVENT_COMPLETE, FuriFlagWaitAny, FuriWaitForever);
+    furi_event_flag_free(back_event);
 }

@@ -11,6 +11,7 @@
 #include "views/one_shot_animation_view.h"
 #include "animation_storage.h"
 #include "animation_manager.h"
+#include <settings.h>
 
 #define TAG "AnimationManager"
 
@@ -224,7 +225,12 @@ static void animation_manager_start_new_idle(AnimationManager* animation_manager
     const BubbleAnimation* bubble_animation =
         animation_storage_get_bubble_animation(animation_manager->current_animation);
     animation_manager->state = AnimationManagerStateIdle;
-    furi_timer_start(animation_manager->idle_animation_timer, bubble_animation->duration * 1000);
+    {
+        int32_t duration = (momentum_settings.cycle_anims == 0) ? (bubble_animation->duration) :
+                                                                  (momentum_settings.cycle_anims);
+        furi_timer_start(
+            animation_manager->idle_animation_timer, (duration > 0) ? (duration * 1000) : 0);
+    }
 }
 
 static bool animation_manager_check_blocking(AnimationManager* animation_manager) {
@@ -380,11 +386,13 @@ static bool animation_manager_is_valid_idle_animation(
 
         result = (sd_status == FSE_NOT_READY);
     }
-    if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
-        result = false;
-    }
-    if((stats->level < info->min_level) || (stats->level > info->max_level)) {
-        result = false;
+    if(!momentum_settings.unlock_anims) {
+        if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
+            result = false;
+        }
+        if((stats->level < info->min_level) || (stats->level > info->max_level)) {
+            result = false;
+        }
     }
 
     return result;
@@ -539,8 +547,12 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
                     } else {
                         const BubbleAnimation* animation = animation_storage_get_bubble_animation(
                             animation_manager->current_animation);
+                        int32_t duration = (momentum_settings.cycle_anims == 0) ?
+                                               (animation->duration) :
+                                               (momentum_settings.cycle_anims);
                         furi_timer_start(
-                            animation_manager->idle_animation_timer, animation->duration * 1000);
+                            animation_manager->idle_animation_timer,
+                            (duration > 0) ? (duration * 1000) : 0);
                     }
                 }
             } else {

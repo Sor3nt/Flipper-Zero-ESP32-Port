@@ -9,6 +9,7 @@ MANIFEST_ROOTS = [
 APP_SOURCE_OVERRIDES = {
     "desktop": "applications",
     "storage": "applications",
+    "desktop_settings": "applications",
 }
 
 APPS = [
@@ -27,6 +28,8 @@ APPS = [
     "loader",
     "loader_start",
     "notification_settings",
+    "clock_settings",
+    "desktop_settings",
     "desktop",
     "archive",
     "about",
@@ -42,7 +45,6 @@ APPS = [
     "passport",
     "nfc",
     "infrared",
-    "lfrfid",
     "wifi",
     "ble_spam",
     "js_app",

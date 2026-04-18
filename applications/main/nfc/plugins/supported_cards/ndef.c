@@ -35,8 +35,9 @@
 #define NDEF_PROTO_T4T     (4)
 #define NDEF_PROTO_TOTAL   (5)
 
+/* Monolithic ESP32 build: default to Ultralight. FBT builds multiple FAPs with other values. */
 #ifndef NDEF_PROTO
-#error Must specify what protocol to use with NDEF_PROTO define!
+#define NDEF_PROTO NDEF_PROTO_UL
 #endif
 #if NDEF_PROTO <= NDEF_PROTO_INVALID || NDEF_PROTO >= NDEF_PROTO_TOTAL
 #error Invalid NDEF_PROTO specified!

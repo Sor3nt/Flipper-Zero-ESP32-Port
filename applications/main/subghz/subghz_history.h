@@ -109,6 +109,9 @@ bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* out
  */
 uint16_t subghz_history_get_last_index(SubGhzHistory* instance);
 
+/** Max number of items the history list can hold (hard cap). */
+uint16_t subghz_history_get_max_items(void);
+
 /** Add protocol to history
  * 
  * @param instance  - SubGhzHistory instance

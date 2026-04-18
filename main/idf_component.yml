@@ -1,0 +1,3 @@
+## Managed components (USB MSC). Fetched on first CMake configure / idf.py build.
+dependencies:
+  espressif/esp_tinyusb: "^2.0.0"

@@ -645,15 +645,12 @@ static void power_init_settings(Power* power) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     furi_pubsub_subscribe(storage_get_pubsub(storage), power_storage_callback, power);
 
-    if(storage_sd_status(storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
-        return;
-    }
-
+    /* Power UI timers etc. are stored in NVS (saved_struct), not on SD. */
     power_settings_load(&power->settings);
     power_settings_apply(power);
-    furi_record_close(RECORD_STORAGE);
     power->charge_is_supressed = false;
+
+    furi_record_close(RECORD_STORAGE);
 }
 
 static Power* power_alloc(void) {

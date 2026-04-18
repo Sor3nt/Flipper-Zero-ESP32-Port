@@ -85,7 +85,6 @@ COMMON_INCLUDES=(
     -I"$PROJECT_DIR/components/archive"
     -I"$PROJECT_DIR/components/nfc"
     -I"$PROJECT_DIR/components/infrared"
-    -I"$PROJECT_DIR/components/lfrfid"
     -I"$PROJECT_DIR/targets"
     -I"$PROJECT_DIR/lib/subghz"
 )

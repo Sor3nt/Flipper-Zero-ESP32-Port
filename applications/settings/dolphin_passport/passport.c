@@ -7,18 +7,18 @@
 
 #include <assets_icons.h>
 
-#define MOODS_TOTAL  3
-#define BUTTHURT_MAX 3
+#define MOODS_TOTAL             3
+#define PASSPORT_ICONS_PER_MOOD 3
 
-static const Icon* const portrait_happy[BUTTHURT_MAX] = {
+static const Icon* const portrait_happy[PASSPORT_ICONS_PER_MOOD] = {
     &I_passport_happy1_46x49,
     &I_passport_happy2_46x49,
     &I_passport_happy3_46x49};
-static const Icon* const portrait_ok[BUTTHURT_MAX] = {
+static const Icon* const portrait_ok[PASSPORT_ICONS_PER_MOOD] = {
     &I_passport_okay1_46x49,
     &I_passport_okay2_46x49,
     &I_passport_okay3_46x49};
-static const Icon* const portrait_bad[BUTTHURT_MAX] = {
+static const Icon* const portrait_bad[PASSPORT_ICONS_PER_MOOD] = {
     &I_passport_bad1_46x49,
     &I_passport_bad2_46x49,
     &I_passport_bad3_46x49};

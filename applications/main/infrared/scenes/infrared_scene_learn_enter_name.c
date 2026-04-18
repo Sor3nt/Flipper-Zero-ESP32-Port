@@ -6,7 +6,21 @@ void infrared_scene_learn_enter_name_on_enter(void* context) {
     TextInput* text_input = infrared->text_input;
     InfraredSignal* signal = infrared->current_signal;
 
-    if(infrared_signal_is_raw(signal)) {
+    if(infrared->app_state.is_easy_mode) {
+        int32_t button_index;
+        if(infrared->app_state.is_learning_new_remote) {
+            button_index = infrared->app_state.current_button_index;
+        } else {
+            button_index = infrared->app_state.existing_remote_button_index;
+        }
+
+        if(button_index < 0) button_index = 0;
+        if(button_index >= (int32_t)easy_mode_button_count) {
+            button_index = (int32_t)easy_mode_button_count - 1;
+        }
+
+        infrared_text_store_set(infrared, 0, "%s", easy_mode_button_names[button_index]);
+    } else if(infrared_signal_is_raw(signal)) {
         const InfraredRawSignal* raw = infrared_signal_get_raw_signal(signal);
         infrared_text_store_set(infrared, 0, "RAW_%zu", raw->timings_size);
     } else {

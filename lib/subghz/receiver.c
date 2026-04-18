@@ -90,7 +90,7 @@ void subghz_receiver_reset(SubGhzReceiver* instance) {
 
 static void subghz_receiver_rx_callback(SubGhzProtocolDecoderBase* decoder_base, void* context) {
     SubGhzReceiver* instance = context;
-    FURI_LOG_I(
+    FURI_LOG_D(
         TAG,
         "DECODE SUCCESS: protocol='%s' type=%d",
         decoder_base->protocol->name,

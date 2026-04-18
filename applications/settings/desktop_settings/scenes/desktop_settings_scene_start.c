@@ -12,6 +12,7 @@ typedef enum {
     DesktopSettingsAutoPowerOff,
     DesktopSettingsBatteryDisplay,
     DesktopSettingsClockDisplay,
+    DesktopSettingsAssetPack,
     DesktopSettingsChangeName,
     DesktopSettingsHappyMode,
     DesktopSettingsFavoriteLeftShort,
@@ -175,6 +176,8 @@ void desktop_settings_scene_start_on_enter(void* context) {
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, clock_enable_text[value_index]);
 
+    variable_item_list_add(variable_item_list, "Idle animation pack", 1, NULL, NULL);
+
     variable_item_list_add(variable_item_list, "Change Flipper Name", 0, NULL, app);
 
     variable_item_list_add(variable_item_list, "Happy Mode", 1, NULL, NULL);
@@ -215,6 +218,10 @@ bool desktop_settings_scene_start_on_event(void* context, SceneManagerEvent even
             // case DesktopSettingsBatteryDisplay:
             // case DesktopSettingsClockDisplay:
             // Proces in default
+
+        case DesktopSettingsAssetPack:
+            scene_manager_next_scene(app->scene_manager, DesktopSettingsAppSceneAssetPack);
+            break;
 
         case DesktopSettingsChangeName:
             scene_manager_next_scene(app->scene_manager, DesktopSettingsAppSceneChangeName);

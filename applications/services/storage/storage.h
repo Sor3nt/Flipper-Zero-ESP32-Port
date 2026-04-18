@@ -509,6 +509,16 @@ FS_Error storage_sd_info(Storage* storage, SDInfo* info);
  */
 FS_Error storage_sd_status(Storage* storage);
 
+/**
+ * @brief Unmount the SD filesystem for USB mass-storage (card stays initialized).
+ *
+ * Publishes StorageEventTypeCardUnmount. Use storage_sd_resume_after_usb_msc() after the host is done.
+ */
+FS_Error storage_sd_suspend_for_usb_msc(Storage* storage);
+
+/** @brief Remount the SD filesystem after USB MSC has been stopped. */
+FS_Error storage_sd_resume_after_usb_msc(Storage* storage);
+
 /************ Internal Storage Backup/Restore ************/
 
 typedef void (*StorageNameConverter)(FuriString*);

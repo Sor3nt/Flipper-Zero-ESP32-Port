@@ -1,0 +1,11 @@
+# This file was generated using idf.py save-defconfig. It can be edited manually.
+# Espressif IoT Development Framework (ESP-IDF) 6.1.0 Project Minimal Configuration
+#
+# default:
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+CONFIG_ESP_TASK_WDT_INIT=n
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+CONFIG_UNITY_ENABLE_BACKTRACE_ON_FAIL=y
+CONFIG_TINYUSB_SUSPEND_CALLBACK=y
+CONFIG_TINYUSB_RESUME_CALLBACK=y
+CONFIG_TINYUSB_CDC_ENABLED=y

@@ -90,6 +90,15 @@ void dolphin_flush(Dolphin* dolphin) {
     dolphin_event_send_wait(dolphin, &event);
 }
 
+void dolphin_reload_state(Dolphin* dolphin) {
+    furi_check(dolphin);
+
+    DolphinEvent event;
+    event.type = DolphinEventTypeReloadState;
+
+    dolphin_event_send_wait(dolphin, &event);
+}
+
 void dolphin_upgrade_level(Dolphin* dolphin) {
     furi_check(dolphin);
 
@@ -283,12 +292,9 @@ static void dolphin_storage_callback(const void* message, void* context) {
 static void dolphin_init_state(Dolphin* dolphin) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     furi_pubsub_subscribe(storage_get_pubsub(storage), dolphin_storage_callback, dolphin);
+    furi_record_close(RECORD_STORAGE);
 
-    if(storage_sd_status(storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping state");
-        return;
-    }
-
+    /* Dolphin progress is in NVS (saved_struct), not on SD. */
     dolphin_state_load(dolphin->state);
 }
 

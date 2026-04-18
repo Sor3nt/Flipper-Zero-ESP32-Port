@@ -23,6 +23,12 @@ LIST_DEF(StorageAnimationList, StorageAnimation*, M_PTR_OPLIST)
 #define M_OPL_StorageAnimationList_t() LIST_OPLIST(StorageAnimationList)
 
 /**
+ * Reload animation directory and manifest paths from desktop settings (default
+ * /ext/dolphin or /ext/asset_packs/<pack>/Anims when a pack is set).
+ */
+void animation_handler_select_manifest(void);
+
+/**
  * Fill list of available animations.
  * List will contain all idle animations on inner flash
  * and all available on SD-card, mentioned in manifest.txt.

@@ -2,7 +2,6 @@
 
 #include <gui/elements.h>
 #include <assets_icons.h>
-#include <locale/locale.h>
 
 #define TAG "ClockSettingsModule"
 
@@ -43,6 +42,30 @@ typedef enum {
 
 #define ROW_COUNT    3
 #define COLUMN_COUNT 3
+
+typedef enum {
+    ClockDatePartDay = 0,
+    ClockDatePartMonth,
+    ClockDatePartYear,
+} ClockDatePart;
+
+typedef struct {
+    uint8_t x;
+    uint8_t w;
+} ClockDateCell;
+
+/** Date row is always month | day | year (left to right). */
+static ClockDatePart clock_settings_module_date_part_from_column(uint8_t column) {
+    if(column == 0) return ClockDatePartMonth;
+    if(column == 1) return ClockDatePartDay;
+    return ClockDatePartYear;
+}
+
+static void clock_settings_module_get_date_cells(ClockDateCell out[3]) {
+    out[0] = (ClockDateCell){44, 17};
+    out[1] = (ClockDateCell){71, 17};
+    out[2] = (ClockDateCell){98, 30};
+}
 
 static inline void clock_settings_module_cleanup_date(DateTime* dt) {
     uint8_t day_per_month =
@@ -107,23 +130,38 @@ static void
 static void
     clock_settings_module_draw_date_callback(Canvas* canvas, ClockSettingsModuleViewModel* model) {
     char buffer[64];
+    ClockDateCell cells[3];
+    clock_settings_module_get_date_cells(cells);
 
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str(canvas, 0, ROW_1_Y + 9, "Date");
-    // Day
-    snprintf(buffer, sizeof(buffer), "%02u", model->current.day);
-    clock_settings_module_draw_block(
-        canvas, 44, ROW_1_Y, 17, ROW_1_H, FontPrimary, get_state(model, 1, 0), buffer);
-    canvas_draw_box(canvas, 71 - 6, ROW_1_Y + ROW_1_H - 4, 2, 2);
-    // Month
-    snprintf(buffer, sizeof(buffer), "%02u", model->current.month);
-    clock_settings_module_draw_block(
-        canvas, 71, ROW_1_Y, 17, ROW_1_H, FontPrimary, get_state(model, 1, 1), buffer);
-    canvas_draw_box(canvas, 98 - 6, ROW_1_Y + ROW_1_H - 4, 2, 2);
-    // Year
-    snprintf(buffer, sizeof(buffer), "%04u", model->current.year);
-    clock_settings_module_draw_block(
-        canvas, 98, ROW_1_Y, 30, ROW_1_H, FontPrimary, get_state(model, 1, 2), buffer);
+
+    for(uint8_t c = 0; c < 3; c++) {
+        ClockDatePart part = clock_settings_module_date_part_from_column(c);
+        if(part == ClockDatePartYear) {
+            snprintf(buffer, sizeof(buffer), "%04u", model->current.year);
+        } else {
+            snprintf(
+                buffer,
+                sizeof(buffer),
+                "%02u",
+                part == ClockDatePartMonth ? model->current.month : model->current.day);
+        }
+        clock_settings_module_draw_block(
+            canvas,
+            cells[c].x,
+            ROW_1_Y,
+            cells[c].w,
+            ROW_1_H,
+            FontPrimary,
+            get_state(model, 1, c),
+            buffer);
+    }
+
+    canvas_draw_box(canvas, cells[0].x + cells[0].w + 2, ROW_1_Y + ROW_1_H - 4, 2, 2);
+    canvas_draw_box(canvas, cells[0].x + cells[0].w + 2, ROW_1_Y + ROW_1_H - 4 - 4, 2, 2);
+    canvas_draw_box(canvas, cells[1].x + cells[1].w + 2, ROW_1_Y + ROW_1_H - 4, 2, 2);
+    canvas_draw_box(canvas, cells[1].x + cells[1].w + 2, ROW_1_Y + ROW_1_H - 4 - 4, 2, 2);
 }
 
 static void
@@ -164,6 +202,8 @@ static void clock_settings_module_draw_callback(Canvas* canvas, void* _model) {
 static bool clock_settings_module_input_navigation_callback(
     InputEvent* event,
     ClockSettingsModuleViewModel* model) {
+    const uint8_t row_before = model->row;
+
     if(event->key == InputKeyUp) {
         if(model->row > 0) model->row--;
     } else if(event->key == InputKeyDown) {
@@ -178,6 +218,12 @@ static bool clock_settings_module_input_navigation_callback(
         model->editing = false;
     } else {
         return false;
+    }
+
+    /* Row change reused column index from the previous row (e.g. minute col 1 -> month
+     * looked like "day" stuck at 12). Reset to first field when moving between rows. */
+    if((event->key == InputKeyUp || event->key == InputKeyDown) && model->row != row_before) {
+        model->column = 0;
     }
 
     return true;
@@ -234,35 +280,31 @@ static bool clock_settings_module_input_time_callback(
 static bool clock_settings_module_input_date_callback(
     InputEvent* event,
     ClockSettingsModuleViewModel* model) {
+    const ClockDatePart part = clock_settings_module_date_part_from_column(model->column);
+
     if(event->key == InputKeyUp) {
-        if(model->column == 0) {
+        switch(part) {
+        case ClockDatePartDay:
             if(model->current.day < 31) model->current.day++;
-        } else if(model->column == 1) {
-            if(model->current.month < 12) {
-                model->current.month++;
-            }
-        } else if(model->column == 2) {
-            if(model->current.year < 2099) {
-                model->current.year++;
-            }
-        } else {
-            furi_crash();
+            break;
+        case ClockDatePartMonth:
+            if(model->current.month < 12) model->current.month++;
+            break;
+        case ClockDatePartYear:
+            if(model->current.year < 2099) model->current.year++;
+            break;
         }
     } else if(event->key == InputKeyDown) {
-        if(model->column == 0) {
-            if(model->current.day > 1) {
-                model->current.day--;
-            }
-        } else if(model->column == 1) {
-            if(model->current.month > 1) {
-                model->current.month--;
-            }
-        } else if(model->column == 2) {
-            if(model->current.year > 2000) {
-                model->current.year--;
-            }
-        } else {
-            furi_crash();
+        switch(part) {
+        case ClockDatePartDay:
+            if(model->current.day > 1) model->current.day--;
+            break;
+        case ClockDatePartMonth:
+            if(model->current.month > 1) model->current.month--;
+            break;
+        case ClockDatePartYear:
+            if(model->current.year > 2000) model->current.year--;
+            break;
         }
     } else {
         return clock_settings_module_input_navigation_callback(event, model);
@@ -374,10 +416,17 @@ static void clock_settings_module_timer_callback(void* context) {
     furi_assert(context);
     ClockSettingsModule* instance = context;
 
-    DateTime dt;
-    furi_hal_rtc_get_datetime(&dt);
     with_view_model(
-        instance->view, ClockSettingsModuleViewModel * model, { model->current = dt; }, true);
+        instance->view,
+        ClockSettingsModuleViewModel * model,
+        {
+            if(!model->editing) {
+                DateTime dt;
+                furi_hal_rtc_get_datetime(&dt);
+                model->current = dt;
+            }
+        },
+        true);
 }
 
 static void clock_settings_module_view_enter_callback(void* context) {
@@ -418,7 +467,14 @@ ClockSettingsModule* clock_settings_module_alloc(FuriEventLoop* event_loop) {
     view_allocate_model(
         instance->view, ViewModelTypeLocking, sizeof(ClockSettingsModuleViewModel));
     with_view_model(
-        instance->view, ClockSettingsModuleViewModel * model, { model->row = 0; }, false);
+        instance->view,
+        ClockSettingsModuleViewModel * model,
+        {
+            model->row = 0;
+            model->column = 0;
+            model->editing = false;
+        },
+        false);
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, clock_settings_module_draw_callback);
     view_set_input_callback(instance->view, clock_settings_module_input_callback);

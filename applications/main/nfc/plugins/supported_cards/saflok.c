@@ -31,8 +31,9 @@
 #define SL_PROTO_UL      (1)
 #define SL_PROTO_TOTAL   (2)
 
+/* Monolithic ESP32 build: default to Mifare Classic. FBT builds a second FAP for Ultralight. */
 #ifndef SL_PROTO
-#error Must specify what protocol to use with SL_PROTO define!
+#define SL_PROTO SL_PROTO_MFC
 #endif
 #if SL_PROTO <= SL_PROTO_INVALID || SL_PROTO >= SL_PROTO_TOTAL
 #error Invalid SL_PROTO specified!

@@ -76,11 +76,11 @@ static bool sonicare_parse(const NfcDevice* device, FuriString* parsed_data) {
 
         furi_string_printf(
             parsed_data,
-            "\e#Philips Sonicare head\nColor: %s\nTime brushed: %02.0f:%02.0f:%02ld\n",
+            "\e#Philips Sonicare head\nColor: %s\nTime brushed: %02lu:%02lu:%02lu\n",
             furi_string_get_cstr(head_type_str),
-            floor(seconds_brushed / 3600),
-            floor((seconds_brushed / 60) % 60),
-            seconds_brushed % 60);
+            (unsigned long)(seconds_brushed / 3600),
+            (unsigned long)((seconds_brushed / 60) % 60),
+            (unsigned long)(seconds_brushed % 60));
 
         furi_string_free(head_type_str);
 

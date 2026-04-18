@@ -81,11 +81,12 @@ bool infrared_scene_start_on_event(void* context, SceneManagerEvent event) {
         } else if(
             submenu_index == SubmenuIndexLearnNewRemote ||
             submenu_index == SubmenuIndexLearnNewRemoteRaw) {
-            // enable automatic signal decoding if "Learn New Remote"
-            // disable automatic signal decoding if "Learn New Remote (RAW)"
-            infrared_worker_rx_enable_signal_decoding(
-                infrared->worker, submenu_index == SubmenuIndexLearnNewRemote);
-
+            const bool want_decode = (submenu_index == SubmenuIndexLearnNewRemote);
+            infrared->app_state.is_decode_enabled = want_decode;
+            infrared->app_state.is_decode_forced = false;
+            infrared_worker_rx_enable_signal_decoding(infrared->worker, want_decode);
+            infrared_worker_rx_force_signal_decoding(infrared->worker, false);
+            infrared->app_state.current_button_index = 0;
             infrared->app_state.is_learning_new_remote = true;
             scene_manager_next_scene(scene_manager, InfraredSceneLearn);
         } else if(submenu_index == SubmenuIndexSavedRemotes) {

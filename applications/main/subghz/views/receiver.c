@@ -6,6 +6,7 @@
 #include <gui/elements.h>
 #include <assets_icons.h>
 #include <m-array.h>
+#include <furi.h>
 
 #define FRAME_HEIGHT 12
 #define MAX_LEN_PX   111
@@ -15,6 +16,9 @@
 // #define SUBGHZ_RAW_THRESHOLD_MIN (-90.0f)
 
 #define FLIP_TIMEOUT (500)
+
+/** Limit gui_update rate when RX worker floods decoded packets (avoids crashes under burst). */
+#define SUBGHZ_RECEIVER_GUI_REFRESH_MIN_INTERVAL_MS 45u
 
 typedef struct {
     FuriString* item_str;
@@ -55,7 +59,19 @@ struct SubGhzViewReceiver {
     SubGhzViewReceiverCallback callback;
     void* context;
     FuriTimer* flip_time_timer;
+    uint32_t rx_gui_throttle_timestamp;
 };
+
+bool subghz_view_receiver_begin_rx_gui_frame(SubGhzViewReceiver* instance) {
+    furi_assert(instance);
+    const uint32_t now = furi_get_tick();
+    const uint32_t elapsed = now - instance->rx_gui_throttle_timestamp;
+    if(elapsed >= SUBGHZ_RECEIVER_GUI_REFRESH_MIN_INTERVAL_MS) {
+        instance->rx_gui_throttle_timestamp = now;
+        return true;
+    }
+    return false;
+}
 
 typedef struct {
     FuriString* frequency_str;
@@ -131,7 +147,7 @@ void subghz_view_receiver_set_callback(
     subghz_receiver->context = context;
 }
 
-static void subghz_view_receiver_update_offset(SubGhzViewReceiver* subghz_receiver) {
+static void subghz_view_receiver_update_offset(SubGhzViewReceiver* subghz_receiver, bool refresh_gui) {
     furi_assert(subghz_receiver);
 
     with_view_model(
@@ -150,7 +166,7 @@ static void subghz_view_receiver_update_offset(SubGhzViewReceiver* subghz_receiv
                 model->list_offset = CLAMP(model->idx - 1, (int16_t)(history_item - bounds), 0);
             }
         },
-        true);
+        refresh_gui);
 }
 
 static void subghz_view_receiver_show_time_moment(void* context) {
@@ -175,7 +191,8 @@ void subghz_view_receiver_add_item_to_menu(
     SubGhzViewReceiver* subghz_receiver,
     const char* name,
     const char* time,
-    uint8_t type) {
+    uint8_t type,
+    bool commit_gui) {
     furi_assert(subghz_receiver);
     with_view_model(
         subghz_receiver->view,
@@ -183,22 +200,34 @@ void subghz_view_receiver_add_item_to_menu(
         {
             SubGhzReceiverMenuItem* item_menu =
                 SubGhzReceiverMenuItemArray_push_raw(model->history->data);
-            item_menu->time = furi_string_alloc_set(time);
-            item_menu->item_str = furi_string_alloc_set(name);
-            item_menu->type = type;
-            if(model->history_item == 0) {
-                view_set_input_mode(subghz_receiver->view, ViewInputModeUpDown);
-            }
-            if(model->idx == model->history_item - 1) {
-                model->history_item++;
-                model->idx++;
-                subghz_view_receiver_show_time_moment(subghz_receiver);
+            item_menu->time = furi_string_alloc_set_str(time);
+            item_menu->item_str = furi_string_alloc_set_str(name);
+            if(!item_menu->time || !item_menu->item_str) {
+                if(item_menu->time) {
+                    furi_string_free(item_menu->time);
+                    item_menu->time = NULL;
+                }
+                if(item_menu->item_str) {
+                    furi_string_free(item_menu->item_str);
+                    item_menu->item_str = NULL;
+                }
+                SubGhzReceiverMenuItemArray_pop_back(NULL, model->history->data);
             } else {
-                model->history_item++;
+                item_menu->type = type;
+                if(model->history_item == 0) {
+                    view_set_input_mode(subghz_receiver->view, ViewInputModeUpDown);
+                }
+                if(model->idx == model->history_item - 1) {
+                    model->history_item++;
+                    model->idx++;
+                    subghz_view_receiver_show_time_moment(subghz_receiver);
+                } else {
+                    model->history_item++;
+                }
             }
         },
-        true);
-    subghz_view_receiver_update_offset(subghz_receiver);
+        commit_gui);
+    subghz_view_receiver_update_offset(subghz_receiver, commit_gui);
 }
 
 void subghz_view_receiver_add_data_statusbar(
@@ -207,7 +236,8 @@ void subghz_view_receiver_add_data_statusbar(
     const char* preset_str,
     const char* history_stat_str,
     bool hopping_enabled,
-    bool bin_raw_enabled) {
+    bool bin_raw_enabled,
+    bool commit_gui) {
     furi_assert(subghz_receiver);
     with_view_model(
         subghz_receiver->view,
@@ -219,7 +249,7 @@ void subghz_view_receiver_add_data_statusbar(
             model->hopping_enabled = hopping_enabled;
             model->bin_raw_enabled = bin_raw_enabled;
         },
-        true);
+        commit_gui);
 }
 
 void subghz_view_receiver_add_data_progress(
@@ -523,7 +553,7 @@ bool subghz_view_receiver_input(InputEvent* event, void* context) {
     }
 
     if(consumed) {
-        subghz_view_receiver_update_offset(subghz_receiver);
+        subghz_view_receiver_update_offset(subghz_receiver, true);
     }
     return consumed;
 }
@@ -572,6 +602,7 @@ SubGhzViewReceiver* subghz_view_receiver_alloc(void) {
 
     subghz_receiver->lock = false;
     subghz_receiver->lock_count = 0;
+    subghz_receiver->rx_gui_throttle_timestamp = 0;
     view_allocate_model(
         subghz_receiver->view, ViewModelTypeLocking, sizeof(SubGhzViewReceiverModel));
     view_set_context(subghz_receiver->view, subghz_receiver);
@@ -700,5 +731,5 @@ void subghz_view_receiver_set_idx_menu(SubGhzViewReceiver* subghz_receiver, uint
             if(model->idx > 2) model->list_offset = idx - 2;
         },
         true);
-    subghz_view_receiver_update_offset(subghz_receiver);
+    subghz_view_receiver_update_offset(subghz_receiver, true);
 }

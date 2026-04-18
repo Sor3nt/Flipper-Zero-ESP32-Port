@@ -3,9 +3,13 @@
 
 #include <furi.h>
 
-#define SUBGHZ_HISTORY_MAX       55
-#define SUBGHZ_HISTORY_FREE_HEAP 20480
+#define SUBGHZ_HISTORY_MAX       100
+#define SUBGHZ_HISTORY_FREE_HEAP 10240
 #define TAG                      "SubGhzHistory"
+
+uint16_t subghz_history_get_max_items(void) {
+    return SUBGHZ_HISTORY_MAX;
+}
 
 typedef struct {
     FuriString* item_str;
@@ -160,8 +164,13 @@ bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* out
         if(output != NULL) furi_string_printf(output, "   Memory is FULL");
         return true;
     }
-    if(output != NULL)
-        furi_string_printf(output, "%02u/%02u", instance->last_index_write, SUBGHZ_HISTORY_MAX);
+    if(output != NULL) {
+        furi_string_printf(
+            output,
+            "%u/%u",
+            (unsigned)instance->last_index_write,
+            (unsigned)SUBGHZ_HISTORY_MAX);
+    }
     return false;
 }
 
@@ -190,11 +199,15 @@ bool subghz_history_add_to_history(
     if(instance->last_index_write >= SUBGHZ_HISTORY_MAX) return false;
 
     SubGhzProtocolDecoderBase* decoder_base = context;
-    FURI_LOG_I(
+    if(!decoder_base->protocol) {
+        return false;
+    }
+
+    FURI_LOG_D(
         TAG,
         "add_to_history: protocol='%s' type=%d hash=%d",
-        decoder_base->protocol ? decoder_base->protocol->name : "NULL",
-        decoder_base->protocol ? decoder_base->protocol->type : -1,
+        decoder_base->protocol->name,
+        decoder_base->protocol->type,
         subghz_protocol_decoder_base_get_hash_data(decoder_base));
 
     if((instance->code_last_hash_data ==
@@ -209,11 +222,31 @@ bool subghz_history_add_to_history(
     instance->last_update_timestamp = furi_get_tick();
 
     FuriString* text = furi_string_alloc();
+    if(!text) {
+        return false;
+    }
+
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_push_raw(instance->history->data);
+    item->preset = NULL;
+    item->item_str = NULL;
+    item->flipper_string = NULL;
+
     item->preset = malloc(sizeof(SubGhzRadioPreset));
+    if(!item->preset) {
+        SubGhzHistoryItemArray_pop_back(NULL, instance->history->data);
+        furi_string_free(text);
+        return false;
+    }
     item->type = decoder_base->protocol->type;
     item->preset->frequency = preset->frequency;
     item->preset->name = furi_string_alloc();
+    if(!item->preset->name) {
+        free(item->preset);
+        item->preset = NULL;
+        SubGhzHistoryItemArray_pop_back(NULL, instance->history->data);
+        furi_string_free(text);
+        return false;
+    }
     furi_string_set(item->preset->name, preset->name);
     item->preset->data = preset->data;
     item->preset->data_size = preset->data_size;
@@ -221,9 +254,20 @@ bool subghz_history_add_to_history(
 
     item->item_str = furi_string_alloc();
     item->flipper_string = flipper_format_string_alloc();
+    if(!item->item_str || !item->flipper_string) {
+        if(item->flipper_string) flipper_format_free(item->flipper_string);
+        if(item->item_str) furi_string_free(item->item_str);
+        furi_string_free(item->preset->name);
+        free(item->preset);
+        item->preset = NULL;
+        SubGhzHistoryItemArray_pop_back(NULL, instance->history->data);
+        furi_string_free(text);
+        return false;
+    }
+
     SubGhzProtocolStatus ser_status =
         subghz_protocol_decoder_base_serialize(decoder_base, item->flipper_string, preset);
-    FURI_LOG_I(
+    FURI_LOG_D(
         TAG,
         "serialize: status=%d preset='%s' freq=%lu",
         (int)ser_status,

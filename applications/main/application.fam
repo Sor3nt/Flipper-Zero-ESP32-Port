@@ -6,7 +6,6 @@ App(
         "gpio",
         "ibutton",
         "infrared",
-        "lfrfid",
         "nfc",
         "subghz",
         "bad_usb",

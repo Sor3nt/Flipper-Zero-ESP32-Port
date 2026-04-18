@@ -927,6 +927,26 @@ FS_Error storage_sd_status(Storage* storage) {
     return S_RETURN_ERROR;
 }
 
+FS_Error storage_sd_suspend_for_usb_msc(Storage* storage) {
+    furi_check(storage);
+
+    S_API_PROLOGUE;
+    SAData data = {};
+    S_API_MESSAGE(StorageCommandSDSuspendUsbMsc);
+    S_API_EPILOGUE;
+    return S_RETURN_ERROR;
+}
+
+FS_Error storage_sd_resume_after_usb_msc(Storage* storage) {
+    furi_check(storage);
+
+    S_API_PROLOGUE;
+    SAData data = {};
+    S_API_MESSAGE(StorageCommandSDResumeUsbMsc);
+    S_API_EPILOGUE;
+    return S_RETURN_ERROR;
+}
+
 File* storage_file_alloc(Storage* storage) {
     furi_check(storage);
 

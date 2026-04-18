@@ -153,9 +153,15 @@ static InfraredApp* infrared_alloc(void) {
     InfraredAppState* app_state = &infrared->app_state;
     app_state->is_learning_new_remote = false;
     app_state->is_debug_enabled = furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug);
+    app_state->is_transmitting = false;
+    app_state->is_otg_enabled = false;
+    app_state->is_easy_mode = false;
+    app_state->is_decode_enabled = true;
+    app_state->is_decode_forced = false;
     app_state->edit_target = InfraredEditTargetNone;
     app_state->edit_mode = InfraredEditModeNone;
     app_state->current_button_index = InfraredButtonIndexNone;
+    app_state->existing_remote_button_index = 0;
 
     infrared->scene_manager = scene_manager_alloc(&infrared_scene_handlers, infrared);
     infrared->view_dispatcher = view_dispatcher_alloc();
@@ -500,37 +506,74 @@ void infrared_enable_otg(InfraredApp* infrared, bool enable) {
     furi_record_close(RECORD_POWER);
 }
 
+typedef struct {
+    FuriHalInfraredTxPin tx_pin;
+    bool otg_enabled;
+} InfraredSettingsV1;
+
+bool infrared_settings_load(InfraredSettings* settings) {
+    if(saved_struct_load(
+           INFRARED_SETTINGS_PATH,
+           settings,
+           sizeof(*settings),
+           INFRARED_SETTINGS_MAGIC,
+           INFRARED_SETTINGS_VERSION)) {
+        return true;
+    }
+
+    settings->tx_pin = FuriHalInfraredTxPinInternal;
+    settings->otg_enabled = false;
+    settings->easy_mode = false;
+
+    uint8_t magic = 0;
+    uint8_t version = 0;
+    if(saved_struct_get_metadata(INFRARED_SETTINGS_PATH, &magic, &version, NULL) &&
+       magic == INFRARED_SETTINGS_MAGIC && version == 1U) {
+        InfraredSettingsV1 v1;
+        if(saved_struct_load(INFRARED_SETTINGS_PATH, &v1, sizeof(v1), magic, version)) {
+            settings->tx_pin = v1.tx_pin;
+            settings->otg_enabled = v1.otg_enabled;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool infrared_settings_save(const InfraredSettings* settings) {
+    return saved_struct_save(
+        INFRARED_SETTINGS_PATH,
+        settings,
+        sizeof(*settings),
+        INFRARED_SETTINGS_MAGIC,
+        INFRARED_SETTINGS_VERSION);
+}
+
 static void infrared_load_settings(InfraredApp* infrared) {
     InfraredSettings settings = {0};
 
-    if(!saved_struct_load(
-           INFRARED_SETTINGS_PATH,
-           &settings,
-           sizeof(InfraredSettings),
-           INFRARED_SETTINGS_MAGIC,
-           INFRARED_SETTINGS_VERSION)) {
+    if(!infrared_settings_load(&settings)) {
         FURI_LOG_D(TAG, "Failed to load settings, using defaults");
-        infrared_save_settings(infrared);
     }
 
     infrared_set_tx_pin(infrared, settings.tx_pin);
     if(settings.tx_pin < FuriHalInfraredTxPinMax) {
         infrared_enable_otg(infrared, settings.otg_enabled);
     }
+    infrared->app_state.is_easy_mode = settings.easy_mode;
+
+    infrared_worker_rx_enable_signal_decoding(infrared->worker, infrared->app_state.is_decode_enabled);
+    infrared_worker_rx_force_signal_decoding(infrared->worker, infrared->app_state.is_decode_forced);
 }
 
 void infrared_save_settings(InfraredApp* infrared) {
     InfraredSettings settings = {
         .tx_pin = infrared->app_state.tx_pin,
         .otg_enabled = infrared->app_state.is_otg_enabled,
+        .easy_mode = infrared->app_state.is_easy_mode,
     };
 
-    if(!saved_struct_save(
-           INFRARED_SETTINGS_PATH,
-           &settings,
-           sizeof(InfraredSettings),
-           INFRARED_SETTINGS_MAGIC,
-           INFRARED_SETTINGS_VERSION)) {
+    if(!infrared_settings_save(&settings)) {
         FURI_LOG_E(TAG, "Failed to save settings");
     }
 }

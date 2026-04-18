@@ -167,6 +167,28 @@ FS_Error sd_unmount_card(StorageData* storage) {
     return storage_ext_parse_error(error);
 }
 
+FS_Error sd_suspend_for_usb_msc(StorageData* storage) {
+    if(!furi_hal_sd_fatfs_detach_keep_card()) {
+        return FSE_INTERNAL;
+    }
+
+    storage->status = StorageStatusNotReady;
+    storage_data_timestamp(storage);
+    return FSE_OK;
+}
+
+FS_Error sd_resume_after_usb_msc(StorageData* storage) {
+    if(!furi_hal_sd_fatfs_remount_after_usb()) {
+        storage->status = StorageStatusNotMounted;
+        storage_data_timestamp(storage);
+        return FSE_INTERNAL;
+    }
+
+    storage->status = StorageStatusOK;
+    storage_data_timestamp(storage);
+    return FSE_OK;
+}
+
 FS_Error sd_mount_card(StorageData* storage, bool notify) {
     sd_mount_card_internal(storage, notify);
     FS_Error error;

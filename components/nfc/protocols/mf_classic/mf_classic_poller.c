@@ -1333,7 +1333,7 @@ NfcCommand mf_classic_poller_handler_nested_calibrate(MfClassicPoller* instance)
         }
         float mean = sum / valid_distances;
         float variance = (sum_sq / valid_distances) - (mean * mean);
-        float std_dev = sqrtf(variance);
+        float std_dev = __builtin_sqrtf(variance);
 
         // Filter out values over 3 standard deviations away from the median
         for(uint8_t i = 0; i < valid_distances; i++) {

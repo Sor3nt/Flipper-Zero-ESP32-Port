@@ -2,12 +2,19 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "dolphin_deed.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+extern const uint32_t DOLPHIN_LEVELS[];
+extern const size_t DOLPHIN_LEVEL_COUNT;
+
+#define BUTTHURT_MAX 14
+#define BUTTHURT_MIN 0
 
 typedef enum {
     DolphinFlagHappyMode = 1,

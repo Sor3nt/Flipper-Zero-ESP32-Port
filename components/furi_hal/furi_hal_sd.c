@@ -622,3 +622,47 @@ bool furi_hal_sd_unmount(void) {
 bool furi_hal_sd_is_mounted(void) {
     return sd_mounted;
 }
+
+bool furi_hal_sd_fatfs_detach_keep_card(void) {
+    if(!sd_initialized || sd_card == NULL) {
+        return false;
+    }
+
+    if(!sd_mounted) {
+        return true;
+    }
+
+    const FRESULT result = f_mount(NULL, SD_FATFS_DRIVE, 0);
+    if(result != FR_OK) {
+        ESP_LOGE(TAG, "FatFs detach failed: %d", result);
+        return false;
+    }
+
+    sd_mounted = false;
+    ESP_LOGI(TAG, "FatFs detached (card kept)");
+    return true;
+}
+
+bool furi_hal_sd_fatfs_remount_after_usb(void) {
+    if(!sd_initialized || sd_card == NULL) {
+        return false;
+    }
+
+    if(sd_mounted) {
+        return true;
+    }
+
+    const FRESULT result = f_mount(&fatfs_object, SD_FATFS_DRIVE, 1);
+    if(result != FR_OK && result != FR_NO_FILESYSTEM) {
+        ESP_LOGE(TAG, "FatFs remount failed: %d", result);
+        return false;
+    }
+
+    sd_mounted = true;
+    ESP_LOGI(TAG, "FatFs remounted");
+    return true;
+}
+
+struct sdmmc_card* furi_hal_sd_get_mmc_card(void) {
+    return (struct sdmmc_card*)((sd_initialized && sd_card != NULL) ? sd_card : NULL);
+}

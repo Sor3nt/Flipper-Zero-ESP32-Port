@@ -104,6 +104,12 @@ void furi_hal_rtc_get_datetime(DateTime* datetime);
 void furi_hal_rtc_set_datetime(DateTime* datetime);
 uint32_t furi_hal_rtc_get_timestamp(void);
 
+/** Alarm: ESP32 port stores settings only; callback is never invoked (no hardware alarm). */
+typedef void (*FuriHalRtcAlarmCallback)(void* context);
+void furi_hal_rtc_set_alarm(const DateTime* datetime, bool enabled);
+bool furi_hal_rtc_get_alarm(DateTime* datetime);
+void furi_hal_rtc_set_alarm_callback(FuriHalRtcAlarmCallback callback, void* context);
+
 FuriHalRtcLocaleTimeFormat furi_hal_rtc_get_locale_timeformat(void);
 void furi_hal_rtc_set_locale_timeformat(FuriHalRtcLocaleTimeFormat format);
 FuriHalRtcLocaleDateFormat furi_hal_rtc_get_locale_dateformat(void);

@@ -2,15 +2,11 @@
 
 #include "scenes/clock_settings_scene.h"
 
-#include <furi_hal_clock.h>
-#include <furi_hal_pwm.h>
+#include <furi_hal.h>
 
 #include <gui/gui.h>
 #include <gui/view_dispatcher.h>
 #include <gui/scene_manager.h>
-#include <gui/modules/submenu.h>
-#include <gui/modules/variable_item_list.h>
-#include <gui/modules/submenu.h>
 #include "views/clock_settings_module.h"
 
 typedef struct ClockSettings ClockSettings;

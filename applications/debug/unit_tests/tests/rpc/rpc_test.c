@@ -759,7 +759,7 @@ MU_TEST(test_storage_list) {
     test_rpc_storage_list_run(STORAGE_EXT_PATH_PREFIX, ++command_id, false, 0);
     test_rpc_storage_list_run(EXT_PATH("infrared"), ++command_id, false, 0);
     test_rpc_storage_list_run(EXT_PATH("ibutton"), ++command_id, false, 0);
-    test_rpc_storage_list_run(EXT_PATH("lfrfid"), ++command_id, false, 0);
+    test_rpc_storage_list_run(EXT_PATH("nfc"), ++command_id, false, 0);
     test_rpc_storage_list_run("error_path", ++command_id, false, 0);
 }
 
@@ -770,7 +770,7 @@ MU_TEST(test_storage_list_md5) {
     test_rpc_storage_list_run(STORAGE_EXT_PATH_PREFIX, ++command_id, true, 0);
     test_rpc_storage_list_run(EXT_PATH("infrared"), ++command_id, true, 0);
     test_rpc_storage_list_run(EXT_PATH("ibutton"), ++command_id, true, 0);
-    test_rpc_storage_list_run(EXT_PATH("lfrfid"), ++command_id, true, 0);
+    test_rpc_storage_list_run(EXT_PATH("nfc"), ++command_id, true, 0);
     test_rpc_storage_list_run("error_path", ++command_id, true, 0);
 }
 

@@ -102,6 +102,7 @@ static void backlight_changed(VariableItem* item) {
     app->notification->settings.display_brightness = backlight_value[index];
 
     notification_message(app->notification, &sequence_display_backlight_force_on);
+    notification_message_save_settings(app->notification);
 }
 
 static void screen_changed(VariableItem* item) {
@@ -115,6 +116,7 @@ static void screen_changed(VariableItem* item) {
         furi_timer_stop(app->notification->display_timer);
     }
     notification_message(app->notification, &sequence_display_backlight_on);
+    notification_message_save_settings(app->notification);
 }
 
 static void volume_changed(VariableItem* item) {
@@ -124,6 +126,7 @@ static void volume_changed(VariableItem* item) {
     variable_item_set_current_value_text(item, volume_text[index]);
     app->notification->settings.speaker_volume = volume_value[index];
     notification_message(app->notification, &sequence_note_c);
+    notification_message_save_settings(app->notification);
 }
 
 // --- NIGHT SHIFT ---

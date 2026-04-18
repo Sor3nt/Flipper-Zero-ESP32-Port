@@ -26,6 +26,7 @@ idf_component_register(
         "furi_hal_gpio.c"
         "furi_hal_resources.c"
         "furi_hal_usb.c"
+        "furi_hal_usb_msc.c"
         "furi_hal_usb_cdc.c"
         "furi_hal_light.c"
         "furi_hal_vibro.c"
@@ -39,12 +40,11 @@ idf_component_register(
         "furi_hal_sd.c"
         "furi_hal_touch.c"
         "furi_hal_infrared.c"
-        "furi_hal_rfid.c"
         "furi_hal_bq27220.c"
         "furi_hal_bq25896.c"
         "fatfs_compat.c"
     INCLUDE_DIRS "." ".." "../.." "boards"
-    REQUIRES furi toolbox input driver esp_lcd fatfs sdmmc datetime ble_hid ble_serial ble_profile furi_ble flipper_protobuf esp_adc esp_driver_rmt esp_driver_i2s nvs_flash
+    REQUIRES furi toolbox input driver esp_lcd fatfs sdmmc datetime ble_hid ble_serial ble_profile furi_ble flipper_protobuf esp_adc esp_driver_rmt esp_driver_i2s nvs_flash esp_tinyusb
 )
 
 # Set board include path as compile definition

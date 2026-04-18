@@ -27,7 +27,6 @@ extern "C" {
 #include <furi_hal_subghz.h>
 #include <furi_hal_nfc.h>
 #include <furi_hal_infrared.h>
-#include <furi_hal_rfid.h>
 
 void furi_hal_init_early(void);
 void furi_hal_deinit_early(void);

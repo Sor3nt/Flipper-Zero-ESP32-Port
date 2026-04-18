@@ -109,16 +109,13 @@ static bool IRAM_ATTR ir_rmt_rx_done_callback(rmt_channel_handle_t channel,
 
         /* Each RMT symbol has two phases: duration0/level0 then duration1/level1 */
         if(sym->duration0 > 0 && ir_rx.capture_callback) {
-            /* IR receiver output is typically inverted:
-             * level0=0 (IR mark/burst) -> report as level=1
-             * level0=1 (IR space/idle) -> report as level=0 */
-            ir_rx.capture_callback(
-                ir_rx.capture_context, !sym->level0, sym->duration0);
+            /* Match targets/f7 (STM32) HAL: level 1 = mark (burst), 0 = space.
+             * rx_chan_config.flags.invert_in already maps TSOP active-low to that. */
+            ir_rx.capture_callback(ir_rx.capture_context, sym->level0, sym->duration0);
             ir_rx_restart_timeout();
         }
         if(sym->duration1 > 0 && ir_rx.capture_callback) {
-            ir_rx.capture_callback(
-                ir_rx.capture_context, !sym->level1, sym->duration1);
+            ir_rx.capture_callback(ir_rx.capture_context, sym->level1, sym->duration1);
             ir_rx_restart_timeout();
         }
     }

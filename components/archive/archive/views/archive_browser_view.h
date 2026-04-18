@@ -29,7 +29,6 @@ typedef enum {
     ArchiveTabFavorites,
     ArchiveTabSubGhz,
     ArchiveTabSubGhzRemote,
-    ArchiveTabLFRFID,
     ArchiveTabNFC,
     ArchiveTabInfrared,
     ArchiveTabIButton,

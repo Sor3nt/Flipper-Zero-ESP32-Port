@@ -2,7 +2,7 @@
 
 const SubmenuSettingsHelperDescriptor descriptor_template = {
     .app_name = "Storage",
-    .options_cnt = 6,
+    .options_cnt = 7,
     .options =
         {
             {.name = "About Internal Storage", .scene_id = StorageSettingsInternalInfo},
@@ -10,6 +10,7 @@ const SubmenuSettingsHelperDescriptor descriptor_template = {
             {.name = "Unmount SD Card", .scene_id = StorageSettingsUnmountConfirm},
             {.name = "Format SD Card", .scene_id = StorageSettingsFormatConfirm},
             {.name = "Benchmark SD Card", .scene_id = StorageSettingsBenchmarkConfirm},
+            {.name = "SD over USB", .scene_id = StorageSettingsUsbMsc},
             {.name = "Factory Reset", .scene_id = StorageSettingsFactoryReset},
         },
 };

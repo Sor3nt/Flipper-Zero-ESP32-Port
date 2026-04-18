@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "../../lib/toolbox/colors.c"
         "version.c"
         "microtar.c"
         "pipe.c"

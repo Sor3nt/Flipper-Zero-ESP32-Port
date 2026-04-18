@@ -492,13 +492,14 @@ static void nfc_protocol_support_scene_read_success_on_enter(NfcApp* instance) {
     popup_set_icon(instance->popup, 12, 23, &A_Loading_24);
     view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
 
-    /* Skip nfc_supported_cards_parse — it uses FAP plugins which don't work
-     * on ESP32, and can crash on incomplete protocol data (e.g., Type4Tag
-     * without CC/NDEF). Go directly to the protocol-specific renderer. */
-    const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
-    nfc_protocol_support_get(protocol, instance)->scene_read_success.on_enter(instance);
-
-    FuriString* temp_str = furi_string_alloc(); /* needed for cleanup below */
+    FuriString* temp_str = furi_string_alloc();
+    if(nfc_supported_cards_parse(instance->nfc_supported_cards, instance->nfc_device, temp_str)) {
+        widget_add_text_scroll_element(
+            instance->widget, 0, 0, 128, 52, furi_string_get_cstr(temp_str));
+    } else {
+        const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+        nfc_protocol_support_get(protocol, instance)->scene_read_success.on_enter(instance);
+    }
 
     furi_string_free(temp_str);
 
