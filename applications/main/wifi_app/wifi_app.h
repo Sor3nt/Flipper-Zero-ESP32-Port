@@ -15,13 +15,11 @@
 #define WIFI_APP_MAX_APS 64
 #define WIFI_APP_LOG_TAG "WifiApp"
 
-/** Deauth mode */
 typedef enum {
-    WifiAppDeauthModeSsid,    // Target specific connected AP
-    WifiAppDeauthModeChannel, // All APs on channel
+    WifiAppDeauthModeSsid,
+    WifiAppDeauthModeChannel,
 } WifiAppDeauthMode;
 
-/** Custom events */
 typedef enum {
     WifiAppCustomEventScanComplete = 100,
     WifiAppCustomEventApSelected,
@@ -32,9 +30,9 @@ typedef enum {
     WifiAppCustomEventHandshakeToggle,
     WifiAppCustomEventHandshakeDeauth,
     WifiAppCustomEventPasswordEntered,
+    WifiAppCustomEventBeaconStop,
 } WifiAppCustomEvent;
 
-/** View IDs */
 typedef enum {
     WifiAppViewSubmenu,
     WifiAppViewWidget,
@@ -48,26 +46,32 @@ typedef enum {
     WifiAppViewHandshakeChannel,
     WifiAppViewAirSnitch,
     WifiAppViewNetscan,
+    WifiAppViewBeacon,
 } WifiAppView;
 
-/** Per-AP scan result */
+typedef enum {
+    WifiAppBeaconModeFunny,
+    WifiAppBeaconModeRickroll,
+    WifiAppBeaconModeRandom,
+    WifiAppBeaconModeCustom,
+} WifiAppBeaconMode;
+
 typedef struct {
     char ssid[33];
     uint8_t bssid[6];
     int8_t rssi;
     uint8_t channel;
     uint8_t authmode;
-    bool is_open;       // authmode == WIFI_AUTH_OPEN
-    bool has_password;  // password file on SD card
+    bool is_open;
+    bool has_password;
 } WifiApRecord;
 
-/** Main app struct */
-typedef struct {
+typedef struct WifiApp WifiApp;
+
+struct WifiApp {
     Gui* gui;
     SceneManager* scene_manager;
     ViewDispatcher* view_dispatcher;
-
-    // GUI modules
     Submenu* submenu;
     Widget* widget;
     Loading* loading;
@@ -79,50 +83,34 @@ typedef struct {
     View* view_handshake;
     View* view_handshake_channel;
     View* view_airsnitch;
-
-    // Scan results
+    View* view_netscan;
+    View* view_beacon;
+    void* beacon_view_obj;
     WifiApRecord* ap_records;
     uint16_t ap_count;
     size_t selected_index;
     FuriString* text_buf;
-
-    // Deauther state
     volatile bool deauth_running;
     uint32_t deauth_frame_count;
-
-    // Sniffer state
     volatile bool sniffer_running;
     uint32_t sniffer_pkt_count;
     uint32_t sniffer_bytes;
     uint8_t sniffer_channel;
-
-    // Handshake capture state
     volatile bool handshake_running;
     volatile bool handshake_deauth_running;
     uint32_t handshake_eapol_count;
     uint32_t handshake_deauth_count;
     bool handshake_complete;
-
-    // Scanner navigation: where to go after AP selection
     uint8_t scanner_next_scene;
-
-    // Connected AP info (stored after successful connect)
     WifiApRecord connected_ap;
-
-    // Deauth mode
     WifiAppDeauthMode deauth_mode;
-
-    // Password input buffer
     char password_input[65];
-
-    // Crawler state
     char crawler_domain[128];
     WifiCrawlerState crawler_state;
-
-    // Network scanner state
-    View* view_netscan;
     uint32_t portscan_target_ip;
-} WifiApp;
+    WifiAppBeaconMode beacon_mode;
+    char single_ssid[33];
+};
 
 static inline const char* wifi_auth_mode_str(int authmode) {
     switch(authmode) {
