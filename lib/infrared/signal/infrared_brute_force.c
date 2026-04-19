@@ -7,15 +7,12 @@
 
 #include "infrared_signal.h"
 
-<<<<<<< HEAD
 #define TAG "InfraredBruteforce"
 
 #define INFRARED_FILE_HEADER     "IR signals file"
 #define INFRARED_LIBRARY_HEADER  "IR library file"
 #define INFRARED_LIBRARY_VERSION (1)
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 ARRAY_DEF(SignalPositionArray, size_t, M_DEFAULT_OPLIST); //-V658
 
 typedef struct {
@@ -96,14 +93,10 @@ void infrared_brute_force_set_db_filename(InfraredBruteForce* brute_force, const
     brute_force->db_filename = db_filename;
 }
 
-<<<<<<< HEAD
 InfraredErrorCode infrared_brute_force_calculate_messages_ex(
     InfraredBruteForce* brute_force,
     bool auto_detect_buttons,
     bool ignore_unknown_buttons) {
-=======
-InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* brute_force) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     furi_check(brute_force);
     furi_assert(!brute_force->is_started);
     furi_assert(brute_force->db_filename);
@@ -120,7 +113,6 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
             break;
         }
 
-<<<<<<< HEAD
         uint32_t version;
         // Temporarily use signal_name to get header info
         if(!flipper_format_read_header(ff, signal_name, &version)) {
@@ -148,9 +140,6 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
 
         bool signal_valid = false;
         uint32_t auto_detect_button_index = 0;
-=======
-        bool signal_valid = false;
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         while(infrared_signal_read_name(ff, signal_name) == InfraredErrorCodeNone) {
             size_t signal_start = flipper_format_tell(ff);
             error = infrared_signal_read_body(signal, ff);
@@ -159,7 +148,6 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
 
             InfraredBruteForceRecord* record =
                 InfraredBruteForceRecordDict_get(brute_force->records, signal_name);
-<<<<<<< HEAD
             if(!record) {
                 if(auto_detect_buttons) {
                     infrared_brute_force_add_record(
@@ -174,9 +162,6 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
                     furi_crash("Unknown signal name");
                 }
             }
-=======
-            furi_assert(record);
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
             SignalPositionArray_push_back(record->signals, signal_start);
         }
         if(!signal_valid) break;
@@ -190,13 +175,10 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
     return error;
 }
 
-<<<<<<< HEAD
 InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* brute_force) {
     return infrared_brute_force_calculate_messages_ex(brute_force, false, false);
 }
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 bool infrared_brute_force_start(
     InfraredBruteForce* brute_force,
     uint32_t index,
@@ -286,7 +268,6 @@ void infrared_brute_force_reset(InfraredBruteForce* brute_force) {
     furi_assert(!brute_force->is_started);
     InfraredBruteForceRecordDict_reset(brute_force->records);
 }
-<<<<<<< HEAD
 
 size_t infrared_brute_force_get_button_count(const InfraredBruteForce* brute_force) {
     size_t size = InfraredBruteForceRecordDict_size(brute_force->records);
@@ -315,5 +296,3 @@ const char*
 
     return NULL; //just as fallback
 }
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685

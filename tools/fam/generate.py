@@ -167,7 +167,6 @@ def render_flags(flags: Iterable[str]) -> str:
     return "|".join(rendered) if rendered else "FlipperInternalApplicationFlagDefault"
 
 
-# ESP32 needs larger stacks than STM32 due to deeper call chains (SPI mutex, FATFS LFN, etc.)
 ESP32_MIN_STACK_SIZE = 4096
 
 
@@ -328,14 +327,19 @@ def gather_sources(base_dir: Path, patterns: Iterable[str]) -> list[Path]:
 
 
 def cmake_quote(path: Path | str) -> str:
-<<<<<<< HEAD
     """Quote a path for generated CMake. Use forward slashes so Windows paths are not
     parsed as escape sequences (e.g. \\U in C:\\Users\\U_... breaks CMake)."""
     s = str(path).replace("\\", "/")
     return '"' + s.replace('"', '\\"') + '"'
-=======
-    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
+
+
+def stage_copy_tree_filtered_command(project_dir: Path, src: Path, dst_cmake_path: str) -> str:
+    """Copy a staged asset tree without SD-only blobs (see gather_staging_dependency_paths)."""
+    script = cmake_quote(project_dir / "tools/fam/copy_ext_tree.py")
+    return (
+        f"    COMMAND ${{Python3_EXECUTABLE}} {script} "
+        f"{cmake_quote(src)} {cmake_quote(dst_cmake_path)} --omit-suffix .ir"
+    )
 
 
 def gather_asset_sources(app: FlipperApplication) -> list[Path]:
@@ -349,14 +353,14 @@ def gather_asset_sources(app: FlipperApplication) -> list[Path]:
     return asset_roots
 
 
-<<<<<<< HEAD
 def is_flipper_resources_ext_mirror(app: FlipperApplication, asset_root: Path) -> bool:
     """True when asset_root is the app's `resources/` tree that mirrors /ext on SD.
 
     Flipper packs e.g. applications/main/infrared/resources/infrared/assets/*.ir so that
     on the card they appear as /ext/infrared/assets/*.ir (EXT_PATH). Staging those
     under apps_assets/<appid>/ breaks paths — we merge each top-level child into
-    ${ESP32_FAM_RUNTIME_EXT_ROOT}/ instead.
+    ${ESP32_FAM_RUNTIME_EXT_ROOT}/ instead. Large *.ir databases are not copied into
+    the embedded runtime image (SD-only); see copy_ext_tree.py / gather_staging_dependency_paths.
     """
     if not app.resources or app.resources != "resources":
         return False
@@ -367,8 +371,6 @@ def is_flipper_resources_ext_mirror(app: FlipperApplication, asset_root: Path) -
         return expected == asset_root
 
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 def gather_asset_dependencies(asset_roots: Iterable[Path]) -> list[Path]:
     dependencies: set[Path] = set()
     for asset_root in asset_roots:
@@ -379,14 +381,20 @@ def gather_asset_dependencies(asset_roots: Iterable[Path]) -> list[Path]:
     return sorted(dependencies)
 
 
-<<<<<<< HEAD
+def gather_staging_dependency_paths(asset_roots: Iterable[Path]) -> list[Path]:
+    """Paths that should trigger a re-stage when changed.
+
+    Infrared *.ir libraries are intentionally not embedded (SD-only); omit them so
+    edits to those databases do not invalidate the firmware asset stamp.
+    """
+    return [p for p in gather_asset_dependencies(asset_roots) if p.suffix.lower() != ".ir"]
+
+
 def _app_manifest_path_posix(app: FlipperApplication) -> str:
     """Normalize manifest path so Windows backslashes match application-dir checks."""
     return getattr(app, "_manifest_path", "").replace("\\", "/")
 
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
     contents = [
         "set(ESP32_FAM_PORTED_OBJECT_TARGETS)",
@@ -401,15 +409,10 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
     ported_apps = [
         app
         for app in sorted_unique_apps(buildset.apps)
-<<<<<<< HEAD
         if (
             "/applications/" in _app_manifest_path_posix(app)
             or "/applications_user/" in _app_manifest_path_posix(app)
         )
-=======
-        if "/applications/" in getattr(app, "_manifest_path", "")
-        or "/applications_user/" in getattr(app, "_manifest_path", "")
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         and (app.apptype != FlipperAppType.STARTUP or bool(app.sources))
     ]
 
@@ -508,7 +511,6 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
         if not asset_roots:
             continue
 
-<<<<<<< HEAD
         apps_assets_destination = f'${{ESP32_FAM_RUNTIME_EXT_ROOT}}/apps_assets/{app.appid}'
         mirror_roots = [ar for ar in asset_roots if is_flipper_resources_ext_mirror(app, ar)]
         other_roots = [ar for ar in asset_roots if not is_flipper_resources_ext_mirror(app, ar)]
@@ -522,10 +524,8 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
                     f"    COMMAND ${{CMAKE_COMMAND}} -E make_directory {cmake_quote(ext_destination)}"
                 )
                 if child.is_dir():
-                    stage_commands.append(
-                        f"    COMMAND ${{CMAKE_COMMAND}} -E copy_directory {cmake_quote(child)} {cmake_quote(ext_destination)}"
-                    )
-                else:
+                    stage_commands.append(stage_copy_tree_filtered_command(project_dir, child, ext_destination))
+                elif child.suffix.lower() != ".ir":
                     dest_file = f'${{ESP32_FAM_RUNTIME_EXT_ROOT}}/{child.name}'
                     stage_commands.append(
                         f"    COMMAND ${{CMAKE_COMMAND}} -E copy_if_different {cmake_quote(child)} {cmake_quote(dest_file)}"
@@ -538,36 +538,23 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
             for asset_root in other_roots:
                 if asset_root.is_dir():
                     stage_commands.append(
-                        f"    COMMAND ${{CMAKE_COMMAND}} -E copy_directory {cmake_quote(asset_root)} {cmake_quote(apps_assets_destination)}"
+                        stage_copy_tree_filtered_command(project_dir, asset_root, apps_assets_destination)
                     )
-                elif asset_root.is_file():
+                elif asset_root.is_file() and asset_root.suffix.lower() != ".ir":
                     stage_commands.append(
                         f"    COMMAND ${{CMAKE_COMMAND}} -E copy_if_different {cmake_quote(asset_root)} {cmake_quote(apps_assets_destination)}"
                     )
-=======
-        destination = f'${{ESP32_FAM_RUNTIME_EXT_ROOT}}/apps_assets/{app.appid}'
-        stage_commands.append(f"    COMMAND ${{CMAKE_COMMAND}} -E make_directory {cmake_quote(destination)}")
-
-        for asset_root in asset_roots:
-            if asset_root.is_dir():
-                stage_commands.append(
-                    f"    COMMAND ${{CMAKE_COMMAND}} -E copy_directory {cmake_quote(asset_root)} {cmake_quote(destination)}"
-                )
-            elif asset_root.is_file():
-                stage_commands.append(
-                    f"    COMMAND ${{CMAKE_COMMAND}} -E copy_if_different {cmake_quote(asset_root)} {cmake_quote(destination)}"
-                )
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
-        stage_depends.update(gather_asset_dependencies(asset_roots))
+        stage_depends.update(gather_staging_dependency_paths(asset_roots))
 
     stage_commands.append('    COMMAND ${CMAKE_COMMAND} -E touch "${ESP32_FAM_STAGE_ASSETS_STAMP}"')
 
     contents.append("add_custom_command(")
     contents.append('    OUTPUT "${ESP32_FAM_STAGE_ASSETS_STAMP}"')
     contents.extend(stage_commands)
-    if stage_depends:
+    stage_depends_all = sorted(stage_depends | {project_dir / "tools/fam/copy_ext_tree.py"})
+    if stage_depends_all:
         contents.append("    DEPENDS")
-        contents.extend(f"        {cmake_quote(path)}" for path in sorted(stage_depends))
+        contents.extend(f"        {cmake_quote(path)}" for path in stage_depends_all)
     contents.append("    VERBATIM")
     contents.append(")")
     contents.append('add_custom_target(esp32_fam_stage_assets DEPENDS "${ESP32_FAM_STAGE_ASSETS_STAMP}")')

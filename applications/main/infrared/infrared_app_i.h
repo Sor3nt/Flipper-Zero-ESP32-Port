@@ -52,12 +52,9 @@
 #define INFRARED_DEFAULT_REMOTE_NAME "Remote"
 #define INFRARED_LOG_TAG             "InfraredApp"
 
-<<<<<<< HEAD
 extern const char* const easy_mode_button_names[];
 extern const size_t easy_mode_button_count;
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 /**
  * @brief Enumeration of invalid remote button indices.
  */
@@ -91,7 +88,6 @@ typedef struct {
     bool is_debug_enabled; /**< Whether to enable or disable debugging features. */
     bool is_transmitting; /**< Whether a signal is currently being transmitted. */
     bool is_otg_enabled; /**< Whether OTG power (external 5V) is enabled. */
-<<<<<<< HEAD
     bool is_easy_mode; /**< Easy learn uses preset button names and skip. */
     bool is_decode_enabled; /**< Auto: decode when possible, else raw. */
     bool is_decode_forced; /**< Decode: decoder only (no raw capture). */
@@ -99,11 +95,6 @@ typedef struct {
     InfraredEditMode edit_mode     : 8; /**< Selected editing operation (rename or delete). */
     int32_t current_button_index; /**< Selected button index (move destination / easy learn index). */
     int32_t existing_remote_button_index; /**< Easy learn index when adding to an existing remote. */
-=======
-    InfraredEditTarget edit_target : 8; /**< Selected editing target (a remote or a button). */
-    InfraredEditMode edit_mode     : 8; /**< Selected editing operation (rename or delete). */
-    int32_t current_button_index; /**< Selected button index (move destination). */
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     int32_t prev_button_index; /**< Previous button index (move source). */
     uint32_t last_transmit_time; /**< Lat time a signal was transmitted. */
     FuriHalInfraredTxPin tx_pin;

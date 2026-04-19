@@ -434,12 +434,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
     variable_item_set_current_value_text(
         item, subghz_setting_get_preset_name(setting, value_index));
 
-<<<<<<< HEAD
     if(!subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         // Hopping
         value_index = subghz_scene_receiver_config_hopper_value_index(subghz);
         item = variable_item_list_add(
@@ -453,12 +448,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         variable_item_set_current_value_text(item, hopping_mode_text[value_index]);
     }
 
-<<<<<<< HEAD
     if(!subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         item = variable_item_list_add(
             subghz->variable_item_list,
             "Bin RAW",
@@ -471,12 +461,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         variable_item_set_current_value_text(item, combobox_text[value_index]);
     }
 
-<<<<<<< HEAD
     if(!subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         item = variable_item_list_add(
             subghz->variable_item_list,
             "Ignore ReversRB2",
@@ -561,12 +546,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, combobox_text[value_index]);
 
-<<<<<<< HEAD
     if(!subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         // Reset to default
         variable_item_list_add(subghz->variable_item_list, "Reset to default", 1, NULL, NULL);
 
@@ -575,12 +555,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
             subghz_scene_receiver_config_var_list_enter_callback,
             subghz);
     }
-<<<<<<< HEAD
     if(!subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         // Lock keyboard
         variable_item_list_add(subghz->variable_item_list, "Lock Keyboard", 1, NULL, NULL);
         variable_item_list_set_enter_callback(
@@ -589,12 +564,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
             subghz);
     }
 
-<<<<<<< HEAD
     if(subghz->receiver_config_from_read_raw) {
-=======
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) ==
-       SubGhzCustomEventManagerSet) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         item = variable_item_list_add(
             subghz->variable_item_list,
             "RSSI Threshold:",
@@ -644,10 +614,7 @@ void subghz_scene_receiver_config_on_exit(void* context) {
     variable_item_list_reset(subghz->variable_item_list);
 
     subghz_last_settings_save(subghz->last_settings);
-<<<<<<< HEAD
     subghz->receiver_config_from_read_raw = false;
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     scene_manager_set_scene_state(
         subghz->scene_manager, SubGhzSceneReadRAW, SubGhzCustomEventManagerNoSet);
 }

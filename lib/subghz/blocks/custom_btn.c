@@ -4,14 +4,11 @@ static uint8_t custom_btn_id = SUBGHZ_CUSTOM_BTN_OK;
 static uint8_t custom_btn_original = 0;
 static uint8_t custom_btn_max_btns = 0;
 static uint8_t controller_programming_mode = PROG_MODE_OFF;
-<<<<<<< HEAD
 static bool subghz_custom_btn_long = false;
 
 static bool custom_btn_has_pages = false;
 static uint8_t custom_btn_page = 0;
 static uint8_t custom_btn_max_pages = 2;
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
 bool subghz_custom_btn_set(uint8_t btn_id) {
     if(btn_id > custom_btn_max_btns) {
@@ -44,13 +41,10 @@ void subghz_custom_btns_reset(void) {
     custom_btn_max_btns = 0;
     controller_programming_mode = PROG_MODE_OFF;
     custom_btn_id = SUBGHZ_CUSTOM_BTN_OK;
-<<<<<<< HEAD
     subghz_custom_btn_long = false;
     custom_btn_has_pages = false;
     custom_btn_page = 0;
     custom_btn_max_pages = 2;
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 }
 
 bool subghz_custom_btn_is_allowed(void) {
@@ -64,7 +58,6 @@ void subghz_custom_btn_set_prog_mode(ProgMode prog_mode) {
 ProgMode subghz_custom_btn_get_prog_mode(void) {
     return controller_programming_mode;
 }
-<<<<<<< HEAD
 
 void subghz_custom_btn_set_long(bool v) {
     subghz_custom_btn_long = v;
@@ -97,5 +90,3 @@ void subghz_custom_btn_set_max_pages(uint8_t n) {
 uint8_t subghz_custom_btn_get_max_pages(void) {
     return custom_btn_max_pages;
 }
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685

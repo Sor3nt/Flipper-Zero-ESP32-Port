@@ -1,11 +1,6 @@
 Filetype: IR library file
 Version: 1
-<<<<<<< HEAD
 # Last Updated 29th Aug, 2025
-=======
-# Last Updated 5th Oct, 2024
-# Last Checked 5th Oct, 2024
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #
 name: Power
 type: raw

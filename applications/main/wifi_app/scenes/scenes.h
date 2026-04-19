@@ -73,13 +73,10 @@ void wifi_app_scene_channel_attack_menu_on_enter(void* context);
 void wifi_app_scene_channel_attack_menu_on_exit(void* context);
 bool wifi_app_scene_channel_attack_menu_on_event(void* context, SceneManagerEvent event);
 
-<<<<<<< HEAD
 void wifi_app_scene_ssid_attack_menu_on_enter(void* context);
 void wifi_app_scene_ssid_attack_menu_on_exit(void* context);
 bool wifi_app_scene_ssid_attack_menu_on_event(void* context, SceneManagerEvent event);
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 void wifi_app_scene_spam_ssids_menu_on_enter(void* context);
 void wifi_app_scene_spam_ssids_menu_on_exit(void* context);
 bool wifi_app_scene_spam_ssids_menu_on_event(void* context, SceneManagerEvent event);

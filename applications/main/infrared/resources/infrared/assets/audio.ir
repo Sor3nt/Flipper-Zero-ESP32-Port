@@ -1,12 +1,7 @@
 Filetype: IR library file
 Version: 1
-<<<<<<< HEAD
 # Last Updated 29th Aug, 2025
 # Last Checked 29th Aug, 2025
-=======
-# Last Updated 5th Oct, 2024
-# Last Checked 5th Oct, 2024
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #
 name: Power
 type: parsed
@@ -5113,7 +5108,6 @@ type: parsed
 protocol: NEC
 address: 00 00 00 00
 command: 15 00 00 00
-<<<<<<< HEAD
 #
 # Model: Sony MHC_GSX75
 #
@@ -6203,5 +6197,3 @@ protocol: NEC
 address: 7A 00 00 00
 command: AA 00 00 00
 #
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685

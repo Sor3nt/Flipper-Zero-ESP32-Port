@@ -71,13 +71,7 @@ extern float sinf(float);
 extern float log10f(float);
 extern float log2f(float);
 
-<<<<<<< HEAD
 /* subghz_protocol_blocks_* prototypes come from decoder.h via protocol_items.h */
-=======
-/* subghz functions that may have different names in this firmware version */
-extern void subghz_protocol_blocks_add_bit(void*, uint8_t);
-extern uint32_t subghz_protocol_blocks_get_hash_data(void*, size_t);
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
 /* GCC runtime helpers (from libgcc, linked into firmware) */
 extern long long __udivdi3(long long, long long);

@@ -1,8 +1,5 @@
 #include "../infrared_app_i.h"
-<<<<<<< HEAD
 #include <core/core_defines.h>
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #include <dolphin/dolphin.h>
 
 void infrared_scene_learn_enter_name_on_enter(void* context) {
@@ -10,7 +7,6 @@ void infrared_scene_learn_enter_name_on_enter(void* context) {
     TextInput* text_input = infrared->text_input;
     InfraredSignal* signal = infrared->current_signal;
 
-<<<<<<< HEAD
     if(infrared->app_state.is_easy_mode) {
         int32_t button_index;
         if(infrared->app_state.is_learning_new_remote) {
@@ -26,9 +22,6 @@ void infrared_scene_learn_enter_name_on_enter(void* context) {
 
         infrared_text_store_set(infrared, 0, "%s", easy_mode_button_names[button_index]);
     } else if(infrared_signal_is_raw(signal)) {
-=======
-    if(infrared_signal_is_raw(signal)) {
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         const InfraredRawSignal* raw = infrared_signal_get_raw_signal(signal);
         infrared_text_store_set(infrared, 0, "RAW_%zu", raw->timings_size);
     } else {

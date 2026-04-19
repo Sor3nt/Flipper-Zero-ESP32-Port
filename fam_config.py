@@ -1,5 +1,10 @@
 import os
 
+# Firmware size: bundled "FAM runtime" assets (see tools/fam/generate.py) are embedded in the
+# image. Infrared remote libraries (*.ir) are megabytes-class data; they are kept out of that
+# bundle and are expected on SD under /ext/infrared/... (same layout as Flipper). T-Embed has
+# plenty of flash today, but the build stays lean so smaller boards can reuse the same tree.
+
 MANIFEST_ROOTS = [
     "components",
     "applications",

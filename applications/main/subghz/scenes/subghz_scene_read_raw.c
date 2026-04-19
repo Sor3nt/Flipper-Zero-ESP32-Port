@@ -9,15 +9,12 @@
 #define RAW_FILE_NAME "RAW_"
 #define TAG           "SubGhzSceneReadRAW"
 
-<<<<<<< HEAD
 void subghz_read_raw_receiver_filter_apply(SubGhz* subghz) {
     furi_assert(subghz);
     subghz_txrx_receiver_set_filter(
         subghz->txrx, SubGhzProtocolFlag_RAW | SubGhzProtocolFlag_Automotive);
 }
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 static void subghz_scene_read_raw_usb_export_callback(
     const int32_t* data,
     uint16_t count,
@@ -28,10 +25,6 @@ static void subghz_scene_read_raw_usb_export_callback(
 
 bool subghz_scene_read_raw_update_filename(SubGhz* subghz) {
     bool ret = false;
-<<<<<<< HEAD
-=======
-    //set the path to read the file
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     FuriString* temp_str = furi_string_alloc();
     do {
         FlipperFormat* fff_data = subghz_txrx_get_fff_data(subghz->txrx);
@@ -143,12 +136,7 @@ void subghz_scene_read_raw_on_enter(void* context) {
 
     furi_check(subghz_txrx_load_decoder_by_name_protocol(subghz->txrx, SUBGHZ_PROTOCOL_RAW_NAME));
 
-<<<<<<< HEAD
     subghz_read_raw_receiver_filter_apply(subghz);
-=======
-    //set filter RAW feed
-    subghz_txrx_receiver_set_filter(subghz->txrx, SubGhzProtocolFlag_RAW);
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     furi_string_free(file_name);
 
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdReadRAW);
@@ -207,10 +195,7 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case SubGhzCustomEventViewReadRAWConfig:
-<<<<<<< HEAD
             subghz->receiver_config_from_read_raw = true;
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzSceneReadRAW, SubGhzCustomEventManagerSet);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverConfig);

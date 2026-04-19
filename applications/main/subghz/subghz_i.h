@@ -92,11 +92,8 @@ struct SubGhz {
 
     bool raw_send_only;
     bool export_to_usb;
-<<<<<<< HEAD
     /** True while Receiver Config was opened from Read RAW (mini settings menu). */
     bool receiver_config_from_read_raw;
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
     bool save_datetime_set;
     DateTime save_datetime;
@@ -150,11 +147,8 @@ bool subghz_is_locked(SubGhz* subghz);
 void subghz_rx_key_state_set(SubGhz* subghz, SubGhzRxKeyState state);
 SubGhzRxKeyState subghz_rx_key_state_get(SubGhz* subghz);
 
-<<<<<<< HEAD
 /** Apply RX decoder filter for Read RAW (RAW + automotive decoders). */
 void subghz_read_raw_receiver_filter_apply(SubGhz* subghz);
 
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 extern const NotificationSequence subghz_sequence_rx;
 extern const NotificationSequence subghz_sequence_rx_locked;

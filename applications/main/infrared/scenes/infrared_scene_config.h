@@ -21,13 +21,10 @@ ADD_SCENE(infrared, universal_fan, UniversalFan)
 ADD_SCENE(infrared, universal_audio, UniversalAudio)
 ADD_SCENE(infrared, universal_projector, UniversalProjector)
 ADD_SCENE(infrared, universal_leds, UniversalLEDs)
-<<<<<<< HEAD
 ADD_SCENE(infrared, universal_bluray, UniversalBluray)
 ADD_SCENE(infrared, universal_monitor, UniversalMonitor)
 ADD_SCENE(infrared, universal_digital_sign, UniversalDigitalSign)
 ADD_SCENE(infrared, universal_from_file, UniversalFromFile)
-=======
->>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 ADD_SCENE(infrared, gpio_settings, GpioSettings)
 ADD_SCENE(infrared, debug, Debug)
 ADD_SCENE(infrared, error_databases, ErrorDatabases)
