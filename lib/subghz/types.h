@@ -134,8 +134,11 @@ typedef enum {
     SubGhzProtocolFlag_Sensors = (1 << 13),
     SubGhzProtocolFlag_Princeton = (1 << 14),
     SubGhzProtocolFlag_NiceFlorS = (1 << 15),
+<<<<<<< HEAD
     /** Vehicle / alarm protocols (enabled during Read RAW when setting is on) */
     SubGhzProtocolFlag_Automotive = (1 << 16),
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 } SubGhzProtocolFlag;
 
 struct SubGhzProtocol {

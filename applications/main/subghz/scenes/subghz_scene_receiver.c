@@ -280,7 +280,10 @@ bool subghz_scene_receiver_on_event(void* context, SceneManagerEvent event) {
             break;
         case SubGhzCustomEventViewReceiverConfig:
             // Actually signals are received but SubGhzNotificationStateRx is not working inside Config Scene
+<<<<<<< HEAD
             subghz->receiver_config_from_read_raw = false;
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzViewIdReceiver, SubGhzCustomEventManagerSet);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverConfig);

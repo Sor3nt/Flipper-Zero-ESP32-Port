@@ -10,7 +10,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+<<<<<<< HEAD
 #include <stddef.h>
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #include "infrared_error_code.h"
 
 #ifdef __cplusplus
@@ -51,6 +54,7 @@ void infrared_brute_force_set_db_filename(InfraredBruteForce* brute_force, const
  * a infrared_brute_force_set_db_filename() call.
  *
  * @param[in,out] brute_force pointer to the instance to be updated.
+<<<<<<< HEAD
  * @param[in] auto_detect_buttons bool whether to automatically register newly discovered buttons.
  * @param[in] ignore_unknown_buttons bool whether to ignore unknown buttons when auto_detect_buttons is false.
  * @returns InfraredErrorCodeNone on success, otherwise error code.
@@ -67,6 +71,8 @@ InfraredErrorCode infrared_brute_force_calculate_messages_ex(
  * a infrared_brute_force_set_db_filename() call.
  *
  * @param[in,out] brute_force pointer to the instance to be updated.
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
  * @returns InfraredErrorCodeNone on success, otherwise error code.
  */
 InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* brute_force);
@@ -134,6 +140,7 @@ void infrared_brute_force_add_record(
  */
 void infrared_brute_force_reset(InfraredBruteForce* brute_force);
 
+<<<<<<< HEAD
 /**
  * @brief Get the total number of unique button names in the database, for example, 
  *        if a button name is "Power" and it appears 3 times in the db, then the 
@@ -154,6 +161,8 @@ size_t infrared_brute_force_get_button_count(const InfraredBruteForce* brute_for
 const char*
     infrared_brute_force_get_button_name(const InfraredBruteForce* brute_force, size_t index);
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #ifdef __cplusplus
 }
 #endif

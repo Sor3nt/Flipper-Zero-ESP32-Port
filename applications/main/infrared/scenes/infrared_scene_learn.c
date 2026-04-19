@@ -1,4 +1,5 @@
 #include "../infrared_app_i.h"
+<<<<<<< HEAD
 #include <core/core_defines.h>
 #include <dolphin/dolphin.h>
 
@@ -116,11 +117,21 @@ void infrared_scene_learn_on_enter(void* context) {
     infrared_worker_rx_enable_signal_decoding(worker, infrared->app_state.is_decode_enabled);
     infrared_worker_rx_force_signal_decoding(worker, infrared->app_state.is_decode_forced);
 
+=======
+#include <dolphin/dolphin.h>
+
+void infrared_scene_learn_on_enter(void* context) {
+    InfraredApp* infrared = context;
+    Popup* popup = infrared->popup;
+    InfraredWorker* worker = infrared->worker;
+
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     infrared_worker_rx_set_received_signal_callback(
         worker, infrared_signal_received_callback, context);
     infrared_worker_rx_start(worker);
     infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStartRead);
 
+<<<<<<< HEAD
     dialog_ex_set_icon(dialog_ex, 0, 22, &I_InfraredLearnShort_128x31);
     dialog_ex_set_header(dialog_ex, NULL, 0, 0, AlignCenter, AlignCenter);
 
@@ -148,6 +159,15 @@ void infrared_scene_learn_on_enter(void* context) {
     dialog_ex_set_result_callback(dialog_ex, infrared_scene_learn_dialog_result_callback);
 
     view_dispatcher_switch_to_view(infrared->view_dispatcher, InfraredViewDialogEx);
+=======
+    popup_set_icon(popup, 0, 32, &I_InfraredLearnShort_128x31);
+    popup_set_header(popup, NULL, 0, 0, AlignCenter, AlignCenter);
+    popup_set_text(
+        popup, "Point the remote at IR port\nand push the button", 5, 10, AlignLeft, AlignCenter);
+    popup_set_callback(popup, NULL);
+
+    view_dispatcher_switch_to_view(infrared->view_dispatcher, InfraredViewPopup);
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 }
 
 bool infrared_scene_learn_on_event(void* context, SceneManagerEvent event) {
@@ -160,6 +180,7 @@ bool infrared_scene_learn_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(infrared->scene_manager, InfraredSceneLearnSuccess);
             dolphin_deed(DolphinDeedIrLearnSuccess);
             consumed = true;
+<<<<<<< HEAD
         } else if(event.event == DialogExResultCenter && infrared->app_state.is_easy_mode) {
             infrared_scene_learn_update_button_name(infrared, true);
             consumed = true;
@@ -196,6 +217,9 @@ bool infrared_scene_learn_on_event(void* context, SceneManagerEvent event) {
             infrared->app_state.existing_remote_button_index = 0;
         }
         consumed = false;
+=======
+        }
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     }
 
     return consumed;
@@ -203,9 +227,18 @@ bool infrared_scene_learn_on_event(void* context, SceneManagerEvent event) {
 
 void infrared_scene_learn_on_exit(void* context) {
     InfraredApp* infrared = context;
+<<<<<<< HEAD
     DialogEx* dialog_ex = infrared->dialog_ex;
     infrared_worker_rx_set_received_signal_callback(infrared->worker, NULL, NULL);
     infrared_worker_rx_stop(infrared->worker);
     infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStop);
     dialog_ex_reset(dialog_ex);
+=======
+    Popup* popup = infrared->popup;
+    infrared_worker_rx_set_received_signal_callback(infrared->worker, NULL, NULL);
+    infrared_worker_rx_stop(infrared->worker);
+    infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStop);
+    popup_set_icon(popup, 0, 0, NULL);
+    popup_set_text(popup, NULL, 0, 0, AlignCenter, AlignCenter);
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 }

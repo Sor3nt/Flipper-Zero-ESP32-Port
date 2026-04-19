@@ -44,7 +44,11 @@ idf_component_register(
         "furi_hal_bq25896.c"
         "fatfs_compat.c"
     INCLUDE_DIRS "." ".." "../.." "boards"
+<<<<<<< HEAD
     REQUIRES furi toolbox input driver esp_lcd fatfs sdmmc datetime ble_hid ble_serial ble_profile furi_ble flipper_protobuf esp_adc esp_driver_rmt esp_driver_i2s nvs_flash mbedtls
+=======
+    REQUIRES furi toolbox input driver esp_lcd fatfs sdmmc datetime ble_hid ble_serial ble_profile furi_ble flipper_protobuf esp_adc esp_driver_rmt esp_driver_i2s nvs_flash
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 )
 
 # Set board include path as compile definition

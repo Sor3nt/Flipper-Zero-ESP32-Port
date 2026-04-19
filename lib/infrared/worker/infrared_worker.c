@@ -79,8 +79,11 @@ struct InfraredWorker {
             bool overrun;
         } rx;
     };
+<<<<<<< HEAD
 
     bool decode_force;
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 };
 
 typedef struct {
@@ -145,7 +148,11 @@ static void
         if(instance->rx.received_signal_callback)
             instance->rx.received_signal_callback(
                 instance->rx.received_signal_context, &instance->signal);
+<<<<<<< HEAD
     } else if(!instance->decode_force) {
+=======
+    } else {
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         /* Skip first timing if it starts from Space */
         if((instance->signal.timings_cnt == 0) && !level) {
             return;
@@ -228,7 +235,11 @@ void infrared_worker_rx_set_received_signal_callback(
 InfraredWorker* infrared_worker_alloc(void) {
     InfraredWorker* instance = malloc(sizeof(InfraredWorker));
 
+<<<<<<< HEAD
     instance->thread = furi_thread_alloc_ex("InfraredWorker", 2048, NULL, instance);
+=======
+    instance->thread = furi_thread_alloc_ex("InfraredWorker", 4096, NULL, instance);
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
     size_t buffer_size =
         MAX(sizeof(InfraredWorkerTiming) * (MAX_TIMINGS_AMOUNT + 1),
@@ -238,7 +249,10 @@ InfraredWorker* infrared_worker_alloc(void) {
     instance->infrared_encoder = infrared_alloc_encoder();
     instance->blink_enable = false;
     instance->decode_enable = true;
+<<<<<<< HEAD
     instance->decode_force = false;
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
     instance->notification = furi_record_open(RECORD_NOTIFICATION);
     instance->state = InfraredWorkerStateIdle;
 
@@ -329,12 +343,15 @@ void infrared_worker_rx_enable_signal_decoding(InfraredWorker* instance, bool en
     instance->decode_enable = enable;
 }
 
+<<<<<<< HEAD
 void infrared_worker_rx_force_signal_decoding(InfraredWorker* instance, bool force) {
     furi_check(instance);
 
     instance->decode_force = force;
 }
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 void infrared_worker_tx_start(InfraredWorker* instance) {
     furi_check(instance);
     furi_check(instance->state == InfraredWorkerStateIdle);

@@ -25,6 +25,7 @@ void subghz_custom_btns_reset(void);
 
 bool subghz_custom_btn_is_allowed(void);
 
+<<<<<<< HEAD
 void subghz_custom_btn_set_long(bool v);
 bool subghz_custom_btn_get_long(void);
 
@@ -35,6 +36,8 @@ uint8_t subghz_custom_btn_get_page(void);
 void subghz_custom_btn_set_max_pages(uint8_t n);
 uint8_t subghz_custom_btn_get_max_pages(void);
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #ifdef __cplusplus
 }
 #endif

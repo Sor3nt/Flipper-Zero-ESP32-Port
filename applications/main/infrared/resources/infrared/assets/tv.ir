@@ -1,7 +1,12 @@
 Filetype: IR library file
 Version: 1
+<<<<<<< HEAD
 # Last Updated 7th Sept, 2025
 # Last Checked 7th Sept, 2025
+=======
+# Last Updated 5th Oct, 2024
+# Last Checked 5th Oct, 2024
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #
 name: Power
 type: parsed
@@ -333,12 +338,20 @@ protocol: NECext
 address: AD ED 00 00
 command: B5 4A 00 00
 #
+<<<<<<< HEAD
+=======
+# ON
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: NEC
 address: 01 00 00 00
 command: 40 00 00 00
+<<<<<<< HEAD
 #
+=======
+# ON
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: NECext
@@ -1144,6 +1157,10 @@ address: 00 00 00 00
 command: 0D 00 00 00
 #
 # Samsung Standby
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: Samsung32
@@ -1151,6 +1168,10 @@ address: 07 00 00 00
 command: E0 00 00 00
 #
 # Samsung Power Off
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: Samsung32
@@ -1902,6 +1923,10 @@ address: 10 01 00 00
 command: 33 00 00 00
 #
 # Sharp TV
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: NECext
@@ -1975,6 +2000,10 @@ duty_cycle: 0.330000
 data: 273 1816 272 767 277 789 255 785 249 791 253 787 246 1818 281 785 248 765 279 1812 276 789 255 759 275 791 253 1812 276 789 255 46372 281 1808 280 785 249 791 253 787 247 793 251 1814 274 791 253 1812 276 1814 274 791 253 1812 276 1814 274 1815 273 792 252 1813 275 42172 272 1819 280 785 249 765 279 761 273 768 276 764 280 1811 277 788 246 768 276 1815 273 792 252 788 246 794 250 1815 273 791 253
 #
 # Brandt TV
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: raw
 frequency: 38000
@@ -2048,6 +2077,10 @@ address: 3E 00 00 00
 command: 0D 00 00 00
 #
 # TCL LED49D2930 / Thomson Remote RC3000E02
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: RCA
@@ -2271,6 +2304,10 @@ address: A0 00 00 00
 command: 5F 00 00 00
 #
 # Xiaomi TV
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: raw
 frequency: 38000
@@ -2302,6 +2339,10 @@ duty_cycle: 0.330000
 data: 1119 528 675 1154 647 558 674 841 675 1153 675 531 673 532 673 843 673 1155 675 1153 674 531 673 12312 1120 505 672 1156 673 532 673 844 673 1155 673 532 671 534 672 842 675 1155 670 1158 673 530 674 12312 1093 532 671 1156 675 530 672 845 672 1156 673 533 671 533 670 846 672 1156 674 1154 674 529 675 12312 1093 557 646 1182 646 532 674 843 673 1181 646 534 672 532 674 842 673 1158 670 1156 674 530 673 12315 1091 530 674 1155 673 530 673 844 673 1157 644 559 673 532 672 844 670 1157 672 1158 672 532 672 12313 1093 533 671 1157 672 532 673 845 671 1157 670 558 647 532 646 871 672 1157 671 1181 646 534 671
 #
 # Daewoo TV
+<<<<<<< HEAD
+=======
+#
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Power
 type: parsed
 protocol: NEC
@@ -3687,6 +3728,7 @@ type: parsed
 protocol: NECext
 address: EA C7 00 00
 command: 33 CC 00 00
+<<<<<<< HEAD
 #
 # Model: Panasonic N2QAYB000752_Full
 #
@@ -4970,3 +5012,5 @@ protocol: NECext
 address: 04 B9 00 00
 command: 15 EA 00 00
 #
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685

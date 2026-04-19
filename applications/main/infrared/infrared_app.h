@@ -16,11 +16,18 @@ typedef struct InfraredApp InfraredApp;
 #include <furi_hal_infrared.h>
 
 #define INFRARED_SETTINGS_PATH    EXT_PATH("infrared/.infrared.settings")
+<<<<<<< HEAD
 #define INFRARED_SETTINGS_VERSION (2)
+=======
+#define INFRARED_SETTINGS_VERSION (1)
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #define INFRARED_SETTINGS_MAGIC   (0x1F)
 
 typedef struct {
     FuriHalInfraredTxPin tx_pin;
     bool otg_enabled;
+<<<<<<< HEAD
     bool easy_mode;
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 } InfraredSettings;

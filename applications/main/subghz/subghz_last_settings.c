@@ -4,7 +4,11 @@
 #define TAG "SubGhzLastSettings"
 
 #define SUBGHZ_LAST_SETTING_FILE_TYPE    "Flipper SubGhz Last Setting File"
+<<<<<<< HEAD
 #define SUBGHZ_LAST_SETTING_FILE_VERSION 4
+=======
+#define SUBGHZ_LAST_SETTING_FILE_VERSION 3
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #define SUBGHZ_LAST_SETTINGS_PATH        EXT_PATH("subghz/assets/last_subghz.settings")
 
 #define SUBGHZ_LAST_SETTING_FIELD_FREQUENCY                         "Frequency"
@@ -21,6 +25,10 @@
 #define SUBGHZ_LAST_SETTING_FIELD_LED_AND_POWER_AMP                 "LedAndPowerAmp"
 #define SUBGHZ_LAST_SETTING_FIELD_TX_POWER                          "TXPower"
 #define SUBGHZ_LAST_SETTING_FIELD_FREQUENCY_OFFSET                  "FreqOffset"
+<<<<<<< HEAD
+=======
+
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 SubGhzLastSettings* subghz_last_settings_alloc(void) {
     SubGhzLastSettings* instance = malloc(sizeof(SubGhzLastSettings));
     return instance;
@@ -58,7 +66,11 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
         do {
             if(!flipper_format_read_header(fff_data_file, temp_str, &config_version)) break;
             if((strcmp(furi_string_get_cstr(temp_str), SUBGHZ_LAST_SETTING_FILE_TYPE) != 0) ||
+<<<<<<< HEAD
                (config_version < 3 || config_version > SUBGHZ_LAST_SETTING_FILE_VERSION)) {
+=======
+               (config_version != SUBGHZ_LAST_SETTING_FILE_VERSION)) {
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
                 break;
             }
 

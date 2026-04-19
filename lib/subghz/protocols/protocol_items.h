@@ -59,6 +59,7 @@
 #include "ditec_gol4.h"
 #include "keyfinder.h"
 
+<<<<<<< HEAD
 #include "vag.h"
 #include "porsche_cayenne.h"
 #include "ford_v0.h"
@@ -83,3 +84,5 @@
 #include "bmw_cas4.h"
 #include "honda.h"
 #include "honda_static.h"
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685

@@ -38,6 +38,7 @@ bool furi_hal_crypto_unload_key(void);
 bool furi_hal_crypto_encrypt(const uint8_t* input, uint8_t* output, size_t size);
 bool furi_hal_crypto_decrypt(const uint8_t* input, uint8_t* output, size_t size);
 
+<<<<<<< HEAD
 bool furi_hal_crypto_aes128_ecb_encrypt(
     const uint8_t* key,
     const uint8_t* input,
@@ -47,6 +48,8 @@ bool furi_hal_crypto_aes128_ecb_decrypt(
     const uint8_t* input,
     uint8_t* output);
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #ifdef __cplusplus
 }
 #endif

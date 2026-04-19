@@ -29,6 +29,7 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_elplast,       &subghz_protocol_treadmill37,
     &subghz_protocol_beninca_arc,   &subghz_protocol_jarolift,
     &subghz_protocol_ditec_gol4,    &subghz_protocol_keyfinder,
+<<<<<<< HEAD
     &subghz_protocol_vag,           &subghz_protocol_porsche_cayenne,
     &subghz_protocol_ford_v0,       &subghz_protocol_psa,
     &subghz_protocol_fiat_spa,      &subghz_protocol_fiat_marelli,
@@ -42,6 +43,8 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_sheriff_cfm,   &subghz_protocol_chrysler,
     &subghz_protocol_bmw_cas4,      &subghz_protocol_honda,
     &subghz_protocol_honda_static,
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 };
 
 const SubGhzProtocolRegistry subghz_protocol_registry = {

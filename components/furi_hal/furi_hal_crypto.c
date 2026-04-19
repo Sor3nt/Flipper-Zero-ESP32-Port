@@ -3,7 +3,10 @@
 #include <string.h>
 
 #include <core/common_defines.h>
+<<<<<<< HEAD
 #include <mbedtls/aes.h>
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
 void furi_hal_crypto_init(void) {
 }
@@ -69,6 +72,7 @@ bool furi_hal_crypto_decrypt(const uint8_t* input, uint8_t* output, size_t size)
     memcpy(output, input, size);
     return true;
 }
+<<<<<<< HEAD
 
 bool furi_hal_crypto_aes128_ecb_encrypt(
     const uint8_t* key,
@@ -111,3 +115,5 @@ bool furi_hal_crypto_aes128_ecb_decrypt(
     mbedtls_aes_free(&ctx);
     return err == 0;
 }
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685

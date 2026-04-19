@@ -1,7 +1,12 @@
 Filetype: IR library file
 Version: 1
+<<<<<<< HEAD
 # Last Updated 7th Sept, 2025
 # Last Checked 7th Sept, 2025
+=======
+# Last Updated 5th Oct, 2024
+# Last Checked 5th Oct, 2024
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 #
 name: Power_on
 type: parsed
@@ -2931,13 +2936,17 @@ protocol: NEC
 address: 00 00 00 00
 command: 43 00 00 00
 #
+<<<<<<< HEAD
 # Model: AIRUEEK Sonic_LED_Lamp
 #
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 name: Brightness_dn
 type: parsed
 protocol: NEC
 address: 00 00 00 00
 command: 0C 00 00 00
+<<<<<<< HEAD
 #
 name: Red
 type: raw
@@ -3749,3 +3758,5 @@ frequency: 38000
 duty_cycle: 0.330000
 data: 9205 4477 586 558 584 533 609 534 577 566 576 541 612 533 578 566 576 542 611 1663 580 1667 587 1663 611 1665 589 1662 581 1670 615 1664 590 1663 591 560 582 1668 586 564 578 1671 583 566 587 535 607 541 580 567 586 1662 581 566 587 1660 583 565 577 1671 593 1661 614 1664 642 1608 583 39864 9242 2244 586
 #
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685

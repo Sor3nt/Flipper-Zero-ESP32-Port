@@ -328,10 +328,14 @@ def gather_sources(base_dir: Path, patterns: Iterable[str]) -> list[Path]:
 
 
 def cmake_quote(path: Path | str) -> str:
+<<<<<<< HEAD
     """Quote a path for generated CMake. Use forward slashes so Windows paths are not
     parsed as escape sequences (e.g. \\U in C:\\Users\\U_... breaks CMake)."""
     s = str(path).replace("\\", "/")
     return '"' + s.replace('"', '\\"') + '"'
+=======
+    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 
 
 def gather_asset_sources(app: FlipperApplication) -> list[Path]:
@@ -345,6 +349,7 @@ def gather_asset_sources(app: FlipperApplication) -> list[Path]:
     return asset_roots
 
 
+<<<<<<< HEAD
 def is_flipper_resources_ext_mirror(app: FlipperApplication, asset_root: Path) -> bool:
     """True when asset_root is the app's `resources/` tree that mirrors /ext on SD.
 
@@ -362,6 +367,8 @@ def is_flipper_resources_ext_mirror(app: FlipperApplication, asset_root: Path) -
         return expected == asset_root
 
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 def gather_asset_dependencies(asset_roots: Iterable[Path]) -> list[Path]:
     dependencies: set[Path] = set()
     for asset_root in asset_roots:
@@ -372,11 +379,14 @@ def gather_asset_dependencies(asset_roots: Iterable[Path]) -> list[Path]:
     return sorted(dependencies)
 
 
+<<<<<<< HEAD
 def _app_manifest_path_posix(app: FlipperApplication) -> str:
     """Normalize manifest path so Windows backslashes match application-dir checks."""
     return getattr(app, "_manifest_path", "").replace("\\", "/")
 
 
+=======
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
 def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
     contents = [
         "set(ESP32_FAM_PORTED_OBJECT_TARGETS)",
@@ -391,10 +401,15 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
     ported_apps = [
         app
         for app in sorted_unique_apps(buildset.apps)
+<<<<<<< HEAD
         if (
             "/applications/" in _app_manifest_path_posix(app)
             or "/applications_user/" in _app_manifest_path_posix(app)
         )
+=======
+        if "/applications/" in getattr(app, "_manifest_path", "")
+        or "/applications_user/" in getattr(app, "_manifest_path", "")
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         and (app.apptype != FlipperAppType.STARTUP or bool(app.sources))
     ]
 
@@ -493,6 +508,7 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
         if not asset_roots:
             continue
 
+<<<<<<< HEAD
         apps_assets_destination = f'${{ESP32_FAM_RUNTIME_EXT_ROOT}}/apps_assets/{app.appid}'
         mirror_roots = [ar for ar in asset_roots if is_flipper_resources_ext_mirror(app, ar)]
         other_roots = [ar for ar in asset_roots if not is_flipper_resources_ext_mirror(app, ar)]
@@ -528,6 +544,20 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
                     stage_commands.append(
                         f"    COMMAND ${{CMAKE_COMMAND}} -E copy_if_different {cmake_quote(asset_root)} {cmake_quote(apps_assets_destination)}"
                     )
+=======
+        destination = f'${{ESP32_FAM_RUNTIME_EXT_ROOT}}/apps_assets/{app.appid}'
+        stage_commands.append(f"    COMMAND ${{CMAKE_COMMAND}} -E make_directory {cmake_quote(destination)}")
+
+        for asset_root in asset_roots:
+            if asset_root.is_dir():
+                stage_commands.append(
+                    f"    COMMAND ${{CMAKE_COMMAND}} -E copy_directory {cmake_quote(asset_root)} {cmake_quote(destination)}"
+                )
+            elif asset_root.is_file():
+                stage_commands.append(
+                    f"    COMMAND ${{CMAKE_COMMAND}} -E copy_if_different {cmake_quote(asset_root)} {cmake_quote(destination)}"
+                )
+>>>>>>> 05c91cb486590019377b94b79a37919e1c650685
         stage_depends.update(gather_asset_dependencies(asset_roots))
 
     stage_commands.append('    COMMAND ${CMAKE_COMMAND} -E touch "${ESP32_FAM_STAGE_ASSETS_STAMP}"')
