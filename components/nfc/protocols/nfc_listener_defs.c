@@ -1,0 +1,28 @@
+#include "nfc_listener_defs.h"
+
+#include <protocols/iso14443_3a/iso14443_3a_listener_defs.h>
+#include <protocols/iso14443_4a/iso14443_4a_listener_defs.h>
+#include <protocols/iso15693_3/iso15693_3_listener_defs.h>
+#include <protocols/felica/felica_listener_defs.h>
+#include <protocols/mf_ultralight/mf_ultralight_listener_defs.h>
+#include <protocols/mf_classic/mf_classic_listener_defs.h>
+#include <protocols/slix/slix_listener_defs.h>
+#include <protocols/type_4_tag/type_4_tag_listener_defs.h>
+
+const NfcListenerBase* const nfc_listeners_api[NfcProtocolNum] = {
+    [NfcProtocolIso14443_3a] = &nfc_listener_iso14443_3a,
+    [NfcProtocolIso14443_3b] = NULL,
+    [NfcProtocolIso14443_4a] = &nfc_listener_iso14443_4a,
+    [NfcProtocolIso14443_4b] = NULL,
+    [NfcProtocolIso15693_3] = &nfc_listener_iso15693_3,
+    [NfcProtocolFelica] = &nfc_listener_felica,
+    [NfcProtocolMfUltralight] = &mf_ultralight_listener,
+    [NfcProtocolMfClassic] = &mf_classic_listener,
+    [NfcProtocolMfPlus] = NULL,
+    [NfcProtocolMfDesfire] = NULL,
+    [NfcProtocolSlix] = &nfc_listener_slix,
+    [NfcProtocolSt25tb] = NULL,
+    [NfcProtocolNtag4xx] = NULL,
+    [NfcProtocolType4Tag] = &nfc_listener_type_4_tag,
+    [NfcProtocolEmv] = NULL,
+};

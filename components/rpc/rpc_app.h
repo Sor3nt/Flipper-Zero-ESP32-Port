@@ -1,0 +1,78 @@
+/**
+ * @file rpc_app.h
+ * @brief Application RPC subsystem interface.
+ *
+ * Copied from STM32 unleashed-firmware with minimal changes for ESP32.
+ */
+#pragma once
+
+#include "rpc.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    RpcAppSystemErrorCodeNone,
+    RpcAppSystemErrorCodeParseFile,
+    RpcAppSystemErrorCodeRegionLock,
+    RpcAppSystemErrorCodeInternalParse,
+} RpcAppSystemErrorCode;
+
+typedef enum {
+    RpcAppSystemEventDataTypeNone,
+    RpcAppSystemEventDataTypeString,
+    RpcAppSystemEventDataTypeInt32,
+    RpcAppSystemEventDataTypeBytes,
+} RpcAppSystemEventDataType;
+
+typedef struct {
+    RpcAppSystemEventDataType type;
+    union {
+        const char* string;
+        int32_t i32;
+        struct {
+            const uint8_t* ptr;
+            size_t size;
+        } bytes;
+    };
+} RpcAppSystemEventData;
+
+typedef enum {
+    RpcAppEventTypeInvalid,
+    RpcAppEventTypeSessionClose,
+    RpcAppEventTypeAppExit,
+    RpcAppEventTypeLoadFile,
+    RpcAppEventTypeButtonPress,
+    RpcAppEventTypeButtonRelease,
+    RpcAppEventTypeButtonPressRelease,
+    RpcAppEventTypeDataExchange,
+} RpcAppSystemEventType;
+
+typedef struct {
+    RpcAppSystemEventType type;
+    RpcAppSystemEventData data;
+} RpcAppSystemEvent;
+
+typedef void (*RpcAppSystemCallback)(const RpcAppSystemEvent* event, void* context);
+
+typedef struct RpcAppSystem RpcAppSystem;
+
+void rpc_system_app_set_callback(
+    RpcAppSystem* rpc_app,
+    RpcAppSystemCallback callback,
+    void* context);
+
+void rpc_system_app_send_started(RpcAppSystem* rpc_app);
+void rpc_system_app_send_exited(RpcAppSystem* rpc_app);
+void rpc_system_app_confirm(RpcAppSystem* rpc_app, bool result);
+
+void rpc_system_app_set_error_code(RpcAppSystem* rpc_app, uint32_t error_code);
+void rpc_system_app_set_error_text(RpcAppSystem* rpc_app, const char* error_text);
+void rpc_system_app_error_reset(RpcAppSystem* rpc_app);
+
+void rpc_system_app_exchange_data(RpcAppSystem* rpc_app, const uint8_t* data, size_t data_size);
+
+#ifdef __cplusplus
+}
+#endif

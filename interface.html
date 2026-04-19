@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<title>Flipper Zero - ESP32 Port Flash Tool</title>
+<script type="module">
+import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
+
+const BOARDS = {
+  't-embed': {
+    name: 'LilyGo T-Embed CC1101',
+    chip: 'ESP32-S3',
+    flashSize: '16MB',
+    parts: [
+      { path: 't-embed/latest/bootloader.bin', offset: 0x0 },
+      { path: 't-embed/latest/partition-table.bin', offset: 0x8000 },
+      { path: 't-embed/latest/furi_esp32.bin', offset: 0x10000 },
+    ],
+  },
+  'waveshare-c6': {
+    name: 'Waveshare ESP32-C6-LCD-1.9',
+    chip: 'ESP32-C6',
+    flashSize: '8MB',
+    parts: [
+      { path: 'waveshare-c6/latest/bootloader.bin', offset: 0x0 },
+      { path: 'waveshare-c6/latest/partition-table.bin', offset: 0x8000 },
+      { path: 'waveshare-c6/latest/furi_esp32.bin', offset: 0x10000 },
+    ],
+  },
+};
+
+let selectedBoard = null;
+let port = null;
+let transport = null;
+
+const $ = id => document.getElementById(id);
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $(id).classList.add('active');
+}
+
+function setError(msg) {
+  const el = $('error-banner');
+  if (msg) {
+    el.textContent = msg;
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function selectBoard(key) {
+  selectedBoard = BOARDS[key];
+  setError(null);
+
+  document.querySelectorAll('.board-card').forEach(c => c.classList.remove('selected'));
+  $('board-' + key).classList.add('selected');
+
+  $('connect-info').textContent = `Connect your ${selectedBoard.name} via USB to get started.`;
+  $('connect-chip').innerHTML = `${selectedBoard.chip} &bull; USB-C &bull; WebSerial`;
+  $('connect-btn').disabled = false;
+  showScreen('screen-connect');
+}
+
+function setConnectState(state) {
+  const btn = $('connect-btn');
+  const spinner = $('connect-spinner');
+  const btnText = $('connect-text');
+
+  if (state === 'waiting') {
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    btnText.textContent = 'Waiting for device...';
+  } else if (state === 'select') {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnText.textContent = 'Select device';
+  } else if (state === 'connected') {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnText.textContent = 'Flash now';
+    btn.classList.add('flash-ready');
+  }
+}
+
+async function handleConnect() {
+  const btn = $('connect-btn');
+
+  if (btn.classList.contains('flash-ready')) {
+    startFlash();
+    return;
+  }
+
+  setError(null);
+  setConnectState('waiting');
+
+  try {
+    port = await navigator.serial.requestPort();
+    transport = new Transport(port, true);
+    setConnectState('connected');
+  } catch (e) {
+    port = null;
+    transport = null;
+    if (e.name === 'NotFoundError') {
+      setConnectState('select');
+    } else {
+      setError('Connection failed: ' + e.message);
+      setConnectState('select');
+    }
+  }
+}
+
+async function startFlash() {
+  showScreen('screen-flash');
+  const progress = $('progress-bar');
+  const progressText = $('progress-text');
+  const board = selectedBoard;
+
+  try {
+    const esploader = new ESPLoader({
+      transport,
+      baudrate: 460800,
+      romBaudrate: 115200,
+      terminal: {
+        clean() {},
+        writeLine(data) { console.log(data); },
+        write(data) { console.log(data); },
+      },
+    });
+
+    progressText.textContent = 'Connecting to bootloader...';
+    await esploader.main();
+    await esploader.flashId();
+
+    const fileArray = [];
+    let totalSize = 0;
+
+    for (const part of board.parts) {
+      progressText.textContent = `Loading ${part.path.split('/').pop()}...`;
+      const resp = await fetch(part.path);
+      if (!resp.ok) throw new Error(`Failed to load ${part.path}: ${resp.status}`);
+      const data = await resp.arrayBuffer();
+      const bytes = new Uint8Array(data);
+      fileArray.push({ data: binaryToStr(bytes), address: part.offset });
+      totalSize += bytes.length;
+    }
+
+    progressText.textContent = `Flashing ${(totalSize / 1024 / 1024).toFixed(1)} MB...`;
+
+    await esploader.writeFlash({
+      fileArray,
+      flashSize: board.flashSize,
+      flashMode: 'dio',
+      flashFreq: '80m',
+      eraseAll: false,
+      compress: true,
+      reportProgress: (idx, written, total) => {
+        const pct = Math.round((written / total) * 100);
+        progress.style.width = pct + '%';
+        progressText.textContent = `Flashing part ${idx + 1}/${board.parts.length}... ${pct}%`;
+      },
+    });
+
+    progressText.textContent = 'Resetting device...';
+    await transport.setDTR(false);
+    await transport.setRTS(true);
+    await new Promise(r => setTimeout(r, 100));
+    await transport.setRTS(false);
+    await new Promise(r => setTimeout(r, 100));
+
+    showScreen('screen-success');
+
+  } catch (e) {
+    console.error('Flash error:', e);
+    setError('Flash failed: ' + e.message);
+    setConnectState('select');
+    port = null;
+    transport = null;
+    showScreen('screen-connect');
+  }
+}
+
+function binaryToStr(u8) {
+  let str = '';
+  for (let i = 0; i < u8.length; i++) str += String.fromCharCode(u8[i]);
+  return str;
+}
+
+function goBack() {
+  setError(null);
+  port = null;
+  transport = null;
+  selectedBoard = null;
+  const btn = $('connect-btn');
+  btn.classList.remove('flash-ready');
+  btn.disabled = true;
+  setConnectState('select');
+  showScreen('screen-board');
+}
+
+window.handleConnect = handleConnect;
+window.selectBoard = selectBoard;
+window.goBack = goBack;
+
+// Check WebSerial support
+if (!('serial' in navigator)) {
+  document.querySelectorAll('.board-card').forEach(c => c.style.pointerEvents = 'none');
+  setError('Use Google Chrome or Edge on desktop to flash.');
+}
+</script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden;
+    background: black;
+}
+
+  .container {
+    text-align: center;
+    max-width: 480px;
+    width: 100%;
+    padding: 40px 24px;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: #ff8c00;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    color: #666;
+    font-size: 0.9rem;
+    margin-bottom: 40px;
+  }
+
+  /* Error banner */
+  #error-banner {
+    display: none;
+    background: #2a0000;
+    border: 1px solid #5a1010;
+    color: #ff5555;
+    padding: 12px 16px;
+    border-radius: 10px;
+    margin-bottom: 24px;
+    font-size: 0.85rem;
+  }
+
+  /* Screens */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* Screen 0: Board selection */
+  .board-heading {
+    color: #999;
+    font-size: 1rem;
+    margin-bottom: 24px;
+  }
+  .board-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .board-card {
+    background: #141414;
+    border: 2px solid #2a2a2a;
+    border-radius: 14px;
+    padding: 20px 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .board-card:hover {
+    border-color: #ff8c00;
+    background: #1a1400;
+  }
+  .board-card.selected {
+    border-color: #ff8c00;
+    background: #1a1400;
+  }
+  .board-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+  .board-info h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 4px;
+  }
+  .board-info p {
+    font-size: 0.8rem;
+    color: #666;
+  }
+
+  /* Screen 1: Connect */
+  .connect-text {
+    color: #999;
+    font-size: 1rem;
+    margin-bottom: 32px;
+    line-height: 1.5;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #ff8c00;
+    color: #000;
+    font-size: 1.1rem;
+    font-weight: 600;
+    padding: 16px 48px;
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 260px;
+    justify-content: center;
+  }
+  .btn:hover:not(:disabled) { background: #ff9f2e; transform: scale(1.02); }
+  .btn:disabled { background: #333; color: #666; cursor: not-allowed; transform: none; }
+  .btn.flash-ready { background: #00c853; color: #000; }
+  .btn.flash-ready:hover { background: #2ee06a; }
+
+  .btn-back {
+    display: inline-block;
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-top: 20px;
+    padding: 6px 12px;
+    transition: color 0.2s;
+  }
+  .btn-back:hover { color: #ff8c00; }
+
+  /* Spinner */
+  .spinner {
+    display: none;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(0,0,0,0.2);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .chip {
+    display: inline-block;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    color: #666;
+    margin-top: 20px;
+  }
+
+  /* Screen 2: Flashing */
+  .flash-info {
+    color: #bbb;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+  .flash-warning {
+    color: #cc8800;
+    font-size: 0.82rem;
+    margin-bottom: 32px;
+  }
+  .progress-container {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    height: 28px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff8c00, #ffb347);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 12px;
+  }
+  #progress-text {
+    color: #888;
+    font-size: 0.85rem;
+  }
+
+  /* Screen 3: Success */
+  .success-icon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+  }
+  .success-text {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #00c853;
+    margin-bottom: 12px;
+  }
+  .success-sub {
+    color: #666;
+    font-size: 0.9rem;
+  }
+  /* Discord button */
+.discord-btn {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: #ff8c00;
+  color: #000;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.discord-btn:hover {
+  background: #ff9f2e;
+  transform: translateX(-50%) scale(1.05);
+}
+
+ /* background element*/
+/* Background container */
+.stars {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+}
+/* Individual star */
+.star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    opacity: 0;
+    animation: twinkle linear infinite;
+}
+/* Twinkle animation */
+@keyframes twinkle {
+    0%   { opacity: 0; }
+    50%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Night Background Element -->
+  <div class="stars" id="stars"></div>
+<script>
+const container = document.getElementById("stars");
+const starCount = 200;
+const centerX = window.innerWidth / 2;
+const centerY = window.innerHeight / 2;
+const radius = 200;
+for (let i = 0; i < starCount; i++) {
+    let x, y;
+    do {
+        x = Math.random() * window.innerWidth;
+        y = Math.random() * window.innerHeight;
+    } while (Math.hypot(x - centerX, y - centerY) < radius);
+    const star = document.createElement("div");
+    star.className = "star";
+    star.style.left = x + "px";
+    star.style.top = y + "px";
+    star.style.animationDuration = (2 + Math.random() * 3) + "s";
+    star.style.animationDelay = (Math.random() * 5) + "s";
+    container.appendChild(star);
+}
+</script>
+<!-- End of Night Background Element -->
+  
+  <div class="container">
+    <h1>Flipper Zero</h1>
+    <p class="subtitle">ESP-32 Port</p>
+
+    <div id="error-banner"></div>
+
+    <!-- Screen 0: Board selection -->
+    <div id="screen-board" class="screen active">
+      <p class="board-heading">Select your board</p>
+      <div class="board-cards">
+        <div id="board-t-embed" class="board-card" onclick="selectBoard('t-embed')">
+          <div class="board-icon">&#9881;</div>
+          <div class="board-info">
+            <h3>LilyGo T-Embed CC1101</h3>
+            <p>ESP32-S3 &bull; NFC &bull; IR &bull; SubGHz</p>
+          </div>
+        </div>
+        <div id="board-waveshare-c6" class="board-card" onclick="selectBoard('waveshare-c6')">
+          <div class="board-icon">&#9881;</div>
+          <div class="board-info">
+            <h3>Waveshare ESP32-C6-LCD-1.9</h3>
+            <p>ESP32-C6 &bull; BLE &bull; WiFi &bull; Touch</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 1: Connect -->
+    <div id="screen-connect" class="screen">
+      <p id="connect-info" class="connect-text">
+        Connect your device via USB to get started.
+      </p>
+
+      <button id="connect-btn" class="btn" disabled onclick="handleConnect()">
+        <span id="connect-spinner" class="spinner"></span>
+        <span id="connect-text">Select device</span>
+      </button>
+
+      <div id="connect-chip" class="chip"></div>
+      <br>
+      <button class="btn-back" onclick="goBack()">&larr; Change board</button>
+    </div>
+
+    <!-- Screen 2: Flashing -->
+    <div id="screen-flash" class="screen">
+      <p class="flash-info">Uploading firmware to device...</p>
+      <p class="flash-warning">Do not disconnect the USB cable.</p>
+
+      <div class="progress-container">
+        <div id="progress-bar" class="progress-fill"></div>
+      </div>
+      <p id="progress-text">Preparing...</p>
+    </div>
+
+    <!-- Screen 3: Success -->
+    <div id="screen-success" class="screen">
+      <div class="success-icon">&#10003;</div>
+      <div class="success-text">Success!</div>
+      <p class="success-sub">Firmware flashed successfully!.<br>Your device is rebooting.</p>
+    </div>
+  </div>
+  <center>
+<a href="https://discord.gg/y7rdnHZHa6" target="_blank" class="discord-btn">
+  Discord
+</a>
+</center>
+</body>
+</html>

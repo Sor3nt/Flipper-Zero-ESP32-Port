@@ -1,0 +1,10 @@
+App(
+    appid="about",
+    name="About",
+    apptype=FlipperAppType.EXTSETTINGS,
+    entry_point="about_app",
+    requires=["gui"],
+    stack_size=4 * 1024,
+    order=10,
+    icon="A_Settings_14",
+)

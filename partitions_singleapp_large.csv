@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Local override for the ESP32 port: the ported Flipper image is already
+# significantly larger than ESP-IDF's stock "singleapp_large" layout.
+nvs,      data, nvs,     ,        0x6000,
+phy_init, data, phy,     ,        0x1000,
+factory,  app,  factory, ,        0x600000,

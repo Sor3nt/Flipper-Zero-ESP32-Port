@@ -1,0 +1,34 @@
+# Target-specific overrides for ESP32-S3 boards (e.g. LilyGo T-Embed CC1101)
+# These are merged ON TOP OF sdkconfig.defaults when building with:
+#   idf.py -B build_s3 set-target esp32s3
+#   idf.py -B build_s3 -DFLIPPER_BOARD=lilygo_t_embed_cc1101 build
+
+# Flash: T-Embed CC1101 has 16MB
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# ESP32-S3 is dual-core Xtensa — keep unicore for Furi compatibility
+CONFIG_FREERTOS_UNICORE=y
+
+# BLE: Use legacy 4.2 advertising (5.0 extended adv not seen by all phones)
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+# CONFIG_BT_BLE_50_FEATURES_SUPPORTED is not set
+
+# PSRAM: T-Embed CC1101 has 8MB PSRAM
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Allow malloc to fall back to PSRAM when internal RAM is exhausted
+CONFIG_SPIRAM_USE_MALLOC=y
+# Allocations <= 4096 bytes stay in internal RAM (DMA, TCB, stack)
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# Reserve 64KB internal RAM for DMA/stacks/TCBs
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Allow task stacks in PSRAM (needed for large apps)
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+# Enable code execution from PSRAM (needed for FAP dynamic loading)
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+
+# NFC needs 3DES (felica, mf_ultralight)
+CONFIG_MBEDTLS_DES_C=y

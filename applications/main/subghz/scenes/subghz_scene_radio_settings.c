@@ -1,0 +1,271 @@
+#include "../subghz_i.h"
+#include "../helpers/subghz_custom_event.h"
+#include <lib/toolbox/value_index.h>
+#include <applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h>
+
+#define RADIO_DEVICE_COUNT 2
+const char* const radio_device_text[RADIO_DEVICE_COUNT] = {
+    "Internal",
+    "External",
+};
+
+const uint32_t radio_device_value[RADIO_DEVICE_COUNT] = {
+    SubGhzRadioDeviceTypeInternal,
+    SubGhzRadioDeviceTypeExternalCC1101,
+};
+
+#define ON_OFF_COUNT 2
+const char* const on_off_text[ON_OFF_COUNT] = {
+    "OFF",
+    "ON",
+};
+
+#define DEBUG_P_COUNT 2
+const char* const debug_pin_text[DEBUG_P_COUNT] = {
+    "OFF",
+    "17(1W)",
+};
+
+#define DEBUG_COUNTER_COUNT 17
+const char* const debug_counter_text[DEBUG_COUNTER_COUNT] = {
+    "+1",
+    "+2",
+    "+3",
+    "+4",
+    "+5",
+    "+10",
+    "+50",
+    "OVFL",
+    "OFEX",
+    "No",
+    "-1",
+    "-2",
+    "-3",
+    "-4",
+    "-5",
+    "-10",
+    "-50",
+};
+const int32_t debug_counter_val[DEBUG_COUNTER_COUNT] = {
+    1,
+    2,
+    3,
+    4,
+    5,
+    10,
+    50,
+    65535,
+    -2147483647,
+    0,
+    -1,
+    -2,
+    -3,
+    -4,
+    -5,
+    -10,
+    -50,
+};
+
+//TX Power
+#define TX_POWER_COUNT 9
+const char* const tx_power_text[TX_POWER_COUNT] = {
+    "Preset",
+    "10dBm +",
+    "7dBm",
+    "5dBm",
+    "0dBm",
+    "-10dBm",
+    "-15dBm",
+    "-20dBm",
+    "-30dBm",
+};
+
+// Frequency offset: -500kHz to +500kHz in 10kHz steps = 101 values, center at index 50
+#define FREQ_OFFSET_COUNT 101
+#define FREQ_OFFSET_CENTER 50
+#define FREQ_OFFSET_STEP  10000 // 10 kHz
+
+static void subghz_scene_radio_settings_set_freq_offset(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    int32_t offset_hz = ((int32_t)index - FREQ_OFFSET_CENTER) * FREQ_OFFSET_STEP;
+
+    static char offset_str[16];
+    if(offset_hz == 0) {
+        snprintf(offset_str, sizeof(offset_str), "0 kHz");
+    } else {
+        snprintf(
+            offset_str,
+            sizeof(offset_str),
+            "%+ld kHz",
+            (long)(offset_hz / 1000));
+    }
+    variable_item_set_current_value_text(item, offset_str);
+
+    subghz->last_settings->frequency_offset = offset_hz;
+    subghz_txrx_set_frequency_offset(subghz->txrx, offset_hz);
+    subghz_last_settings_save(subghz->last_settings);
+}
+
+static void subghz_scene_radio_settings_set_tx_power(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    //Update the Menu Item on screen
+    variable_item_set_current_value_text(item, tx_power_text[index]);
+
+    //Set TX power and remember setting
+    subghz->last_settings->tx_power = subghz->tx_power = index;
+
+    //Save the settings now, this is the convention here!
+    subghz_last_settings_save(subghz->last_settings);
+}
+
+static void subghz_scene_receiver_config_set_debug_pin(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, debug_pin_text[index]);
+
+    subghz_txrx_set_debug_pin_state(subghz->txrx, index == 1);
+}
+
+static void subghz_scene_reciever_config_set_ext_amp_leds_control(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, on_off_text[index]);
+    subghz->last_settings->leds_and_amp = index == 1;
+    // Set globally in furi hal
+    furi_hal_subghz_set_ext_leds_and_amp(subghz->last_settings->leds_and_amp);
+    subghz_last_settings_save(subghz->last_settings);
+    // reinit external device
+    const SubGhzRadioDeviceType current = subghz_txrx_radio_device_get(subghz->txrx);
+    if(current != SubGhzRadioDeviceTypeInternal) {
+        subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeInternal);
+        subghz_txrx_radio_device_set(subghz->txrx, current);
+    }
+}
+
+static void subghz_scene_receiver_config_set_debug_counter(VariableItem* item) {
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, debug_counter_text[index]);
+    furi_hal_subghz_set_rolling_counter_mult(debug_counter_val[index]);
+}
+
+static void subghz_scene_receiver_config_set_timestamp_file_names(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, on_off_text[index]);
+
+    subghz->last_settings->protocol_file_names = (index == 1);
+    subghz_last_settings_save(subghz->last_settings);
+}
+
+void subghz_scene_radio_settings_on_enter(void* context) {
+    SubGhz* subghz = context;
+
+    VariableItemList* variable_item_list = subghz->variable_item_list;
+    int32_t value_index;
+    VariableItem* item;
+
+    // Module selection removed — ESP32 port has no external CC1101 option
+
+    //Add TX Power
+    item = variable_item_list_add(
+        subghz->variable_item_list,
+        "TX Power",
+        TX_POWER_COUNT,
+        subghz_scene_radio_settings_set_tx_power,
+        subghz);
+
+    value_index = subghz->tx_power;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, tx_power_text[value_index]);
+
+    // Frequency Offset (crystal calibration)
+    item = variable_item_list_add(
+        variable_item_list,
+        "Freq Offset",
+        FREQ_OFFSET_COUNT,
+        subghz_scene_radio_settings_set_freq_offset,
+        subghz);
+    {
+        int32_t offset_hz = subghz->last_settings->frequency_offset;
+        uint8_t offset_idx =
+            (uint8_t)CLAMP((offset_hz / FREQ_OFFSET_STEP) + FREQ_OFFSET_CENTER, FREQ_OFFSET_COUNT - 1, 0);
+        variable_item_set_current_value_index(item, offset_idx);
+        static char offset_str[16];
+        if(offset_hz == 0) {
+            snprintf(offset_str, sizeof(offset_str), "0 kHz");
+        } else {
+            snprintf(offset_str, sizeof(offset_str), "%+ld kHz", (long)(offset_hz / 1000));
+        }
+        variable_item_set_current_value_text(item, offset_str);
+    }
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "Protocol Names",
+        ON_OFF_COUNT,
+        subghz_scene_receiver_config_set_timestamp_file_names,
+        subghz);
+    value_index = subghz->last_settings->protocol_file_names;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, on_off_text[value_index]);
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "Counter Incr.",
+        furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug) ? DEBUG_COUNTER_COUNT : 3,
+        subghz_scene_receiver_config_set_debug_counter,
+        subghz);
+    value_index = value_index_int32(
+        furi_hal_subghz_get_rolling_counter_mult(),
+        debug_counter_val,
+        furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug) ? DEBUG_COUNTER_COUNT : 3);
+    furi_hal_subghz_set_rolling_counter_mult(debug_counter_val[value_index]);
+
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, debug_counter_text[value_index]);
+
+    if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
+        item = variable_item_list_add(
+            variable_item_list,
+            "Ext Amp & LEDs",
+            ON_OFF_COUNT,
+            subghz_scene_reciever_config_set_ext_amp_leds_control,
+            subghz);
+        value_index = subghz->last_settings->leds_and_amp ? 1 : 0;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, on_off_text[value_index]);
+
+        item = variable_item_list_add(
+            variable_item_list,
+            "Debug Pin",
+            DEBUG_P_COUNT,
+            subghz_scene_receiver_config_set_debug_pin,
+            subghz);
+        value_index = subghz_txrx_get_debug_pin_state(subghz->txrx);
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, debug_pin_text[value_index]);
+    }
+
+    view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdVariableItemList);
+}
+
+bool subghz_scene_radio_settings_on_event(void* context, SceneManagerEvent event) {
+    SubGhz* subghz = context;
+    UNUSED(subghz);
+    UNUSED(event);
+
+    return false;
+}
+
+void subghz_scene_radio_settings_on_exit(void* context) {
+    SubGhz* subghz = context;
+    variable_item_list_set_selected_item(subghz->variable_item_list, 0);
+    variable_item_list_reset(subghz->variable_item_list);
+}

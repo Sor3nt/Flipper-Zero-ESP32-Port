@@ -1,0 +1,9 @@
+App(
+    appid="backlight_settings",
+    name="Backlight",
+    apptype=FlipperAppType.SETTINGS,
+    entry_point="backlight_settings_app",
+    requires=["gui"],
+    stack_size=1 * 1024,
+    order=5,
+)

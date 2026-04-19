@@ -1,0 +1,23 @@
+App(
+    appid="bt",
+    name="BtSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="bt_srv",
+    requires=["storage"],
+    stack_size=4 * 1024,
+    order=45,
+)
+
+App(
+    appid="bt_settings",
+    name="Bluetooth",
+    apptype=FlipperAppType.EXTSETTINGS,
+    entry_point="bt_settings_app",
+    requires=[
+        "bt",
+        "gui",
+    ],
+    stack_size=2 * 1024,
+    order=20,
+    icon="A_Settings_14",
+)

@@ -1,0 +1,10 @@
+App(
+    appid="notification",
+    name="NotificationSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="notification_srv",
+    cdefines=["SRV_NOTIFICATION"],
+    requires=["input"],
+    stack_size=2 * 1024,
+    order=20,
+)
