@@ -32,3 +32,14 @@ CONFIG_SPIRAM_RODATA=y
 
 # NFC needs 3DES (felica, mf_ultralight)
 CONFIG_MBEDTLS_DES_C=y
+
+# TinyUSB (USB HID for BadUSB over wired USB)
+# HID + Keyboard + Mouse + Consumer Control packed into one interface.
+CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_HID_BUFSIZE=16
+# Leave other classes off - we only need HID for BadUSB.
+CONFIG_TINYUSB_CDC_ENABLED=n
+CONFIG_TINYUSB_MSC_ENABLED=n
+CONFIG_TINYUSB_MIDI_ENABLED=n
+CONFIG_TINYUSB_NCM_ENABLED=n
+CONFIG_TINYUSB_DEBUG_LEVEL=1
