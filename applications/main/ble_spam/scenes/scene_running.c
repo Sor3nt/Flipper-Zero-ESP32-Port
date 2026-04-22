@@ -104,6 +104,9 @@ static int32_t spam_thread_fn(void* arg) {
 
     while(app->running) {
         ble_spam_hal_stop_adv();
+        // Rotate MAC per packet — iOS/Android dedupe identical source addresses,
+        // so without this the popup only ever shows once per stack boot.
+        ble_spam_hal_set_random_addr();
 
         uint8_t payload[31];
         uint8_t len = build_next_payload(app, payload);

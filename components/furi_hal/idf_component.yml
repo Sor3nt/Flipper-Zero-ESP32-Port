@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp_tinyusb:
+    version: "^1.4.0"
+    rules:
+      - if: "target in [esp32s2, esp32s3]"
