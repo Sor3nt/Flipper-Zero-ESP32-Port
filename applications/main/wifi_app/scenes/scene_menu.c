@@ -49,7 +49,7 @@ bool wifi_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case SubmenuIndexSsidAttack:
-            scene_manager_next_scene(app->scene_manager, WifiAppSceneSpamSSIDsMenu);
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneSsidAttackMenu);
             consumed = true;
             break;
         case SubmenuIndexChannelAttack:
