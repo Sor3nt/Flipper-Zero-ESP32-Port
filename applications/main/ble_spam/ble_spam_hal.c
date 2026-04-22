@@ -13,6 +13,7 @@
 
 static volatile bool s_adv_configured = false;
 static volatile bool s_advertising = false;
+static volatile bool s_rand_addr_pending = false;
 
 static esp_ble_adv_params_t s_adv_params = {
     .adv_int_min = 0x20,               // 20ms
@@ -41,6 +42,9 @@ static void spam_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_
         break;
     case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
         s_advertising = false;
+        break;
+    case ESP_GAP_BLE_SET_STATIC_RAND_ADDR_EVT:
+        s_rand_addr_pending = false;
         break;
     default:
         break;
@@ -102,6 +106,12 @@ bool ble_spam_hal_start(void) {
 
     s_adv_configured = false;
     s_advertising = false;
+    s_rand_addr_pending = false;
+
+    // Set an initial random static address so that the first start_advertising()
+    // call (triggered asynchronously from ADV_DATA_RAW_SET_COMPLETE_EVT) can use
+    // BLE_ADDR_TYPE_RANDOM without falling back to an invalid zero address.
+    ble_spam_hal_set_random_addr();
 
     ESP_LOGI(TAG, "BLE spam HAL ready");
     return true;
@@ -166,12 +176,20 @@ void ble_spam_hal_stop_adv(void) {
 void ble_spam_hal_set_random_addr(void) {
     esp_bd_addr_t addr;
     furi_hal_random_fill_buf(addr, 6);
+    // Random static address: top two bits of MSB must be 11 (0xC0..0xFF).
     addr[0] = (addr[0] & 0x3F) | 0xC0;
+    s_rand_addr_pending = true;
     esp_err_t err = esp_ble_gap_set_rand_addr(addr);
     if(err != ESP_OK) {
         ESP_LOGW(TAG, "set_rand_addr: %s", esp_err_to_name(err));
+        s_rand_addr_pending = false;
+        return;
     }
-    furi_delay_ms(2);
+    // Wait up to 40ms for SET_STATIC_RAND_ADDR_EVT so the subsequent
+    // start_advertising() call has a valid own-address to use.
+    for(int i = 0; i < 20 && s_rand_addr_pending; i++) {
+        furi_delay_ms(2);
+    }
 }
 
 void ble_spam_hal_set_addr(const uint8_t addr[6]) {
