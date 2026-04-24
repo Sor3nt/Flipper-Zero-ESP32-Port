@@ -88,9 +88,11 @@ void DG_Init(void) {
     I_AllocCapturedStats();
 }
 
-/* Convert 8 RGBA8888 Doom pixels into 8 byte-swapped RGB565 pixels and blit.
- * For Phase 4 we letterbox-crop: center the 320x200 Doom buffer on a 320x170
- * panel by dropping 15 rows top and 15 bottom. */
+/* Convert Doom's 320x200 RGBA8888 buffer to RGB565 and blit to the 320x170
+ * panel with vertical nearest-neighbour scaling (200 → 170). Doom's native
+ * pixel aspect is 1.2:1 (non-square), so the 0.85x vertical compression
+ * actually brings the image closer to a correct 1:1 pixel aspect. No
+ * cropping, the full play area + HUD is visible. */
 void DG_DrawFrame(void) {
     if(!s_panel || !s_rgb_stripe) return;
 
@@ -99,17 +101,19 @@ void DG_DrawFrame(void) {
     const uint16_t doom_w = DOOMGENERIC_RESX;
     const uint16_t doom_h = DOOMGENERIC_RESY;
 
-    const uint16_t crop_top = (doom_h > panel_h) ? ((doom_h - panel_h) / 2) : 0;
-    const uint16_t rows_to_draw = (doom_h > panel_h) ? panel_h : doom_h;
-
     const uint32_t* src = (const uint32_t*)DG_ScreenBuffer;
     const size_t stripe_h = 16;
 
     furi_hal_spi_bus_lock();
-    for(uint16_t y0 = 0; y0 < rows_to_draw; y0 += stripe_h) {
-        uint16_t rows = (y0 + stripe_h > rows_to_draw) ? (rows_to_draw - y0) : stripe_h;
+    for(uint16_t y0 = 0; y0 < panel_h; y0 += stripe_h) {
+        uint16_t rows = (y0 + stripe_h > panel_h) ? (panel_h - y0) : stripe_h;
         for(uint16_t row = 0; row < rows; row++) {
-            const uint32_t* src_row = &src[((crop_top + y0 + row) * doom_w)];
+            uint16_t panel_y = y0 + row;
+            /* Nearest-neighbour vertical scale: map panel_y in [0..panel_h) to
+             * doom_y in [0..doom_h). +panel_h/2 biases to the nearest row. */
+            uint16_t doom_y = (uint16_t)(((uint32_t)panel_y * doom_h + panel_h / 2) / panel_h);
+            if(doom_y >= doom_h) doom_y = doom_h - 1;
+            const uint32_t* src_row = &src[(uint32_t)doom_y * doom_w];
             uint16_t* dst_row = &s_rgb_stripe[row * panel_w];
             uint16_t copy_w = doom_w < panel_w ? doom_w : panel_w;
             for(uint16_t x = 0; x < copy_w; x++) {
