@@ -3,15 +3,1011 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/x-icon" href="favicon.ico">
-<title>Flipper Zero - ESP32 Port Flash Tool</title>
+<title>Flipper Zero — ESP32 Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #060608;
+  --surface: #0d0d10;
+  --surface2: #13131a;
+  --surface3: #1a1a24;
+  --border: #1e1e2e;
+  --border2: #2a2a3e;
+  --orange: #ff8c00;
+  --orange-dim: rgba(255,140,0,0.12);
+  --orange-glow: rgba(255,140,0,0.35);
+  --green: #00e676;
+  --green-dim: rgba(0,230,118,0.10);
+  --red: #ff4444;
+  --red-dim: rgba(255,68,68,0.10);
+  --blue: #4fc3f7;
+  --text: #d0d0e0;
+  --text-dim: #6060808;
+  --text-muted: #505068;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui: 'Space Grotesk', sans-serif;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --transition: 0.18s ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scanlines & noise overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.06) 2px,
+    rgba(0,0,0,0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Stars ── */
+.stars {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.star {
+  position: absolute;
+  width: 1px; height: 1px;
+  background: #fff;
+  border-radius: 50%;
+  opacity: 0;
+  animation: twinkle linear infinite;
+}
+@keyframes twinkle {
+  0%,100% { opacity: 0; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Layout ── */
+.layout {
+  position: relative;
+  z-index: 1;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 36px;
+}
+.logo-mark {
+  width: 48px; height: 48px;
+  background: var(--orange);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 0 24px var(--orange-glow);
+  flex-shrink: 0;
+}
+.header-text h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.header-text p {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 5px;
+  margin-bottom: 24px;
+}
+.tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: -0.01em;
+}
+.tab:hover { color: var(--text); background: var(--surface3); }
+.tab.active {
+  background: var(--surface3);
+  color: var(--orange);
+  border: 1px solid var(--border2);
+  box-shadow: 0 0 12px rgba(255,140,0,0.08);
+}
+.tab-icon { font-size: 1rem; }
+
+/* ── Tab panels ── */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Error banner ── */
+.error-banner {
+  display: none;
+  background: var(--red-dim);
+  border: 1px solid rgba(255,68,68,0.3);
+  color: var(--red);
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+}
+.card-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* ── Board cards ── */
+.board-cards { display: flex; flex-direction: column; gap: 10px; }
+.board-card {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.board-card:hover {
+  border-color: var(--orange);
+  background: var(--orange-dim);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(255,140,0,0.1);
+}
+.board-card.selected {
+  border-color: var(--orange);
+  background: var(--orange-dim);
+  box-shadow: 0 0 0 1px var(--orange), 0 4px 24px rgba(255,140,0,0.15);
+}
+.board-chip {
+  width: 44px; height: 44px;
+  background: var(--surface3);
+  border-radius: 10px;
+  border: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+.board-card.selected .board-chip {
+  background: rgba(255,140,0,0.15);
+  border-color: var(--orange);
+}
+.board-info h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.board-meta {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+}
+.badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.badge.orange { color: var(--orange); border-color: rgba(255,140,0,0.3); background: var(--orange-dim); }
+.badge.green { color: var(--green); border-color: rgba(0,230,118,0.3); background: var(--green-dim); }
+
+/* ── Screens within flash panel ── */
+.flash-screen { display: none; }
+.flash-screen.active { display: block; }
+
+/* ── Buttons ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: var(--orange);
+  color: #000;
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 14px 36px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: -0.01em;
+  width: 100%;
+  box-shadow: 0 4px 20px rgba(255,140,0,0.25);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #ffa333;
+  box-shadow: 0 6px 28px rgba(255,140,0,0.4);
+  transform: translateY(-1px);
+}
+.btn-primary:disabled {
+  background: var(--surface3);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+.btn-primary.flash-ready {
+  background: var(--green);
+  box-shadow: 0 4px 20px rgba(0,230,118,0.3);
+}
+.btn-primary.flash-ready:hover:not(:disabled) {
+  box-shadow: 0 6px 28px rgba(0,230,118,0.45);
+}
+
+.btn-ghost {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-ghost:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-dim); }
+.btn-ghost:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Spinner ── */
+.spinner {
+  display: none;
+  width: 16px; height: 16px;
+  border: 2px solid rgba(0,0,0,0.2);
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Connect screen ── */
+.connect-info {
+  font-size: 0.9rem;
+  color: #8888aa;
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+.device-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+}
+.device-tag-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+/* ── Progress ── */
+.progress-wrap {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  height: 24px;
+  overflow: hidden;
+  margin: 16px 0 12px;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--orange), #ffb347);
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.progress-label {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ── Success ── */
+.success-wrap {
+  text-align: center;
+  padding: 16px 0;
+}
+.success-icon {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: var(--green-dim);
+  border: 2px solid var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  margin: 0 auto 20px;
+  box-shadow: 0 0 32px rgba(0,230,118,0.2);
+  animation: pop 0.4s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes pop {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.success-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--green);
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+.success-sub {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+/* ── Filesystem panel ── */
+.fs-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.conn-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.conn-badge.offline { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,68,68,0.25); }
+.conn-badge.online { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,0.25); }
+.conn-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+
+.toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+/* ── Breadcrumb ── */
+.breadcrumb {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  min-height: 1.2em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.crumb { cursor: pointer; color: var(--orange); transition: opacity var(--transition); }
+.crumb:hover { opacity: 0.75; }
+.crumb.active { color: var(--text); cursor: default; }
+.crumb.active:hover { opacity: 1; }
+.crumb-sep { color: var(--text-muted); }
+
+/* ── File list ── */
+.file-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 280px;
+}
+.file-row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+  cursor: pointer;
+}
+.file-row:last-child { border-bottom: none; }
+.file-row:hover { background: var(--surface3); }
+.file-row:hover .entry-del { opacity: 1; }
+.entry-icon {
+  font-size: 1rem;
+  text-align: center;
+  user-select: none;
+}
+.entry-name {
+  font-size: 0.88rem;
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--transition);
+}
+.file-row:hover .entry-name { color: var(--orange); }
+.entry-size {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.entry-del {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: all var(--transition);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.entry-del:hover { color: var(--red); background: var(--red-dim); }
+
+.file-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  gap: 10px;
+}
+.file-empty-icon { font-size: 2rem; opacity: 0.4; }
+.file-empty-text { font-size: 0.85rem; }
+
+/* ── Loading ── */
+.loading-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.loading-spin {
+  width: 16px; height: 16px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--orange);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* ── Status bar ── */
+.statusbar {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 10px;
+  min-height: 1.2em;
+  transition: color 0.3s;
+  padding: 0 2px;
+}
+.statusbar.err { color: var(--red); }
+.statusbar.ok { color: var(--green); }
+
+/* ── Fixed Discord ── */
+.discord-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #5865F2;
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 10px 16px;
+  border-radius: 10px;
+  text-decoration: none;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  box-shadow: 0 4px 16px rgba(88,101,242,0.35);
+  transition: all var(--transition);
+}
+.discord-btn:hover { background: #4752C4; transform: translateY(-2px); box-shadow: 0 6px 24px rgba(88,101,242,0.5); }
+
+/* ── Back link ── */
+.back-link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 8px 0;
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color var(--transition);
+}
+.back-link:hover { color: var(--orange); }
+
+/* ── Flash warning ── */
+.flash-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,180,0,0.06);
+  border: 1px solid rgba(255,180,0,0.18);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  font-size: 0.8rem;
+  color: #cc9900;
+  font-family: var(--font-mono);
+}
+
+/* ── Path bar ── */
+.path-bar-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 0 4px 0 12px;
+  margin: 10px 0 10px;
+  gap: 4px;
+  transition: border-color var(--transition);
+}
+.path-bar-wrap:focus-within {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 2px rgba(255,140,0,0.1);
+}
+.path-bar-prefix {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--orange);
+  white-space: nowrap;
+  user-select: none;
+}
+.path-bar-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  padding: 9px 4px;
+  min-width: 0;
+}
+.path-bar-input::placeholder { color: var(--text-muted); }
+.path-bar-input:disabled { opacity: 0.4; cursor: not-allowed; }
+.path-bar-go {
+  background: var(--orange-dim);
+  border: 1px solid rgba(255,140,0,0.25);
+  color: var(--orange);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.path-bar-go:hover { background: rgba(255,140,0,0.22); }
+.path-bar-go:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Credits ── */
+.credits-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+#credits-grid {
+  display: grid;
+  gap: 12px;
+  padding: 4px 0 16px;
+  /* columns set dynamically by JS */
+}
+
+.contributor-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+.contributor-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(255,140,0,0.07) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.contributor-card:hover {
+  border-color: var(--orange);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 28px rgba(255,140,0,0.13);
+}
+.contributor-card:hover::before { opacity: 1; }
+
+.contributor-avatar {
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  transition: border-color 0.2s;
+  object-fit: cover;
+  background: var(--surface3);
+  flex-shrink: 0;
+}
+.contributor-card:hover .contributor-avatar { border-color: var(--orange); }
+
+.contributor-name {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  transition: color 0.2s;
+}
+.contributor-card:hover .contributor-name { color: var(--orange); }
+
+.contributor-commits {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 3px 9px;
+}
+
+.contributor-rank-1 { border-color: rgba(255,215,0,0.4); }
+.contributor-rank-1:hover { border-color: gold; box-shadow: 0 8px 28px rgba(255,215,0,0.18); }
+.contributor-rank-1 .contributor-avatar { border-color: rgba(255,215,0,0.6); }
+.contributor-rank-2 { border-color: rgba(192,192,192,0.35); }
+.contributor-rank-3 { border-color: rgba(205,127,50,0.35); }
+
+
+.drop-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 50;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  color: var(--orange);
+  border: 2px dashed var(--orange);
+}
+.drop-overlay.active { display: flex; }
+
+</style>
+</head>
+<body>
+
+<!-- Stars -->
+<div class="stars" id="stars"></div>
+
+<!-- Drop overlay -->
+<div class="drop-overlay" id="drop-overlay">
+  <div style="font-size:3rem">📂</div>
+  <div>Drop files to upload</div>
+</div>
+
+<div class="layout">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-mark">🐬</div>
+    <div class="header-text">
+      <h1>Flipper Zero</h1>
+      <p>ESP-32 Port &nbsp;·&nbsp; Web Flasher + File Manager</p>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('flash')" id="tab-flash">
+      <span class="tab-icon">⚡</span> Flash Firmware
+    </button>
+    <button class="tab" onclick="switchTab('fs')" id="tab-fs">
+      <span class="tab-icon">💾</span> SD Card
+    </button>
+    <button class="tab" onclick="switchTab('credits')" id="tab-credits">
+      <span class="tab-icon">🤝</span> Credits
+    </button>
+  </div>
+
+  <!-- ── FLASH PANEL ── -->
+  <div class="panel active" id="panel-flash">
+
+    <div id="flash-error" class="error-banner"></div>
+
+    <!-- Board select -->
+    <div class="flash-screen active" id="fscreen-board">
+      <div class="card">
+        <div class="card-label">Select your board</div>
+        <div class="board-cards">
+          <div class="board-card" id="fboard-t-embed" onclick="flashSelectBoard('t-embed')">
+            <div class="board-chip">⚙️</div>
+            <div class="board-info">
+              <h3>LilyGo T-Embed CC1101</h3>
+              <div class="board-meta">
+                <span class="badge orange">ESP32-S3</span>
+                <span class="badge">NFC</span>
+                <span class="badge">IR</span>
+                <span class="badge">SubGHz</span>
+                <span class="badge">16MB</span>
+              </div>
+            </div>
+          </div>
+          <div class="board-card" id="fboard-waveshare-c6" onclick="flashSelectBoard('waveshare-c6')">
+            <div class="board-chip">📡</div>
+            <div class="board-info">
+              <h3>Waveshare ESP32-C6-LCD-1.9</h3>
+              <div class="board-meta">
+                <span class="badge orange">ESP32-C6</span>
+                <span class="badge">BLE</span>
+                <span class="badge">WiFi</span>
+                <span class="badge">Touch</span>
+                <span class="badge">8MB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connect -->
+    <div class="flash-screen" id="fscreen-connect">
+      <div class="card">
+        <div class="card-label">Connect device</div>
+        <p class="connect-info" id="f-connect-info">Connect your device via USB to get started.</p>
+        <div class="device-tag">
+          <div class="device-tag-dot"></div>
+          <span id="f-connect-chip">—</span>
+        </div>
+        <button class="btn-primary" id="f-connect-btn" disabled onclick="flashHandleConnect()">
+          <span class="spinner" id="f-spinner"></span>
+          <span id="f-connect-text">Select device</span>
+        </button>
+        <br>
+        <button class="back-link" onclick="flashGoBack()">← Change board</button>
+      </div>
+    </div>
+
+    <!-- Flashing -->
+    <div class="flash-screen" id="fscreen-flash">
+      <div class="card">
+        <div class="card-label">Uploading firmware</div>
+        <div class="flash-warning">⚠ Do not disconnect USB during flashing</div>
+        <div class="progress-wrap">
+          <div class="progress-fill" id="f-progress-bar"></div>
+        </div>
+        <div class="progress-label" id="f-progress-text">Preparing...</div>
+      </div>
+    </div>
+
+    <!-- Success -->
+    <div class="flash-screen" id="fscreen-success">
+      <div class="card">
+        <div class="success-wrap">
+          <div class="success-icon">✓</div>
+          <div class="success-title">Flash complete</div>
+          <p class="success-sub">Firmware written successfully.<br>Your device is rebooting.</p>
+          <br>
+          <button class="btn-ghost" onclick="flashGoBack()" style="margin:auto">⚡ Flash another</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-flash -->
+
+  <!-- ── FILESYSTEM PANEL ── -->
+  <div class="panel" id="panel-fs">
+
+    <div id="fs-error" class="error-banner"></div>
+
+    <div class="card" style="padding:16px 20px 14px">
+      <!-- Row 1: Connect + status -->
+      <div class="fs-header">
+        <button class="btn-primary" id="fs-connect-btn" onclick="fsToggleConnect()" style="width:auto;padding:10px 20px;font-size:0.85rem">
+          Connect to Device
+        </button>
+        <div class="conn-badge offline" id="fs-status-badge">
+          <div class="conn-dot"></div>
+          Disconnected
+        </div>
+      </div>
+
+      <!-- Row 2: Path bar -->
+      <div class="path-bar-wrap">
+        <span class="path-bar-prefix">/ext/</span>
+        <input
+          id="fs-path-input"
+          class="path-bar-input"
+          type="text"
+          placeholder="SubGHz/Doorbell"
+          spellcheck="false"
+          autocomplete="off"
+          disabled
+        />
+        <button class="path-bar-go" id="fs-path-go" onclick="fsNavigatePath()" disabled title="Go (Enter)">→</button>
+      </div>
+
+      <!-- Row 3: Toolbar -->
+      <div class="toolbar" style="margin-bottom:0">
+        <button class="btn-ghost" id="fs-btn-upload" onclick="fsUpload()" disabled>⬆ Upload</button>
+        <button class="btn-ghost" id="fs-btn-mkdir" onclick="fsShowMkdir()" disabled>📁 New Folder</button>
+        <button class="btn-ghost" id="fs-btn-refresh" onclick="fsRefresh()" disabled>↻ Refresh</button>
+      </div>
+
+      <!-- Inline mkdir input (hidden by default) -->
+      <div id="fs-mkdir-row" style="display:none;margin-top:10px;display:none">
+        <div class="path-bar-wrap">
+          <span class="path-bar-prefix">name/</span>
+          <input id="fs-mkdir-input" class="path-bar-input" type="text" placeholder="new-folder" spellcheck="false" autocomplete="off"/>
+          <button class="path-bar-go" onclick="fsConfirmMkdir()" title="Create">✓</button>
+          <button class="path-bar-go" onclick="fsCancelMkdir()" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,68,68,0.3)" title="Cancel">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="file-pane" id="fs-file-list">
+      <div class="file-empty">
+        <div class="file-empty-icon">📡</div>
+        <div class="file-empty-text">Connect a device to browse files</div>
+      </div>
+    </div>
+
+    <div class="statusbar" id="fs-statusbar"></div>
+
+  </div><!-- /panel-fs -->
+
+  <!-- ── CREDITS PANEL ── -->
+  <div class="panel" id="panel-credits">
+    <div class="card" style="text-align:center;padding:28px 24px 20px">
+      <div style="font-size:1.5rem;font-weight:700;color:#fff;letter-spacing:-0.02em;margin-bottom:4px">Contributors</div>
+      <div style="font-family:var(--font-mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.06em;text-transform:uppercase">
+        Sor3nt / Flipper-Zero-ESP32-Port
+      </div>
+    </div>
+    <div id="credits-grid" style="margin-top:0">
+      <div class="credits-loading" id="credits-loading">
+        <div class="loading-spin"></div>
+        <span>Fetching contributors...</span>
+      </div>
+    </div>
+    <div id="credits-error" class="error-banner" style="margin-top:12px"></div>
+  </div><!-- /panel-credits -->
+
+</div><!-- /layout -->
+
+<a href="https://discord.gg/y7rdnHZHa6" target="_blank" class="discord-btn">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994.021-.04.001-.088-.041-.104a13.1 13.1 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>
+  Discord
+</a>
+
+<!-- ══ SCRIPTS ══ -->
 <script type="module">
 import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
+
+// ── Flash Tool ──
 
 const BOARDS = {
   't-embed': {
     name: 'LilyGo T-Embed CC1101',
-    chip: 'ESP32-S3',
+    chip: 'ESP32-S3 · USB-C · WebSerial',
     flashSize: '16MB',
     parts: [
       { path: 't-embed/latest/bootloader.bin', offset: 0x0 },
@@ -21,7 +1017,7 @@ const BOARDS = {
   },
   'waveshare-c6': {
     name: 'Waveshare ESP32-C6-LCD-1.9',
-    chip: 'ESP32-C6',
+    chip: 'ESP32-C6 · USB-C · WebSerial',
     flashSize: '8MB',
     parts: [
       { path: 'waveshare-c6/latest/bootloader.bin', offset: 0x0 },
@@ -31,115 +1027,105 @@ const BOARDS = {
   },
 };
 
-let selectedBoard = null;
-let port = null;
-let transport = null;
+let fSelectedBoard = null;
+let fPort = null;
+let fTransport = null;
 
-const $ = id => document.getElementById(id);
+const $f = id => document.getElementById(id);
 
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  $(id).classList.add('active');
-}
-
-function setError(msg) {
-  const el = $('error-banner');
-  if (msg) {
-    el.textContent = msg;
-    el.style.display = 'block';
-  } else {
-    el.style.display = 'none';
-  }
-}
-
-function selectBoard(key) {
-  selectedBoard = BOARDS[key];
-  setError(null);
-
+window.flashSelectBoard = function(key) {
+  fSelectedBoard = BOARDS[key];
+  flashSetError(null);
   document.querySelectorAll('.board-card').forEach(c => c.classList.remove('selected'));
-  $('board-' + key).classList.add('selected');
+  $f('fboard-' + key).classList.add('selected');
+  $f('f-connect-info').textContent = `Connect your ${fSelectedBoard.name} via USB to get started.`;
+  $f('f-connect-chip').textContent = fSelectedBoard.chip;
+  $f('f-connect-btn').disabled = false;
+  flashShowScreen('fscreen-connect');
+};
 
-  $('connect-info').textContent = `Connect your ${selectedBoard.name} via USB to get started.`;
-  $('connect-chip').innerHTML = `${selectedBoard.chip} &bull; USB-C &bull; WebSerial`;
-  $('connect-btn').disabled = false;
-  showScreen('screen-connect');
-}
-
-function setConnectState(state) {
-  const btn = $('connect-btn');
-  const spinner = $('connect-spinner');
-  const btnText = $('connect-text');
-
-  if (state === 'waiting') {
-    btn.disabled = true;
-    spinner.style.display = 'inline-block';
-    btnText.textContent = 'Waiting for device...';
-  } else if (state === 'select') {
-    btn.disabled = false;
-    spinner.style.display = 'none';
-    btnText.textContent = 'Select device';
-  } else if (state === 'connected') {
-    btn.disabled = false;
-    spinner.style.display = 'none';
-    btnText.textContent = 'Flash now';
-    btn.classList.add('flash-ready');
-  }
-}
-
-async function handleConnect() {
-  const btn = $('connect-btn');
-
-  if (btn.classList.contains('flash-ready')) {
-    startFlash();
-    return;
-  }
-
-  setError(null);
-  setConnectState('waiting');
-
+window.flashHandleConnect = async function() {
+  const btn = $f('f-connect-btn');
+  if (btn.classList.contains('flash-ready')) { flashStart(); return; }
+  flashSetError(null);
+  setFConnState('waiting');
   try {
-    port = await navigator.serial.requestPort();
-    transport = new Transport(port, true);
-    setConnectState('connected');
+    fPort = await navigator.serial.requestPort();
+    // Don't open the port here — ESPLoader opens it itself when flashing starts.
+    // Just confirm the user picked something and move to "ready" state.
+    setFConnState('connected');
   } catch (e) {
-    port = null;
-    transport = null;
-    if (e.name === 'NotFoundError') {
-      setConnectState('select');
-    } else {
-      setError('Connection failed: ' + e.message);
-      setConnectState('select');
-    }
+    fPort = null;
+    if (e.name !== 'NotFoundError') flashSetError('Connection failed: ' + e.message);
+    setFConnState('select');
   }
+};
+
+window.flashGoBack = async function() {
+  flashSetError(null);
+  await flashClosePort();
+  fSelectedBoard = null;
+  const btn = $f('f-connect-btn');
+  btn.classList.remove('flash-ready');
+  btn.disabled = true;
+  setFConnState('select');
+  flashShowScreen('fscreen-board');
+};
+
+async function flashClosePort() {
+  try {
+    if (fTransport) { await fTransport.disconnect(); }
+  } catch(_) {}
+  try {
+    if (fPort && fPort.readable) {
+      // If readable is still locked, it means ESPLoader still holds a reader — force-close
+      try { await fPort.readable.cancel(); } catch(_) {}
+    }
+    if (fPort) { await fPort.close(); }
+  } catch(_) {}
+  fPort = null;
+  fTransport = null;
 }
 
-async function startFlash() {
-  showScreen('screen-flash');
-  const progress = $('progress-bar');
-  const progressText = $('progress-text');
-  const board = selectedBoard;
+function flashShowScreen(id) {
+  document.querySelectorAll('.flash-screen').forEach(s => s.classList.remove('active'));
+  $f(id).classList.add('active');
+}
 
+function flashSetError(msg) {
+  const el = $f('flash-error');
+  if (msg) { el.textContent = msg; el.style.display = 'block'; }
+  else el.style.display = 'none';
+}
+
+function setFConnState(state) {
+  const btn = $f('f-connect-btn');
+  const spinner = $f('f-spinner');
+  const btnText = $f('f-connect-text');
+  btn.classList.remove('flash-ready');
+  if (state === 'waiting') { btn.disabled = true; spinner.style.display = 'inline-block'; btnText.textContent = 'Waiting...'; }
+  else if (state === 'select') { btn.disabled = false; spinner.style.display = 'none'; btnText.textContent = 'Select device'; }
+  else if (state === 'connected') { btn.disabled = false; spinner.style.display = 'none'; btnText.textContent = '⚡ Flash now'; btn.classList.add('flash-ready'); }
+}
+
+async function flashStart() {
+  flashShowScreen('fscreen-flash');
   try {
+    // Create transport fresh here — ESPLoader.main() will open the port itself
+    fTransport = new Transport(fPort, false);
     const esploader = new ESPLoader({
-      transport,
+      transport: fTransport,
       baudrate: 460800,
       romBaudrate: 115200,
-      terminal: {
-        clean() {},
-        writeLine(data) { console.log(data); },
-        write(data) { console.log(data); },
-      },
+      terminal: { clean(){}, writeLine(d){console.log(d)}, write(d){console.log(d)} },
     });
-
-    progressText.textContent = 'Connecting to bootloader...';
+    $f('f-progress-text').textContent = 'Connecting to bootloader...';
     await esploader.main();
     await esploader.flashId();
-
     const fileArray = [];
     let totalSize = 0;
-
-    for (const part of board.parts) {
-      progressText.textContent = `Loading ${part.path.split('/').pop()}...`;
+    for (const part of fSelectedBoard.parts) {
+      $f('f-progress-text').textContent = `Loading ${part.path.split('/').pop()}...`;
       const resp = await fetch(part.path);
       if (!resp.ok) throw new Error(`Failed to load ${part.path}: ${resp.status}`);
       const data = await resp.arrayBuffer();
@@ -147,418 +1133,614 @@ async function startFlash() {
       fileArray.push({ data: binaryToStr(bytes), address: part.offset });
       totalSize += bytes.length;
     }
-
-    progressText.textContent = `Flashing ${(totalSize / 1024 / 1024).toFixed(1)} MB...`;
-
+    $f('f-progress-text').textContent = `Flashing ${(totalSize/1024/1024).toFixed(1)} MB...`;
     await esploader.writeFlash({
       fileArray,
-      flashSize: board.flashSize,
+      flashSize: fSelectedBoard.flashSize,
       flashMode: 'dio',
       flashFreq: '80m',
       eraseAll: false,
       compress: true,
       reportProgress: (idx, written, total) => {
-        const pct = Math.round((written / total) * 100);
-        progress.style.width = pct + '%';
-        progressText.textContent = `Flashing part ${idx + 1}/${board.parts.length}... ${pct}%`;
+        const pct = Math.round((written/total)*100);
+        $f('f-progress-bar').style.width = pct + '%';
+        $f('f-progress-text').textContent = `Part ${idx+1}/${fSelectedBoard.parts.length} — ${pct}%`;
       },
     });
-
-    progressText.textContent = 'Resetting device...';
-    await transport.setDTR(false);
-    await transport.setRTS(true);
-    await new Promise(r => setTimeout(r, 100));
-    await transport.setRTS(false);
-    await new Promise(r => setTimeout(r, 100));
-
-    showScreen('screen-success');
-
+    $f('f-progress-text').textContent = 'Resetting device...';
+    await fTransport.setDTR(false);
+    await fTransport.setRTS(true);
+    await new Promise(r=>setTimeout(r,100));
+    await fTransport.setRTS(false);
+    await new Promise(r=>setTimeout(r,100));
+    // Always close the port after flashing so SD Card tab can open it
+    await flashClosePort();
+    flashShowScreen('fscreen-success');
   } catch (e) {
-    console.error('Flash error:', e);
-    setError('Flash failed: ' + e.message);
-    setConnectState('select');
-    port = null;
-    transport = null;
-    showScreen('screen-connect');
+    flashSetError('Flash failed: ' + e.message);
+    setFConnState('select');
+    await flashClosePort();
+    flashShowScreen('fscreen-connect');
   }
 }
 
 function binaryToStr(u8) {
-  let str = '';
-  for (let i = 0; i < u8.length; i++) str += String.fromCharCode(u8[i]);
-  return str;
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return s;
 }
 
-function goBack() {
-  setError(null);
-  port = null;
-  transport = null;
-  selectedBoard = null;
-  const btn = $('connect-btn');
-  btn.classList.remove('flash-ready');
-  btn.disabled = true;
-  setConnectState('select');
-  showScreen('screen-board');
-}
+window.switchTab = function(tab) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+  document.getElementById('tab-'+tab).classList.add('active');
+};
 
-window.handleConnect = handleConnect;
-window.selectBoard = selectBoard;
-window.goBack = goBack;
-
-// Check WebSerial support
 if (!('serial' in navigator)) {
-  document.querySelectorAll('.board-card').forEach(c => c.style.pointerEvents = 'none');
-  setError('Use Google Chrome or Edge on desktop to flash.');
+  flashSetError('WebSerial requires Chrome or Edge on desktop.');
+  document.querySelectorAll('.board-card').forEach(c => c.style.pointerEvents='none');
 }
+
+// ── Filesystem Tool ──
+
+let fsPort = null;
+let fsReader = null;
+let fsWriter = null;
+let fsReadBuffer = '';
+let fsCurrentPath = '/ext';
+let fsConnected = false;
+const fsEncoder = new TextEncoder();
+const fsDecoder = new TextDecoder();
+
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[mGKHF]/g,'')
+            .replace(/\x1b\[[0-9;]*[A-Za-z]/g,'')
+            .replace(/\x1b\[\?[0-9;]*[A-Za-z]/g,'')
+            .replace(/\x1b\][^\x07]*\x07/g,'')
+            .replace(/\x1b[()][A-Za-z]/g,'')
+            .replace(/\r/g,'');
+}
+
+window.fsToggleConnect = async function() {
+  if (fsConnected) await fsDisconnect(); else await fsConnect();
+};
+
+async function fsConnect() {
+  const btn = document.getElementById('fs-connect-btn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+  try {
+    fsPort = await navigator.serial.requestPort();
+    // Always try to open fresh — close first if somehow still open
+    try { await fsPort.close(); } catch(_) {}
+    await fsSleep(200);
+    await fsPort.open({ baudRate: 115200 });
+    await fsPort.setSignals({ dataTerminalReady: true, requestToSend: false });
+    await fsSleep(100);
+    await fsPort.setSignals({ dataTerminalReady: true, requestToSend: true });
+    fsReader = fsPort.readable.getReader();
+    fsWriter = fsPort.writable.getWriter();
+    fsConnected = true;
+    fsUpdateConnUI(true);
+    fsStartReading();
+
+    // Wake the CLI — send Enter a few times
+    await fsSleep(800);
+    for (let i = 0; i < 3; i++) {
+      await fsSendRaw('\r\n');
+      await fsSleep(400);
+      if (stripAnsi(fsReadBuffer).includes('>:')) break;
+    }
+
+    // If still nothing, toggle DTR to reset CLI
+    if (!stripAnsi(fsReadBuffer).includes('>:')) {
+      await fsPort.setSignals({ dataTerminalReady: false, requestToSend: false });
+      await fsSleep(300);
+      await fsPort.setSignals({ dataTerminalReady: true, requestToSend: true });
+      await fsSleep(800);
+      await fsSendRaw('\r\n');
+      await fsSleep(400);
+    }
+
+    await fsWaitForPrompt(4000);
+    fsReadBuffer = '';
+    await fsListDir(fsCurrentPath);
+  } catch (e) {
+    fsConnected = false;
+    try { if (fsReader) { fsReader.releaseLock(); fsReader = null; } } catch(_) {}
+    try { if (fsWriter) { fsWriter.releaseLock(); fsWriter = null; } } catch(_) {}
+    try { if (fsPort) { await fsPort.close(); } } catch(_) {}
+    fsPort = null;
+    fsUpdateConnUI(false);
+    let msg = e.message || String(e);
+    if (e.name === 'NotFoundError') msg = 'No device selected.';
+    else if (msg.toLowerCase().includes('already open')) msg = 'Port busy — unplug/replug USB and try again.';
+    fsSetError(msg);
+  }
+}
+
+async function fsDisconnect() {
+  fsConnected = false;
+  try { if (fsReader) { await fsReader.cancel(); fsReader.releaseLock(); fsReader = null; } } catch(_) {}
+  try { if (fsWriter) { fsWriter.releaseLock(); fsWriter = null; } } catch(_) {}
+  try { if (fsPort) { await fsPort.close(); fsPort = null; } } catch(_) {}
+  fsUpdateConnUI(false);
+  document.getElementById('fs-file-list').innerHTML = `
+    <div class="file-empty">
+      <div class="file-empty-icon">📡</div>
+      <div class="file-empty-text">Connect a device to browse files</div>
+    </div>`;
+  fsUpdatePathBar();
+}
+
+function fsUpdateConnUI(on) {
+  const btn = document.getElementById('fs-connect-btn');
+  const badge = document.getElementById('fs-status-badge');
+  btn.disabled = false;
+  btn.textContent = on ? 'Disconnect' : 'Connect to Device';
+  badge.className = 'conn-badge ' + (on ? 'online' : 'offline');
+  badge.innerHTML = `<div class="conn-dot"></div>${on ? 'Connected' : 'Disconnected'}`;
+  ['fs-btn-upload','fs-btn-mkdir','fs-btn-refresh'].forEach(id => {
+    document.getElementById(id).disabled = !on;
+  });
+  const pi = document.getElementById('fs-path-input');
+  const pg = document.getElementById('fs-path-go');
+  if (pi) pi.disabled = !on;
+  if (pg) pg.disabled = !on;
+}
+
+async function fsStartReading() {
+  try {
+    while (fsConnected && fsReader) {
+      const { value, done } = await fsReader.read();
+      if (done) break;
+      fsReadBuffer += fsDecoder.decode(value, { stream: true });
+    }
+  } catch(e) {}
+}
+
+async function fsSendRaw(data) {
+  if (!fsWriter) return;
+  await fsWriter.write(fsEncoder.encode(data));
+}
+
+// Clear buffer, send command, wait a tick for echo to start
+async function fsSendCommand(cmd) {
+  fsReadBuffer = '';
+  await fsSendRaw(cmd + '\r\n');
+  await fsSleep(60); // let echo arrive
+}
+
+function fsSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Wait for the Flipper CLI prompt ">: " to appear
+async function fsWaitForPrompt(timeout = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clean = stripAnsi(fsReadBuffer);
+    if (clean.includes('>: ') || clean.includes('>:')) {
+      const result = fsReadBuffer;
+      fsReadBuffer = '';
+      return stripAnsi(result);
+    }
+    await fsSleep(40);
+  }
+  const result = fsReadBuffer;
+  fsReadBuffer = '';
+  return stripAnsi(result);
+}
+
+async function fsWaitForString(str, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (stripAnsi(fsReadBuffer).includes(str)) return true;
+    await fsSleep(40);
+  }
+  return false;
+}
+
+// ── Navigation ──
+
+async function fsListDir(path) {
+  if (!fsConnected) return;
+  // Normalise: always start with /ext
+  if (!path.startsWith('/')) path = '/ext/' + path;
+  if (!path.startsWith('/ext')) path = '/ext' + path;
+  // Strip trailing slash
+  path = path.replace(/\/+$/, '') || '/ext';
+  fsCurrentPath = path;
+  fsUpdatePathBar();
+  fsShowLoading();
+
+  await fsSendCommand('storage list ' + path);
+  const response = await fsWaitForPrompt(6000);
+
+  const lines = response.split('\n');
+  const entries = [];
+  for (const line of lines) {
+    const t = line.trim();
+    // Flipper format: [D] dirname   or  [F] filename 1234b
+    const dirMatch = t.match(/^\[D\]\s+(.+)$/);
+    const fileMatch = t.match(/^\[F\]\s+(.+?)\s+(\d+)b\s*$/);
+    if (dirMatch && dirMatch[1].trim()) entries.push({ name: dirMatch[1].trim(), type: 'dir', size: 0 });
+    else if (fileMatch && fileMatch[1].trim()) entries.push({ name: fileMatch[1].trim(), type: 'file', size: parseInt(fileMatch[2]) });
+  }
+
+  // If no entries parsed, check for error messages
+  const hasError = response.includes('storage_error') || response.includes('not found') || response.includes('invalid');
+  fsRenderList(entries, hasError ? response : null);
+}
+
+window.fsNavigatePath = async function() {
+  const input = document.getElementById('fs-path-input');
+  if (!input || !fsConnected) return;
+  let val = input.value.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+  const path = val ? '/ext/' + val : '/ext';
+  input.value = '';
+  await fsListDir(path);
+};
+
+window.fsRefresh = function() { if (fsConnected) fsListDir(fsCurrentPath); };
+
+function fsUpdatePathBar() {
+  const input = document.getElementById('fs-path-input');
+  if (!input) return;
+  // Show relative path (strip /ext/ prefix for display in bar)
+  const rel = fsCurrentPath.replace(/^\/ext\/?/, '');
+  input.placeholder = rel || 'SubGHz/Doorbell';
+  input.value = '';
+  // Also update the page title-ish area
+  const badge = document.getElementById('fs-status-badge');
+  if (badge && fsConnected) {
+    const short = '/' + (rel || 'ext');
+    badge.innerHTML = `<div class="conn-dot"></div><span style="font-family:var(--font-mono);font-size:0.68rem;opacity:0.8">${escHtml(short)}</span>`;
+  }
+}
+
+// ── Upload ──
+
+window.fsUpload = async function() {
+  if (!fsConnected) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async () => {
+    for (const file of input.files) await fsUploadFile(file);
+    await fsListDir(fsCurrentPath);
+  };
+  input.click();
+};
+
+async function fsUploadFile(file) {
+  const remotePath = fsCurrentPath + '/' + file.name;
+  fsSetStatus('Uploading ' + file.name + '...');
+
+  // Remove existing file first (ignore error)
+  await fsSendCommand('storage remove ' + remotePath);
+  await fsWaitForPrompt(3000);
+
+  const data = new Uint8Array(await file.arrayBuffer());
+  const totalSize = data.length;
+
+  fsReadBuffer = '';
+  await fsSendCommand('storage write_chunk ' + remotePath + ' ' + totalSize);
+
+  const ready = await fsWaitForString('Ready', 5000);
+  if (!ready) { fsSetError('Device not ready for upload'); return; }
+  await fsSleep(150);
+  fsReadBuffer = '';
+
+  // Send in 512-byte chunks with small pacing delay
+  const chunkSize = 512;
+  let sent = 0;
+  while (sent < totalSize) {
+    const end = Math.min(sent + chunkSize, totalSize);
+    await fsWriter.write(data.slice(sent, end));
+    sent = end;
+    fsSetStatus('Uploading ' + file.name + '... ' + Math.round((sent / totalSize) * 100) + '%');
+    await fsSleep(25);
+  }
+
+  await fsWaitForPrompt(10000);
+  fsSetStatus('Uploaded ' + file.name + ' (' + fsFormatSize(totalSize) + ')', 'ok');
+}
+
+// ── Download ──
+
+async function fsDownload(path, filename, fileSize) {
+  if (!fsConnected) return;
+  fsSetStatus('Downloading ' + filename + '...');
+  const chunkSize = 512;
+  fsReadBuffer = '';
+  await fsSendCommand('storage read_chunks ' + path + ' ' + chunkSize);
+  await fsWaitForString('Size:', 3000);
+  await fsSleep(100);
+  const sizeMatch = fsReadBuffer.match(/Size:\s*(\d+)/);
+  const size = sizeMatch ? parseInt(sizeMatch[1]) : fileSize;
+  const chunks = [];
+  let received = 0;
+  while (received < size) {
+    await fsWaitForString('Ready?', 5000);
+    await fsSleep(60);
+    fsReadBuffer = '';
+    await fsSendRaw('\r');
+    await fsSleep(80);
+    const expected = Math.min(chunkSize, size - received);
+    const deadline = Date.now() + 5000;
+    while (fsReadBuffer.length < expected && Date.now() < deadline) await fsSleep(40);
+    chunks.push(fsReadBuffer.substring(0, expected));
+    received += expected;
+    fsReadBuffer = fsReadBuffer.substring(expected);
+    fsSetStatus('Downloading... ' + Math.round((received / size) * 100) + '%');
+  }
+  await fsWaitForPrompt(3000);
+  const full = chunks.join('');
+  const bytes = new Uint8Array(full.length);
+  for (let i = 0; i < full.length; i++) bytes[i] = full.charCodeAt(i) & 0xff;
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  fsSetStatus('Downloaded ' + filename + ' (' + fsFormatSize(size) + ')', 'ok');
+}
+
+// ── Mkdir (inline) ──
+
+window.fsShowMkdir = function() {
+  const row = document.getElementById('fs-mkdir-row');
+  row.style.display = 'block';
+  document.getElementById('fs-mkdir-input').focus();
+};
+
+window.fsCancelMkdir = function() {
+  document.getElementById('fs-mkdir-row').style.display = 'none';
+  document.getElementById('fs-mkdir-input').value = '';
+};
+
+window.fsConfirmMkdir = async function() {
+  const input = document.getElementById('fs-mkdir-input');
+  const name = input.value.trim();
+  if (!name || !fsConnected) { fsCancelMkdir(); return; }
+  fsCancelMkdir();
+  fsSetStatus('Creating folder ' + name + '...');
+  await fsSendCommand('storage mkdir ' + fsCurrentPath + '/' + name);
+  await fsWaitForPrompt(4000);
+  await fsListDir(fsCurrentPath);
+};
+
+// Enter key on mkdir input
+document.addEventListener('DOMContentLoaded', () => {
+  const mi = document.getElementById('fs-mkdir-input');
+  if (mi) mi.addEventListener('keydown', e => { if (e.key === 'Enter') fsConfirmMkdir(); if (e.key === 'Escape') fsCancelMkdir(); });
+  const pi = document.getElementById('fs-path-input');
+  if (pi) pi.addEventListener('keydown', e => { if (e.key === 'Enter') fsNavigatePath(); });
+});
+
+// ── Delete ──
+
+async function fsDelete(name, type) {
+  if (!confirm(`Delete ${type === 'dir' ? 'folder' : 'file'} "${name}"?`)) return;
+  fsSetStatus('Deleting...');
+  await fsSendCommand('storage remove ' + fsCurrentPath + '/' + name);
+  await fsWaitForPrompt(4000);
+  await fsListDir(fsCurrentPath);
+  fsSetStatus('Deleted ' + name);
+}
+
+// ── Render ──
+
+function fsShowLoading() {
+  document.getElementById('fs-file-list').innerHTML = `
+    <div class="loading-row">
+      <div class="loading-spin"></div>
+      Loading...
+    </div>`;
+}
+
+function fsRenderList(entries, errMsg) {
+  const list = document.getElementById('fs-file-list');
+  list.innerHTML = '';
+
+  if (errMsg) {
+    list.innerHTML = `<div class="file-empty"><div class="file-empty-icon">⚠️</div><div class="file-empty-text" style="color:var(--red);font-family:var(--font-mono);font-size:0.75rem;max-width:90%;text-align:center">${escHtml(errMsg.substring(0, 200))}</div></div>`;
+    return;
+  }
+
+  // Back row (not on root)
+  if (fsCurrentPath !== '/ext') {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    row.style.cursor = 'pointer';
+    row.innerHTML = `<div class="entry-icon" style="opacity:0.5">↩</div><div class="entry-name" style="color:var(--text-muted)">..</div><div class="entry-size"></div><div></div>`;
+    row.onclick = () => {
+      const parent = fsCurrentPath.includes('/') ? fsCurrentPath.substring(0, fsCurrentPath.lastIndexOf('/')) : '/ext';
+      fsListDir(parent || '/ext');
+    };
+    list.appendChild(row);
+  }
+
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  if (entries.length === 0) {
+    list.innerHTML += `<div class="file-empty"><div class="file-empty-icon">📂</div><div class="file-empty-text">Empty directory</div></div>`;
+    return;
+  }
+
+  for (const entry of entries) {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const icon = entry.type === 'dir' ? '📁' : getFileIcon(entry.name);
+    row.innerHTML = `
+      <div class="entry-icon">${icon}</div>
+      <div class="entry-name">${escHtml(entry.name)}</div>
+      <div class="entry-size">${entry.type === 'file' ? fsFormatSize(entry.size) : ''}</div>
+      <button class="entry-del" title="Delete">✕</button>`;
+    row.querySelector('.entry-name').onclick = () => {
+      if (entry.type === 'dir') fsListDir(fsCurrentPath + '/' + entry.name);
+      else fsDownload(fsCurrentPath + '/' + entry.name, entry.name, entry.size);
+    };
+    row.querySelector('.entry-del').onclick = (e) => { e.stopPropagation(); fsDelete(entry.name, entry.type); };
+    list.appendChild(row);
+  }
+}
+
+function getFileIcon(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const map = { nfc:'💳', sub:'📻', ir:'🔴', rfid:'🏷', ibtn:'🔑', txt:'📄', log:'📋', bin:'⚙️', json:'📑', png:'🖼️', jpg:'🖼️', bmp:'🖼️', wav:'🎵', mp3:'🎵', fap:'⚡', u2f:'🔐', csv:'📊', xml:'📋', cfg:'⚙️' };
+  return map[ext] || '📄';
+}
+
+function fsSetStatus(msg, type='') {
+  const el = document.getElementById('fs-statusbar');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'statusbar ' + type;
+}
+
+function fsSetError(msg) {
+  const el = document.getElementById('fs-error');
+  if (!el) return;
+  el.textContent = msg; el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}
+
+function fsFormatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+window._fsNav = (path) => fsListDir(path);
+
+// Drag-and-drop upload
+const dropOverlay = document.getElementById('drop-overlay');
+document.addEventListener('dragenter', e => {
+  if (fsConnected && document.getElementById('tab-fs').classList.contains('active'))
+    dropOverlay.classList.add('active');
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) dropOverlay.classList.remove('active'); });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropOverlay.classList.remove('active');
+  if (!fsConnected) return;
+  for (const f of [...e.dataTransfer.files]) await fsUploadFile(f);
+  await fsListDir(fsCurrentPath);
+});
+
+// ── Credits ──
+
+let creditsLoaded = false;
+
+async function loadCredits() {
+  if (creditsLoaded) return;
+  const grid = document.getElementById('credits-grid');
+  const errEl = document.getElementById('credits-error');
+  const loadEl = document.getElementById('credits-loading');
+
+  try {
+    // Fetch up to 100 contributors (GitHub API max per page)
+    const res = await fetch('https://api.github.com/repos/Sor3nt/Flipper-Zero-ESP32-Port/contributors?per_page=100');
+    if (!res.ok) throw new Error(`GitHub API error ${res.status}`);
+    const contributors = await res.json();
+
+    loadEl.style.display = 'none';
+    creditsLoaded = true;
+
+    const n = contributors.length;
+
+    // ── Math: best grid layout ──
+    // Available width ≈ min(700, viewport) - 48px padding
+    const availW = Math.min(700, window.innerWidth) - 48;
+
+    // Try columns 2..6, pick the one that minimises wasted space
+    // and keeps cards >= 100px wide
+    let bestCols = 2;
+    let bestScore = Infinity;
+    for (let cols = 2; cols <= 6; cols++) {
+      const cardW = (availW - (cols - 1) * 12) / cols;
+      if (cardW < 100) break;
+      const rows = Math.ceil(n / cols);
+      const empty = rows * cols - n;          // empty cells = wasted space
+      const aspect = cardW / 160;             // prefer squarish cards (ideal ~160px)
+      const score = empty * 2 + Math.abs(1 - aspect) * cols;
+      if (score < bestScore) { bestScore = score; bestCols = cols; }
+    }
+
+    const cardW = Math.floor((availW - (bestCols - 1) * 12) / bestCols);
+    // Avatar size: ~45% of card width, clamped 40px–80px
+    const avatarSize = Math.min(80, Math.max(40, Math.floor(cardW * 0.45)));
+
+    grid.style.gridTemplateColumns = `repeat(${bestCols}, 1fr)`;
+
+    contributors.forEach((c, i) => {
+      const rank = i < 3 ? i + 1 : 0;
+      const card = document.createElement('a');
+      card.href = c.html_url;
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+      card.className = 'contributor-card' + (rank ? ` contributor-rank-${rank}` : '');
+      card.title = `${c.login} — ${c.contributions} commit${c.contributions !== 1 ? 's' : ''}`;
+
+      // Medal for top 3
+      const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+
+      card.innerHTML = `
+        <img
+          class="contributor-avatar"
+          src="${c.avatar_url}&s=${avatarSize * 2}"
+          width="${avatarSize}"
+          height="${avatarSize}"
+          alt="${c.login}"
+          loading="lazy"
+        />
+        <div class="contributor-name">${medal ? medal + ' ' : ''}${c.login}</div>
+        <div class="contributor-commits">${c.contributions} commit${c.contributions !== 1 ? 's' : ''}</div>
+      `;
+      grid.appendChild(card);
+    });
+
+  } catch (e) {
+    loadEl.style.display = 'none';
+    errEl.textContent = 'Could not load contributors: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// Hook into switchTab to lazy-load credits
+const _origSwitchTab = window.switchTab;
+window.switchTab = function(tab) {
+  _origSwitchTab(tab);
+  if (tab === 'credits') loadCredits();
+};
+
 </script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0a0a0a;
-    color: #e0e0e0;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    height: 100vh;
-    margin: 0;
-    overflow: hidden;
-    background: black;
-}
 
-  .container {
-    text-align: center;
-    max-width: 480px;
-    width: 100%;
-    padding: 40px 24px;
-  }
-  h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
-    color: #ff8c00;
-    margin-bottom: 6px;
-  }
-  .subtitle {
-    color: #666;
-    font-size: 0.9rem;
-    margin-bottom: 40px;
-  }
-
-  /* Error banner */
-  #error-banner {
-    display: none;
-    background: #2a0000;
-    border: 1px solid #5a1010;
-    color: #ff5555;
-    padding: 12px 16px;
-    border-radius: 10px;
-    margin-bottom: 24px;
-    font-size: 0.85rem;
-  }
-
-  /* Screens */
-  .screen { display: none; }
-  .screen.active { display: block; }
-
-  /* Screen 0: Board selection */
-  .board-heading {
-    color: #999;
-    font-size: 1rem;
-    margin-bottom: 24px;
-  }
-  .board-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .board-card {
-    background: #141414;
-    border: 2px solid #2a2a2a;
-    border-radius: 14px;
-    padding: 20px 24px;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-align: left;
-    display: flex;
-    align-items: center;
-    gap: 18px;
-  }
-  .board-card:hover {
-    border-color: #ff8c00;
-    background: #1a1400;
-  }
-  .board-card.selected {
-    border-color: #ff8c00;
-    background: #1a1400;
-  }
-  .board-icon {
-    font-size: 2rem;
-    flex-shrink: 0;
-  }
-  .board-info h3 {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #e0e0e0;
-    margin-bottom: 4px;
-  }
-  .board-info p {
-    font-size: 0.8rem;
-    color: #666;
-  }
-
-  /* Screen 1: Connect */
-  .connect-text {
-    color: #999;
-    font-size: 1rem;
-    margin-bottom: 32px;
-    line-height: 1.5;
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    background: #ff8c00;
-    color: #000;
-    font-size: 1.1rem;
-    font-weight: 600;
-    padding: 16px 48px;
-    border: none;
-    border-radius: 14px;
-    cursor: pointer;
-    transition: all 0.2s;
-    min-width: 260px;
-    justify-content: center;
-  }
-  .btn:hover:not(:disabled) { background: #ff9f2e; transform: scale(1.02); }
-  .btn:disabled { background: #333; color: #666; cursor: not-allowed; transform: none; }
-  .btn.flash-ready { background: #00c853; color: #000; }
-  .btn.flash-ready:hover { background: #2ee06a; }
-
-  .btn-back {
-    display: inline-block;
-    background: none;
-    border: none;
-    color: #666;
-    font-size: 0.85rem;
-    cursor: pointer;
-    margin-top: 20px;
-    padding: 6px 12px;
-    transition: color 0.2s;
-  }
-  .btn-back:hover { color: #ff8c00; }
-
-  /* Spinner */
-  .spinner {
-    display: none;
-    width: 20px;
-    height: 20px;
-    border: 3px solid rgba(0,0,0,0.2);
-    border-top-color: #000;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .chip {
-    display: inline-block;
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 0.78rem;
-    color: #666;
-    margin-top: 20px;
-  }
-
-  /* Screen 2: Flashing */
-  .flash-info {
-    color: #bbb;
-    font-size: 0.95rem;
-    margin-bottom: 8px;
-    line-height: 1.5;
-  }
-  .flash-warning {
-    color: #cc8800;
-    font-size: 0.82rem;
-    margin-bottom: 32px;
-  }
-  .progress-container {
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    border-radius: 12px;
-    height: 28px;
-    overflow: hidden;
-    margin-bottom: 16px;
-  }
-  .progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #ff8c00, #ffb347);
-    width: 0%;
-    transition: width 0.3s ease;
-    border-radius: 12px;
-  }
-  #progress-text {
-    color: #888;
-    font-size: 0.85rem;
-  }
-
-  /* Screen 3: Success */
-  .success-icon {
-    font-size: 4rem;
-    margin-bottom: 16px;
-  }
-  .success-text {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #00c853;
-    margin-bottom: 12px;
-  }
-  .success-sub {
-    color: #666;
-    font-size: 0.9rem;
-  }
-  /* Discord button */
-.discord-btn {
-  position: fixed;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
-  background: #ff8c00;
-  color: #000;
-  font-size: 0.9rem;
-  font-weight: 600;
-  padding: 12px 20px;
-  border-radius: 12px;
-  text-decoration: none;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-
-.discord-btn:hover {
-  background: #ff9f2e;
-  transform: translateX(-50%) scale(1.05);
-}
-
- /* background element*/
-/* Background container */
-.stars {
-    position: fixed;
-    width: 100%;
-    height: 100%;
-}
-/* Individual star */
-.star {
-    position: absolute;
-    width: 2px;
-    height: 2px;
-    background: white;
-    border-radius: 50%;
-    opacity: 0;
-    animation: twinkle linear infinite;
-}
-/* Twinkle animation */
-@keyframes twinkle {
-    0%   { opacity: 0; }
-    50%  { opacity: 1; }
-    100% { opacity: 0; }
-}
-</style>
-</head>
-<body>
-<!-- Night Background Element -->
-  <div class="stars" id="stars"></div>
+<!-- Stars script -->
 <script>
-const container = document.getElementById("stars");
-const starCount = 200;
-const centerX = window.innerWidth / 2;
-const centerY = window.innerHeight / 2;
-const radius = 200;
-for (let i = 0; i < starCount; i++) {
+(function() {
+  const container = document.getElementById('stars');
+  const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+  for (let i = 0; i < 180; i++) {
     let x, y;
-    do {
-        x = Math.random() * window.innerWidth;
-        y = Math.random() * window.innerHeight;
-    } while (Math.hypot(x - centerX, y - centerY) < radius);
-    const star = document.createElement("div");
-    star.className = "star";
-    star.style.left = x + "px";
-    star.style.top = y + "px";
-    star.style.animationDuration = (2 + Math.random() * 3) + "s";
-    star.style.animationDelay = (Math.random() * 5) + "s";
-    container.appendChild(star);
-}
+    do { x = Math.random()*window.innerWidth; y = Math.random()*window.innerHeight; }
+    while (Math.hypot(x-cx, y-cy) < 160);
+    const s = document.createElement('div');
+    s.className = 'star';
+    s.style.cssText = `left:${x}px;top:${y}px;animation-duration:${2+Math.random()*4}s;animation-delay:${Math.random()*6}s`;
+    container.appendChild(s);
+  }
+})();
 </script>
-<!-- End of Night Background Element -->
-  
-  <div class="container">
-    <h1>Flipper Zero</h1>
-    <p class="subtitle">ESP-32 Port</p>
 
-    <div id="error-banner"></div>
-
-    <!-- Screen 0: Board selection -->
-    <div id="screen-board" class="screen active">
-      <p class="board-heading">Select your board</p>
-      <div class="board-cards">
-        <div id="board-t-embed" class="board-card" onclick="selectBoard('t-embed')">
-          <div class="board-icon">&#9881;</div>
-          <div class="board-info">
-            <h3>LilyGo T-Embed CC1101</h3>
-            <p>ESP32-S3 &bull; NFC &bull; IR &bull; SubGHz</p>
-          </div>
-        </div>
-        <div id="board-waveshare-c6" class="board-card" onclick="selectBoard('waveshare-c6')">
-          <div class="board-icon">&#9881;</div>
-          <div class="board-info">
-            <h3>Waveshare ESP32-C6-LCD-1.9</h3>
-            <p>ESP32-C6 &bull; BLE &bull; WiFi &bull; Touch</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Screen 1: Connect -->
-    <div id="screen-connect" class="screen">
-      <p id="connect-info" class="connect-text">
-        Connect your device via USB to get started.
-      </p>
-
-      <button id="connect-btn" class="btn" disabled onclick="handleConnect()">
-        <span id="connect-spinner" class="spinner"></span>
-        <span id="connect-text">Select device</span>
-      </button>
-
-      <div id="connect-chip" class="chip"></div>
-      <br>
-      <button class="btn-back" onclick="goBack()">&larr; Change board</button>
-    </div>
-
-    <!-- Screen 2: Flashing -->
-    <div id="screen-flash" class="screen">
-      <p class="flash-info">Uploading firmware to device...</p>
-      <p class="flash-warning">Do not disconnect the USB cable.</p>
-
-      <div class="progress-container">
-        <div id="progress-bar" class="progress-fill"></div>
-      </div>
-      <p id="progress-text">Preparing...</p>
-    </div>
-
-    <!-- Screen 3: Success -->
-    <div id="screen-success" class="screen">
-      <div class="success-icon">&#10003;</div>
-      <div class="success-text">Success!</div>
-      <p class="success-sub">Firmware flashed successfully!.<br>Your device is rebooting.</p>
-    </div>
-  </div>
-  <center>
-<a href="https://discord.gg/y7rdnHZHa6" target="_blank" class="discord-btn">
-  Discord
-</a>
-</center>
 </body>
 </html>
