@@ -554,6 +554,8 @@ void infrared_signal_received_callback(void* context, InfraredWorkerSignal* rece
             INFRARED_COMMON_DUTY_CYCLE);
     }
 
+    infrared_tx_send_once(infrared);
+
     view_dispatcher_send_custom_event(
         infrared->view_dispatcher, InfraredCustomEventTypeSignalReceived);
 }

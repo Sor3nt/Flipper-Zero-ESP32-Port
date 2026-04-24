@@ -1,0 +1,13 @@
+App(
+    appid="bad_ble",
+    name="Bad BLE",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="bad_ble_app",
+    targets=["f32"],
+    icon="A_Bluetooth_14",
+    stack_size=4 * 1024,
+    order=55,
+    sources=["*.c", "scenes/*.c"],
+    fap_libs=["ble_hid"],
+    fap_category="Bluetooth",
+)

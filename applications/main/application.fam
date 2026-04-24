@@ -10,6 +10,7 @@ App(
         "nfc",
         "subghz",
         "bad_usb",
+        "bad_ble",
         "u2f",
         "archive",
         "clock",
