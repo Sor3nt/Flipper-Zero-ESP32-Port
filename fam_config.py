@@ -35,6 +35,7 @@ APPS = [
     "example_apps_assets",
     "example_number_input",
     "clock",
+    "doom",
     "bad_usb",
     "subghz",
     "cli_subghz",
@@ -78,6 +79,9 @@ _board = os.environ.get("FLIPPER_BOARD", "")
 _boards_without_nfc = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 _boards_without_ir = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 
+# Doom needs PSRAM + large flash; only T-Embed (ESP32-S3) is supported for now.
+_boards_without_doom = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+
 if _board in _boards_without_nfc:
     APPS = [a for a in APPS if a != "nfc"]
 
@@ -88,6 +92,9 @@ if _board in _boards_without_ir:
 
 if _board in _boards_without_subghz:
     APPS = [a for a in APPS if a not in ("subghz", "cli_subghz", "subghz_load_dangerous_settings", "js_subghz")]
+
+if _board in _boards_without_doom:
+    APPS = [a for a in APPS if a != "doom"]
 
 EXTRA_EXT_APPS = []
 TARGET_HW = 32
