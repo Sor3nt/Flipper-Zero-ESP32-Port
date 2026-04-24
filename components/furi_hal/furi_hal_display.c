@@ -271,3 +271,15 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
 void furi_hal_display_set_backlight(uint8_t brightness) {
     furi_hal_light_set(LightBacklight, brightness);
 }
+
+uint16_t furi_hal_display_get_h_res(void) {
+    return LCD_H_RES;
+}
+
+uint16_t furi_hal_display_get_v_res(void) {
+    return LCD_V_RES;
+}
+
+esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void) {
+    return panel_handle;
+}

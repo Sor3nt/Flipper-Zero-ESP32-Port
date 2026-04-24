@@ -192,6 +192,7 @@ static void encoder_button_poll(
     ButtonState* btn,
     FuriPubSub* pubsub,
     uint32_t now,
+    uint32_t long_press_ticks,
     uint32_t* sequence_counter) {
     bool raw = button_is_pressed(btn);
 
@@ -206,7 +207,20 @@ static void encoder_button_poll(
     }
 
     if(btn->debounce_polls < INPUT_DEBOUNCE_POLLS) return;
-    if(btn->debounced_pressed == btn->raw_pressed) return; /* No change */
+
+    if(btn->debounced_pressed == btn->raw_pressed) {
+        /* Held down: emit InputTypeLong once after the long-press threshold.
+         * Nothing special for repeats — consumers that care (Doom) just
+         * look for Long. Rotation while held keeps emitting Left/Right
+         * and suppresses the Short at release, not Long. */
+        if(btn->debounced_pressed && !btn->long_press_sent &&
+           (now - btn->press_started_at) >= long_press_ticks) {
+            btn->long_press_sent = true;
+            input_publish(pubsub, InputKeyOk, InputTypePress, ++(*sequence_counter));
+            input_publish(pubsub, InputKeyOk, InputTypeLong, *sequence_counter);
+        }
+        return;
+    }
 
     /* State changed */
     btn->debounced_pressed = btn->raw_pressed;
@@ -215,9 +229,14 @@ static void encoder_button_poll(
         /* Press — just record, wait for release or rotation */
         btn->press_started_at = now;
         btn->had_encoder_rotation = false;
+        btn->long_press_sent = false;
     } else {
-        /* Release — emit Ok only if no rotation happened while held */
-        if(!btn->had_encoder_rotation) {
+        if(btn->long_press_sent) {
+            /* End of a long press — emit Release so the consumer can
+             * stop whatever action was tied to the held key. */
+            input_publish(pubsub, InputKeyOk, InputTypeRelease, ++(*sequence_counter));
+        } else if(!btn->had_encoder_rotation) {
+            /* Short press without rotation → emit Ok short */
             input_emit_short(pubsub, InputKeyOk, ++(*sequence_counter));
         }
         btn->had_encoder_rotation = false;
@@ -298,10 +317,10 @@ void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
     /* Rotary encoder (must poll before buttons to detect held+rotate) */
     encoder_poll(pubsub, sequence_counter);
 
-    /* Encoder button: short=Ok (if no rotation), hold is modifier for Left/Right only */
+    /* Encoder button: short=Ok (if no rotation), long-hold emits Ok Long+Release */
     encoder_button_poll(
         &encoder_btn, pubsub,
-        now, sequence_counter);
+        now, long_press_ticks, sequence_counter);
 
     /* Side key: short=Back (dedicated back button) */
     button_poll(

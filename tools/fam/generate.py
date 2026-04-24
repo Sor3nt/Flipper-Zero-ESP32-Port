@@ -301,7 +301,7 @@ def recursive_glob(base_dir: Path, pattern: str) -> list[Path]:
     return sorted(matches)
 
 
-def gather_sources(base_dir: Path, patterns: Iterable[str]) -> list[Path]:
+def gather_sources(base_dir: Path, patterns: Iterable[str], allow_lib_dir: bool = False) -> list[Path]:
     include_patterns = [pattern for pattern in patterns if not pattern.startswith("!")]
     exclude_patterns = [pattern[1:] for pattern in patterns if pattern.startswith("!")]
     resolved: list[Path] = []
@@ -324,6 +324,8 @@ def gather_sources(base_dir: Path, patterns: Iterable[str]) -> list[Path]:
         excluded.update(expand(pattern))
 
     unique = sorted({path for path in resolved if path.is_file() and path not in excluded})
+    if allow_lib_dir:
+        return unique
     return [path for path in unique if "/lib/" not in str(path)]
 
 
@@ -410,7 +412,7 @@ def generate_ported_cmake(buildset: AppBuildset, project_dir: Path) -> str:
 
         for private_lib in app.fap_private_libs:
             lib_root = app_root / "lib" / private_lib.name
-            lib_sources = gather_sources(lib_root, private_lib.sources)
+            lib_sources = gather_sources(lib_root, private_lib.sources, allow_lib_dir=True)
             if not lib_sources:
                 continue
 
