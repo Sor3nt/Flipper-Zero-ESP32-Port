@@ -29,6 +29,9 @@ CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 # Enable code execution from PSRAM (needed for FAP dynamic loading)
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
+# Allow .bss to live in PSRAM. Auto-maps lwip/net80211/pp/bt BSS to SPIRAM,
+# and exposes the `extram_bss` linker scheme for our own mappings (see main/main.lf).
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 # NFC needs 3DES (felica, mf_ultralight)
 CONFIG_MBEDTLS_DES_C=y
