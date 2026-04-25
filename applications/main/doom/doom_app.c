@@ -13,10 +13,12 @@
 
 #include <esp_lcd_panel_ops.h>
 #include <furi_hal_spi_bus.h>
+#include <furi_hal_speaker.h>
 
 #include "lib/doomgeneric/doomgeneric.h"
 #include "lib/doomgeneric/doomkeys.h"
 #include "lib/doomgeneric/doomtype.h"
+#include "lib/doomgeneric/doom_i2s.h"
 
 /* Splash image (320x170 RGB565, byte-swapped for ST7789). */
 extern const uint16_t doom_splash_rgb565[320 * 170];
@@ -202,6 +204,13 @@ int32_t doom_app(void* p) {
     furi_record_close(RECORD_BT);
     esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
     FURI_LOG_I(TAG, "Free DRAM after BT release: %zu", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+
+    /* Release the default speaker HAL so we can own I2S_NUM_0 outright for
+     * Doom's SFX + music mixer. */
+    furi_hal_speaker_deinit();
+    if(!doom_i2s_init()) {
+        FURI_LOG_E(TAG, "doom_i2s_init failed — Doom will run silent");
+    }
 
     esp_lcd_panel_handle_t panel = furi_hal_display_get_panel_handle();
     uint16_t w = furi_hal_display_get_h_res();

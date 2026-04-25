@@ -3,6 +3,7 @@
 
 #include "doomgeneric.h"
 #include "doomkeys.h"
+#include "doom_i2s.h"
 
 #include <furi.h>
 #include <furi_hal.h>

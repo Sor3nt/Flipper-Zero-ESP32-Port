@@ -71,11 +71,12 @@ static int snd_mport = 0;
 
 // Compiled-in sound modules:
 
-static sound_module_t *sound_modules[] = 
+/* ESP32 port: DG_sound_module is implemented in i_esp32_sfx.c and lives
+ * in the firmware unconditionally — we do not ship SDL here. */
+extern sound_module_t DG_sound_module;
+static sound_module_t *sound_modules[] =
 {
-    #ifdef FEATURE_SOUND
     &DG_sound_module,
-    #endif
     NULL,
 };
 
@@ -128,11 +129,13 @@ static void InitSfxModule(boolean use_sfx_prefix)
 
 // Initialize music according to snd_musicdevice.
 
+/* ESP32 port: stub music module lives in i_esp32_music.c. */
+extern music_module_t DG_music_module;
+
 static void InitMusicModule(void)
 {
-#ifdef FEATURE_SOUND
     music_module = &DG_music_module;
-#endif /* FEATURE_SOUND */
+    music_module->Init();
 }
 
 //
