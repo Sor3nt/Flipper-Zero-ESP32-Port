@@ -442,7 +442,7 @@ static void wifi_worker_fn(void* arg) {
         case WCMD_QUIT:
             ESP_LOGI(TAG, "Worker quitting");
             if(cmd.done) *cmd.done = true;
-            vTaskSuspend(NULL);
+            vTaskDelete(NULL);
             return;
         }
 
@@ -609,9 +609,16 @@ bool wifi_hal_is_started(void) {
 void wifi_hal_cleanup(void) {
     wifi_hal_stop();
     if(s_worker_task) {
+        TaskHandle_t old = s_worker_task;
         WifiCmd quit = {.type = WCMD_QUIT};
         wifi_send_cmd_sync(&quit);
         s_worker_task = NULL;
+        /* Wait until idle task has fully processed vTaskDelete before
+         * freeing the stack. Accessing it earlier crashes the next
+         * context switch (TCB still references the freed stack). */
+        while(eTaskGetState(old) != eDeleted) {
+            vTaskDelay(1);
+        }
     }
     if(s_worker_stack) {
         heap_caps_free(s_worker_stack);

@@ -1,4 +1,5 @@
 #include "../wifi_app.h"
+#include "../wifi_hal.h"
 
 enum SsidAttackIndex {
     SsidAttackIndexHandshake,
@@ -15,6 +16,7 @@ static void ssid_attack_callback(void* context, uint32_t index) {
 
 void wifi_app_scene_ssid_attack_menu_on_enter(void* context) {
     WifiApp* app = context;
+    bool connected = wifi_hal_is_connected();
 
     submenu_add_item(
         app->submenu, "Capture Handshake", SsidAttackIndexHandshake,
@@ -22,15 +24,17 @@ void wifi_app_scene_ssid_attack_menu_on_enter(void* context) {
     submenu_add_item(
         app->submenu, "Deauth", SsidAttackIndexDeauth,
         ssid_attack_callback, app);
-    submenu_add_item(
-        app->submenu, "Network Scanner", SsidAttackIndexNetscan,
-        ssid_attack_callback, app);
-    submenu_add_item(
-        app->submenu, "AirSnitch", SsidAttackIndexAirSnitch,
-        ssid_attack_callback, app);
-    submenu_add_item(
-        app->submenu, "Crawler", SsidAttackIndexCrawler,
-        ssid_attack_callback, app);
+    if(connected) {
+        submenu_add_item(
+            app->submenu, "Network Scanner", SsidAttackIndexNetscan,
+            ssid_attack_callback, app);
+        submenu_add_item(
+            app->submenu, "AirSnitch", SsidAttackIndexAirSnitch,
+            ssid_attack_callback, app);
+        submenu_add_item(
+            app->submenu, "Crawler", SsidAttackIndexCrawler,
+            ssid_attack_callback, app);
+    }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WifiAppViewSubmenu);
 }

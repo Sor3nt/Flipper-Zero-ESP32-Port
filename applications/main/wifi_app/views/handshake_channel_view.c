@@ -22,7 +22,7 @@ static void hs_channel_view_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_str_aligned(canvas, 64, 38, AlignCenter, AlignCenter,
                                 model->running ? "Listening..." : "Idle");
         canvas_set_font(canvas, FontPrimary);
-        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "L/R:Channel");
+        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "Up/Dn:Channel");
         return;
     }
 

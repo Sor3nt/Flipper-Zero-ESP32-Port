@@ -25,6 +25,7 @@ typedef enum {
     WifiAppCustomEventApSelected,
     WifiAppCustomEventDeauthToggle,
     WifiAppCustomEventConnect,
+    WifiAppCustomEventSelect,
     WifiAppCustomEventCrawlerDomainEntered,
     WifiAppCustomEventCrawlerStop,
     WifiAppCustomEventHandshakeToggle,
@@ -47,6 +48,7 @@ typedef enum {
     WifiAppViewAirSnitch,
     WifiAppViewNetscan,
     WifiAppViewBeacon,
+    WifiAppViewPortscan,
 } WifiAppView;
 
 typedef enum {
@@ -85,6 +87,7 @@ struct WifiApp {
     View* view_airsnitch;
     View* view_netscan;
     View* view_beacon;
+    View* view_portscan;
     void* beacon_view_obj;
     WifiApRecord* ap_records;
     uint16_t ap_count;
@@ -103,6 +106,7 @@ struct WifiApp {
     bool handshake_complete;
     uint8_t scanner_next_scene;
     WifiApRecord connected_ap;
+    bool ap_selected;
     WifiAppDeauthMode deauth_mode;
     char password_input[65];
     char crawler_domain[128];

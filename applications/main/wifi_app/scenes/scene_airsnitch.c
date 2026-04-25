@@ -6,6 +6,8 @@
 
 #define TAG WIFI_APP_LOG_TAG
 
+bool g_airsnitch_did_connect = false;
+
 void wifi_app_scene_airsnitch_on_enter(void* context) {
     WifiApp* app = context;
 
@@ -16,15 +18,24 @@ void wifi_app_scene_airsnitch_on_enter(void* context) {
         wifi_hal_start();
     }
 
-    // Get selected AP
     WifiApRecord* target = NULL;
-    if(app->selected_index < app->ap_count) {
+    if(app->ap_selected) {
+        target = &app->connected_ap;
+    } else if(app->selected_index < app->ap_count) {
         target = &app->ap_records[app->selected_index];
     }
 
     if(!target) {
         ESP_LOGE(TAG, "AirSnitch: no AP selected");
         scene_manager_previous_scene(app->scene_manager);
+        return;
+    }
+
+    g_airsnitch_did_connect = false;
+
+    if(wifi_hal_is_connected()) {
+        ESP_LOGI(TAG, "AirSnitch: already connected, skipping connect");
+        scene_manager_next_scene(app->scene_manager, WifiAppSceneAirsnScan);
         return;
     }
 
@@ -58,6 +69,7 @@ void wifi_app_scene_airsnitch_on_enter(void* context) {
     }
 
     if(connected) {
+        g_airsnitch_did_connect = true;
         ESP_LOGI(TAG, "AirSnitch: connected, starting scan");
         scene_manager_next_scene(app->scene_manager, WifiAppSceneAirsnScan);
     } else {
