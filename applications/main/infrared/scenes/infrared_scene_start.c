@@ -6,7 +6,9 @@ enum SubmenuIndex {
     SubmenuIndexSavedRemotes,
     SubmenuIndexGpioSettings,
     SubmenuIndexLearnNewRemoteRaw,
-    SubmenuIndexDebug
+    SubmenuIndexDebug,
+    SubmenuIndexTVBGone,
+    SubmenuIndexBruteforce
 };
 
 static void infrared_scene_start_submenu_callback(void* context, uint32_t index) {
@@ -41,6 +43,18 @@ void infrared_scene_start_on_enter(void* context) {
         submenu,
         "GPIO Settings",
         SubmenuIndexGpioSettings,
+        infrared_scene_start_submenu_callback,
+        infrared);
+    submenu_add_item(
+        submenu,
+        "TV-B-Gone",
+        SubmenuIndexTVBGone,
+        infrared_scene_start_submenu_callback,
+        infrared);
+    submenu_add_item(
+        submenu,
+        "IR Bruteforce",
+        SubmenuIndexBruteforce,
         infrared_scene_start_submenu_callback,
         infrared);
 
@@ -93,6 +107,10 @@ bool infrared_scene_start_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(scene_manager, InfraredSceneRemoteList);
         } else if(submenu_index == SubmenuIndexGpioSettings) {
             scene_manager_next_scene(scene_manager, InfraredSceneGpioSettings);
+        } else if(submenu_index == SubmenuIndexTVBGone) {
+            scene_manager_next_scene(scene_manager, InfraredSceneTVBGone);
+        } else if(submenu_index == SubmenuIndexBruteforce) {
+            scene_manager_next_scene(scene_manager, InfraredSceneBruteforce);
         } else if(submenu_index == SubmenuIndexDebug) {
             scene_manager_next_scene(scene_manager, InfraredSceneDebug);
         }
