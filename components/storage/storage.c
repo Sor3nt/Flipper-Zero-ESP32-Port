@@ -614,7 +614,12 @@ bool storage_dir_read(File* file, FileInfo* fileinfo, char* name, uint16_t name_
     }
 
     storage_sd_bus_lock();
-    struct dirent* entry = readdir(file->dir_handle);
+    struct dirent* entry;
+    // Skip FAT32 macOS resource-fork files (e.g. "._foo.fal") created when copying from macOS
+    do {
+        entry = readdir(file->dir_handle);
+    } while(entry && entry->d_name[0] == '.' && entry->d_name[1] == '_');
+
     if(!entry) {
         storage_sd_bus_unlock();
         file->error_id = FSE_NOT_EXIST;
