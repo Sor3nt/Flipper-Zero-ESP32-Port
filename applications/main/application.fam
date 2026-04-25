@@ -14,6 +14,7 @@ App(
         "u2f",
         "archive",
         "clock",
+        "doom",
         "subghz_remote",
         "main_apps_on_start",
     ],
