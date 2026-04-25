@@ -2,10 +2,11 @@
 #include "../wifi_hal.h"
 
 enum SubmenuIndex {
-    SubmenuIndexConnect,
+    SubmenuIndexSelect,
     SubmenuIndexSsidAttack,
     SubmenuIndexChannelAttack,
     SubmenuIndexSpamSSIDs,
+    SubmenuIndexConnect,
     SubmenuIndexDisconnect,
 };
 
@@ -21,15 +22,23 @@ void wifi_app_scene_menu_on_enter(void* context) {
         wifi_hal_stop();
     }
 
-    if(wifi_hal_is_connected()) {
+    bool connected = wifi_hal_is_connected();
+    bool has_target = connected || app->ap_selected;
+
+    if(has_target) {
         char label[48];
         snprintf(label, sizeof(label), "%s Attack", app->connected_ap.ssid);
         submenu_add_item(app->submenu, label, SubmenuIndexSsidAttack, wifi_app_scene_menu_submenu_callback, app);
         submenu_add_item(app->submenu, "Channel Attack", SubmenuIndexChannelAttack, wifi_app_scene_menu_submenu_callback, app);
         submenu_add_item(app->submenu, "Spam SSIDs", SubmenuIndexSpamSSIDs, wifi_app_scene_menu_submenu_callback, app);
-        submenu_add_item(app->submenu, "Disconnect", SubmenuIndexDisconnect, wifi_app_scene_menu_submenu_callback, app);
+        if(connected) {
+            submenu_add_item(app->submenu, "Disconnect", SubmenuIndexDisconnect, wifi_app_scene_menu_submenu_callback, app);
+        } else {
+            submenu_add_item(app->submenu, "Connect", SubmenuIndexConnect, wifi_app_scene_menu_submenu_callback, app);
+        }
+        submenu_add_item(app->submenu, "Select Other WiFi", SubmenuIndexSelect, wifi_app_scene_menu_submenu_callback, app);
     } else {
-        submenu_add_item(app->submenu, "Connect to WiFi", SubmenuIndexConnect, wifi_app_scene_menu_submenu_callback, app);
+        submenu_add_item(app->submenu, "Select WiFi", SubmenuIndexSelect, wifi_app_scene_menu_submenu_callback, app);
         submenu_add_item(app->submenu, "Channel Attack", SubmenuIndexChannelAttack, wifi_app_scene_menu_submenu_callback, app);
         submenu_add_item(app->submenu, "Spam SSIDs", SubmenuIndexSpamSSIDs, wifi_app_scene_menu_submenu_callback, app);
     }
@@ -43,9 +52,17 @@ bool wifi_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
-        case SubmenuIndexConnect:
-            app->scanner_next_scene = WifiAppSceneConnect;
+        case SubmenuIndexSelect:
+            app->scanner_next_scene = WifiAppSceneApDetail;
             scene_manager_next_scene(app->scene_manager, WifiAppSceneScanner);
+            consumed = true;
+            break;
+        case SubmenuIndexConnect:
+            if(app->connected_ap.is_open || app->connected_ap.has_password) {
+                scene_manager_next_scene(app->scene_manager, WifiAppSceneConnect);
+            } else {
+                scene_manager_next_scene(app->scene_manager, WifiAppScenePasswordInput);
+            }
             consumed = true;
             break;
         case SubmenuIndexSsidAttack:
@@ -63,7 +80,8 @@ bool wifi_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
         case SubmenuIndexDisconnect:
             wifi_hal_disconnect();
             wifi_hal_stop();
-            scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WifiAppSceneMenu);
+            wifi_app_scene_menu_on_exit(app);
+            wifi_app_scene_menu_on_enter(app);
             consumed = true;
             break;
         }
