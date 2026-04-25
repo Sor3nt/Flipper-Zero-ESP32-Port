@@ -28,6 +28,18 @@
 #define FURI_LOG_D(...)
 #endif
 
+#ifdef ESP_PLATFORM
+/* PSRAM-first allocation: keeps internal DRAM free for FreeRTOS objects,
+ * I2C/SPI command links, etc. Falls back to default heap if PSRAM full. */
+static inline void* elf_psram_malloc(size_t size) {
+    void* p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(!p) p = malloc(size);
+    return p;
+}
+#else
+#define elf_psram_malloc(size) malloc(size)
+#endif
+
 #define ELF_INVALID_ADDRESS 0xFFFFFFFF
 
 /* ESP32-S3: Convert PSRAM data bus address to instruction bus address.
@@ -420,7 +432,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
         /* Read ALL relocation entries at once into RAM (bulk read).
          * This avoids thousands of individual 12-byte SD card reads. */
         size_t rela_size = relEntries * sizeof(Elf32_Rela);
-        Elf32_Rela* rela_table = malloc(rela_size);
+        Elf32_Rela* rela_table = elf_psram_malloc(rela_size);
         if(!rela_table) {
             FURI_LOG_E(TAG, "Failed to alloc %u bytes for RELA table", (unsigned)rela_size);
             return false;
@@ -665,7 +677,7 @@ static SectionTypeInfo elf_preload_section(
         elf->symbol_count = section_header->sh_size / sizeof(Elf32_Sym);
 
         /* Cache entire symbol table in RAM for fast lookup */
-        elf->sym_cache = malloc(section_header->sh_size);
+        elf->sym_cache = elf_psram_malloc(section_header->sh_size);
         if(elf->sym_cache) {
             if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
                storage_file_read(elf->fd, elf->sym_cache, section_header->sh_size) !=
@@ -687,7 +699,7 @@ static SectionTypeInfo elf_preload_section(
 
         /* Cache entire string table in RAM */
         elf->str_cache_size = section_header->sh_size;
-        elf->str_cache = malloc(section_header->sh_size);
+        elf->str_cache = elf_psram_malloc(section_header->sh_size);
         if(elf->str_cache) {
             if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
                storage_file_read(elf->fd, elf->str_cache, section_header->sh_size) !=
