@@ -519,22 +519,30 @@ FuriHalNfcEvent furi_hal_nfc_poller_wait_event(uint32_t timeout_ms) {
     return (FuriHalNfcEvent)(flags & NFC_EVENT_ALL_BITS);
 }
 
+/* Per-iteration PN532 timeout while polling for reader activation / RX.
+ * Short enough that an abort request from another thread is honored within
+ * ~200 ms; the outer loop continues until the caller's overall timeout. */
+#define PN532_LISTENER_POLL_MS 200U
+
+static bool nfc_listener_abort_requested(void) {
+    if(!nfc_event_flags) return false;
+    uint32_t flags = furi_event_flag_wait(
+        nfc_event_flags, FuriHalNfcEventAbortRequest, FuriFlagWaitAny, 0);
+    if((flags & FuriFlagError) || !(flags & FuriHalNfcEventAbortRequest)) return false;
+    furi_event_flag_clear(nfc_event_flags, FuriHalNfcEventAbortRequest);
+    return true;
+}
+
 FuriHalNfcEvent furi_hal_nfc_listener_wait_event(uint32_t timeout_ms) {
     if(!nfc_hal_ready) return FuriHalNfcEventTimeout;
 
-    /* Check for abort request first */
-    if(nfc_event_flags) {
-        uint32_t flags = furi_event_flag_wait(
-            nfc_event_flags, FuriHalNfcEventAbortRequest, FuriFlagWaitAny, 0);
-        if(!(flags & FuriFlagError) && (flags & FuriHalNfcEventAbortRequest)) {
-            furi_event_flag_clear(nfc_event_flags, FuriHalNfcEventAbortRequest);
-            return FuriHalNfcEventAbortRequest;
-        }
-    }
+    if(nfc_listener_abort_requested()) return FuriHalNfcEventAbortRequest;
 
     if(!listener_activated && listener_configured) {
-        /* First call: send TgInitAsTarget to wait for a reader.
-         * This blocks until a reader activates us or timeout. */
+        /* TgInitAsTarget: wait for a reader to activate us. We poll in short
+         * slices so an abort from the UI thread (Side button → nfc_stop →
+         * furi_hal_nfc_abort) is honored quickly instead of being stuck in
+         * a single multi-minute PN532 command. */
         uint8_t cmd[40];
         size_t idx = 0;
         cmd[idx++] = PN532_CMD_TGINITASTARGET;
@@ -557,53 +565,73 @@ FuriHalNfcEvent furi_hal_nfc_listener_wait_event(uint32_t timeout_ms) {
         cmd[idx++] = 0x00;
         cmd[idx++] = 0x00;
 
-        uint8_t resp[64];
-        size_t resp_len = sizeof(resp);
-        FuriHalNfcError err = pn532_send_command(cmd, idx, resp, &resp_len, timeout_ms);
+        uint32_t remaining = timeout_ms;
+        while(true) {
+            if(nfc_listener_abort_requested()) return FuriHalNfcEventAbortRequest;
 
-        if(err == FuriHalNfcErrorNone && resp_len >= 1) {
-            FURI_LOG_I(TAG, "Listener activated: mode=%02X", resp[0]);
-            listener_activated = true;
+            uint32_t slice = remaining < PN532_LISTENER_POLL_MS ? remaining : PN532_LISTENER_POLL_MS;
+            if(timeout_ms == FURI_HAL_NFC_EVENT_WAIT_FOREVER) slice = PN532_LISTENER_POLL_MS;
 
-            /* Cache initial command data from reader (if present after Mode byte) */
-            if(resp_len > 1) {
-                listener_rx_len = resp_len - 1;
-                if(listener_rx_len > sizeof(listener_rx_buf))
-                    listener_rx_len = sizeof(listener_rx_buf);
-                memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+            uint8_t resp[64];
+            size_t resp_len = sizeof(resp);
+            FuriHalNfcError err = pn532_send_command(cmd, idx, resp, &resp_len, slice);
+
+            if(err == FuriHalNfcErrorNone && resp_len >= 1) {
+                FURI_LOG_I(TAG, "Listener activated: mode=%02X", resp[0]);
+                listener_activated = true;
+
+                if(resp_len > 1) {
+                    listener_rx_len = resp_len - 1;
+                    if(listener_rx_len > sizeof(listener_rx_buf))
+                        listener_rx_len = sizeof(listener_rx_buf);
+                    memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+                }
+
+                return (FuriHalNfcEvent)(FuriHalNfcEventFieldOn | FuriHalNfcEventListenerActive);
             }
 
-            return (FuriHalNfcEvent)(FuriHalNfcEventFieldOn | FuriHalNfcEventListenerActive);
+            if(timeout_ms != FURI_HAL_NFC_EVENT_WAIT_FOREVER) {
+                if(remaining <= slice) return FuriHalNfcEventTimeout;
+                remaining -= slice;
+            }
         }
-
-        return FuriHalNfcEventTimeout;
     }
 
     if(listener_activated) {
-        /* Subsequent calls: get next command from reader via TgGetData */
+        /* TgGetData: receive next reader command. Poll in slices to allow abort. */
         uint8_t cmd[] = {PN532_CMD_TGGETDATA};
-        uint8_t resp[253];
-        size_t resp_len = sizeof(resp);
-        FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, timeout_ms);
+        uint32_t remaining = timeout_ms;
+        while(true) {
+            if(nfc_listener_abort_requested()) return FuriHalNfcEventAbortRequest;
 
-        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] == PN532_STATUS_OK) {
-            /* Cache reader data for listener_rx */
-            listener_rx_len = (resp_len > 1) ? (resp_len - 1) : 0;
-            if(listener_rx_len > sizeof(listener_rx_buf))
-                listener_rx_len = sizeof(listener_rx_buf);
-            if(listener_rx_len > 0)
-                memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+            uint32_t slice = remaining < PN532_LISTENER_POLL_MS ? remaining : PN532_LISTENER_POLL_MS;
+            if(timeout_ms == FURI_HAL_NFC_EVENT_WAIT_FOREVER) slice = PN532_LISTENER_POLL_MS;
 
-            return (FuriHalNfcEvent)(FuriHalNfcEventRxEnd);
+            uint8_t resp[253];
+            size_t resp_len = sizeof(resp);
+            FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, slice);
+
+            if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] == PN532_STATUS_OK) {
+                listener_rx_len = (resp_len > 1) ? (resp_len - 1) : 0;
+                if(listener_rx_len > sizeof(listener_rx_buf))
+                    listener_rx_len = sizeof(listener_rx_buf);
+                if(listener_rx_len > 0)
+                    memcpy(listener_rx_buf, &resp[1], listener_rx_len);
+
+                return (FuriHalNfcEvent)(FuriHalNfcEventRxEnd);
+            }
+
+            if(err != FuriHalNfcErrorCommunicationTimeout) {
+                /* Field lost or other error */
+                listener_activated = false;
+                return FuriHalNfcEventFieldOff;
+            }
+
+            if(timeout_ms != FURI_HAL_NFC_EVENT_WAIT_FOREVER) {
+                if(remaining <= slice) return FuriHalNfcEventTimeout;
+                remaining -= slice;
+            }
         }
-
-        /* Reader left or error */
-        if(err == FuriHalNfcErrorCommunicationTimeout) {
-            return FuriHalNfcEventTimeout;
-        }
-        /* Field lost */
-        listener_activated = false;
-        return FuriHalNfcEventFieldOff;
     }
 
     /* Not configured yet — just wait for any event flags */

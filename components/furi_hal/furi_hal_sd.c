@@ -18,6 +18,7 @@
 #include <diskio_impl.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_memory_utils.h>
 #include <sdmmc_cmd.h>
 #include <driver/sdspi_host.h>
 
@@ -26,6 +27,7 @@ static const char* TAG = "FuriHalSd";
 #define SD_FATFS_DRIVE "0:"
 #define SD_SPI_HOST    SPI2_HOST
 #define SD_MAX_FREQ    (20 * 1000) /* 20 MHz — conservative for shared bus */
+#define SD_BOUNCE_SECTORS 8 /* 4 KiB persistent DMA bounce buffer */
 
 static sdmmc_card_t* sd_card = NULL;
 static sdspi_dev_handle_t sd_handle = 0;
@@ -34,6 +36,28 @@ static bool sd_diskio_registered = false;
 static bool sd_disk_status_check = false;
 static bool sd_mounted = false;
 static const BYTE sd_pdrv = 0;
+static uint8_t* sd_bounce_buf = NULL;
+
+static bool sd_ensure_bounce_buf(void) {
+    if(sd_bounce_buf) return true;
+    /* Allocate once in internal DMA-capable RAM, 64-byte aligned to satisfy
+     * any cache/DMA alignment requirement. Reused for every non-DMA transfer
+     * so we don't fragment the DMA heap with per-call temporaries. */
+    sd_bounce_buf = heap_caps_aligned_alloc(
+        64, 512 * SD_BOUNCE_SECTORS, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if(!sd_bounce_buf) {
+        ESP_LOGE(TAG, "Failed to allocate %d-byte SD bounce buffer", 512 * SD_BOUNCE_SECTORS);
+        return false;
+    }
+    return true;
+}
+
+static bool sd_buf_is_dma_capable(const void* buf) {
+    /* SDSPI works with internal RAM buffers. PSRAM-resident buffers force
+     * the ESP-IDF SDMMC layer into a per-call temp allocation path that
+     * can fail when the DMA heap is fragmented. */
+    return !esp_ptr_external_ram(buf);
+}
 
 static bool sd_host_conflicts_with(const FuriHalSpiBus* bus) {
     if(!bus || !bus->initialized) return false;
@@ -357,8 +381,32 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         return RES_PARERR;
     }
 
+    esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
-    const esp_err_t err = sdmmc_read_sectors(sd_card, buff, sector, count);
+
+    if(sd_buf_is_dma_capable(buff)) {
+        err = sdmmc_read_sectors(sd_card, buff, sector, count);
+    } else if(sd_ensure_bounce_buf()) {
+        /* PSRAM destination: stage through persistent DMA-capable buffer.
+         * This avoids ESP-IDF allocating a per-call temp buffer that fails
+         * once the internal DMA heap is fragmented. */
+        const size_t block_size = sd_card->csd.sector_size;
+        UINT remaining = count;
+        DWORD cur_sector = sector;
+        BYTE* cur_dst = buff;
+        while(remaining > 0) {
+            UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
+            err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            if(err != ESP_OK) break;
+            memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
+            cur_dst += block_size * chunk;
+            cur_sector += chunk;
+            remaining -= chunk;
+        }
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+
     furi_hal_spi_bus_unlock();
 
     if(err != ESP_OK) {
@@ -374,8 +422,29 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         return RES_PARERR;
     }
 
+    esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
-    const esp_err_t err = sdmmc_write_sectors(sd_card, buff, sector, count);
+
+    if(sd_buf_is_dma_capable(buff)) {
+        err = sdmmc_write_sectors(sd_card, buff, sector, count);
+    } else if(sd_ensure_bounce_buf()) {
+        const size_t block_size = sd_card->csd.sector_size;
+        UINT remaining = count;
+        DWORD cur_sector = sector;
+        const BYTE* cur_src = buff;
+        while(remaining > 0) {
+            UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
+            memcpy(sd_bounce_buf, cur_src, block_size * chunk);
+            err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            if(err != ESP_OK) break;
+            cur_src += block_size * chunk;
+            cur_sector += chunk;
+            remaining -= chunk;
+        }
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+
     furi_hal_spi_bus_unlock();
 
     if(err != ESP_OK) {
