@@ -9,6 +9,7 @@
 #include "views/airsnitch_view.h"
 #include "views/netscan_view.h"
 #include "views/beacon_view.h"
+#include "views/portscan_view.h"
 
 static bool wifi_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -70,6 +71,9 @@ static WifiApp* wifi_app_alloc(void) {
     app->view_netscan = netscan_view_alloc();
     view_set_context(app->view_netscan, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewNetscan, app->view_netscan);
+    app->view_portscan = portscan_view_alloc();
+    view_set_context(app->view_portscan, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewPortscan, app->view_portscan);
 
     // Beacon view allocation
     app->beacon_view_obj = beacon_view_alloc();
@@ -92,6 +96,8 @@ static WifiApp* wifi_app_alloc(void) {
     app->handshake_deauth_count = 0;
     app->handshake_complete = false;
     app->scanner_next_scene = WifiAppSceneApDetail;
+    app->ap_selected = false;
+    memset(&app->connected_ap, 0, sizeof(app->connected_ap));
     memset(app->crawler_domain, 0, sizeof(app->crawler_domain));
     memset(&app->crawler_state, 0, sizeof(app->crawler_state));
     memset(app->single_ssid, 0, sizeof(app->single_ssid));
@@ -117,6 +123,7 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewAirSnitch);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewNetscan);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewBeacon);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewPortscan);
     submenu_free(app->submenu);
     widget_free(app->widget);
     loading_free(app->loading);
@@ -129,6 +136,7 @@ static void wifi_app_free(WifiApp* app) {
     handshake_channel_view_free(app->view_handshake_channel);
     airsnitch_view_free(app->view_airsnitch);
     netscan_view_free(app->view_netscan);
+    portscan_view_free(app->view_portscan);
     beacon_view_free(app->beacon_view_obj);
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);

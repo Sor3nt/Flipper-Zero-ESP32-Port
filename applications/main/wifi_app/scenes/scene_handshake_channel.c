@@ -334,17 +334,7 @@ bool wifi_app_scene_handshake_channel_on_event(void* context, SceneManagerEvent 
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == InputKeyLeft) {
-            // Channel down
-            if(s_hsc_channel > 1) s_hsc_channel--; else s_hsc_channel = 13;
-            wifi_hal_set_promiscuous(false, NULL);
-            wifi_hal_set_channel(s_hsc_channel);
-            furi_delay_ms(20);
-            wifi_hal_set_promiscuous(true, hsc_rx_callback);
-            ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
-            consumed = true;
-        } else if(event.event == InputKeyRight) {
-            // Channel up
+        if(event.event == InputKeyUp) {
             if(s_hsc_channel < 13) s_hsc_channel++; else s_hsc_channel = 1;
             wifi_hal_set_promiscuous(false, NULL);
             wifi_hal_set_channel(s_hsc_channel);
@@ -352,27 +342,13 @@ bool wifi_app_scene_handshake_channel_on_event(void* context, SceneManagerEvent 
             wifi_hal_set_promiscuous(true, hsc_rx_callback);
             ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
             consumed = true;
-        } else if(event.event == InputKeyUp) {
-            // Scroll up in list
-            HsChannelViewModel* model = view_get_model(app->view_handshake_channel);
-            if(model->selected > 0) {
-                model->selected--;
-                if(model->selected < model->window_offset) {
-                    model->window_offset = model->selected;
-                }
-            }
-            view_commit_model(app->view_handshake_channel, true);
-            consumed = true;
         } else if(event.event == InputKeyDown) {
-            // Scroll down in list
-            HsChannelViewModel* model = view_get_model(app->view_handshake_channel);
-            if(model->selected < model->count - 1) {
-                model->selected++;
-                if(model->selected >= model->window_offset + HS_CHANNEL_ITEMS_ON_SCREEN) {
-                    model->window_offset = model->selected - HS_CHANNEL_ITEMS_ON_SCREEN + 1;
-                }
-            }
-            view_commit_model(app->view_handshake_channel, true);
+            if(s_hsc_channel > 1) s_hsc_channel--; else s_hsc_channel = 13;
+            wifi_hal_set_promiscuous(false, NULL);
+            wifi_hal_set_channel(s_hsc_channel);
+            furi_delay_ms(20);
+            wifi_hal_set_promiscuous(true, hsc_rx_callback);
+            ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
             consumed = true;
         }
     } else if(event.type == SceneManagerEventTypeTick) {

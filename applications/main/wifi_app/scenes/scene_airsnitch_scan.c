@@ -189,7 +189,12 @@ bool wifi_app_scene_airsn_scan_on_event(void* context, SceneManagerEvent event) 
     return consumed;
 }
 
+extern bool g_airsnitch_did_connect;
+
 void wifi_app_scene_airsn_scan_on_exit(void* context) {
     UNUSED(context);
-    wifi_hal_disconnect();
+    if(g_airsnitch_did_connect) {
+        wifi_hal_disconnect();
+        g_airsnitch_did_connect = false;
+    }
 }

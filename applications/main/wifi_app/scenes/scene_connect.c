@@ -27,13 +27,13 @@ void wifi_app_scene_connect_on_enter(void* context) {
         app->widget, 64, 28, AlignCenter, AlignCenter, FontPrimary, "Connecting...");
     view_dispatcher_switch_to_view(app->view_dispatcher, WifiAppViewWidget);
 
-    if(app->selected_index >= app->ap_count) {
-        ESP_LOGE(TAG, "Invalid AP index");
+    if(!app->ap_selected) {
+        ESP_LOGE(TAG, "No AP selected");
         s_connect_done = true;
         return;
     }
 
-    WifiApRecord* ap = &app->ap_records[app->selected_index];
+    WifiApRecord* ap = &app->connected_ap;
 
     char password[65] = {0};
     if(app->password_input[0]) {
@@ -63,34 +63,21 @@ bool wifi_app_scene_connect_on_event(void* context, SceneManagerEvent event) {
         if(!s_connect_done && wifi_hal_is_connected()) {
             s_connect_success = true;
             s_connect_done = true;
-            s_done_tick = s_tick_count;
 
-            // Store connected AP info
-            WifiApRecord* ap = &app->ap_records[app->selected_index];
-            memcpy(&app->connected_ap, ap, sizeof(WifiApRecord));
+            WifiApRecord* ap = &app->connected_ap;
 
-            // Save password to SD card for future use
             if(s_used_password[0] && !ap->is_open) {
                 wifi_password_save(ap->ssid, s_used_password);
                 ap->has_password = true;
             }
 
-            // Get IP info
-            esp_netif_ip_info_t ip_info = {0};
-            esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-            if(netif) {
-                esp_netif_get_ip_info(netif, &ip_info);
-            }
+            ESP_LOGI(TAG, "WiFi connected to '%s'", ap->ssid);
 
-            widget_reset(app->widget);
-            furi_string_printf(
-                app->text_buf,
-                "Connected!\n\nIP: " IPSTR "\nGW: " IPSTR,
-                IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
-            widget_add_string_multiline_element(
-                app->widget, 0, 2, AlignLeft, AlignTop, FontSecondary,
-                furi_string_get_cstr(app->text_buf));
-            ESP_LOGI(TAG, "WiFi connected, IP: " IPSTR, IP2STR(&ip_info.ip));
+            scene_manager_search_and_switch_to_previous_scene(
+                app->scene_manager, WifiAppSceneMenu);
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneSsidAttackMenu);
+            consumed = true;
+            return consumed;
         }
 
         if(!s_connect_done && s_tick_count > 40) {
@@ -105,14 +92,10 @@ bool wifi_app_scene_connect_on_event(void* context, SceneManagerEvent event) {
             ESP_LOGW(TAG, "Connect timeout");
         }
 
-        // Show result for 1.5 seconds (6 ticks @ 250ms), then navigate
-        if(s_connect_done && s_done_tick > 0 && (s_tick_count - s_done_tick) >= 6) {
-            if(s_connect_success) {
-                scene_manager_search_and_switch_to_previous_scene(
-                    app->scene_manager, WifiAppSceneMenu);
-            } else {
-                scene_manager_previous_scene(app->scene_manager);
-            }
+        // Failure: show "Failed!" briefly, then go back
+        if(s_connect_done && !s_connect_success && s_done_tick > 0 &&
+           (s_tick_count - s_done_tick) >= 6) {
+            scene_manager_previous_scene(app->scene_manager);
         }
 
         consumed = true;

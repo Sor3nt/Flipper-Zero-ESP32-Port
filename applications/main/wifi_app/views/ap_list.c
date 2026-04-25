@@ -46,15 +46,14 @@ static void ap_list_draw_callback(Canvas* canvas, void* _model) {
             canvas_set_color(canvas, ColorWhite);
         }
 
+        const Icon* icon = ap->is_open ? &I_Unlock_7x8 : &I_Lock_7x8;
+        canvas_draw_icon(canvas, 2, y + 2, icon);
+
         const char* ssid = ap->ssid[0] ? ap->ssid : "???";
         char line[64];
         snprintf(line, sizeof(line), "%.14s %ddB ch%d",
                  ssid, ap->rssi, ap->channel);
-        canvas_draw_str(canvas, 2, y + 9, line);
-
-        // Lock/Unlock icon (open vs encrypted)
-        const Icon* icon = ap->is_open ? &I_Unlock_7x8 : &I_Lock_7x8;
-        canvas_draw_icon(canvas, 109, y + 2, icon);
+        canvas_draw_str(canvas, 12, y + 9, line);
 
         if(idx == model->selected) {
             canvas_set_color(canvas, ColorBlack);
