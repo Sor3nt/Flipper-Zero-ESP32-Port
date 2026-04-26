@@ -8,6 +8,7 @@
 #include <gui/modules/widget.h>
 #include <gui/modules/loading.h>
 #include <gui/modules/text_input.h>
+#include <gui/modules/variable_item_list.h>
 
 #include "scenes/scenes.h"
 #include "wifi_crawler.h"
@@ -53,6 +54,7 @@ typedef enum {
     WifiAppViewBeacon,
     WifiAppViewPortscan,
     WifiAppViewEvilPortal,
+    WifiAppViewVariableItemList,
 } WifiAppView;
 
 typedef enum {
@@ -95,6 +97,7 @@ struct WifiApp {
     Widget* widget;
     Loading* loading;
     TextInput* text_input;
+    VariableItemList* variable_item_list;
     View* view_ap_list;
     View* view_deauther;
     View* view_sniffer;
@@ -135,7 +138,6 @@ struct WifiApp {
     char single_ssid[33];
     char evil_portal_ssid[33];
     uint8_t evil_portal_channel;
-    bool evil_portal_deauth;
     WifiAppEvilPortalTemplate evil_portal_template;
     char evil_portal_sd_path[128];
     WifiAppEvilPortalCred evil_portal_cred_queue[WIFI_APP_EVIL_PORTAL_QUEUE_SIZE];

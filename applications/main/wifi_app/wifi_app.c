@@ -57,6 +57,11 @@ static WifiApp* wifi_app_alloc(void) {
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewSniffer, app->view_sniffer);
     app->text_input = text_input_alloc();
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewTextInput, text_input_get_view(app->text_input));
+    app->variable_item_list = variable_item_list_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher,
+        WifiAppViewVariableItemList,
+        variable_item_list_get_view(app->variable_item_list));
     app->view_crawler = crawler_view_alloc();
     crawler_view_set_view_dispatcher(app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewCrawler, app->view_crawler);
@@ -110,7 +115,6 @@ static WifiApp* wifi_app_alloc(void) {
     memset(app->evil_portal_ssid, 0, sizeof(app->evil_portal_ssid));
     memset(app->evil_portal_sd_path, 0, sizeof(app->evil_portal_sd_path));
     app->evil_portal_channel = 0;
-    app->evil_portal_deauth = false;
     app->evil_portal_template = WifiAppEvilPortalTemplateGoogle;
     app->evil_portal_cred_head = 0;
     app->evil_portal_cred_tail = 0;
@@ -131,6 +135,7 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewDeauther);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewSniffer);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewTextInput);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewVariableItemList);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewCrawler);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewHandshake);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewHandshakeChannel);
@@ -143,6 +148,7 @@ static void wifi_app_free(WifiApp* app) {
     widget_free(app->widget);
     loading_free(app->loading);
     text_input_free(app->text_input);
+    variable_item_list_free(app->variable_item_list);
     ap_list_free(app->view_ap_list);
     deauther_view_free(app->view_deauther);
     sniffer_view_free(app->view_sniffer);
