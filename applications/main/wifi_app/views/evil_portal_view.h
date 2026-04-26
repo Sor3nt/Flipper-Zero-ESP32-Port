@@ -4,12 +4,7 @@
 
 typedef struct EvilPortalView EvilPortalView;
 
-typedef enum {
-    EvilPortalViewActionConfig,
-    EvilPortalViewActionTogglePause,
-} EvilPortalViewAction;
-
-typedef void (*EvilPortalViewActionCb)(EvilPortalViewAction action, void* ctx);
+typedef void (*EvilPortalViewActionCb)(void* ctx);
 
 EvilPortalView* evil_portal_view_alloc(void);
 void evil_portal_view_free(EvilPortalView* v);

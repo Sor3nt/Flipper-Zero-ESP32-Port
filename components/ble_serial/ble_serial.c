@@ -361,7 +361,7 @@ static const uint8_t dis_api_version_uuid[16] = {
 
 static const char dis_manufacturer[] = "Flipper Devices Inc.";
 static const char dis_hw_revision[] = "ESP32-C6 1.0";
-static const char dis_sw_revision[] = "0.1.0";
+static const char dis_sw_revision[] = "1.4.3";
 /* API version format: "major.minor" — matches STM32 firmware API */
 static const char dis_api_version[] = "0.3";
 
