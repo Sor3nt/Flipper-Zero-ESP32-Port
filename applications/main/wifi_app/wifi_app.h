@@ -32,6 +32,9 @@ typedef enum {
     WifiAppCustomEventHandshakeDeauth,
     WifiAppCustomEventPasswordEntered,
     WifiAppCustomEventBeaconStop,
+    WifiAppCustomEventEvilPortalSsidEntered,
+    WifiAppCustomEventEvilPortalCredCaptured,
+    WifiAppCustomEventEvilPortalStop,
 } WifiAppCustomEvent;
 
 typedef enum {
@@ -49,7 +52,21 @@ typedef enum {
     WifiAppViewNetscan,
     WifiAppViewBeacon,
     WifiAppViewPortscan,
+    WifiAppViewEvilPortal,
 } WifiAppView;
+
+typedef enum {
+    WifiAppEvilPortalTemplateGoogle = 0,
+    WifiAppEvilPortalTemplateRouter,
+    WifiAppEvilPortalTemplateSd,
+} WifiAppEvilPortalTemplate;
+
+typedef struct {
+    char user[64];
+    char pwd[64];
+} WifiAppEvilPortalCred;
+
+#define WIFI_APP_EVIL_PORTAL_QUEUE_SIZE 16
 
 typedef enum {
     WifiAppBeaconModeFunny,
@@ -88,7 +105,9 @@ struct WifiApp {
     View* view_netscan;
     View* view_beacon;
     View* view_portscan;
+    View* view_evil_portal;
     void* beacon_view_obj;
+    void* evil_portal_view_obj;
     WifiApRecord* ap_records;
     uint16_t ap_count;
     size_t selected_index;
@@ -114,6 +133,15 @@ struct WifiApp {
     uint32_t portscan_target_ip;
     WifiAppBeaconMode beacon_mode;
     char single_ssid[33];
+    char evil_portal_ssid[33];
+    uint8_t evil_portal_channel;
+    bool evil_portal_deauth;
+    WifiAppEvilPortalTemplate evil_portal_template;
+    char evil_portal_sd_path[128];
+    WifiAppEvilPortalCred evil_portal_cred_queue[WIFI_APP_EVIL_PORTAL_QUEUE_SIZE];
+    volatile uint8_t evil_portal_cred_head;
+    volatile uint8_t evil_portal_cred_tail;
+    uint32_t evil_portal_cred_total;
 };
 
 static inline const char* wifi_auth_mode_str(int authmode) {

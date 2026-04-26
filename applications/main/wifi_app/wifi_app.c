@@ -10,6 +10,7 @@
 #include "views/netscan_view.h"
 #include "views/beacon_view.h"
 #include "views/portscan_view.h"
+#include "views/evil_portal_view.h"
 
 static bool wifi_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -80,6 +81,11 @@ static WifiApp* wifi_app_alloc(void) {
     app->view_beacon = beacon_view_get_view(app->beacon_view_obj);
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewBeacon, app->view_beacon);
 
+    // Evil Portal view allocation
+    app->evil_portal_view_obj = evil_portal_view_alloc();
+    app->view_evil_portal = evil_portal_view_get_view(app->evil_portal_view_obj);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewEvilPortal, app->view_evil_portal);
+
     app->ap_records = malloc(sizeof(WifiApRecord) * WIFI_APP_MAX_APS);
     app->ap_count = 0;
     app->selected_index = 0;
@@ -101,6 +107,14 @@ static WifiApp* wifi_app_alloc(void) {
     memset(app->crawler_domain, 0, sizeof(app->crawler_domain));
     memset(&app->crawler_state, 0, sizeof(app->crawler_state));
     memset(app->single_ssid, 0, sizeof(app->single_ssid));
+    memset(app->evil_portal_ssid, 0, sizeof(app->evil_portal_ssid));
+    memset(app->evil_portal_sd_path, 0, sizeof(app->evil_portal_sd_path));
+    app->evil_portal_channel = 0;
+    app->evil_portal_deauth = false;
+    app->evil_portal_template = WifiAppEvilPortalTemplateGoogle;
+    app->evil_portal_cred_head = 0;
+    app->evil_portal_cred_tail = 0;
+    app->evil_portal_cred_total = 0;
     return app;
 }
 
@@ -124,6 +138,7 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewNetscan);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewBeacon);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewPortscan);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewEvilPortal);
     submenu_free(app->submenu);
     widget_free(app->widget);
     loading_free(app->loading);
@@ -138,6 +153,7 @@ static void wifi_app_free(WifiApp* app) {
     netscan_view_free(app->view_netscan);
     portscan_view_free(app->view_portscan);
     beacon_view_free(app->beacon_view_obj);
+    evil_portal_view_free(app->evil_portal_view_obj);
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
     free(app->ap_records);

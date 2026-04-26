@@ -65,6 +65,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         idf::subghz
         idf::toolbox
         idf::esp_http_client
+        idf::esp_http_server
         idf::lfrfid
         idf::mjs
     )
