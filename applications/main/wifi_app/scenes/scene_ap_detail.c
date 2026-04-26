@@ -1,4 +1,14 @@
 #include "../wifi_app.h"
+#include <string.h>
+
+static void ap_detail_apply_evil_portal_target(WifiApp* app) {
+    if(app->connected_ap.ssid[0] == '\0') return;
+    strncpy(app->evil_portal_ssid, app->connected_ap.ssid, sizeof(app->evil_portal_ssid) - 1);
+    app->evil_portal_ssid[sizeof(app->evil_portal_ssid) - 1] = '\0';
+    if(app->connected_ap.channel >= 1 && app->connected_ap.channel <= 14) {
+        app->evil_portal_channel = app->connected_ap.channel;
+    }
+}
 
 static void __attribute__((unused)) ap_detail_deauth_callback(GuiButtonType result, InputType type, void* context) {
     WifiApp* app = context;
@@ -72,6 +82,7 @@ bool wifi_app_scene_ap_detail_on_event(void* context, SceneManagerEvent event) {
             WifiApRecord* ap = &app->ap_records[app->selected_index];
             memcpy(&app->connected_ap, ap, sizeof(WifiApRecord));
             app->ap_selected = true;
+            ap_detail_apply_evil_portal_target(app);
             if(ap->is_open || ap->has_password) {
                 scene_manager_next_scene(app->scene_manager, WifiAppSceneConnect);
             } else {
@@ -82,6 +93,7 @@ bool wifi_app_scene_ap_detail_on_event(void* context, SceneManagerEvent event) {
             if(app->selected_index < app->ap_count) {
                 memcpy(&app->connected_ap, &app->ap_records[app->selected_index], sizeof(WifiApRecord));
                 app->ap_selected = true;
+                ap_detail_apply_evil_portal_target(app);
             }
             scene_manager_search_and_switch_to_previous_scene(app->scene_manager, WifiAppSceneMenu);
             consumed = true;
