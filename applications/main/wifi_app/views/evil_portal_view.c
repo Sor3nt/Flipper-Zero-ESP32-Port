@@ -133,7 +133,6 @@ static void evil_portal_view_draw(Canvas* canvas, void* model) {
 
     // ---- Buttons ----
     if(!toast_active) {
-        elements_button_left(canvas, "Config");
         elements_button_center(canvas, m->paused ? "Resume" : "Pause");
     }
 }
@@ -142,16 +141,12 @@ static bool evil_portal_view_input(InputEvent* event, void* context) {
     EvilPortalView* v = context;
     if(event->type != InputTypeShort) return false;
     if(event->key == InputKeyOk) {
-        if(v->action_cb) v->action_cb(EvilPortalViewActionTogglePause, v->action_ctx);
+        if(v->action_cb) v->action_cb(v->action_ctx);
         return true;
     }
-    // T-Embed encoder: rotation without holding sends Up/Down; treat them
-    // and the regular Left as "go to config".
-    if(event->key == InputKeyLeft || event->key == InputKeyUp ||
-       event->key == InputKeyDown) {
-        if(v->action_cb) v->action_cb(EvilPortalViewActionConfig, v->action_ctx);
-        return true;
-    }
+    // Encoder rotation (Up/Down/Left/Right) is intentionally ignored so that
+    // accidental wheel movement after display auto-off doesn't leave the run
+    // view. Use the hardware back button to return to the menu.
     return false;
 }
 

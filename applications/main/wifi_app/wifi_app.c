@@ -121,9 +121,10 @@ static WifiApp* wifi_app_alloc(void) {
     memset(&app->crawler_state, 0, sizeof(app->crawler_state));
     memset(app->single_ssid, 0, sizeof(app->single_ssid));
     memset(app->evil_portal_ssid, 0, sizeof(app->evil_portal_ssid));
-    memset(app->evil_portal_sd_path, 0, sizeof(app->evil_portal_sd_path));
     app->evil_portal_channel = 0;
-    app->evil_portal_template = WifiAppEvilPortalTemplateGoogle;
+    memset(app->evil_portal_templates, 0, sizeof(app->evil_portal_templates));
+    app->evil_portal_template_count = 0;
+    app->evil_portal_template_index = 0;
     app->evil_portal_cred_head = 0;
     app->evil_portal_cred_tail = 0;
     app->evil_portal_cred_total = 0;

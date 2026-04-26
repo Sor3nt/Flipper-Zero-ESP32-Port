@@ -41,7 +41,7 @@ int32_t about_app(void* p) {
         AlignTop,
         FontSecondary,
         "Lily T-Embed\n"
-        "FW: 1.1.0 - Sor3nt Stuff");
+        "FW: 1.1.1 - Sor3nt Stuff");
 
     View* widget_view = widget_get_view(app->widget);
     view_set_previous_callback(widget_view, about_app_exit);
