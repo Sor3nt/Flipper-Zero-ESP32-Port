@@ -16,6 +16,3 @@ extern const size_t EVIL_PORTAL_HTML_GOOGLE_LEN;
 
 extern const char EVIL_PORTAL_HTML_ROUTER[];
 extern const size_t EVIL_PORTAL_HTML_ROUTER_LEN;
-
-extern const char EVIL_PORTAL_HTML_LOADING[];
-extern const size_t EVIL_PORTAL_HTML_LOADING_LEN;
