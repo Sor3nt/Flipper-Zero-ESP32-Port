@@ -157,13 +157,15 @@ static esp_err_t handler_redirect(httpd_req_t* req) {
     return ESP_OK;
 }
 
-// Used for Android captive-portal probe URLs: 302 to a Google look-alike
-// domain. We swap both Latin "o" in "google" for Cyrillic "о" (U+043E) so the
-// hostname is technically a different domain (not HSTS-preloaded -> can stay
-// on plain HTTP) but visually indistinguishable in the CNA address bar. DNS
-// hijack resolves it to our AP IP, then handler_root serves the portal HTML.
+// Captive-portal probe URLs (Android/Windows/Firefox): 302 to a Google-like
+// typo domain. The DNS hijack resolves anything to the AP IP, so the follow-up
+// GET hits us with Host: accounts.googl.com -- handler_root then serves the
+// portal HTML and the address bar shows accounts.googl.com instead of e.g.
+// connectivitycheck.gstatic.com. We use a typo (no second "e") rather than
+// real google.com because every google.com subdomain is HSTS-preloaded which
+// would force the browser to HTTPS.
 static esp_err_t handler_probe_to_google(httpd_req_t* req) {
-    static const char location[] = "http://accounts.g\xD0\xBE\xD0\xBEgle.com/";
+    static const char location[] = "http://accounts.googl.com/";
     ESP_LOGI(TAG, "probe-redirect %s -> %s", req->uri, location);
     log_req_headers(req, "probe");
     httpd_resp_set_status(req, "302 Found");
@@ -345,16 +347,13 @@ static bool start_http(void) {
     httpd_register_uri_handler(s_http, &uri_post_post);
     httpd_register_uri_handler(s_http, &uri_post_get);
 
-    // Probe URLs (Android, Windows, Firefox) -> serve the portal HTML directly.
-    // We tried 302 to a Google look-alike but Chromium-based CNA browsers
-    // punycode mixed-script hostnames (accounts.xn--ggle-55da.com), and every
-    // real Google subdomain is HSTS-preloaded -> forced HTTPS -> would need TLS.
-    // Direct HTML keeps the address bar at e.g. "connectivitycheck.gstatic.com"
-    // which is at least a real Google-branded host, and Android allows HTTP on
-    // its captive-portal probe URLs as an explicit OS exception.
+    // Probe URLs (Android, Windows, Firefox) -> 302 redirect so the address
+    // bar shows accounts.googl.com instead of the probe host (e.g.
+    // connectivitycheck.gstatic.com). DNS hijack resolves the typo domain to
+    // our AP IP, then handler_root serves the portal on the follow-up GET.
     for(size_t i = 0; i < sizeof(probe_uris) / sizeof(probe_uris[0]); i++) {
         httpd_uri_t u = {
-            .uri = probe_uris[i], .method = HTTP_GET, .handler = handler_root, .user_ctx = NULL};
+            .uri = probe_uris[i], .method = HTTP_GET, .handler = handler_probe_to_google, .user_ctx = NULL};
         httpd_register_uri_handler(s_http, &u);
     }
 
