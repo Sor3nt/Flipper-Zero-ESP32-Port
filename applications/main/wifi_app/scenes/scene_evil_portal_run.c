@@ -183,7 +183,6 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
     WifiHalEvilPortalConfig cfg = {
         .ssid = app->evil_portal_ssid,
         .channel = app->evil_portal_channel,
-        .deauth_enabled = app->evil_portal_deauth,
         .html = html,
         .html_len = html_len,
         .cred_cb = evil_portal_cred_cb,

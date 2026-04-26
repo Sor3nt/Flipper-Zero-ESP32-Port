@@ -54,7 +54,6 @@ typedef void (*WifiHalEvilPortalCredCb)(const char* user, const char* pwd, void*
 typedef struct {
     const char* ssid;
     uint8_t channel;
-    bool deauth_enabled;
     const char* html;
     size_t html_len;
     WifiHalEvilPortalCredCb cred_cb;
