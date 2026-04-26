@@ -35,7 +35,10 @@ typedef enum {
     WifiAppCustomEventBeaconStop,
     WifiAppCustomEventEvilPortalSsidEntered,
     WifiAppCustomEventEvilPortalCredCaptured,
+    WifiAppCustomEventEvilPortalCredsValid,
     WifiAppCustomEventEvilPortalStop,
+    WifiAppCustomEventEvilPortalConfig,
+    WifiAppCustomEventEvilPortalTogglePause,
 } WifiAppCustomEvent;
 
 typedef enum {
@@ -55,6 +58,7 @@ typedef enum {
     WifiAppViewPortscan,
     WifiAppViewEvilPortal,
     WifiAppViewVariableItemList,
+    WifiAppViewEvilPortalCaptured,
 } WifiAppView;
 
 typedef enum {
@@ -111,6 +115,7 @@ struct WifiApp {
     View* view_evil_portal;
     void* beacon_view_obj;
     void* evil_portal_view_obj;
+    void* evil_portal_captured_view_obj;
     WifiApRecord* ap_records;
     uint16_t ap_count;
     size_t selected_index;
@@ -140,6 +145,8 @@ struct WifiApp {
     uint8_t evil_portal_channel;
     WifiAppEvilPortalTemplate evil_portal_template;
     char evil_portal_sd_path[128];
+    char evil_portal_valid_ssid[33];
+    char evil_portal_valid_pwd[65];
     WifiAppEvilPortalCred evil_portal_cred_queue[WIFI_APP_EVIL_PORTAL_QUEUE_SIZE];
     volatile uint8_t evil_portal_cred_head;
     volatile uint8_t evil_portal_cred_tail;
