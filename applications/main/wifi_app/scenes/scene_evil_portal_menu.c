@@ -1,6 +1,10 @@
 #include "../wifi_app.h"
 #include <stdio.h>
 #include <string.h>
+#include <storage/storage.h>
+
+#define LOGIN_TEMPLATES_DIR  "/ext/wifi/evil_portal/login_template"
+#define ROUTER_TEMPLATES_DIR "/ext/wifi/evil_portal/router_template"
 
 enum EvilPortalMenuIndex {
     EvilPortalMenuIndexSsid,
@@ -14,12 +18,76 @@ static const char* const channel_text[CHANNEL_COUNT] = {
     "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
 };
 
-static const char* const template_text[] = {"Google", "Router", "SD"};
-#define TEMPLATE_COUNT 3
-
 static uint8_t channel_index(uint8_t channel) {
     if(channel >= 1 && channel <= CHANNEL_COUNT) return (uint8_t)(channel - 1);
     return 5; // default 6
+}
+
+static bool ends_with_html_ci(const char* s) {
+    size_t n = strlen(s);
+    if(n <= 5) return false;
+    const char* ext = s + n - 5;
+    return (ext[0] == '.') && ((ext[1] | 0x20) == 'h') && ((ext[2] | 0x20) == 't') &&
+           ((ext[3] | 0x20) == 'm') && ((ext[4] | 0x20) == 'l');
+}
+
+static void scan_dir(WifiApp* app, Storage* storage, const char* dir, bool verify) {
+    File* f = storage_file_alloc(storage);
+    if(storage_dir_open(f, dir)) {
+        FileInfo info;
+        char name[64];
+        while(storage_dir_read(f, &info, name, sizeof(name))) {
+            if(info.flags & FSF_DIRECTORY) continue;
+            if(info.size == 0) continue;
+            if(!ends_with_html_ci(name)) continue;
+            if(app->evil_portal_template_count >= WIFI_APP_EVIL_PORTAL_MAX_TEMPLATES) break;
+
+            WifiAppEvilPortalTemplateEntry* e =
+                &app->evil_portal_templates[app->evil_portal_template_count];
+
+            size_t nlen = strlen(name);
+            size_t copy = nlen - 5; // strip .html
+            if(copy >= sizeof(e->name)) copy = sizeof(e->name) - 1;
+            memcpy(e->name, name, copy);
+            e->name[copy] = 0;
+            snprintf(e->path, sizeof(e->path), "%s/%s", dir, name);
+            e->kind = WifiAppEvilPortalTemplateKindCustom;
+            e->verify = verify;
+            app->evil_portal_template_count++;
+        }
+        storage_dir_close(f);
+    }
+    storage_file_free(f);
+}
+
+// Build the dynamic template list:
+//   built-ins (Google, Router) + every *.html under
+//     /ext/wifi/evil_portal/login_template/  (verify off)
+//     /ext/wifi/evil_portal/router_template/ (verify on)
+static void scan_templates(WifiApp* app) {
+    app->evil_portal_template_count = 0;
+
+    WifiAppEvilPortalTemplateEntry* e =
+        &app->evil_portal_templates[app->evil_portal_template_count++];
+    strcpy(e->name, "Google");
+    e->path[0] = 0;
+    e->kind = WifiAppEvilPortalTemplateKindBuiltinGoogle;
+    e->verify = false;
+
+    e = &app->evil_portal_templates[app->evil_portal_template_count++];
+    strcpy(e->name, "Router");
+    e->path[0] = 0;
+    e->kind = WifiAppEvilPortalTemplateKindBuiltinRouter;
+    e->verify = true;
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    scan_dir(app, storage, LOGIN_TEMPLATES_DIR, false);
+    scan_dir(app, storage, ROUTER_TEMPLATES_DIR, true);
+    furi_record_close(RECORD_STORAGE);
+
+    if(app->evil_portal_template_index >= app->evil_portal_template_count) {
+        app->evil_portal_template_index = 0;
+    }
 }
 
 static void evil_portal_menu_set_channel(VariableItem* item) {
@@ -32,16 +100,8 @@ static void evil_portal_menu_set_channel(VariableItem* item) {
 static void evil_portal_menu_set_template(VariableItem* item) {
     WifiApp* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    app->evil_portal_template = (WifiAppEvilPortalTemplate)idx;
-    variable_item_set_current_value_text(item, template_text[idx]);
-    if(app->evil_portal_template == WifiAppEvilPortalTemplateSd &&
-       app->evil_portal_sd_path[0] == '\0') {
-        strncpy(
-            app->evil_portal_sd_path,
-            "/ext/wifi/evil_portal/custom.html",
-            sizeof(app->evil_portal_sd_path) - 1);
-        app->evil_portal_sd_path[sizeof(app->evil_portal_sd_path) - 1] = '\0';
-    }
+    app->evil_portal_template_index = idx;
+    variable_item_set_current_value_text(item, app->evil_portal_templates[idx].name);
 }
 
 static void evil_portal_menu_enter_callback(void* context, uint32_t index) {
@@ -59,6 +119,8 @@ void wifi_app_scene_evil_portal_menu_on_enter(void* context) {
         app->evil_portal_channel = 6;
     }
 
+    scan_templates(app);
+
     VariableItem* item;
 
     item = variable_item_list_add(app->variable_item_list, "SSID", 1, NULL, app);
@@ -73,12 +135,12 @@ void wifi_app_scene_evil_portal_menu_on_enter(void* context) {
     }
 
     item = variable_item_list_add(
-        app->variable_item_list, "Template", TEMPLATE_COUNT, evil_portal_menu_set_template, app);
+        app->variable_item_list, "Template",
+        app->evil_portal_template_count, evil_portal_menu_set_template, app);
     {
-        uint8_t idx = (uint8_t)app->evil_portal_template;
-        if(idx >= TEMPLATE_COUNT) idx = 0;
+        uint8_t idx = app->evil_portal_template_index;
         variable_item_set_current_value_index(item, idx);
-        variable_item_set_current_value_text(item, template_text[idx]);
+        variable_item_set_current_value_text(item, app->evil_portal_templates[idx].name);
     }
 
     variable_item_list_add(app->variable_item_list, "Start", 1, NULL, app);

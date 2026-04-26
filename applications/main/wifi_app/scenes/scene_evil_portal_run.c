@@ -51,12 +51,10 @@ static void evil_portal_busy_cb(bool busy, const char* msg, void* ctx) {
     evil_portal_view_set_busy(app->evil_portal_view_obj, busy, msg);
 }
 
-static void evil_portal_action_cb(EvilPortalViewAction action, void* ctx) {
+static void evil_portal_action_cb(void* ctx) {
     WifiApp* app = ctx;
-    uint32_t event = (action == EvilPortalViewActionConfig)
-                         ? WifiAppCustomEventEvilPortalConfig
-                         : WifiAppCustomEventEvilPortalTogglePause;
-    view_dispatcher_send_custom_event(app->view_dispatcher, event);
+    view_dispatcher_send_custom_event(
+        app->view_dispatcher, WifiAppCustomEventEvilPortalTogglePause);
 }
 
 // Build "<option>SSID</option>" list from a scan, password-protected only.
@@ -246,18 +244,44 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
 
     open_cred_file(app);
 
+    const WifiAppEvilPortalTemplateEntry* tpl =
+        (app->evil_portal_template_index < app->evil_portal_template_count)
+            ? &app->evil_portal_templates[app->evil_portal_template_index]
+            : NULL;
+
     const char* html = NULL;
     size_t html_len = 0;
     bool verify = false;
-    switch(app->evil_portal_template) {
-    case WifiAppEvilPortalTemplateGoogle:
+    bool load_failed = false;
+
+    if(!tpl) {
+        // Should not happen — menu always populates at least Google.
         html = EVIL_PORTAL_HTML_GOOGLE;
         html_len = EVIL_PORTAL_HTML_GOOGLE_LEN;
-        break;
-    case WifiAppEvilPortalTemplateRouter:
+    } else if(tpl->kind == WifiAppEvilPortalTemplateKindBuiltinGoogle) {
+        html = EVIL_PORTAL_HTML_GOOGLE;
+        html_len = EVIL_PORTAL_HTML_GOOGLE_LEN;
+    } else if(tpl->kind == WifiAppEvilPortalTemplateKindBuiltinRouter) {
         html = EVIL_PORTAL_HTML_ROUTER;
         html_len = EVIL_PORTAL_HTML_ROUTER_LEN;
         verify = true;
+    } else { // Custom
+        if(load_sd_html(tpl->path)) {
+            html = s_sd_html_buf;
+            html_len = s_sd_html_len;
+            verify = tpl->verify;
+        } else {
+            load_failed = true;
+        }
+    }
+
+    if(load_failed) {
+        evil_portal_view_set_status(app->evil_portal_view_obj, "SD load failed");
+        // Bail out -- no portal start. User has to back out.
+        return;
+    }
+
+    if(verify) {
         evil_portal_view_set_busy(app->evil_portal_view_obj, true, "Scanning APs...");
         if(s_router_options) {
             free(s_router_options);
@@ -265,17 +289,6 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
         }
         s_router_options = build_router_ssid_options();
         evil_portal_view_set_busy(app->evil_portal_view_obj, false, NULL);
-        break;
-    case WifiAppEvilPortalTemplateSd:
-        if(load_sd_html(app->evil_portal_sd_path)) {
-            html = s_sd_html_buf;
-            html_len = s_sd_html_len;
-        } else {
-            html = EVIL_PORTAL_HTML_GOOGLE;
-            html_len = EVIL_PORTAL_HTML_GOOGLE_LEN;
-            evil_portal_view_set_status(app->evil_portal_view_obj, "SD failed");
-        }
-        break;
     }
 
     WifiHalEvilPortalConfig cfg = {
@@ -305,8 +318,7 @@ bool wifi_app_scene_evil_portal_run_on_event(void* context, SceneManagerEvent ev
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == WifiAppCustomEventEvilPortalStop ||
-           event.event == WifiAppCustomEventEvilPortalConfig) {
+        if(event.event == WifiAppCustomEventEvilPortalStop) {
             scene_manager_previous_scene(app->scene_manager);
             consumed = true;
         } else if(event.event == WifiAppCustomEventEvilPortalTogglePause) {

@@ -37,7 +37,6 @@ typedef enum {
     WifiAppCustomEventEvilPortalCredCaptured,
     WifiAppCustomEventEvilPortalCredsValid,
     WifiAppCustomEventEvilPortalStop,
-    WifiAppCustomEventEvilPortalConfig,
     WifiAppCustomEventEvilPortalTogglePause,
 } WifiAppCustomEvent;
 
@@ -62,10 +61,19 @@ typedef enum {
 } WifiAppView;
 
 typedef enum {
-    WifiAppEvilPortalTemplateGoogle = 0,
-    WifiAppEvilPortalTemplateRouter,
-    WifiAppEvilPortalTemplateSd,
-} WifiAppEvilPortalTemplate;
+    WifiAppEvilPortalTemplateKindBuiltinGoogle,
+    WifiAppEvilPortalTemplateKindBuiltinRouter,
+    WifiAppEvilPortalTemplateKindCustom,
+} WifiAppEvilPortalTemplateKind;
+
+typedef struct {
+    char name[33];                    // dropdown label (filename without .html for custom)
+    char path[160];                   // SD path; empty for built-in templates
+    WifiAppEvilPortalTemplateKind kind;
+    bool verify;                      // run AP-cred verification flow for this template
+} WifiAppEvilPortalTemplateEntry;
+
+#define WIFI_APP_EVIL_PORTAL_MAX_TEMPLATES 16
 
 typedef struct {
     char user[64];
@@ -143,8 +151,9 @@ struct WifiApp {
     char single_ssid[33];
     char evil_portal_ssid[33];
     uint8_t evil_portal_channel;
-    WifiAppEvilPortalTemplate evil_portal_template;
-    char evil_portal_sd_path[128];
+    WifiAppEvilPortalTemplateEntry evil_portal_templates[WIFI_APP_EVIL_PORTAL_MAX_TEMPLATES];
+    uint8_t evil_portal_template_count;
+    uint8_t evil_portal_template_index;
     char evil_portal_valid_ssid[33];
     char evil_portal_valid_pwd[65];
     WifiAppEvilPortalCred evil_portal_cred_queue[WIFI_APP_EVIL_PORTAL_QUEUE_SIZE];
