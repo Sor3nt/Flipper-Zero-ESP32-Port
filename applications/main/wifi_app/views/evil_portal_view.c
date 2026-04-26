@@ -145,7 +145,10 @@ static bool evil_portal_view_input(InputEvent* event, void* context) {
         if(v->action_cb) v->action_cb(EvilPortalViewActionTogglePause, v->action_ctx);
         return true;
     }
-    if(event->key == InputKeyLeft) {
+    // T-Embed encoder: rotation without holding sends Up/Down; treat them
+    // and the regular Left as "go to config".
+    if(event->key == InputKeyLeft || event->key == InputKeyUp ||
+       event->key == InputKeyDown) {
         if(v->action_cb) v->action_cb(EvilPortalViewActionConfig, v->action_ctx);
         return true;
     }
