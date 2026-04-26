@@ -11,6 +11,7 @@
 #include "views/beacon_view.h"
 #include "views/portscan_view.h"
 #include "views/evil_portal_view.h"
+#include "views/evil_portal_captured_view.h"
 
 static bool wifi_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -91,6 +92,13 @@ static WifiApp* wifi_app_alloc(void) {
     app->view_evil_portal = evil_portal_view_get_view(app->evil_portal_view_obj);
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewEvilPortal, app->view_evil_portal);
 
+    // Evil Portal captured-credentials view
+    app->evil_portal_captured_view_obj = evil_portal_captured_view_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher,
+        WifiAppViewEvilPortalCaptured,
+        evil_portal_captured_view_get_view(app->evil_portal_captured_view_obj));
+
     app->ap_records = malloc(sizeof(WifiApRecord) * WIFI_APP_MAX_APS);
     app->ap_count = 0;
     app->selected_index = 0;
@@ -144,6 +152,7 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewBeacon);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewPortscan);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewEvilPortal);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewEvilPortalCaptured);
     submenu_free(app->submenu);
     widget_free(app->widget);
     loading_free(app->loading);
@@ -160,6 +169,7 @@ static void wifi_app_free(WifiApp* app) {
     portscan_view_free(app->view_portscan);
     beacon_view_free(app->beacon_view_obj);
     evil_portal_view_free(app->evil_portal_view_obj);
+    evil_portal_captured_view_free(app->evil_portal_captured_view_obj);
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
     free(app->ap_records);
