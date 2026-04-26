@@ -46,3 +46,8 @@ CONFIG_TINYUSB_MSC_ENABLED=n
 CONFIG_TINYUSB_MIDI_ENABLED=n
 CONFIG_TINYUSB_NCM_ENABLED=n
 CONFIG_TINYUSB_DEBUG_LEVEL=1
+
+# esp_http_server: increase header / URI limits for Evil Portal so smartphones
+# with large cookie sets don't trip the 431 "Request Header Fields Too Large" error.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=4096
+CONFIG_HTTPD_MAX_URI_LEN=2048

@@ -6,6 +6,10 @@
 
 void wifi_hal_preinit(void);
 
+typedef void (*WifiHalWorkerFn)(void* arg);
+
+bool wifi_hal_run_in_worker(WifiHalWorkerFn fn, void* arg);
+
 bool wifi_hal_start(void);
 
 void wifi_hal_stop(void);
@@ -44,3 +48,25 @@ void wifi_hal_beacon_spam_stop(void);
 bool wifi_hal_beacon_spam_is_running(void);
 
 uint32_t wifi_hal_beacon_spam_get_frame_count(void);
+
+typedef void (*WifiHalEvilPortalCredCb)(const char* user, const char* pwd, void* ctx);
+
+typedef struct {
+    const char* ssid;
+    uint8_t channel;
+    bool deauth_enabled;
+    const char* html;
+    size_t html_len;
+    WifiHalEvilPortalCredCb cred_cb;
+    void* cred_cb_ctx;
+} WifiHalEvilPortalConfig;
+
+bool wifi_hal_evil_portal_start(const WifiHalEvilPortalConfig* cfg);
+
+void wifi_hal_evil_portal_stop(void);
+
+bool wifi_hal_evil_portal_is_running(void);
+
+uint32_t wifi_hal_evil_portal_get_cred_count(void);
+
+uint16_t wifi_hal_evil_portal_get_client_count(void);

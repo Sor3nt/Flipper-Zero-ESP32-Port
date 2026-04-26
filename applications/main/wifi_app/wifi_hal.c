@@ -39,6 +39,7 @@ typedef enum {
     WCMD_DISCONNECT,
     WCMD_BEACON_SPAM_START,
     WCMD_BEACON_SPAM_STOP,
+    WCMD_RUN_FN,
     WCMD_QUIT,
 } WifiCmdType;
 
@@ -73,6 +74,10 @@ typedef struct {
             WifiHalBeaconMode mode;
             char base_ssid[33];
         } beacon_start;
+        struct {
+            WifiHalWorkerFn fn;
+            void* arg;
+        } run_fn;
     };
     volatile bool* done;
     volatile bool* result;
@@ -439,6 +444,12 @@ static void wifi_worker_fn(void* arg) {
             while(s_beacon_task) vTaskDelay(pdMS_TO_TICKS(10));
             break;
 
+        case WCMD_RUN_FN:
+            if(cmd.run_fn.fn) {
+                cmd.run_fn.fn(cmd.run_fn.arg);
+            }
+            break;
+
         case WCMD_QUIT:
             ESP_LOGI(TAG, "Worker quitting");
             if(cmd.done) *cmd.done = true;
@@ -483,6 +494,14 @@ static bool wifi_ensure_worker(void) {
 }
 
 void wifi_hal_preinit(void) {
+}
+
+bool wifi_hal_run_in_worker(WifiHalWorkerFn fn, void* arg) {
+    if(!fn) return false;
+    if(!wifi_ensure_worker()) return false;
+    WifiCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}};
+    wifi_send_cmd_sync(&cmd);
+    return true;
 }
 
 bool wifi_hal_start(void) {
