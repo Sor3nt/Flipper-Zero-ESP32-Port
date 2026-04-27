@@ -1,6 +1,6 @@
 App(
     appid="nrf24",
-    name="NRF24",
+    name="NRF 2.4GHz",
     apptype=FlipperAppType.MENUEXTERNAL,
     entry_point="nrf24_app",
     stack_size=4 * 1024,
