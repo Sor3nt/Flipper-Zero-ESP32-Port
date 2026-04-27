@@ -41,5 +41,11 @@ const GpioPin gpio_ext_pa4  = {.port = NULL, .pin = BOARD_PIN_CC1101_CSN};
 const GpioPin gpio_ext_pa6  = {.port = NULL, .pin = BOARD_PIN_CC1101_MISO};
 const GpioPin gpio_ext_pa7  = {.port = NULL, .pin = BOARD_PIN_CC1101_MOSI};
 const GpioPin gpio_cc1101_g0 = {.port = NULL, .pin = BOARD_PIN_CC1101_GDO0};
+
+#ifdef BOARD_PIN_NRF24_CSN
+const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = BOARD_PIN_NRF24_CSN};
+#else
+const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = UINT16_MAX};
+#endif
 const GpioPin gpio_ibutton  = {.port = NULL, .pin = UINT16_MAX};
 const GpioPin gpio_speaker  = {.port = NULL, .pin = UINT16_MAX};
