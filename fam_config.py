@@ -45,6 +45,7 @@ APPS = [
     "infrared",
     "lfrfid",
     "wifi",
+    "nrf24",
     "ble_spam",
     "js_app",
     "js_event_loop",
@@ -87,11 +88,18 @@ if _board in _boards_without_nfc:
 
 _boards_without_subghz = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 
+# NRF24 plugs into the LORA slot (T-Embed CC1101). Boards without the slot
+# don't have the required pin defines.
+_boards_without_nrf24 = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+
 if _board in _boards_without_ir:
     APPS = [a for a in APPS if a not in ("infrared", "js_infrared")]
 
 if _board in _boards_without_subghz:
     APPS = [a for a in APPS if a not in ("subghz", "cli_subghz", "subghz_load_dangerous_settings", "js_subghz")]
+
+if _board in _boards_without_nrf24:
+    APPS = [a for a in APPS if a != "nrf24"]
 
 if _board in _boards_without_doom:
     APPS = [a for a in APPS if a != "doom"]

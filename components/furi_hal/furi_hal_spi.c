@@ -74,6 +74,20 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_subghz = {
     .mode = 0,
 };
 
+/* NRF24 sits on the same SPI bus as the SubGhz / CC1101 (T-Embed) but uses its
+ * own CS pin -- both devices can be parallel-attached and CS-muxed on the bus. */
+FuriHalSpiBusHandle furi_hal_spi_bus_handle_nrf24 = {
+    .bus = &furi_hal_spi_bus_subghz,
+    .miso = &gpio_ext_pa6,
+    .mosi = &gpio_ext_pa7,
+    .sck = &gpio_ext_pb3,
+    .cs = &gpio_nrf24_cs,
+    .device = NULL,
+    .initialized = false,
+    .frequency_hz = 4 * 1000 * 1000,
+    .mode = 0,
+};
+
 static bool furi_hal_spi_pin_valid(const GpioPin* pin) {
     return pin && pin->pin != FURI_HAL_SPI_PIN_UNMAPPED;
 }
