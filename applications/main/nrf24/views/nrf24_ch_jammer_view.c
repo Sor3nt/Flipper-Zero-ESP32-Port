@@ -44,11 +44,11 @@ static void nrf24_ch_jammer_draw_callback(Canvas* canvas, void* _model) {
     char chbuf[16];
     snprintf(chbuf, sizeof(chbuf), "Channel %u", model->channel);
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str_aligned(canvas, 64, 38, AlignCenter, AlignTop, chbuf);
+    canvas_draw_str_aligned(canvas, 64, 35, AlignCenter, AlignTop, chbuf);
 
-    canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str_aligned(
-        canvas, 64, 50, AlignCenter, AlignTop, model->running ? "JAMMING" : "Standby");
+//    canvas_set_font(canvas, FontPrimary);
+//    canvas_draw_str_aligned(
+//        canvas, 64, 50, AlignCenter, AlignTop, model->running ? "JAMMING" : "Standby");
 
     /* Bottom button hints */
     canvas_set_font(canvas, FontSecondary);

@@ -149,6 +149,15 @@ void nrf24_app_scene_wifi_jam_on_enter(void* context) {
 
 bool nrf24_app_scene_wifi_jam_on_event(void* context, SceneManagerEvent event) {
     Nrf24App* app = context;
+
+    if(event.type == SceneManagerEventTypeBack) {
+        /* Skip the wifi-scan scene on the way out -- once the user has
+         * picked an AP, "back" should land in the main menu. */
+        scene_manager_search_and_switch_to_previous_scene(
+            app->scene_manager, Nrf24AppSceneMenu);
+        return true;
+    }
+
     if(event.type != SceneManagerEventTypeCustom || !g_ctx) return false;
 
     if(event.event == Nrf24WifiJamEventToggle) {
