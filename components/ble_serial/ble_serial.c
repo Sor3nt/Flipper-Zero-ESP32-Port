@@ -7,9 +7,13 @@
  */
 
 #include "ble_serial.h"
+#include <protobuf_version.h>
 
 #include <string.h>
 #include <stdlib.h>
+
+#define BLE_SERIAL_STR_HELPER(x) #x
+#define BLE_SERIAL_STR(x)        BLE_SERIAL_STR_HELPER(x)
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -362,8 +366,12 @@ static const uint8_t dis_api_version_uuid[16] = {
 static const char dis_manufacturer[] = "Flipper Devices Inc.";
 static const char dis_hw_revision[] = "ESP32-C6 1.0";
 static const char dis_sw_revision[] = "1.4.3";
-/* API version format: "major.minor" — matches STM32 firmware API */
-static const char dis_api_version[] = "0.3";
+/* API version format: "major.minor" — pulled from the protobuf header so it
+ * stays in sync with rpc_system. Anything < 0.6 makes the Flipper iOS app
+ * report "Outdated Firmware Version"; anything >= 1.0 makes it report
+ * "Outdated Mobile App Version". Current value: 0.25. */
+static const char dis_api_version[] =
+    BLE_SERIAL_STR(PROTOBUF_MAJOR_VERSION) "." BLE_SERIAL_STR(PROTOBUF_MINOR_VERSION);
 
 enum {
     DIS_IDX_SVC,

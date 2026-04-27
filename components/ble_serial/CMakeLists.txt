@@ -3,5 +3,5 @@ idf_component_register(
         "ble_serial.c"
     INCLUDE_DIRS "."
     REQUIRES esp_hid bt
-    PRIV_REQUIRES nvs_flash furi_ble furi_hal
+    PRIV_REQUIRES nvs_flash furi_ble furi_hal flipper_protobuf
 )
