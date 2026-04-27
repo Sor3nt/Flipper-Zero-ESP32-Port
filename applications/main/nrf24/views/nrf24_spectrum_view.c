@@ -7,9 +7,9 @@
 #include <assets_icons.h>
 #include <stdio.h>
 
-#define BAR_TOP    14
-#define BAR_BOTTOM 47
-#define SCALE_Y    49
+#define BAR_TOP    13
+#define BAR_BOTTOM 52
+#define SCALE_Y    54
 
 /* Map an NRF24 channel index (0..79) to an x-pixel on the 128 px wide canvas */
 #define BAR_X(ch) (((int)(ch) * 128) / NRF24_SPECTRUM_CHANNELS)
@@ -39,7 +39,8 @@ static void nrf24_spectrum_draw_callback(Canvas* canvas, void* _model) {
 
     for(int i = 0; i < NRF24_SPECTRUM_CHANNELS; i++) {
         int level = model->levels[i];
-        int h = (level * bar_h) / 125;
+        /* 1.5x boost so weak signals are still visible; clamp to bar height */
+        int h = (level * bar_h * 3) / (125 * 2);
         if(h > bar_h) h = bar_h;
         if(h > 0) {
             int x = BAR_X(i);
@@ -54,17 +55,11 @@ static void nrf24_spectrum_draw_callback(Canvas* canvas, void* _model) {
     char tick[4];
     for(size_t i = 0; i < sizeof(scale_marks) / sizeof(scale_marks[0]); i++) {
         uint8_t ch = scale_marks[i];
-        int x = BAR_X(ch) + (BAR_X(ch + 1) - BAR_X(ch)) / 2;
+        int x = BAR_X(ch) + (BAR_X(ch + 1) - BAR_X(ch)) / 2 + 4;
         canvas_draw_dot(canvas, x, BAR_BOTTOM + 1);
         snprintf(tick, sizeof(tick), "%u", ch);
         canvas_draw_str_aligned(canvas, x, SCALE_Y + 1, AlignCenter, AlignTop, tick);
     }
-
-    /* Footer status */
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%lu sweeps", (unsigned long)model->sweep_count);
-    canvas_draw_str(canvas, 0, 63, buf);
-    canvas_draw_str_aligned(canvas, 127, 63, AlignRight, AlignBottom, "2.40-2.48GHz");
 }
 
 static bool nrf24_spectrum_input_callback(InputEvent* event, void* context) {

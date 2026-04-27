@@ -43,12 +43,9 @@ static void nrf24_wifi_jam_draw_callback(Canvas* canvas, void* _model) {
         return;
     }
 
-    /* ---- Hero icon left ---- */
-    canvas_draw_icon(canvas, 2, 14, &I_Connect_me_62x31);
-
     /* ---- MHZ range right ---- */
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 90, 35, "MHZ");
+    canvas_draw_str(canvas, 87, 32, "MHZ");
 
     canvas_set_font(canvas, FontPrimary);
     char range[16];
@@ -66,6 +63,11 @@ static void nrf24_wifi_jam_draw_callback(Canvas* canvas, void* _model) {
 
     canvas_set_font(canvas, FontSecondary);
     elements_button_center(canvas, model->running ? "Pause" : "Run");
+
+
+    /* ---- Hero icon left ---- */
+    canvas_draw_icon(canvas, 2, 14, &I_Connect_me_62x31);
+
 }
 
 static bool nrf24_wifi_jam_input_callback(InputEvent* event, void* context) {
