@@ -306,7 +306,12 @@ static void wifi_worker_fn(void* arg) {
             if(!s_netif_initialized) {
                 esp_netif_init();
                 esp_event_loop_create_default();
-                s_netif_sta = esp_netif_create_default_wifi_sta();
+                /* Reuse the default STA netif if another app already created
+                 * it -- esp_netif_create_default_wifi_sta() asserts on dup. */
+                s_netif_sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                if(!s_netif_sta) {
+                    s_netif_sta = esp_netif_create_default_wifi_sta();
+                }
                 esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL);
                 esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
                 s_netif_initialized = true;

@@ -1,0 +1,6 @@
+ADD_SCENE(nrf24_app, menu, Menu)
+ADD_SCENE(nrf24_app, info, Info)
+ADD_SCENE(nrf24_app, spectrum, Spectrum)
+ADD_SCENE(nrf24_app, ch_jammer, ChJammer)
+ADD_SCENE(nrf24_app, wifi_scan, WifiScan)
+ADD_SCENE(nrf24_app, wifi_jam, WifiJam)
