@@ -53,6 +53,10 @@ static Nrf24App* nrf24_app_alloc(void) {
     view_set_context(app->wifi_jam_view, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewWifiJam, app->wifi_jam_view);
 
+    app->smart_jam_view = nrf24_smart_jam_view_alloc();
+    view_set_context(app->smart_jam_view, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewSmartJam, app->smart_jam_view);
+
     app->wifi_aps = NULL;
     app->wifi_ap_count = 0;
     app->selected_wifi_ssid[0] = '\0';
@@ -67,12 +71,14 @@ static void nrf24_app_free(Nrf24App* app) {
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewSpectrum);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewChJammer);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewWifiJam);
+    view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewSmartJam);
 
     submenu_free(app->submenu);
     widget_free(app->widget);
     nrf24_spectrum_view_free(app->spectrum_view);
     nrf24_ch_jammer_view_free(app->ch_jammer_view);
     nrf24_wifi_jam_view_free(app->wifi_jam_view);
+    nrf24_smart_jam_view_free(app->smart_jam_view);
 
     if(app->wifi_aps) {
         free(app->wifi_aps);

@@ -11,6 +11,7 @@
 #include "views/nrf24_spectrum_view.h"
 #include "views/nrf24_ch_jammer_view.h"
 #include "views/nrf24_wifi_jam_view.h"
+#include "views/nrf24_smart_jam_view.h"
 #include "scenes/scenes.h"
 
 typedef enum {
@@ -19,6 +20,7 @@ typedef enum {
     Nrf24ViewSpectrum,
     Nrf24ViewChJammer,
     Nrf24ViewWifiJam,
+    Nrf24ViewSmartJam,
 } Nrf24View;
 
 #define NRF24_WIFI_SCAN_MAX 24
@@ -32,6 +34,7 @@ typedef struct {
     View* spectrum_view;
     View* ch_jammer_view;
     View* wifi_jam_view;
+    View* smart_jam_view;
 
     /* WiFi scan results — owned by the wifi_scan scene */
     wifi_ap_record_t* wifi_aps;
