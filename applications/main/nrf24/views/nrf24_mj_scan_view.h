@@ -10,6 +10,7 @@ typedef struct {
     uint16_t sweep_count;
     bool running;
     bool hardware_ok;
+    bool no_targets_msg; /* show "No targets" overlay just before leaving */
     char last_target_label[24]; /* "AB:CD:EF (LG) ch72" */
 } Nrf24MjScanModel;
 
