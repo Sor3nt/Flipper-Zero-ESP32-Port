@@ -145,7 +145,15 @@ bool nrf24_app_scene_mj_scan_on_event(void* context, SceneManagerEvent event) {
         if(app->mj_target_count > 0) {
             scene_manager_next_scene(app->scene_manager, Nrf24AppSceneMjTargetList);
         } else {
-            /* No targets — just leave the scan view as-is; user can BACK out. */
+            /* No targets — signal worker to stop, flash a message, return to menu. */
+            g_ctx->stop = true;
+            with_view_model(
+                app->mj_scan_view,
+                Nrf24MjScanModel * model,
+                { model->no_targets_msg = true; },
+                true);
+            furi_delay_ms(1500);
+            scene_manager_previous_scene(app->scene_manager);
         }
         return true;
     }
