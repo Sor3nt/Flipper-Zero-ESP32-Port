@@ -1,7 +1,10 @@
 #include "ble_spam_app.h"
+#include "ble_uuid_db.h"
 #include "views/ble_spam_view.h"
 #include "views/ble_walk_scan_view.h"
 #include "views/ble_walk_detail_view.h"
+#include "views/tracker_list_view.h"
+#include "views/tracker_geiger_view.h"
 
 static bool ble_spam_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -60,6 +63,19 @@ static BleSpamApp* ble_spam_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, BleSpamViewWalkDetail, app->view_walk_detail);
 
+    // BLE Tracker views
+    app->view_tracker_scan = tracker_list_view_alloc();
+    view_set_context(app->view_tracker_scan, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, BleSpamViewTrackerScan, app->view_tracker_scan);
+
+    app->view_tracker_geiger = tracker_geiger_view_alloc();
+    view_set_context(app->view_tracker_geiger, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, BleSpamViewTrackerGeiger, app->view_tracker_geiger);
+
+    app->tracker_geiger_timer = NULL;
+
     // State
     app->attack_type = BleSpamAttackAppleDevice;
     app->running = false;
@@ -76,11 +92,15 @@ static void ble_spam_app_free(BleSpamApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewRunning);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewWalkScan);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewWalkDetail);
+    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerScan);
+    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerGeiger);
 
     submenu_free(app->submenu);
     ble_spam_view_free(app->view_running);
     ble_walk_scan_view_free(app->view_walk_scan);
     ble_walk_detail_view_free(app->view_walk_detail);
+    tracker_list_view_free(app->view_tracker_scan);
+    tracker_geiger_view_free(app->view_tracker_geiger);
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
@@ -93,11 +113,13 @@ static void ble_spam_app_free(BleSpamApp* app) {
 
 int32_t ble_spam_app(void* args) {
     UNUSED(args);
+    ble_uuid_db_init();
     BleSpamApp* app = ble_spam_app_alloc();
 
     scene_manager_next_scene(app->scene_manager, BleSpamSceneMain);
     view_dispatcher_run(app->view_dispatcher);
 
     ble_spam_app_free(app);
+    ble_uuid_db_deinit();
     return 0;
 }

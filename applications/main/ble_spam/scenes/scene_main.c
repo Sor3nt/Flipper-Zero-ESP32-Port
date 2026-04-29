@@ -4,6 +4,7 @@ enum MainMenuIndex {
     MainMenuIndexBleSpam,
     MainMenuIndexBleWalk,
     MainMenuIndexBleClone,
+    MainMenuIndexBleTracker,
 };
 
 static void main_menu_callback(void* context, uint32_t index) {
@@ -14,9 +15,11 @@ static void main_menu_callback(void* context, uint32_t index) {
 void ble_spam_scene_main_on_enter(void* context) {
     BleSpamApp* app = context;
 
-    submenu_add_item(app->submenu, "BLE Spam", MainMenuIndexBleSpam, main_menu_callback, app);
-    submenu_add_item(app->submenu, "BLE Walk", MainMenuIndexBleWalk, main_menu_callback, app);
-    submenu_add_item(app->submenu, "BLE Clone", MainMenuIndexBleClone, main_menu_callback, app);
+    submenu_add_item(app->submenu, "Spam", MainMenuIndexBleSpam, main_menu_callback, app);
+    submenu_add_item(app->submenu, "Walk", MainMenuIndexBleWalk, main_menu_callback, app);
+    submenu_add_item(
+        app->submenu, "Tracker", MainMenuIndexBleTracker, main_menu_callback, app);
+    submenu_add_item(app->submenu, "Clone", MainMenuIndexBleClone, main_menu_callback, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, BleSpamViewSubmenu);
 }
@@ -37,6 +40,10 @@ bool ble_spam_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainMenuIndexBleClone:
             scene_manager_next_scene(app->scene_manager, BleSpamSceneCloneScan);
+            consumed = true;
+            break;
+        case MainMenuIndexBleTracker:
+            scene_manager_next_scene(app->scene_manager, BleSpamSceneTrackerScan);
             consumed = true;
             break;
         }
