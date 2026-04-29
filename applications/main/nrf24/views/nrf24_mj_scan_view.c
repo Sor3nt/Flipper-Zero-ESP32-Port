@@ -53,6 +53,16 @@ static void nrf24_mj_scan_draw_callback(Canvas* canvas, void* _model) {
 
     /* Footer hint */
     elements_button_center(canvas, model->target_count > 0 ? "List" : "Stop");
+
+    /* No-targets overlay (shown briefly before leaving the scene) */
+    if(model->no_targets_msg) {
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_box(canvas, 12, 22, 104, 22);
+        canvas_set_color(canvas, ColorBlack);
+        elements_frame(canvas, 12, 22, 104, 22);
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str_aligned(canvas, 64, 33, AlignCenter, AlignCenter, "No targets found");
+    }
 }
 
 static bool nrf24_mj_scan_input_callback(InputEvent* event, void* context) {
