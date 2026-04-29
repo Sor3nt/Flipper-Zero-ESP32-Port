@@ -145,8 +145,14 @@ bool nrf24_app_scene_mj_scan_on_event(void* context, SceneManagerEvent event) {
         if(app->mj_target_count > 0) {
             scene_manager_next_scene(app->scene_manager, Nrf24AppSceneMjTargetList);
         } else {
-            /* No targets — signal worker to stop, flash a message, return to menu. */
+            /* No targets — fully stop the worker BEFORE the toast delay,
+             * otherwise the radio keeps sweeping channels for 1.5s. */
             g_ctx->stop = true;
+            if(g_ctx->worker) {
+                furi_thread_join(g_ctx->worker);
+                furi_thread_free(g_ctx->worker);
+                g_ctx->worker = NULL;
+            }
             with_view_model(
                 app->mj_scan_view,
                 Nrf24MjScanModel * model,
@@ -164,8 +170,11 @@ void nrf24_app_scene_mj_scan_on_exit(void* context) {
     UNUSED(context);
     if(!g_ctx) return;
     g_ctx->stop = true;
-    furi_thread_join(g_ctx->worker);
-    furi_thread_free(g_ctx->worker);
+    if(g_ctx->worker) {
+        furi_thread_join(g_ctx->worker);
+        furi_thread_free(g_ctx->worker);
+        g_ctx->worker = NULL;
+    }
     free(g_ctx);
     g_ctx = NULL;
 }
