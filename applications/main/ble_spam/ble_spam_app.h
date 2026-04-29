@@ -6,6 +6,7 @@
 #include <gui/view_dispatcher.h>
 #include <gui/modules/submenu.h>
 
+#include "ble_tracker_hal.h"
 #include "scenes/scenes.h"
 
 #define BLE_SPAM_LOG_TAG "BleSpam"
@@ -37,6 +38,8 @@ typedef enum {
     BleSpamViewRunning,
     BleSpamViewWalkScan,
     BleSpamViewWalkDetail,
+    BleSpamViewTrackerScan,
+    BleSpamViewTrackerGeiger,
 } BleSpamViewId;
 
 typedef struct {
@@ -65,4 +68,13 @@ typedef struct {
     // BLE Clone state
     uint16_t clone_selected_device;
     volatile bool clone_active;
+
+    // BLE Tracker state
+    View* view_tracker_scan;
+    View* view_tracker_geiger;
+    TrackerDevice tracker_target;
+    FuriTimer* tracker_geiger_timer;
+    volatile int8_t tracker_current_rssi;
+    volatile bool tracker_current_stale;
+    uint32_t tracker_current_period;
 } BleSpamApp;
