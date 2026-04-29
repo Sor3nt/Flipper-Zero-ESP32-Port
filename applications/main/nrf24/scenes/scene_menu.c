@@ -3,8 +3,7 @@
 enum SubmenuIndex {
     SubmenuIndexSpectrum,
     SubmenuIndexJammer,
-    SubmenuIndexWifiJammer,
-    SubmenuIndexSmartJammer,
+    SubmenuIndexMouseJacker,
 };
 
 static void nrf24_scene_menu_submenu_callback(void* context, uint32_t index) {
@@ -16,19 +15,17 @@ void nrf24_app_scene_menu_on_enter(void* context) {
     Nrf24App* app = context;
 
     submenu_add_item(
-        app->submenu, "Spectrum Analyzer", SubmenuIndexSpectrum, nrf24_scene_menu_submenu_callback, app);
-    submenu_add_item(
         app->submenu,
-        "Jammer [WiFi]",
-        SubmenuIndexWifiJammer,
+        "Spectrum Analyzer",
+        SubmenuIndexSpectrum,
         nrf24_scene_menu_submenu_callback,
         app);
     submenu_add_item(
-        app->submenu, "Jammer [Channel]", SubmenuIndexJammer, nrf24_scene_menu_submenu_callback, app);
+        app->submenu, "Jammer", SubmenuIndexJammer, nrf24_scene_menu_submenu_callback, app);
     submenu_add_item(
         app->submenu,
-        "Jammer [Smart 2.4 GHz]",
-        SubmenuIndexSmartJammer,
+        "MouseJacker",
+        SubmenuIndexMouseJacker,
         nrf24_scene_menu_submenu_callback,
         app);
 
@@ -46,15 +43,11 @@ bool nrf24_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case SubmenuIndexJammer:
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneChJammer);
+            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneJammerMenu);
             consumed = true;
             break;
-        case SubmenuIndexWifiJammer:
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneWifiScan);
-            consumed = true;
-            break;
-        case SubmenuIndexSmartJammer:
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneSmartJam);
+        case SubmenuIndexMouseJacker:
+            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneMjMenu);
             consumed = true;
             break;
         default:
