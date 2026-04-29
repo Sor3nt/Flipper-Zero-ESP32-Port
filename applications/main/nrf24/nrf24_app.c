@@ -23,6 +23,8 @@ static Nrf24App* nrf24_app_alloc(void) {
     Nrf24App* app = malloc(sizeof(Nrf24App));
 
     app->gui = furi_record_open(RECORD_GUI);
+    app->dialogs = furi_record_open(RECORD_DIALOGS);
+    app->storage = furi_record_open(RECORD_STORAGE);
 
     app->scene_manager = scene_manager_alloc(&nrf24_app_scene_handlers, app);
     app->view_dispatcher = view_dispatcher_alloc();
@@ -57,10 +59,23 @@ static Nrf24App* nrf24_app_alloc(void) {
     view_set_context(app->smart_jam_view, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewSmartJam, app->smart_jam_view);
 
+    app->mj_scan_view = nrf24_mj_scan_view_alloc();
+    view_set_context(app->mj_scan_view, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewMjScan, app->mj_scan_view);
+
+    app->mj_attack_view = nrf24_mj_attack_view_alloc();
+    view_set_context(app->mj_attack_view, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewMjAttack, app->mj_attack_view);
+
     app->wifi_aps = NULL;
     app->wifi_ap_count = 0;
     app->selected_wifi_ssid[0] = '\0';
     app->selected_wifi_channel = 0;
+
+    app->mj_target_count = 0;
+    app->mj_selected_target = -1;
+    app->mj_script_path = furi_string_alloc();
+    app->mj_auto_mode = false;
 
     return app;
 }
@@ -72,6 +87,8 @@ static void nrf24_app_free(Nrf24App* app) {
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewChJammer);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewWifiJam);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewSmartJam);
+    view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewMjScan);
+    view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewMjAttack);
 
     submenu_free(app->submenu);
     widget_free(app->widget);
@@ -79,15 +96,26 @@ static void nrf24_app_free(Nrf24App* app) {
     nrf24_ch_jammer_view_free(app->ch_jammer_view);
     nrf24_wifi_jam_view_free(app->wifi_jam_view);
     nrf24_smart_jam_view_free(app->smart_jam_view);
+    nrf24_mj_scan_view_free(app->mj_scan_view);
+    nrf24_mj_attack_view_free(app->mj_attack_view);
 
     if(app->wifi_aps) {
         free(app->wifi_aps);
         app->wifi_aps = NULL;
     }
 
+    if(app->mj_script_path) {
+        furi_string_free(app->mj_script_path);
+        app->mj_script_path = NULL;
+    }
+
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
 
+    furi_record_close(RECORD_STORAGE);
+    app->storage = NULL;
+    furi_record_close(RECORD_DIALOGS);
+    app->dialogs = NULL;
     furi_record_close(RECORD_GUI);
     app->gui = NULL;
 
