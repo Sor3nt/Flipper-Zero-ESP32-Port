@@ -4,8 +4,6 @@ enum MainMenuIndex {
     MainMenuIndexBleSpam,
     MainMenuIndexBleWalk,
     MainMenuIndexBleAutoWalk,
-    MainMenuIndexBleBrute,
-    MainMenuIndexBleClone,
     MainMenuIndexBleTracker,
 };
 
@@ -22,10 +20,7 @@ void ble_spam_scene_main_on_enter(void* context) {
     submenu_add_item(
         app->submenu, "Auto Walk", MainMenuIndexBleAutoWalk, main_menu_callback, app);
     submenu_add_item(
-        app->submenu, "Brute", MainMenuIndexBleBrute, main_menu_callback, app);
-    submenu_add_item(
         app->submenu, "Tracker", MainMenuIndexBleTracker, main_menu_callback, app);
-    submenu_add_item(app->submenu, "Clone", MainMenuIndexBleClone, main_menu_callback, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, BleSpamViewSubmenu);
 }
@@ -46,14 +41,6 @@ bool ble_spam_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainMenuIndexBleAutoWalk:
             scene_manager_next_scene(app->scene_manager, BleSpamSceneAutoWalk);
-            consumed = true;
-            break;
-        case MainMenuIndexBleBrute:
-            scene_manager_next_scene(app->scene_manager, BleSpamSceneBruteScan);
-            consumed = true;
-            break;
-        case MainMenuIndexBleClone:
-            scene_manager_next_scene(app->scene_manager, BleSpamSceneCloneScan);
             consumed = true;
             break;
         case MainMenuIndexBleTracker:

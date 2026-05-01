@@ -44,7 +44,9 @@ bool ble_walk_hal_is_scanning(void);
 BleWalkDevice* ble_walk_hal_get_devices(uint16_t* count);
 
 // GATT Client
-bool ble_walk_hal_connect(BleWalkDevice* device);
+// `abort_flag` is optional; pass a pointer to a volatile bool that the caller
+// flips to abort the connect early. NULL ok.
+bool ble_walk_hal_connect(BleWalkDevice* device, volatile bool* abort_flag);
 void ble_walk_hal_disconnect(void);
 bool ble_walk_hal_is_connected(void);
 
