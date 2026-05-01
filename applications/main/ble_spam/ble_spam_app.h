@@ -39,8 +39,6 @@ typedef enum {
     BleSpamViewWalkScan,
     BleSpamViewWalkDetail,
     BleSpamViewAutoWalk,
-    BleSpamViewBruteScan,
-    BleSpamViewBruteRun,
     BleSpamViewTrackerScan,
     BleSpamViewTrackerGeiger,
 } BleSpamViewId;
@@ -70,15 +68,6 @@ typedef struct {
 
     // BLE Auto-Walk state
     View* view_auto_walk;
-
-    // BLE Brute state
-    View* view_brute_scan;
-    View* view_brute_run;
-    uint16_t brute_selected_device;
-
-    // BLE Clone state
-    uint16_t clone_selected_device;
-    volatile bool clone_active;
 
     // BLE Tracker state
     View* view_tracker_scan;

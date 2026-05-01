@@ -210,7 +210,7 @@ static int32_t auto_walk_worker(void* ctx) {
 
         // Connect
         set_status(AutoWalkStatusConnect);
-        if(!ble_walk_hal_connect(&picked)) {
+        if(!ble_walk_hal_connect(&picked, &s_stop)) {
             ble_auto_walk_log_device_marker(s_log, &picked, "connect_failed");
             continue;
         }
