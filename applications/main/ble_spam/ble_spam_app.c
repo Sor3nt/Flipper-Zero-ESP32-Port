@@ -3,6 +3,8 @@
 #include "views/ble_spam_view.h"
 #include "views/ble_walk_scan_view.h"
 #include "views/ble_walk_detail_view.h"
+#include "views/ble_auto_walk_view.h"
+#include "views/ble_brute_view.h"
 #include "views/tracker_list_view.h"
 #include "views/tracker_geiger_view.h"
 
@@ -63,6 +65,25 @@ static BleSpamApp* ble_spam_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, BleSpamViewWalkDetail, app->view_walk_detail);
 
+    // BLE Auto-Walk view
+    app->view_auto_walk = ble_auto_walk_view_alloc();
+    view_set_context(app->view_auto_walk, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, BleSpamViewAutoWalk, app->view_auto_walk);
+
+    // BLE Brute views (scan reuses the walk-scan view layout)
+    app->view_brute_scan = ble_walk_scan_view_alloc();
+    view_set_context(app->view_brute_scan, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, BleSpamViewBruteScan, app->view_brute_scan);
+
+    app->view_brute_run = ble_brute_view_alloc();
+    view_set_context(app->view_brute_run, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, BleSpamViewBruteRun, app->view_brute_run);
+
+    app->brute_selected_device = 0;
+
     // BLE Tracker views
     app->view_tracker_scan = tracker_list_view_alloc();
     view_set_context(app->view_tracker_scan, app->view_dispatcher);
@@ -92,6 +113,9 @@ static void ble_spam_app_free(BleSpamApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewRunning);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewWalkScan);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewWalkDetail);
+    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewAutoWalk);
+    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewBruteScan);
+    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewBruteRun);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerScan);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerGeiger);
 
@@ -99,6 +123,9 @@ static void ble_spam_app_free(BleSpamApp* app) {
     ble_spam_view_free(app->view_running);
     ble_walk_scan_view_free(app->view_walk_scan);
     ble_walk_detail_view_free(app->view_walk_detail);
+    ble_auto_walk_view_free(app->view_auto_walk);
+    ble_walk_scan_view_free(app->view_brute_scan);
+    ble_brute_view_free(app->view_brute_run);
     tracker_list_view_free(app->view_tracker_scan);
     tracker_geiger_view_free(app->view_tracker_geiger);
 

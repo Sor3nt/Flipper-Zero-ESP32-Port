@@ -28,6 +28,7 @@ static volatile bool s_chars_ready = false;
 static uint8_t s_read_buf[BLE_WALK_MAX_VALUE_LEN];
 static uint16_t s_read_len = 0;
 static volatile bool s_read_ready = false;
+static volatile uint8_t s_read_status = 0;
 
 static esp_gatt_if_t s_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t s_conn_id = 0;
@@ -194,6 +195,7 @@ static void walk_gattc_event_handler(
         break;
 
     case ESP_GATTC_READ_CHAR_EVT:
+        s_read_status = param->read.status;
         if(param->read.status == ESP_GATT_OK) {
             s_read_len = param->read.value_len;
             if(s_read_len > BLE_WALK_MAX_VALUE_LEN) s_read_len = BLE_WALK_MAX_VALUE_LEN;
@@ -531,6 +533,10 @@ bool ble_walk_hal_read_ready(void) {
 uint8_t* ble_walk_hal_get_read_value(uint16_t* len) {
     *len = s_read_len;
     return s_read_buf;
+}
+
+uint8_t ble_walk_hal_get_read_status(void) {
+    return s_read_status;
 }
 
 bool ble_walk_hal_write_char(uint16_t handle, const uint8_t* data, uint16_t len) {
