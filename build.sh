@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 # Configuration
@@ -13,20 +12,20 @@ BUILD_ONLY=0
 SELECTED_BOARD=""
 
 # Hardware Definitions
-declare -A TARGETS=( 
-    ["esp32s3"]="esp32s3" 
-    ["waveshare_c6"]="esp32c6" 
-    ["t_embed"]="esp32s3" 
+declare -A TARGETS=(
+    ["esp32s3"]="esp32s3"
+    ["waveshare_c6"]="esp32c6"
+    ["t_embed"]="esp32s3"
 )
-declare -A NAMES=( 
-    ["esp32s3"]="esp32s3_generic" 
-    ["waveshare_c6"]="waveshare_c6_1.9" 
-    ["t_embed"]="lilygo_t_embed_cc1101" 
+declare -A NAMES=(
+    ["esp32s3"]="esp32s3_generic"
+    ["waveshare_c6"]="waveshare_c6_1.9"
+    ["t_embed"]="lilygo_t_embed_cc1101"
 )
-declare -A DIRS=( 
-    ["esp32s3"]="build_s3" 
-    ["waveshare_c6"]="build_waveshare_c6" 
-    ["t_embed"]="build_t_embed" 
+declare -A DIRS=(
+    ["esp32s3"]="build_s3"
+    ["waveshare_c6"]="build_waveshare_c6"
+    ["t_embed"]="build_t_embed"
 )
 
 usage() {
@@ -42,7 +41,6 @@ detect_port() {
     shopt -s nullglob
     matches=(/dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM*)
     shopt -u nullglob
-
     if [[ "${#matches[@]}" -eq 1 ]]; then
         printf '%s\n' "${matches[0]}"
     elif [[ "${#matches[@]}" -gt 1 ]]; then
@@ -66,11 +64,11 @@ release_port() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -b|--board) SELECTED_BOARD="$2"; shift 2 ;;
-        -p|--port)  PORT="$2"; shift 2 ;;
+        -b|--board)   SELECTED_BOARD="$2"; shift 2 ;;
+        -p|--port)    PORT="$2"; shift 2 ;;
         -m|--monitor) RUN_MONITOR=1; shift ;;
         --build-only) BUILD_ONLY=1; shift ;;
-        -h|--help) usage; exit 0 ;;
+        -h|--help)    usage; exit 0 ;;
         *) echo "Unknown: $1"; usage; exit 1 ;;
     esac
 done
@@ -93,26 +91,35 @@ if [[ -z "${PORT}" && "${BUILD_ONLY}" -eq 0 ]]; then
 fi
 
 [[ ! -f "${EXPORT_SCRIPT}" ]] && echo "IDF export script missing." >&2 && exit 1
-
 # shellcheck source=/dev/null
 source "${EXPORT_SCRIPT}"
+
 cd "${SCRIPT_DIR}"
 
 [[ "${BUILD_ONLY}" -eq 0 ]] && release_port "${PORT}"
 
-# Remove sdkconfig if it exists but belongs to a different target
+# Remove root sdkconfig if it belongs to a different target
 if [[ -f "sdkconfig" ]]; then
-    CURRENT_CONFIG_TARGET=$(grep "CONFIG_IDF_TARGET=" sdkconfig | cut -d'"' -f2 || echo "")
-    if [[ "${CURRENT_CONFIG_TARGET}" != "${TARGET}" ]]; then
-        echo "Target mismatch (Config: ${CURRENT_CONFIG_TARGET}, Needed: ${TARGET}). Cleaning sdkconfig..."
+    CURRENT_CONFIG_TARGET=$(grep -oP '(?<=CONFIG_IDF_TARGET=")[^"]+' sdkconfig 2>/dev/null || echo "")
+    if [[ -z "${CURRENT_CONFIG_TARGET}" || "${CURRENT_CONFIG_TARGET}" != "${TARGET}" ]]; then
+        echo "Root sdkconfig mismatch (Config: '${CURRENT_CONFIG_TARGET}', Needed: '${TARGET}'). Removing..."
         rm -f sdkconfig
+    fi
+fi
+
+# Remove build-dir sdkconfig if it belongs to a different target
+if [[ -f "${BUILD_DIR}/sdkconfig" ]]; then
+    BD_TARGET=$(grep -oP '(?<=CONFIG_IDF_TARGET=")[^"]+' "${BUILD_DIR}/sdkconfig" 2>/dev/null || echo "")
+    if [[ -z "${BD_TARGET}" || "${BD_TARGET}" != "${TARGET}" ]]; then
+        echo "Build dir sdkconfig mismatch (Config: '${BD_TARGET}', Needed: '${TARGET}'). Removing..."
+        rm -f "${BUILD_DIR}/sdkconfig"
     fi
 fi
 
 # Set target (creates/updates sdkconfig)
 idf.py -B "${BUILD_DIR}" set-target "${TARGET}"
 
-# Construct Command
+# Construct command
 COMMANDS=("reconfigure" "build")
 PY_OPTS=("-B" "${BUILD_DIR}" "-DFLIPPER_BOARD=${BOARD}")
 
