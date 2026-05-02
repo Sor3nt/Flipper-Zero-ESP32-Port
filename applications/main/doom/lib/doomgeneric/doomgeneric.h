@@ -4,12 +4,15 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+/* Hardgekodet auf Doom-Original 320x200 für den ESP32-Port. Vorher kamen
+ * die Defines via application.fam-cdefines, aber buildFap.sh wertet diese
+ * (noch) nicht aus → Default 640x400 schlug bis ins Rendering durch. */
 #ifndef DOOMGENERIC_RESX
-#define DOOMGENERIC_RESX 640
+#define DOOMGENERIC_RESX 320
 #endif  // DOOMGENERIC_RESX
 
 #ifndef DOOMGENERIC_RESY
-#define DOOMGENERIC_RESY 400
+#define DOOMGENERIC_RESY 200
 #endif  // DOOMGENERIC_RESY
 
 
