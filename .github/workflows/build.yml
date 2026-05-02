@@ -12,23 +12,20 @@ jobs:
     name: Build ${{ matrix.board.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-
     strategy:
       fail-fast: false
       matrix:
         board:
           - name: generic_esp32s3
-            script_key: s3
+            script_key: esp32s3
             build_dir: build_s3
             artifact_name: flipper-esp32s3-generic
-
           - name: lilygo_t_embed_cc1101
             script_key: t_embed
             build_dir: build_t_embed
             artifact_name: flipper-lilygo-t-embed-cc1101
-
           - name: waveshare_c6_1.9
-            script_key: c6
+            script_key: waveshare_c6
             build_dir: build_waveshare_c6
             artifact_name: flipper-waveshare-c6-1.9
 
@@ -37,6 +34,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Clean stale sdkconfig
+        run: |
+          rm -f sdkconfig
+          rm -f ${{ matrix.board.build_dir }}/sdkconfig
 
       - name: Set up ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
