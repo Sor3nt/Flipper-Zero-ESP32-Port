@@ -187,8 +187,10 @@ FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplicatio
 
         /* Cache coherency: relocated values were written via data cache.
          * 1. Write back data cache to PSRAM (so PSRAM has the new values)
-         * 2. Invalidate instruction cache (so CPU fetches fresh code from PSRAM) */
-#if defined(ESP_PLATFORM)
+         * 2. Invalidate instruction cache (so CPU fetches fresh code from PSRAM)
+         * ROM functions Cache_WriteBack_All / Cache_Invalidate_ICache_All are only
+         * present on Xtensa ESP32-S3.  Skip on RISC-V targets (C6 etc.). */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
         extern void Cache_WriteBack_All(void);
         extern void Cache_Invalidate_ICache_All(void);
         Cache_WriteBack_All();
