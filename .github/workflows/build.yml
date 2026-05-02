@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build ${{ matrix.board.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60 # ← Increased timeout
+    timeout-minutes: 60
 
     strategy:
       matrix:
@@ -35,25 +35,25 @@ jobs:
             artifact_name: flipper-waveshare-c6-1.9
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: ESP-IDF Cache + Setup
+      - name: Set up ESP-IDF ${{ matrix.board.target }}
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.1
           target: ${{ matrix.board.target }}
-          cache: true # ← Very important
 
       - name: Build ${{ matrix.board.name }}
         shell: bash
         run: |
           source $IDF_PATH/export.sh
 
-          echo "🛠 Building ${{ matrix.board.name }}..."
+          echo "Building ${{ matrix.board.name }}..."
 
+          # Clean previous config to avoid target mismatch
           rm -f sdkconfig
           rm -rf ${{ matrix.board.build_dir }}
 
@@ -61,4 +61,14 @@ jobs:
 
           idf.py -B ${{ matrix.board.build_dir }} \
             -DFLIPPER_BOARD=${{ matrix.board.flipper_board }} \
-            reconfigure build --no-warnings
+            reconfigure build
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.board.artifact_name }}
+          path: |
+            ${{ matrix.board.build_dir }}/*.bin
+            ${{ matrix.board.build_dir }}/bootloader/bootloader.bin
+            ${{ matrix.board.build_dir }}/partition_table/partition-table.bin
+          retention-days: 30
