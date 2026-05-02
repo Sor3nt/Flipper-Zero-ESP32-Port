@@ -40,14 +40,53 @@ jobs:
           rm -f sdkconfig
           rm -f ${{ matrix.board.build_dir }}/sdkconfig
 
-      - name: Set up ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-
-      - name: Build with combined script
-        shell: bash
+      - name: Install ESP-IDF system dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util \
+            libusb-1.0-0 libglib2.0-dev
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        id: idf-cache
+        with:
+          path: ~/esp/esp-idf
+          key: esp-idf-v5.4.1
+          restore-keys: esp-idf-v5.4.1
+
+      - name: Clone ESP-IDF v5.4.1
+        if: steps.idf-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/esp
+          git clone --branch v5.4.1 --depth 1 \
+            https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+
+      - name: Cache ESP-IDF tools
+        uses: actions/cache@v4
+        id: idf-tools-cache
+        with:
+          path: ~/.espressif
+          key: esp-idf-tools-v5.4.1-${{ matrix.board.script_key }}
+          restore-keys: |
+            esp-idf-tools-v5.4.1-${{ matrix.board.script_key }}
+            esp-idf-tools-v5.4.1-
+
+      - name: Install ESP-IDF tools
+        if: steps.idf-tools-cache.outputs.cache-hit != 'true'
+        run: |
+          ~/esp/esp-idf/install.sh all
+
+      - name: Verify ESP-IDF environment
+        run: |
+          source ~/esp/esp-idf/export.sh
+          echo "IDF_PATH=$IDF_PATH"
+          idf.py --version
+
+      - name: Build
+        run: |
+          source ~/esp/esp-idf/export.sh
           chmod +x ./build.sh
           ./build.sh --board ${{ matrix.board.script_key }} --build-only
 
