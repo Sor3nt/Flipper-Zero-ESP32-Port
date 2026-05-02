@@ -68,10 +68,7 @@ jobs:
         id: idf-tools-cache
         with:
           path: ~/.espressif
-          key: esp-idf-tools-v5.4.1-${{ matrix.board.script_key }}
-          restore-keys: |
-            esp-idf-tools-v5.4.1-${{ matrix.board.script_key }}
-            esp-idf-tools-v5.4.1-
+          key: esp-idf-tools-v5.4.1
 
       - name: Install ESP-IDF tools
         if: steps.idf-tools-cache.outputs.cache-hit != 'true'
