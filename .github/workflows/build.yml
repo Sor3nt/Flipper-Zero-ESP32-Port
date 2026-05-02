@@ -11,6 +11,7 @@ jobs:
   build:
     name: Build ${{ matrix.board.name }}
     runs-on: ubuntu-24.04
+
     strategy:
       matrix:
         board:
@@ -38,21 +39,24 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup ESP-IDF ${{ matrix.board.target }}
+      - name: Setup ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.1
           target: ${{ matrix.board.target }}
 
-      - name: Build Firmware - ${{ matrix.board.name }}
+      - name: Build ${{ matrix.board.name }}
         shell: bash
         run: |
           source $IDF_PATH/export.sh
 
-          echo "=== Building ${{ matrix.board.name }} ==="
-          echo "Target: ${{ matrix.board.target }}"
-          echo "Flipper Board: ${{ matrix.board.flipper_board }}"
+          echo "Building ${{ matrix.board.name }} (Target: ${{ matrix.board.target }})"
 
+          # Important: Delete old sdkconfig to avoid target mismatch
+          rm -f sdkconfig
+          rm -rf ${{ matrix.board.build_dir }}
+
+          # Set target and build
           idf.py -B ${{ matrix.board.build_dir }} \
             set-target ${{ matrix.board.target }}
 
@@ -60,30 +64,21 @@ jobs:
             -DFLIPPER_BOARD=${{ matrix.board.flipper_board }} \
             reconfigure build
 
-          # List built binaries
-          ls -lh ${{ matrix.board.build_dir }}/*.bin || true
+          ls -lh ${{ matrix.board.build_dir }}/*.bin || echo "No .bin files found"
 
       - name: Prepare Artifacts
         shell: bash
         run: |
           mkdir -p artifacts
-
           BUILD_DIR="${{ matrix.board.build_dir }}"
 
-          # Copy main binaries
           cp ${BUILD_DIR}/*.bin artifacts/ 2>/dev/null || true
           cp ${BUILD_DIR}/bootloader/bootloader.bin artifacts/ 2>/dev/null || true
           cp ${BUILD_DIR}/partition_table/partition-table.bin artifacts/ 2>/dev/null || true
 
-          # Rename main firmware to something clear
           if [ -f ${BUILD_DIR}/furi_esp32.bin ]; then
             cp ${BUILD_DIR}/furi_esp32.bin artifacts/${{ matrix.board.artifact_name }}.bin
-          elif [ -f ${BUILD_DIR}/flipper_esp32.bin ]; then
-            cp ${BUILD_DIR}/flipper_esp32.bin artifacts/${{ matrix.board.artifact_name }}.bin
           fi
-
-          echo "Artifacts for ${{ matrix.board.name }}:"
-          ls -la artifacts/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
