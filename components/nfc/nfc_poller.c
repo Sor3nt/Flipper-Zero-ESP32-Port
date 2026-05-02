@@ -45,7 +45,7 @@ static void nfc_poller_list_alloc(NfcPoller* instance) {
         if(parent_protocol == NfcProtocolInvalid) break;
 
         NfcPollerListElement* parent = malloc(sizeof(NfcPollerListElement));
-        memset(parent, 0, sizeof(parent));
+        memset(parent, 0, sizeof(*parent));
         parent->protocol = parent_protocol;
         parent->poller_api = nfc_pollers_api[parent_protocol];
         parent->child = instance->list.head;
