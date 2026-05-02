@@ -14,24 +14,25 @@ jobs:
     timeout-minutes: 60
 
     strategy:
+      fail-fast: false
       matrix:
         board:
           - name: generic_esp32s3
+            script_key: s3
             target: esp32s3
-            build_dir: build_generic
-            flipper_board: generic_esp32s3
+            build_dir: build_s3
             artifact_name: flipper-esp32s3-generic
 
           - name: lilygo_t_embed_cc1101
+            script_key: t_embed
             target: esp32s3
             build_dir: build_t_embed
-            flipper_board: lilygo_t_embed_cc1101
             artifact_name: flipper-lilygo-t-embed-cc1101
 
           - name: waveshare_c6_1.9
+            script_key: c6
             target: esp32c6
             build_dir: build_waveshare_c6
-            flipper_board: waveshare_c6_1.9
             artifact_name: flipper-waveshare-c6-1.9
 
     steps:
@@ -46,22 +47,15 @@ jobs:
           esp_idf_version: v5.4.1
           target: ${{ matrix.board.target }}
 
-      - name: Build ${{ matrix.board.name }}
+      - name: Build with combined script
         shell: bash
         run: |
-          source $IDF_PATH/export.sh
+          # Ensure the script is executable
+          chmod +x ./build.sh
 
-          echo "Building ${{ matrix.board.name }}..."
-
-          # Clean previous config to avoid target mismatch
-          rm -f sdkconfig
-          rm -rf ${{ matrix.board.build_dir }}
-
-          idf.py -B ${{ matrix.board.build_dir }} set-target ${{ matrix.board.target }}
-
-          idf.py -B ${{ matrix.board.build_dir }} \
-            -DFLIPPER_BOARD=${{ matrix.board.flipper_board }} \
-            reconfigure build
+          # Use the --build-only flag to skip serial port detection/flashing
+          # and the --board flag to select the specific config
+          ./build.sh --board ${{ matrix.board.script_key }} --build-only
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
