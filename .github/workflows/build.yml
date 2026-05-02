@@ -19,19 +19,16 @@ jobs:
         board:
           - name: generic_esp32s3
             script_key: s3
-            target: esp32s3
             build_dir: build_s3
             artifact_name: flipper-esp32s3-generic
 
           - name: lilygo_t_embed_cc1101
             script_key: t_embed
-            target: esp32s3
             build_dir: build_t_embed
             artifact_name: flipper-lilygo-t-embed-cc1101
 
           - name: waveshare_c6_1.9
             script_key: c6
-            target: esp32c6
             build_dir: build_waveshare_c6
             artifact_name: flipper-waveshare-c6-1.9
 
@@ -41,20 +38,15 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up ESP-IDF ${{ matrix.board.target }}
+      - name: Set up ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.1
-          target: ${{ matrix.board.target }}
 
       - name: Build with combined script
         shell: bash
         run: |
-          # Ensure the script is executable
           chmod +x ./build.sh
-
-          # Use the --build-only flag to skip serial port detection/flashing
-          # and the --board flag to select the specific config
           ./build.sh --board ${{ matrix.board.script_key }} --build-only
 
       - name: Upload Artifacts
