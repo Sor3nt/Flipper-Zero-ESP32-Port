@@ -41,6 +41,7 @@ typedef enum {
     BleSpamViewAutoWalk,
     BleSpamViewTrackerScan,
     BleSpamViewTrackerGeiger,
+    BleSpamViewRaceDetector,
 } BleSpamViewId;
 
 typedef struct {
@@ -77,4 +78,8 @@ typedef struct {
     volatile int8_t tracker_current_rssi;
     volatile bool tracker_current_stale;
     uint32_t tracker_current_period;
+
+    // Airoha RACE Detector state (CVE-2025-20700)
+    View* view_race_detector;
+    volatile bool race_probe_abort;
 } BleSpamApp;
