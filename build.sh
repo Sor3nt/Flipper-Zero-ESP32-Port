@@ -13,14 +13,26 @@ BUILD_ONLY=0
 SELECTED_BOARD=""
 
 # Hardware Definitions
-declare -A TARGETS=( ["s3"]="esp32s3" ["c6"]="esp32c6" ["t_embed"]="esp32s3" )
-declare -A NAMES=( ["s3"]="esp32s3_generic" ["c6"]="waveshare_c6_1.9" ["t_embed"]="lilygo_t_embed_cc1101" )
-declare -A DIRS=( ["s3"]="build_s3" ["c6"]="build_waveshare_c6" ["t_embed"]="build_t_embed" )
+declare -A TARGETS=( 
+    ["esp32s3"]="esp32s3" 
+    ["waveshare_c6"]="esp32c6" 
+    ["t_embed"]="esp32s3" 
+)
+declare -A NAMES=( 
+    ["esp32s3"]="esp32s3_generic" 
+    ["waveshare_c6"]="waveshare_c6_1.9" 
+    ["t_embed"]="lilygo_t_embed_cc1101" 
+)
+declare -A DIRS=( 
+    ["esp32s3"]="build_s3" 
+    ["waveshare_c6"]="build_waveshare_c6" 
+    ["t_embed"]="build_t_embed" 
+)
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --board <name> [options]
-Boards: s3, c6, t_embed
+Boards: esp32s3, waveshare_c6, t_embed
 Options: -p|--port, -m|--monitor, --build-only
 EOF
 }
@@ -64,13 +76,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${SELECTED_BOARD}" || -z "${NAMES[$SELECTED_BOARD]+x}" ]]; then
-    echo "Error: Valid --board required (s3, c6, t_embed)." >&2
+    echo "Error: Valid --board required (esp32s3, waveshare_c6, t_embed)." >&2
     exit 1
 fi
 
 BOARD="${NAMES[$SELECTED_BOARD]}"
 BUILD_DIR="${DIRS[$SELECTED_BOARD]}"
 TARGET="${TARGETS[$SELECTED_BOARD]}"
+
+# Force environment to match board target
+export IDF_TARGET="${TARGET}"
 
 if [[ -z "${PORT}" && "${BUILD_ONLY}" -eq 0 ]]; then
     PORT="$(detect_port || echo "")"
@@ -85,7 +100,16 @@ cd "${SCRIPT_DIR}"
 
 [[ "${BUILD_ONLY}" -eq 0 ]] && release_port "${PORT}"
 
-# Sync sdkconfig with current chip target
+# Remove sdkconfig if it exists but belongs to a different target
+if [[ -f "sdkconfig" ]]; then
+    CURRENT_CONFIG_TARGET=$(grep "CONFIG_IDF_TARGET=" sdkconfig | cut -d'"' -f2 || echo "")
+    if [[ "${CURRENT_CONFIG_TARGET}" != "${TARGET}" ]]; then
+        echo "Target mismatch (Config: ${CURRENT_CONFIG_TARGET}, Needed: ${TARGET}). Cleaning sdkconfig..."
+        rm -f sdkconfig
+    fi
+fi
+
+# Set target (creates/updates sdkconfig)
 idf.py -B "${BUILD_DIR}" set-target "${TARGET}"
 
 # Construct Command
