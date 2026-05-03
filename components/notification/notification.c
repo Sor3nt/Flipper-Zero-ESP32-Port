@@ -8,12 +8,18 @@
 #include <furi_hal_rtc.h>
 #include <furi_hal_speaker.h>
 #include <input.h>
+#include <saved_struct.h>
+#include <storage/storage.h>
 #include "notification_app.h"
 #include "notification_messages.h"
 
 #define TAG "NotificationSrv"
 
 #define NOTIFICATION_EVENT_COMPLETE 0x00000001U
+
+#define NOTIFICATION_SETTINGS_PATH    INT_PATH(".notification.settings")
+#define NOTIFICATION_SETTINGS_MAGIC   0x42
+#define NOTIFICATION_SETTINGS_VERSION 0x01
 
 typedef enum {
     NotificationLayerMessage,
@@ -301,6 +307,49 @@ static void notification_message_send(
     furi_check(furi_message_queue_put(app->queue, &message, FuriWaitForever) == FuriStatusOk);
 }
 
+static bool notification_load_settings(NotificationApp* app) {
+    NotificationSettings tmp;
+    bool ok = saved_struct_load(
+        NOTIFICATION_SETTINGS_PATH,
+        &tmp,
+        sizeof(NotificationSettings),
+        NOTIFICATION_SETTINGS_MAGIC,
+        NOTIFICATION_SETTINGS_VERSION);
+    if(ok) {
+        app->settings = tmp;
+        FURI_LOG_I(
+            TAG,
+            "LOAD ok: brightness=%.2f vol=%.2f delay_ms=%u",
+            (double)app->settings.display_brightness,
+            (double)app->settings.speaker_volume,
+            (unsigned)app->settings.display_off_delay_ms);
+    } else {
+        FURI_LOG_W(TAG, "LOAD failed — using defaults");
+    }
+    /* Sanity: never let a 0ms delay sneak through and instantly blank the screen. */
+    if(app->settings.display_off_delay_ms < 2000) app->settings.display_off_delay_ms = 2000;
+    return ok;
+}
+
+static bool notification_save_settings(NotificationApp* app) {
+    bool ok = saved_struct_save(
+        NOTIFICATION_SETTINGS_PATH,
+        &app->settings,
+        sizeof(NotificationSettings),
+        NOTIFICATION_SETTINGS_MAGIC,
+        NOTIFICATION_SETTINGS_VERSION);
+    if(ok) {
+        FURI_LOG_I(
+            TAG,
+            "SAVE ok: brightness=%.2f vol=%.2f",
+            (double)app->settings.display_brightness,
+            (double)app->settings.speaker_volume);
+    } else {
+        FURI_LOG_E(TAG, "SAVE failed");
+    }
+    return ok;
+}
+
 static NotificationApp* notification_app_alloc(void) {
     NotificationApp* app = malloc(sizeof(NotificationApp));
 
@@ -317,6 +366,10 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.night_shift_start = 1020;
     app->settings.night_shift_end = 300;
     app->current_night_shift = 1.0f;
+
+    /* Try to load persisted settings (NVS-backed via saved_struct).
+     * Fails silently on first boot or version mismatch — defaults stay in place. */
+    notification_load_settings(app);
 
     app->display.value[LayerInternal] = 0x00;
     app->display.value[LayerNotification] = 0x00;
@@ -357,10 +410,7 @@ int32_t notification_srv(void* p) {
             notification_process_internal_message(app, &message);
             break;
         case SaveSettingsMessage:
-            /* Settings are only in RAM on ESP32 — no persistent save yet.
-             * The message type exists so notification_message_save_settings()
-             * can be called from the settings app without crashing. */
-            FURI_LOG_I(TAG, "Settings updated (RAM only)");
+            notification_save_settings(app);
             break;
         }
 

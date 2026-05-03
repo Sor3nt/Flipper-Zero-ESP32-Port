@@ -127,12 +127,20 @@ def main():
             print(f"  + {name} (0x{h:08x}) -> {prefix}{name}")
         return 0
 
-    # Merge existing + new entries, sort, and rebuild the table section
-    all_entries = [(h, name) for h, name, _ in entries]
-    all_entries.extend(to_add)
-    all_entries.sort(key=lambda x: x[0])
+    # Merge existing + new entries, sort, and rebuild the table section.
+    # WICHTIG: bestehende Zeilen bleiben verbatim erhalten — nur neue Einträge
+    # werden via format_entry() formatiert. Sonst gehen manuell gesetzte
+    # &-Prefixe für Variablen außerhalb der I_*/message_*/sequence_*-Convention
+    # verloren (z.B. ble_profile_serial, subghz_protocol_registry).
+    merged = [(h, name, original_line) for h, name, original_line in entries]
+    for h, name in to_add:
+        merged.append((h, name, None))
+    merged.sort(key=lambda x: x[0])
 
-    new_table_lines = [format_entry(name, h) + "\n" for h, name in all_entries]
+    new_table_lines = [
+        (original_line if original_line is not None else format_entry(name, h) + "\n")
+        for h, name, original_line in merged
+    ]
 
     # Replace table lines in the file
     result = lines[:table_start] + new_table_lines + lines[table_end + 1:]

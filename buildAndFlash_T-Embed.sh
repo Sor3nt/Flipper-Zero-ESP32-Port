@@ -101,27 +101,6 @@ echo "Build dir:      ${BUILD_DIR}"
 echo "Using ESP-IDF:  ${EXPORT_SCRIPT}"
 echo "Serial port:    ${PORT}"
 
-# Kill any process holding the serial port exclusively (e.g. a left-over
-# `idf.py monitor`, `screen`, `pyserial`). Without this the flash fails with
-# "Could not exclusively lock port [...] Resource temporarily unavailable".
-release_serial_port() {
-    local port="$1"
-    [[ -z "${port}" || ! -e "${port}" ]] && return 0
-    if ! command -v lsof >/dev/null 2>&1; then return 0; fi
-    local pids
-    pids="$(lsof -t "${port}" 2>/dev/null || true)"
-    if [[ -n "${pids}" ]]; then
-        echo "Releasing serial port ${port} from PID(s): ${pids}" >&2
-        # shellcheck disable=SC2086
-        kill -9 ${pids} 2>/dev/null || true
-        sleep 0.3
-    fi
-}
-
-if [[ "${BUILD_ONLY}" -eq 0 ]]; then
-    release_serial_port "${PORT}"
-fi
-
 # shellcheck source=/dev/null
 source "${EXPORT_SCRIPT}"
 

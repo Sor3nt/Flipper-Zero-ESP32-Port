@@ -349,9 +349,9 @@ void infrared_worker_tx_start(InfraredWorker* instance) {
 
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context) {
     InfraredWorker* instance = context;
-    uint32_t flags_set = furi_thread_flags_set(
+    /* ESP32 port: same task-context race as data_callback — see comment there. */
+    furi_thread_flags_set(
         furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_MESSAGE_SENT);
-    furi_check(flags_set & INFRARED_WORKER_TX_MESSAGE_SENT);
 }
 
 static FuriHalInfraredTxGetDataState
@@ -377,9 +377,13 @@ static FuriHalInfraredTxGetDataState
         furi_crash();
     }
 
-    uint32_t flags_set = furi_thread_flags_set(
+    /* ESP32 port: data_callback runs from ir_tx_task (priority 15), not ISR.
+     * The worker thread (priority 16) preempts between notify-set and read-back,
+     * consuming the flag before the query — the upstream furi_check on the
+     * read-back is unsafe in task context. The set itself can't fail with a
+     * valid thread handle, so just fire and forget. */
+    furi_thread_flags_set(
         furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_FILL_BUFFER);
-    furi_check(flags_set & INFRARED_WORKER_TX_FILL_BUFFER);
 
     return state;
 }

@@ -1,0 +1,143 @@
+name: Build Flipper ESP32 Variants
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.board.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - name: generic_esp32s3
+            script_key: esp32s3
+            build_dir: build_s3
+            artifact_name: flipper-esp32s3-generic
+            chip: esp32s3
+            flash_size: 16MB
+          - name: lilygo_t_embed_cc1101
+            script_key: t_embed
+            build_dir: build_t_embed
+            artifact_name: flipper-lilygo-t-embed-cc1101
+            chip: esp32s3
+            flash_size: 16MB
+          - name: waveshare_c6_1.9
+            script_key: waveshare_c6
+            build_dir: build_waveshare_c6
+            artifact_name: flipper-waveshare-c6-1.9
+            chip: esp32c6
+            flash_size: 8MB
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Clean stale sdkconfig
+        run: |
+          rm -f sdkconfig
+          rm -f ${{ matrix.board.build_dir }}/sdkconfig
+
+      - name: Install ESP-IDF system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util \
+            libusb-1.0-0 libglib2.0-dev
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        id: idf-cache
+        with:
+          path: ~/esp/esp-idf
+          key: esp-idf-v5.4.1
+          restore-keys: esp-idf-v5.4.1
+
+      - name: Clone ESP-IDF v5.4.1
+        if: steps.idf-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/esp
+          git clone --branch v5.4.1 --depth 1 \
+            https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+
+      - name: Cache ESP-IDF tools
+        uses: actions/cache@v4
+        id: idf-tools-cache
+        with:
+          path: ~/.espressif
+          key: esp-idf-tools-v5.4.1
+
+      - name: Install ESP-IDF tools
+        if: steps.idf-tools-cache.outputs.cache-hit != 'true'
+        run: |
+          ~/esp/esp-idf/install.sh all
+
+      - name: Verify ESP-IDF environment
+        run: |
+          source ~/esp/esp-idf/export.sh
+          echo "IDF_PATH=$IDF_PATH"
+          idf.py --version
+
+      - name: Build
+        run: |
+          source ~/esp/esp-idf/export.sh
+          chmod +x ./build.sh
+          ./build.sh --board ${{ matrix.board.script_key }} --build-only
+
+      - name: Package artifacts
+        run: |
+          BOARD="${{ matrix.board.name }}"
+          CHIP="${{ matrix.board.chip }}"
+          FLASH_SIZE="${{ matrix.board.flash_size }}"
+          BUILD="${{ matrix.board.build_dir }}"
+          STAGE="artifact_staging"
+
+          # Clean flat staging directory — what users actually unzip
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/bootloader" "$STAGE/partition_table"
+
+          # Firmware binaries
+          cp "$BUILD/furi_esp32.bin"                          "$STAGE/furi_esp32.bin"
+          cp "$BUILD/bootloader/bootloader.bin"               "$STAGE/bootloader/bootloader.bin"
+          cp "$BUILD/partition_table/partition-table.bin"     "$STAGE/partition_table/partition-table.bin"
+
+          # ESP-IDF flash-args file (contains verified offsets and flash params)
+          if [ -f "$BUILD/flash_project_args" ]; then
+            cp "$BUILD/flash_project_args" "$STAGE/flash_args.txt"
+          fi
+
+          # Generate board-specific flash scripts by substituting template placeholders
+          sed \
+            -e "s/__BOARD_NAME__/${BOARD}/g" \
+            -e "s/__CHIP__/${CHIP}/g"         \
+            -e "s/__FLASH_SIZE__/${FLASH_SIZE}/g" \
+            tools/flash_linux.sh > "$STAGE/flash_linux.sh"
+          chmod +x "$STAGE/flash_linux.sh"
+
+          sed \
+            -e "s/__BOARD_NAME__/${BOARD}/g" \
+            -e "s/__CHIP__/${CHIP}/g"         \
+            -e "s/__FLASH_SIZE__/${FLASH_SIZE}/g" \
+            tools/flash_windows.bat > "$STAGE/flash_windows.bat"
+
+          echo ""
+          echo "=== Staged artifact contents ==="
+          ls -lh "$STAGE" "$STAGE/bootloader" "$STAGE/partition_table"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.board.artifact_name }}
+          # Upload from the flat staging dir so the zip has no extra path prefix.
+          # Users unzip and immediately run flash_linux.sh or flash_windows.bat.
+          path: artifact_staging/
+          retention-days: 30

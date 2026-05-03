@@ -301,9 +301,12 @@ static bool elf_relocate_slot0(Elf32_Addr relAddr, Elf32_Addr symAddr, Elf32_Swo
 
     if(op0 == 0x01) {
         /* L32R instruction: loads 32-bit value from literal pool.
-         * target = ((PC+3) & ~3) + (sign_ext(imm16) << 2)
-         * On ESP32-S3, L32R accesses memory via instruction cache/bus.
-         * Both PC and literal target must be instruction-bus addresses. */
+         * Xtensa-Encoding: vAddr = ((PC+3) & ~3) + 0xFFFC0000 + (imm16 << 2)
+         * Damit ist der Offset IMMER negativ und im Bereich [-262144, -4] bytes
+         * (256 KB rückwärts), kodiert als unsigned 16-bit imm16 ∈ [0, 65535].
+         * Vorherige Validation prüfte signed 16-bit Range — das blockte
+         * gültige Offsets > 128 KB rückwärts (siehe Doom mit ~134 KB .text).
+         * Auf ESP32-S3 muss L32R die instruction-bus-Adresse benutzen. */
         Elf32_Addr l32r_target = PSRAM_DATA_TO_INST(symAddr + addend);
         Elf32_Addr pc_aligned = (instPC + 3) & ~3;
         int32_t offset = (int32_t)(l32r_target - pc_aligned);
@@ -313,15 +316,16 @@ static bool elf_relocate_slot0(Elf32_Addr relAddr, Elf32_Addr symAddr, Elf32_Swo
             return false;
         }
 
-        int32_t imm16 = offset >> 2;
-        if(imm16 < -32768 || imm16 > 32767) {
-            FURI_LOG_E(TAG, "  L32R offset out of range: %d", (int)imm16);
+        int32_t units = offset >> 2;
+        if(units < -65536 || units > -1) {
+            FURI_LOG_E(TAG, "  L32R offset out of range: %d (units=%d)", (int)offset, (int)units);
             return false;
         }
 
+        uint16_t imm16 = (uint16_t)(units & 0xFFFF);
         insn[1] = (uint8_t)(imm16 & 0xFF);
         insn[2] = (uint8_t)((imm16 >> 8) & 0xFF);
-        FURI_LOG_D(TAG, "  L32R relocated, offset=%d", (int)imm16);
+        FURI_LOG_D(TAG, "  L32R relocated, offset=%d", (int)offset);
         return true;
     }
 
@@ -566,7 +570,11 @@ static ELFLoadSectionResult
     section->size = section_header->sh_size;
 
     if(section_header->sh_type == SHT_NOBITS) {
-        // BSS section, no data to load - already zeroed by aligned_malloc
+        // BSS section, no data to load. heap_caps_aligned_alloc(SPIRAM)
+        // does NOT zero memory — only the aligned_malloc fallback does (it
+        // uses calloc via memmgr.h's redefine). Zero explicitly so static
+        // BSS variables in FAPs are NULL/0 as the C standard demands.
+        memset(section->data, 0, section_header->sh_size);
         return ELFLoadSectionResultSuccess;
     }
 
@@ -736,6 +744,15 @@ static SectionTypeInfo elf_preload_section(
 
 static bool elf_relocate_section(ELFFile* elf, ELFSection* section) {
     if(section->rel_count) {
+        if(section->data == NULL) {
+            /* Section war nicht alloziert (kein SHF_ALLOC, z.B. .debug_*).
+             * Ihre Rela-Einträge sind nur für externe Tools (Debugger,
+             * gdb-stub) relevant und müssen zur Laufzeit nicht aufgelöst
+             * werden. Skip statt fehlschlagen — sonst bricht der Loader
+             * jeden FAP ab, der mit Debug-Symbolen gebaut wurde. */
+            FURI_LOG_D(TAG, "Skipping relocation: section not allocated");
+            return true;
+        }
         FURI_LOG_D(TAG, "Relocating section");
         return elf_relocate(elf, section);
     } else {

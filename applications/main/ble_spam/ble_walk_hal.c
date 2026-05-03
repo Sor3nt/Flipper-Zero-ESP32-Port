@@ -28,6 +28,7 @@ static volatile bool s_chars_ready = false;
 static uint8_t s_read_buf[BLE_WALK_MAX_VALUE_LEN];
 static uint16_t s_read_len = 0;
 static volatile bool s_read_ready = false;
+static volatile uint8_t s_read_status = 0;
 
 static esp_gatt_if_t s_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t s_conn_id = 0;
@@ -194,6 +195,7 @@ static void walk_gattc_event_handler(
         break;
 
     case ESP_GATTC_READ_CHAR_EVT:
+        s_read_status = param->read.status;
         if(param->read.status == ESP_GATT_OK) {
             s_read_len = param->read.value_len;
             if(s_read_len > BLE_WALK_MAX_VALUE_LEN) s_read_len = BLE_WALK_MAX_VALUE_LEN;
@@ -339,9 +341,10 @@ void ble_walk_hal_stop(void) {
 // ---------------------------------------------------------------------------
 
 bool ble_walk_hal_start_scan(void) {
-    s_device_count = 0;
-    memset(s_devices, 0, sizeof(s_devices));
-
+    // Preserve the existing device list — the scan keeps populating it. On
+    // first start after ble_walk_hal_start() the list is already empty (HAL
+    // init zeroes it), so no explicit clear is needed here. Callers that
+    // want a fresh list can call ble_walk_hal_clear_devices() first.
     esp_ble_scan_params_t scan_params = {
         .scan_type = BLE_SCAN_TYPE_ACTIVE,
         .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
@@ -381,7 +384,7 @@ BleWalkDevice* ble_walk_hal_get_devices(uint16_t* count) {
 // GATT Client
 // ---------------------------------------------------------------------------
 
-bool ble_walk_hal_connect(BleWalkDevice* device) {
+bool ble_walk_hal_connect(BleWalkDevice* device, volatile bool* abort_flag) {
     if(s_gattc_if == ESP_GATT_IF_NONE) {
         ESP_LOGE(TAG, "connect: gattc_if not registered");
         return false;
@@ -407,18 +410,33 @@ bool ble_walk_hal_connect(BleWalkDevice* device) {
         return false;
     }
 
-    // Wait for connection (max 4s)
+    // Wait for connection (max 4s) — abortable
+    bool aborted = false;
     for(int i = 0; i < 80 && !s_connected; i++) {
+        if(abort_flag && *abort_flag) {
+            aborted = true;
+            ESP_LOGW(TAG, "connect aborted after %d ms", i * 50);
+            break;
+        }
         furi_delay_ms(50);
     }
 
     if(!s_connected) {
-        ESP_LOGW(TAG, "Connection timeout after 4s, cancelling");
-        // Cancel pending: close GATT + GAP disconnect, then wait for cleanup
+        ESP_LOGW(TAG, "Connection %s, cancelling", aborted ? "aborted" : "timeout after 4s");
+        // Cancel pending: close GATT + GAP disconnect. Don't wait long if we
+        // were aborted — the GUI thread is joining us and we want to return
+        // ASAP. The BT stack will clean up async.
         esp_ble_gattc_close(s_gattc_if, 0);
         esp_ble_gap_disconnect(device->addr);
-        // Wait for disconnect event to fully clean up the stack
-        furi_delay_ms(500);
+        if(!aborted) {
+            // Normal timeout path: short grace window for stack callbacks,
+            // but stay abortable so the GUI thread doesn't have to wait the
+            // full window when the user backs out.
+            for(int i = 0; i < 10; i++) {
+                if(abort_flag && *abort_flag) break;
+                furi_delay_ms(20);
+            }
+        }
     }
     return s_connected;
 }
@@ -531,6 +549,10 @@ bool ble_walk_hal_read_ready(void) {
 uint8_t* ble_walk_hal_get_read_value(uint16_t* len) {
     *len = s_read_len;
     return s_read_buf;
+}
+
+uint8_t ble_walk_hal_get_read_status(void) {
+    return s_read_status;
 }
 
 bool ble_walk_hal_write_char(uint16_t handle, const uint8_t* data, uint16_t len) {
