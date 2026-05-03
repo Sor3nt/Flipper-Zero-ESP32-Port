@@ -85,6 +85,7 @@ static WifiApp* wifi_app_alloc(void) {
     // Beacon view allocation
     app->beacon_view_obj = beacon_view_alloc();
     app->view_beacon = beacon_view_get_view(app->beacon_view_obj);
+    view_set_context(app->view_beacon, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, WifiAppViewBeacon, app->view_beacon);
 
     // Evil Portal view allocation
