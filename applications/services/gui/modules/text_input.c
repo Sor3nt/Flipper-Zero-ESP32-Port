@@ -50,9 +50,9 @@ static const uint8_t keyboard_row_count = 4;
 #define REM_KEY        'R'
 
 static const TextInputKey keyboard_keys_row_0[] = {
-    {CAPS_KEY, 1, 8},
-    {SPEC_KEY, 23, 8},
-    {REM_KEY, 45, 8},
+    {CAPS_KEY, 64, 0},
+    {SPEC_KEY, 88, 0},
+    {REM_KEY, 108, 0},
 };
 
 static const TextInputKey keyboard_keys_row_1[] = {
@@ -335,17 +335,17 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
 
             // Handle special control buttons
             if(key_char == CAPS_KEY) {
+                const uint8_t btn_x = keyboard_origin_x + keys[column].x - 2;
+                const uint8_t btn_y = keyboard_origin_y + keys[column].y - 2;
+                const uint8_t btn_w = 26;
+                const uint8_t btn_h = 12;
                 if(selected) {
                     canvas_set_color(canvas, ColorBlack);
-                    canvas_draw_box(
-                        canvas,
-                        keyboard_origin_x + keys[column].x - 1,
-                        keyboard_origin_y + keys[column].y - 8,
-                        18,
-                        10);
+                    elements_slightly_rounded_box(canvas, btn_x, btn_y, btn_w, btn_h);
                     canvas_set_color(canvas, ColorWhite);
                 } else {
                     canvas_set_color(canvas, ColorBlack);
+                    elements_slightly_rounded_frame(canvas, btn_x, btn_y, btn_w, btn_h);
                 }
                 canvas_draw_str(
                     canvas,
@@ -353,17 +353,17 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                     keyboard_origin_y + keys[column].y,
                     model->caps_mode ? "CAPS" : "Caps");
             } else if(key_char == SPEC_KEY) {
+                const uint8_t btn_x = keyboard_origin_x + keys[column].x - 2;
+                const uint8_t btn_y = keyboard_origin_y + keys[column].y - 2;
+                const uint8_t btn_w = 26;
+                const uint8_t btn_h = 12;
                 if(selected) {
                     canvas_set_color(canvas, ColorBlack);
-                    canvas_draw_box(
-                        canvas,
-                        keyboard_origin_x + keys[column].x - 1,
-                        keyboard_origin_y + keys[column].y - 8,
-                        18,
-                        10);
+                    elements_slightly_rounded_box(canvas, btn_x, btn_y, btn_w, btn_h);
                     canvas_set_color(canvas, ColorWhite);
                 } else {
                     canvas_set_color(canvas, ColorBlack);
+                    elements_slightly_rounded_frame(canvas, btn_x, btn_y, btn_w, btn_h);
                 }
                 canvas_draw_str(
                     canvas,
@@ -371,17 +371,17 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                     keyboard_origin_y + keys[column].y,
                     model->special_chars_mode ? "SPEC" : "Spec");
             } else if(key_char == REM_KEY) {
+                const uint8_t btn_x = keyboard_origin_x + keys[column].x - 2;
+                const uint8_t btn_y = keyboard_origin_y + keys[column].y - 2;
+                const uint8_t btn_w = 18;
+                const uint8_t btn_h = 12;
                 if(selected) {
                     canvas_set_color(canvas, ColorBlack);
-                    canvas_draw_box(
-                        canvas,
-                        keyboard_origin_x + keys[column].x - 1,
-                        keyboard_origin_y + keys[column].y - 8,
-                        14,
-                        10);
+                    elements_slightly_rounded_box(canvas, btn_x, btn_y, btn_w, btn_h);
                     canvas_set_color(canvas, ColorWhite);
                 } else {
                     canvas_set_color(canvas, ColorBlack);
+                    elements_slightly_rounded_frame(canvas, btn_x, btn_y, btn_w, btn_h);
                 }
                 canvas_draw_str(
                     canvas,
