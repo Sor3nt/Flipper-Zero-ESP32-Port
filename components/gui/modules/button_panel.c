@@ -306,54 +306,52 @@ static void button_panel_process_up(ButtonPanel* button_panel) {
         true);
 }
 
-static void button_panel_process_left(ButtonPanel* button_panel) {
+/* Linear (row-major) traversal: right moves to the next non-empty button,
+ * wrapping to the first column of the next row at the row's end and to the
+ * matrix start after the last button. Lets a single-axis input (e.g. rotary
+ * encoder) reach every button without a row-jump modifier. */
+static void button_panel_process_right(ButtonPanel* button_panel) {
     with_view_model(
         button_panel->view,
         ButtonPanelModel * model,
         {
-            size_t new_selected_item_x = model->selected_item_x;
-            size_t new_selected_item_y = model->selected_item_y;
-            size_t i;
-
-            if(new_selected_item_x > 0) {
-                --new_selected_item_x;
-
-                for(i = 0; i < model->reserve_y; ++i) {
-                    new_selected_item_y = (model->selected_item_y + i) % model->reserve_y;
-                    if(*button_panel_get_item(model, new_selected_item_x, new_selected_item_y)) {
+            size_t total = (size_t)model->reserve_x * (size_t)model->reserve_y;
+            if(total > 0) {
+                size_t cur = (size_t)model->selected_item_y * model->reserve_x +
+                             model->selected_item_x;
+                for(size_t step = 1; step <= total; ++step) {
+                    size_t idx = (cur + step) % total;
+                    size_t try_x = idx % model->reserve_x;
+                    size_t try_y = idx / model->reserve_x;
+                    if(*button_panel_get_item(model, try_x, try_y)) {
+                        model->selected_item_x = try_x;
+                        model->selected_item_y = try_y;
                         break;
                     }
-                }
-                if(i != model->reserve_y) {
-                    model->selected_item_x = new_selected_item_x;
-                    model->selected_item_y = new_selected_item_y;
                 }
             }
         },
         true);
 }
 
-static void button_panel_process_right(ButtonPanel* button_panel) {
+static void button_panel_process_left(ButtonPanel* button_panel) {
     with_view_model(
         button_panel->view,
         ButtonPanelModel * model,
         {
-            uint16_t new_selected_item_x = model->selected_item_x;
-            uint16_t new_selected_item_y = model->selected_item_y;
-            size_t i;
-
-            if(new_selected_item_x < (model->reserve_x - 1)) {
-                ++new_selected_item_x;
-
-                for(i = 0; i < model->reserve_y; ++i) {
-                    new_selected_item_y = (model->selected_item_y + i) % model->reserve_y;
-                    if(*button_panel_get_item(model, new_selected_item_x, new_selected_item_y)) {
+            size_t total = (size_t)model->reserve_x * (size_t)model->reserve_y;
+            if(total > 0) {
+                size_t cur = (size_t)model->selected_item_y * model->reserve_x +
+                             model->selected_item_x;
+                for(size_t step = 1; step <= total; ++step) {
+                    size_t idx = (cur + total - (step % total)) % total;
+                    size_t try_x = idx % model->reserve_x;
+                    size_t try_y = idx / model->reserve_x;
+                    if(*button_panel_get_item(model, try_x, try_y)) {
+                        model->selected_item_x = try_x;
+                        model->selected_item_y = try_y;
                         break;
                     }
-                }
-                if(i != model->reserve_y) {
-                    model->selected_item_x = new_selected_item_x;
-                    model->selected_item_y = new_selected_item_y;
                 }
             }
         },
@@ -400,12 +398,15 @@ static bool button_panel_view_input_callback(InputEvent* event, void* context) {
             button_panel_process_down(button_panel);
             break;
         case InputKeyLeft:
+            /* Swapped with Right: rotary encoder CW (clockwise) feels like
+             * "forward / next button" to users; the orientation mapping
+             * otherwise turns CW into Left, which felt backwards. */
             consumed = true;
-            button_panel_process_left(button_panel);
+            button_panel_process_right(button_panel);
             break;
         case InputKeyRight:
             consumed = true;
-            button_panel_process_right(button_panel);
+            button_panel_process_left(button_panel);
             break;
         default:
             break;

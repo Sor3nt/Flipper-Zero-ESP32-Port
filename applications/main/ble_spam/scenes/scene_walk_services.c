@@ -1,20 +1,34 @@
 #include "../ble_spam_app.h"
 #include "../ble_walk_hal.h"
+#include "../ble_uuid_db.h"
 
 #include <esp_log.h>
 #include <stdio.h>
 
 #define TAG "BleWalk"
 
-static void uuid_to_str(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+static void format_service_label(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+    const char* name = ble_uuid_db_lookup_service(uuid);
+    if(name) {
+        snprintf(buf, buf_len, "%s", name);
+        return;
+    }
     if(uuid->len == ESP_UUID_LEN_16) {
         snprintf(buf, buf_len, "0x%04X", uuid->uuid.uuid16);
     } else if(uuid->len == ESP_UUID_LEN_32) {
         snprintf(buf, buf_len, "0x%08lX", (unsigned long)uuid->uuid.uuid32);
     } else if(uuid->len == ESP_UUID_LEN_128) {
         uint8_t* u = uuid->uuid.uuid128;
-        snprintf(buf, buf_len, "%02X%02X%02X%02X-%02X%02X",
-                 u[15], u[14], u[13], u[12], u[11], u[10]);
+        snprintf(
+            buf,
+            buf_len,
+            "%02X%02X%02X%02X-%02X%02X",
+            u[15],
+            u[14],
+            u[13],
+            u[12],
+            u[11],
+            u[10]);
     } else {
         snprintf(buf, buf_len, "?");
     }
@@ -41,7 +55,7 @@ void ble_spam_scene_walk_services_on_enter(void* context) {
 
     for(int i = 0; i < count; i++) {
         char label[40];
-        uuid_to_str(&services[i].uuid, label, sizeof(label));
+        format_service_label(&services[i].uuid, label, sizeof(label));
         submenu_add_item(app->submenu, label, i, services_callback, app);
     }
 

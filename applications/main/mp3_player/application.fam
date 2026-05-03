@@ -1,0 +1,34 @@
+App(
+    appid="mp3_player",
+    name="MP3 Player",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="mp3_player_app",
+    requires=["gui"],
+    stack_size=16 * 1024,
+    order=85,
+    icon="A_Plugins_14",
+    fap_icon="icon.png",
+    fap_category="Media",
+    fap_private_libs=[
+        Lib(
+            name="helix",
+            sources=["*.c"],
+            fap_include_paths=["."],
+            cdefines=[
+                "ARDUINO",
+            ],
+            cflags=[
+                "-w",
+                "-Wno-error=implicit-function-declaration",
+                "-Wno-error=incompatible-pointer-types",
+                "-Wno-error=int-conversion",
+                "-Wno-error=pointer-sign",
+                "-Wno-error=unused-variable",
+                "-Wno-error=unused-function",
+                "-Wno-error=unused-but-set-variable",
+                "-Wno-error=unused-parameter",
+                "-Wno-error=discarded-qualifiers",
+            ],
+        ),
+    ],
+)

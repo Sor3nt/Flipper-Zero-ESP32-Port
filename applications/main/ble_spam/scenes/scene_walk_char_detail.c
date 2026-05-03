@@ -1,5 +1,6 @@
 #include "../ble_spam_app.h"
 #include "../ble_walk_hal.h"
+#include "../ble_uuid_db.h"
 #include "../views/ble_walk_detail_view.h"
 
 #include <esp_log.h>
@@ -9,6 +10,11 @@
 #define TAG "BleWalk"
 
 static void uuid_to_str(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+    const char* name = ble_uuid_db_lookup_char(uuid);
+    if(name) {
+        snprintf(buf, buf_len, "%s", name);
+        return;
+    }
     if(uuid->len == ESP_UUID_LEN_16) {
         snprintf(buf, buf_len, "0x%04X", uuid->uuid.uuid16);
     } else if(uuid->len == ESP_UUID_LEN_128) {

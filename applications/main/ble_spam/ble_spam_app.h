@@ -6,6 +6,7 @@
 #include <gui/view_dispatcher.h>
 #include <gui/modules/submenu.h>
 
+#include "ble_tracker_hal.h"
 #include "scenes/scenes.h"
 
 #define BLE_SPAM_LOG_TAG "BleSpam"
@@ -37,6 +38,10 @@ typedef enum {
     BleSpamViewRunning,
     BleSpamViewWalkScan,
     BleSpamViewWalkDetail,
+    BleSpamViewAutoWalk,
+    BleSpamViewTrackerScan,
+    BleSpamViewTrackerGeiger,
+    BleSpamViewRaceDetector,
 } BleSpamViewId;
 
 typedef struct {
@@ -62,7 +67,19 @@ typedef struct {
     uint16_t walk_selected_service;
     uint16_t walk_selected_char;
 
-    // BLE Clone state
-    uint16_t clone_selected_device;
-    volatile bool clone_active;
+    // BLE Auto-Walk state
+    View* view_auto_walk;
+
+    // BLE Tracker state
+    View* view_tracker_scan;
+    View* view_tracker_geiger;
+    TrackerDevice tracker_target;
+    FuriTimer* tracker_geiger_timer;
+    volatile int8_t tracker_current_rssi;
+    volatile bool tracker_current_stale;
+    uint32_t tracker_current_period;
+
+    // Airoha RACE Detector state (CVE-2025-20700)
+    View* view_race_detector;
+    volatile bool race_probe_abort;
 } BleSpamApp;
