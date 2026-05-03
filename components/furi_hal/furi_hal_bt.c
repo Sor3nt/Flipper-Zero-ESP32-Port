@@ -1,5 +1,6 @@
 #include "furi_hal_bt.h"
 
+#include <furi.h>
 #include <ble_hid.h>
 #include <ble_serial.h>
 #include <ble_profile/extra_profiles/hid_profile.h>

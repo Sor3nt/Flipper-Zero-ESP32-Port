@@ -1,12 +1,18 @@
 #include "../ble_spam_app.h"
 #include "../ble_walk_hal.h"
+#include "../ble_uuid_db.h"
 
 #include <esp_log.h>
 #include <stdio.h>
 
 #define TAG "BleWalk"
 
-static void uuid_to_str_short(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+static void format_char_label(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+    const char* name = ble_uuid_db_lookup_char(uuid);
+    if(name) {
+        snprintf(buf, buf_len, "%s", name);
+        return;
+    }
     if(uuid->len == ESP_UUID_LEN_16) {
         snprintf(buf, buf_len, "0x%04X", uuid->uuid.uuid16);
     } else if(uuid->len == ESP_UUID_LEN_128) {
@@ -36,16 +42,16 @@ void ble_spam_scene_walk_chars_on_enter(void* context) {
     BleWalkChar* chars = ble_walk_hal_get_chars(&count);
 
     for(int i = 0; i < count; i++) {
-        char label[48];
-        char uuid_str[20];
-        uuid_to_str_short(&chars[i].uuid, uuid_str, sizeof(uuid_str));
+        char label[64];
+        char name_str[32];
+        format_char_label(&chars[i].uuid, name_str, sizeof(name_str));
 
         char props[16] = "";
         if(chars[i].properties & 0x02) strcat(props, "R");
         if(chars[i].properties & 0x08) strcat(props, "W");
         if(chars[i].properties & 0x10) strcat(props, "N");
 
-        snprintf(label, sizeof(label), "%s [%s]", uuid_str, props);
+        snprintf(label, sizeof(label), "%s [%s]", name_str, props);
         submenu_add_item(app->submenu, label, i, chars_callback, app);
     }
 

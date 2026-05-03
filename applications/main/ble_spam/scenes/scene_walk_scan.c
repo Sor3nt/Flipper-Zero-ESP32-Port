@@ -70,7 +70,7 @@ bool ble_spam_scene_walk_scan_on_event(void* context, SceneManagerEvent event) {
                 uint16_t count;
                 BleWalkDevice* devices = ble_walk_hal_get_devices(&count);
                 if(selected < count) {
-                    if(ble_walk_hal_connect(&devices[selected])) {
+                    if(ble_walk_hal_connect(&devices[selected], NULL)) {
                         // Show "Connected!" briefly
                         BleWalkScanModel* m = view_get_model(app->view_walk_scan);
                         m->connect_status = WalkScanStatusConnected;

@@ -1060,6 +1060,11 @@ int32_t storage_srv(void* p) {
         storage->sd_mounted = true;
         ESP_LOGI(TAG, "SD card mounted successfully");
 
+        /* Ensure the internal-storage shadow dir exists (for /int paths) */
+        if(mkdir(SD_MOUNT_POINT "/.int", 0755) != 0 && errno != EEXIST) {
+            ESP_LOGW(TAG, "mkdir %s/.int failed: %s", SD_MOUNT_POINT, strerror(errno));
+        }
+
         StorageEvent event = {.type = StorageEventTypeCardMount};
         furi_pubsub_publish(storage->pubsub, &event);
     } else {
