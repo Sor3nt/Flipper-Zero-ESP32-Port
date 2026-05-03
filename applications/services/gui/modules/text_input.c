@@ -47,60 +47,58 @@ static const uint8_t keyboard_row_count = 4;
 #define BACKSPACE_KEY  '\b'
 #define CAPS_KEY       'C'
 #define SPEC_KEY       'S'
-#define REM_KEY        'R'
 
 static const TextInputKey keyboard_keys_row_0[] = {
     {CAPS_KEY, 64, 0},
     {SPEC_KEY, 88, 0},
-    {REM_KEY, 108, 0},
 };
 
 static const TextInputKey keyboard_keys_row_1[] = {
-    {'q', 1, 8},
-    {'w', 10, 8},
-    {'e', 19, 8},
-    {'r', 28, 8},
-    {'t', 37, 8},
-    {'y', 46, 8},
-    {'u', 55, 8},
-    {'i', 64, 8},
-    {'o', 73, 8},
-    {'p', 82, 8},
-    {'0', 91, 8},
-    {'1', 100, 8},
-    {'2', 110, 8},
-    {'3', 120, 8},
+    {'q', 1, 10},
+    {'w', 10, 10},
+    {'e', 19, 10},
+    {'r', 28, 10},
+    {'t', 37, 10},
+    {'y', 46, 10},
+    {'u', 55, 10},
+    {'i', 64, 10},
+    {'o', 73, 10},
+    {'p', 82, 10},
+    {'0', 91, 10},
+    {'1', 100, 10},
+    {'2', 110, 10},
+    {'3', 120, 10},
 };
 
 static const TextInputKey keyboard_keys_row_2[] = {
-    {'a', 1, 20},
-    {'s', 10, 20},
-    {'d', 19, 20},
-    {'f', 28, 20},
-    {'g', 37, 20},
-    {'h', 46, 20},
-    {'j', 55, 20},
-    {'k', 64, 20},
-    {'l', 73, 20},
-    {BACKSPACE_KEY, 82, 12},
-    {'4', 100, 20},
-    {'5', 110, 20},
-    {'6', 120, 20},
+    {'a', 1, 22},
+    {'s', 10, 22},
+    {'d', 19, 22},
+    {'f', 28, 22},
+    {'g', 37, 22},
+    {'h', 46, 22},
+    {'j', 55, 22},
+    {'k', 64, 22},
+    {'l', 73, 22},
+    {BACKSPACE_KEY, 82, 14},
+    {'4', 100, 22},
+    {'5', 110, 22},
+    {'6', 120, 22},
 };
 
 static const TextInputKey keyboard_keys_row_3[] = {
-    {'z', 1, 32},
-    {'x', 10, 32},
-    {'c', 19, 32},
-    {'v', 28, 32},
-    {'b', 37, 32},
-    {'n', 46, 32},
-    {'m', 55, 32},
-    {'_', 64, 32},
-    {ENTER_KEY, 74, 23},
-    {'7', 100, 32},
-    {'8', 110, 32},
-    {'9', 120, 32},
+    {'z', 1, 34},
+    {'x', 10, 34},
+    {'c', 19, 34},
+    {'v', 28, 34},
+    {'b', 37, 34},
+    {'n', 46, 34},
+    {'m', 55, 34},
+    {'_', 64, 34},
+    {ENTER_KEY, 74, 25},
+    {'7', 100, 34},
+    {'8', 110, 34},
+    {'9', 120, 34},
 };
 
 // Special characters row 1
@@ -370,24 +368,6 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                     keyboard_origin_x + keys[column].x,
                     keyboard_origin_y + keys[column].y,
                     model->special_chars_mode ? "SPEC" : "Spec");
-            } else if(key_char == REM_KEY) {
-                const uint8_t btn_x = keyboard_origin_x + keys[column].x - 2;
-                const uint8_t btn_y = keyboard_origin_y + keys[column].y - 2;
-                const uint8_t btn_w = 18;
-                const uint8_t btn_h = 12;
-                if(selected) {
-                    canvas_set_color(canvas, ColorBlack);
-                    elements_slightly_rounded_box(canvas, btn_x, btn_y, btn_w, btn_h);
-                    canvas_set_color(canvas, ColorWhite);
-                } else {
-                    canvas_set_color(canvas, ColorBlack);
-                    elements_slightly_rounded_frame(canvas, btn_x, btn_y, btn_w, btn_h);
-                }
-                canvas_draw_str(
-                    canvas,
-                    keyboard_origin_x + keys[column].x,
-                    keyboard_origin_y + keys[column].y,
-                    "Rem");
             } else if(key_char == ENTER_KEY) {
                 canvas_set_color(canvas, ColorBlack);
                 if(selected) {
@@ -464,8 +444,9 @@ static void text_input_handle_up(TextInput* text_input, TextInputModel* model) {
     UNUSED(text_input);
     if(model->selected_row > 0) {
         model->selected_row--;
-        if(model->selected_column > get_row_size(model->selected_row, model->special_chars_mode) - 6) {
-            model->selected_column = model->selected_column + 1;
+        const uint8_t new_row_size = get_row_size(model->selected_row, model->special_chars_mode);
+        if(model->selected_column >= new_row_size) {
+            model->selected_column = new_row_size ? new_row_size - 1 : 0;
         }
     } else {
         model->cursor_select = true;
@@ -479,8 +460,9 @@ static void text_input_handle_down(TextInput* text_input, TextInputModel* model)
         model->cursor_select = false;
     } else if(model->selected_row < keyboard_row_count - 1) {
         model->selected_row++;
-        if(model->selected_column > get_row_size(model->selected_row, model->special_chars_mode) - 4) {
-            model->selected_column = model->selected_column - 1;
+        const uint8_t new_row_size = get_row_size(model->selected_row, model->special_chars_mode);
+        if(model->selected_column >= new_row_size) {
+            model->selected_column = new_row_size ? new_row_size - 1 : 0;
         }
     }
 }
@@ -533,13 +515,6 @@ static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, I
             if(model->selected_column >= new_row_size) {
                 model->selected_column = new_row_size - 1;
             }
-        }
-        return;
-    } else if(selected == REM_KEY) {
-        // Clear all text
-        if(model->text_buffer) {
-            model->text_buffer[0] = '\0';
-            model->cursor_pos = 0;
         }
         return;
     }
