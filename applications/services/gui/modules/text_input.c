@@ -34,14 +34,26 @@ typedef struct {
     void* validator_callback_context;
     FuriString* validator_text;
     bool validator_message_visible;
+    
+    bool caps_mode;
+    bool special_chars_mode;
 } TextInputModel;
 
 static const uint8_t keyboard_origin_x = 1;
 static const uint8_t keyboard_origin_y = 29;
-static const uint8_t keyboard_row_count = 3;
+static const uint8_t keyboard_row_count = 4;
 
-#define ENTER_KEY     '\r'
-#define BACKSPACE_KEY '\b'
+#define ENTER_KEY      '\r'
+#define BACKSPACE_KEY  '\b'
+#define CAPS_KEY       'C'
+#define SPEC_KEY       'S'
+#define REM_KEY        'R'
+
+static const TextInputKey keyboard_keys_row_0[] = {
+    {CAPS_KEY, 1, 8},
+    {SPEC_KEY, 23, 8},
+    {REM_KEY, 45, 8},
+};
 
 static const TextInputKey keyboard_keys_row_1[] = {
     {'q', 1, 8},
@@ -91,48 +103,143 @@ static const TextInputKey keyboard_keys_row_3[] = {
     {'9', 120, 32},
 };
 
-static uint8_t get_row_size(uint8_t row_index) {
+// Special characters row 1
+static const TextInputKey keyboard_keys_spec_row_1[] = {
+    {'!', 1, 8},
+    {'"', 10, 8},
+    {'£', 19, 8},
+    {'$', 28, 8},
+    {'%', 37, 8},
+    {'^', 46, 8},
+    {'&', 55, 8},
+    {'*', 64, 8},
+    {'(', 73, 8},
+    {')', 82, 8},
+    {'-', 91, 8},
+    {'+', 100, 8},
+    {'=', 110, 8},
+    {'[', 120, 8},
+};
+
+// Special characters row 2
+static const TextInputKey keyboard_keys_spec_row_2[] = {
+    {'{', 1, 20},
+    {']', 10, 20},
+    {'}', 19, 20},
+    {'|', 28, 20},
+    {'\\', 37, 20},
+    {'/', 46, 20},
+    {':', 55, 20},
+    {';', 64, 20},
+    {'@', 73, 20},
+    {BACKSPACE_KEY, 82, 12},
+    {'#', 100, 20},
+    {'~', 110, 20},
+    {'`', 120, 20},
+};
+
+// Special characters row 3
+static const TextInputKey keyboard_keys_spec_row_3[] = {
+    {'<', 1, 32},
+    {'>', 10, 32},
+    {'?', 19, 32},
+    {',', 28, 32},
+    {'.', 37, 32},
+    {'\'', 46, 32},
+    {'_', 55, 32},
+    {'-', 64, 32},
+    {ENTER_KEY, 74, 23},
+    {' ', 100, 32},
+    {'.', 110, 32},
+    {'*', 120, 32},
+};
+
+static uint8_t get_row_size(uint8_t row_index, bool special_chars_mode) {
     uint8_t row_size = 0;
 
-    switch(row_index + 1) {
-    case 1:
-        row_size = COUNT_OF(keyboard_keys_row_1);
-        break;
-    case 2:
-        row_size = COUNT_OF(keyboard_keys_row_2);
-        break;
-    case 3:
-        row_size = COUNT_OF(keyboard_keys_row_3);
-        break;
-    default:
-        furi_crash();
+    if(special_chars_mode) {
+        switch(row_index) {
+        case 0:
+            row_size = COUNT_OF(keyboard_keys_row_0);
+            break;
+        case 1:
+            row_size = COUNT_OF(keyboard_keys_spec_row_1);
+            break;
+        case 2:
+            row_size = COUNT_OF(keyboard_keys_spec_row_2);
+            break;
+        case 3:
+            row_size = COUNT_OF(keyboard_keys_spec_row_3);
+            break;
+        default:
+            furi_crash();
+        }
+    } else {
+        switch(row_index) {
+        case 0:
+            row_size = COUNT_OF(keyboard_keys_row_0);
+            break;
+        case 1:
+            row_size = COUNT_OF(keyboard_keys_row_1);
+            break;
+        case 2:
+            row_size = COUNT_OF(keyboard_keys_row_2);
+            break;
+        case 3:
+            row_size = COUNT_OF(keyboard_keys_row_3);
+            break;
+        default:
+            furi_crash();
+        }
     }
 
     return row_size;
 }
 
-static const TextInputKey* get_row(uint8_t row_index) {
+static const TextInputKey* get_row(uint8_t row_index, bool special_chars_mode) {
     const TextInputKey* row = NULL;
 
-    switch(row_index + 1) {
-    case 1:
-        row = keyboard_keys_row_1;
-        break;
-    case 2:
-        row = keyboard_keys_row_2;
-        break;
-    case 3:
-        row = keyboard_keys_row_3;
-        break;
-    default:
-        furi_crash();
+    if(special_chars_mode) {
+        switch(row_index) {
+        case 0:
+            row = keyboard_keys_row_0;
+            break;
+        case 1:
+            row = keyboard_keys_spec_row_1;
+            break;
+        case 2:
+            row = keyboard_keys_spec_row_2;
+            break;
+        case 3:
+            row = keyboard_keys_spec_row_3;
+            break;
+        default:
+            furi_crash();
+        }
+    } else {
+        switch(row_index) {
+        case 0:
+            row = keyboard_keys_row_0;
+            break;
+        case 1:
+            row = keyboard_keys_row_1;
+            break;
+        case 2:
+            row = keyboard_keys_row_2;
+            break;
+        case 3:
+            row = keyboard_keys_row_3;
+            break;
+        default:
+            furi_crash();
+        }
     }
 
     return row;
 }
 
 static char get_selected_char(TextInputModel* model) {
-    return get_row(model->selected_row)[model->selected_column].text;
+    return get_row(model->selected_row, model->special_chars_mode)[model->selected_column].text;
 }
 
 static bool char_is_lowercase(char letter) {
@@ -217,14 +324,71 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
     canvas_set_font(canvas, FontKeyboard);
 
     for(uint8_t row = 0; row < keyboard_row_count; row++) {
-        const uint8_t column_count = get_row_size(row);
-        const TextInputKey* keys = get_row(row);
+        const uint8_t column_count = get_row_size(row, model->special_chars_mode);
+        const TextInputKey* keys = get_row(row, model->special_chars_mode);
 
         for(size_t column = 0; column < column_count; column++) {
             bool selected = !model->cursor_select && model->selected_row == row &&
                             model->selected_column == column;
 
-            if(keys[column].text == ENTER_KEY) {
+            char key_char = keys[column].text;
+
+            // Handle special control buttons
+            if(key_char == CAPS_KEY) {
+                if(selected) {
+                    canvas_set_color(canvas, ColorBlack);
+                    canvas_draw_box(
+                        canvas,
+                        keyboard_origin_x + keys[column].x - 1,
+                        keyboard_origin_y + keys[column].y - 8,
+                        18,
+                        10);
+                    canvas_set_color(canvas, ColorWhite);
+                } else {
+                    canvas_set_color(canvas, ColorBlack);
+                }
+                canvas_draw_str(
+                    canvas,
+                    keyboard_origin_x + keys[column].x,
+                    keyboard_origin_y + keys[column].y,
+                    model->caps_mode ? "CAPS" : "Caps");
+            } else if(key_char == SPEC_KEY) {
+                if(selected) {
+                    canvas_set_color(canvas, ColorBlack);
+                    canvas_draw_box(
+                        canvas,
+                        keyboard_origin_x + keys[column].x - 1,
+                        keyboard_origin_y + keys[column].y - 8,
+                        18,
+                        10);
+                    canvas_set_color(canvas, ColorWhite);
+                } else {
+                    canvas_set_color(canvas, ColorBlack);
+                }
+                canvas_draw_str(
+                    canvas,
+                    keyboard_origin_x + keys[column].x,
+                    keyboard_origin_y + keys[column].y,
+                    model->special_chars_mode ? "SPEC" : "Spec");
+            } else if(key_char == REM_KEY) {
+                if(selected) {
+                    canvas_set_color(canvas, ColorBlack);
+                    canvas_draw_box(
+                        canvas,
+                        keyboard_origin_x + keys[column].x - 1,
+                        keyboard_origin_y + keys[column].y - 8,
+                        14,
+                        10);
+                    canvas_set_color(canvas, ColorWhite);
+                } else {
+                    canvas_set_color(canvas, ColorBlack);
+                }
+                canvas_draw_str(
+                    canvas,
+                    keyboard_origin_x + keys[column].x,
+                    keyboard_origin_y + keys[column].y,
+                    "Rem");
+            } else if(key_char == ENTER_KEY) {
                 canvas_set_color(canvas, ColorBlack);
                 if(selected) {
                     canvas_draw_icon(
@@ -239,7 +403,7 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                         keyboard_origin_y + keys[column].y,
                         &I_KeySave_24x11);
                 }
-            } else if(keys[column].text == BACKSPACE_KEY) {
+            } else if(key_char == BACKSPACE_KEY) {
                 canvas_set_color(canvas, ColorBlack);
                 if(selected) {
                     canvas_draw_icon(
@@ -268,19 +432,18 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                     canvas_set_color(canvas, ColorBlack);
                 }
 
-                if(model->clear_default_text || text_length == 0) {
-                    canvas_draw_glyph(
-                        canvas,
-                        keyboard_origin_x + keys[column].x,
-                        keyboard_origin_y + keys[column].y,
-                        char_to_uppercase(keys[column].text));
-                } else {
-                    canvas_draw_glyph(
-                        canvas,
-                        keyboard_origin_x + keys[column].x,
-                        keyboard_origin_y + keys[column].y,
-                        keys[column].text);
+                char display_char = key_char;
+                if(!model->special_chars_mode && (model->clear_default_text || text_length == 0)) {
+                    display_char = char_to_uppercase(key_char);
+                } else if(!model->special_chars_mode && model->caps_mode) {
+                    display_char = char_to_uppercase(key_char);
                 }
+
+                canvas_draw_glyph(
+                    canvas,
+                    keyboard_origin_x + keys[column].x,
+                    keyboard_origin_y + keys[column].y,
+                    display_char);
             }
         }
     }
@@ -301,7 +464,7 @@ static void text_input_handle_up(TextInput* text_input, TextInputModel* model) {
     UNUSED(text_input);
     if(model->selected_row > 0) {
         model->selected_row--;
-        if(model->selected_column > get_row_size(model->selected_row) - 6) {
+        if(model->selected_column > get_row_size(model->selected_row, model->special_chars_mode) - 6) {
             model->selected_column = model->selected_column + 1;
         }
     } else {
@@ -316,7 +479,7 @@ static void text_input_handle_down(TextInput* text_input, TextInputModel* model)
         model->cursor_select = false;
     } else if(model->selected_row < keyboard_row_count - 1) {
         model->selected_row++;
-        if(model->selected_column > get_row_size(model->selected_row) - 4) {
+        if(model->selected_column > get_row_size(model->selected_row, model->special_chars_mode) - 4) {
             model->selected_column = model->selected_column - 1;
         }
     }
@@ -332,7 +495,7 @@ static void text_input_handle_left(TextInput* text_input, TextInputModel* model)
     } else if(model->selected_column > 0) {
         model->selected_column--;
     } else {
-        model->selected_column = get_row_size(model->selected_row) - 1;
+        model->selected_column = get_row_size(model->selected_row, model->special_chars_mode) - 1;
     }
 }
 
@@ -341,7 +504,7 @@ static void text_input_handle_right(TextInput* text_input, TextInputModel* model
     if(model->cursor_select) {
         model->clear_default_text = false;
         model->cursor_pos = CLAMP(model->cursor_pos + 1, strlen(model->text_buffer), 0u);
-    } else if(model->selected_column < get_row_size(model->selected_row) - 1) {
+    } else if(model->selected_column < get_row_size(model->selected_row, model->special_chars_mode) - 1) {
         model->selected_column++;
     } else {
         model->selected_column = 0;
@@ -357,6 +520,29 @@ static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, I
     bool repeat = type == InputTypeRepeat;
     char selected = get_selected_char(model);
     size_t text_length = strlen(model->text_buffer);
+
+    // Handle special control buttons
+    if(selected == CAPS_KEY) {
+        model->caps_mode = !model->caps_mode;
+        return;
+    } else if(selected == SPEC_KEY) {
+        model->special_chars_mode = !model->special_chars_mode;
+        // Reset column selection to 0 if it's out of bounds for the new keyboard
+        if(model->selected_row > 0) {
+            uint8_t new_row_size = get_row_size(model->selected_row, model->special_chars_mode);
+            if(model->selected_column >= new_row_size) {
+                model->selected_column = new_row_size - 1;
+            }
+        }
+        return;
+    } else if(selected == REM_KEY) {
+        // Clear all text
+        if(model->text_buffer) {
+            model->text_buffer[0] = '\0';
+            model->cursor_pos = 0;
+        }
+        return;
+    }
 
     if(selected == ENTER_KEY) {
         if(model->validator_callback &&
@@ -375,9 +561,13 @@ static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, I
                 text_length = 0;
             }
             if(text_length < (model->text_buffer_size - 1)) {
-                if(shift != (text_length == 0)) {
+                // Apply caps mode if not in special chars mode
+                if(!model->special_chars_mode && model->caps_mode) {
+                    selected = char_to_uppercase(selected);
+                } else if(shift != (text_length == 0)) {
                     selected = char_to_uppercase(selected);
                 }
+                
                 if(model->clear_default_text) {
                     model->text_buffer[0] = selected;
                     model->text_buffer[1] = '\0';
@@ -563,6 +753,8 @@ void text_input_reset(TextInput* text_input) {
             model->validator_callback_context = NULL;
             furi_string_reset(model->validator_text);
             model->validator_message_visible = false;
+            model->caps_mode = false;
+            model->special_chars_mode = false;
         },
         true);
 }
@@ -592,8 +784,8 @@ void text_input_set_result_callback(
             model->cursor_select = false;
             if(text_buffer && text_buffer[0] != '\0') {
                 model->cursor_pos = strlen(text_buffer);
-                // Set focus on Save
-                model->selected_row = 2;
+                // Set focus on Save (now row 3, column 8)
+                model->selected_row = 3;
                 model->selected_column = 8;
             } else {
                 model->cursor_pos = 0;

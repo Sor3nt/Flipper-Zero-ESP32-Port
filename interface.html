@@ -34,6 +34,11 @@ const BOARDS = {
 let selectedBoard = null;
 let port = null;
 let transport = null;
+let reader = null;
+let writer = null;
+let readBuffer = '';
+let currentPath = '/ext';
+let connected = false;
 
 const $ = id => document.getElementById(id);
 
@@ -78,11 +83,19 @@ function setConnectState(state) {
     btn.disabled = false;
     spinner.style.display = 'none';
     btnText.textContent = 'Select device';
+    btn.classList.remove('flash-ready', 'filesystem-ready');
   } else if (state === 'connected') {
     btn.disabled = false;
     spinner.style.display = 'none';
     btnText.textContent = 'Flash now';
     btn.classList.add('flash-ready');
+    btn.classList.remove('filesystem-ready');
+  } else if (state === 'filesystem') {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnText.textContent = 'Manage Files';
+    btn.classList.add('filesystem-ready');
+    btn.classList.remove('flash-ready');
   }
 }
 
@@ -91,6 +104,12 @@ async function handleConnect() {
 
   if (btn.classList.contains('flash-ready')) {
     startFlash();
+    return;
+  }
+
+  if (btn.classList.contains('filesystem-ready')) {
+    showScreen('screen-filesystem');
+    await connectFilesystem();
     return;
   }
 
@@ -191,19 +210,542 @@ function binaryToStr(u8) {
 
 function goBack() {
   setError(null);
+  disconnectFilesystem();
   port = null;
   transport = null;
   selectedBoard = null;
   const btn = $('connect-btn');
-  btn.classList.remove('flash-ready');
+  btn.classList.remove('flash-ready', 'filesystem-ready');
   btn.disabled = true;
   setConnectState('select');
   showScreen('screen-board');
 }
 
+// ── Filesystem helpers ──
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// Strip ANSI escape sequences from string
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+            .replace(/\x1b\[\?[0-9;]*[A-Za-z]/g, '')
+            .replace(/\x1b[()][A-Za-z]/g, '');
+}
+
+async function startReading() {
+  console.log('[startReading] started, readable:', !!port?.readable, 'reader:', !!reader);
+  try {
+    while (connected && reader) {
+      const { value, done } = await reader.read();
+      if (done) { console.log('[startReading] done signal'); break; }
+      const chunk = decoder.decode(value, { stream: true });
+      console.log('[startReading] received', value.byteLength, 'bytes:', JSON.stringify(chunk));
+      readBuffer += chunk;
+    }
+  } catch (e) { console.error('[startReading] error:', e); }
+}
+
+async function sendRaw(data) {
+  if (!writer) return;
+  const bytes = encoder.encode(data);
+  console.log('[sendRaw] sending', bytes.byteLength, 'bytes:', JSON.stringify(data));
+  await writer.write(bytes);
+}
+
+async function sendCommand(cmd) {
+  readBuffer = '';
+  await sendRaw(cmd + '\r');
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function waitForPrompt(timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clean = stripAnsi(readBuffer);
+    if (clean.includes('>: ')) {
+      const result = readBuffer;
+      readBuffer = '';
+      console.log('[waitForPrompt] raw:', JSON.stringify(result));
+      console.log('[waitForPrompt] clean:', stripAnsi(result));
+      return stripAnsi(result);
+    }
+    await sleep(50);
+  }
+  const result = readBuffer;
+  readBuffer = '';
+  console.log('[waitForPrompt] TIMEOUT, raw:', JSON.stringify(result));
+  console.log('[waitForPrompt] TIMEOUT, clean:', stripAnsi(result));
+  return stripAnsi(result);
+}
+
+async function waitForString(str, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (stripAnsi(readBuffer).includes(str)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  console.log('[waitForString] TIMEOUT waiting for:', str, 'buffer:', JSON.stringify(readBuffer));
+  return false;
+}
+
+// ── Storage commands ──
+
+async function listDir(path) {
+  if (!connected) return;
+  currentPath = path;
+  updateBreadcrumb();
+
+  setFilesystemStatus('Loading directory...');
+  await sendCommand('storage list ' + path);
+  const response = await waitForPrompt();
+  setFilesystemStatus('Ready');
+
+  console.log('[listDir] response lines:', response.split(/\r?\n/));
+
+  const lines = response.split(/\r?\n/);
+  const entries = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const dirMatch = trimmed.match(/\[D\]\s+(.+)$/);
+    const fileMatch = trimmed.match(/\[F\]\s+(.+?)\s+(\d+)b$/);
+    if (dirMatch) {
+      entries.push({ name: dirMatch[1], type: 'dir', size: 0 });
+    } else if (fileMatch) {
+      entries.push({ name: fileMatch[1], type: 'file', size: parseInt(fileMatch[2]) });
+    }
+  }
+
+  console.log('[listDir] parsed entries:', entries);
+  renderFileList(entries);
+}
+
+async function downloadFile(path, filename, fileSize) {
+  if (!connected) return;
+  setFilesystemStatus('Downloading ' + filename + '...');
+
+  const chunkSize = 512;
+  readBuffer = '';
+  await sendCommand('storage read_chunks ' + path + ' ' + chunkSize);
+
+  // Wait for "Size: <n>" line
+  await waitForString('Size:', 3000);
+  await sleep(100);
+
+  const sizeMatch = readBuffer.match(/Size:\s*(\d+)/);
+  const size = sizeMatch ? parseInt(sizeMatch[1]) : fileSize;
+
+  const chunks = [];
+  let received = 0;
+
+  while (received < size) {
+    // Wait for "Ready?"
+    await waitForString('Ready?', 5000);
+    await sleep(50);
+    readBuffer = '';
+
+    // Send char to trigger chunk
+    await sendRaw('\r');
+    await sleep(100);
+
+    // Wait for data
+    const expectedBytes = Math.min(chunkSize, size - received);
+    const start = Date.now();
+    while (readBuffer.length < expectedBytes && Date.now() - start < 5000) {
+      await sleep(50);
+    }
+
+    // Collect binary data - we need raw bytes
+    const chunkData = readBuffer.substring(0, expectedBytes);
+    chunks.push(chunkData);
+    received += expectedBytes;
+    readBuffer = readBuffer.substring(expectedBytes);
+
+    const pct = Math.round((received / size) * 100);
+    setFilesystemStatus('Downloading ' + filename + '... ' + pct + '%');
+  }
+
+  // Wait for prompt to return
+  await waitForPrompt(3000);
+
+  // Create blob and download
+  const fullData = chunks.join('');
+  const bytes = new Uint8Array(fullData.length);
+  for (let i = 0; i < fullData.length; i++) {
+    bytes[i] = fullData.charCodeAt(i) & 0xff;
+  }
+
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  setFilesystemStatus('Downloaded ' + filename + ' (' + formatSize(size) + ')');
+}
+
+async function uploadFile() {
+  if (!connected) return;
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async () => {
+    for (const file of input.files) {
+      await uploadSingleFile(file);
+    }
+    await listDir(currentPath);
+  };
+  input.click();
+}
+
+async function uploadSingleFile(file) {
+  const remotePath = currentPath + '/' + file.name;
+  setFilesystemStatus('Uploading ' + file.name + '...');
+
+  // First remove existing file (ignore errors)
+  await sendCommand('storage remove ' + remotePath);
+  await waitForPrompt(3000);
+
+  const data = new Uint8Array(await file.arrayBuffer());
+  const totalSize = data.length;
+
+  readBuffer = '';
+  await sendCommand('storage write_chunk ' + remotePath + ' ' + totalSize);
+
+  // Wait for "Ready"
+  const ready = await waitForString('Ready', 5000);
+  if (!ready) {
+    setFilesystemError('Device did not respond with Ready');
+    return;
+  }
+  await sleep(100);
+  readBuffer = '';
+
+  // Send data in chunks
+  const sendChunkSize = 512;
+  let sent = 0;
+
+  while (sent < totalSize) {
+    const end = Math.min(sent + sendChunkSize, totalSize);
+    const chunk = data.slice(sent, end);
+    await writer.write(chunk);
+    sent = end;
+
+    const pct = Math.round((sent / totalSize) * 100);
+    setFilesystemStatus('Uploading ' + file.name + '... ' + pct + '%');
+
+    // Small delay to not overwhelm the serial buffer
+    await sleep(20);
+  }
+
+  // Wait for command to finish
+  await waitForPrompt(10000);
+  setFilesystemStatus('Uploaded ' + file.name + ' (' + formatSize(totalSize) + ')');
+}
+
+async function createDir() {
+  if (!connected) return;
+  const name = prompt('Directory name:');
+  if (!name) return;
+
+  await sendCommand('storage mkdir ' + currentPath + '/' + name);
+  await waitForPrompt();
+  await listDir(currentPath);
+}
+
+async function deleteEntry(name, type) {
+  if (!confirm('Delete ' + (type === 'dir' ? 'directory' : 'file') + ' "' + name + '"?')) return;
+
+  setFilesystemStatus('Deleting ' + name + '...');
+  await sendCommand('storage remove ' + currentPath + '/' + name);
+  await waitForPrompt();
+  await listDir(currentPath);
+  setFilesystemStatus('Deleted ' + name);
+}
+
+async function editFile(path, filename) {
+  if (!connected) return;
+  setFilesystemStatus('Downloading ' + filename + ' for editing...');
+
+  // Download the file content
+  const chunkSize = 512;
+  readBuffer = '';
+  await sendCommand('storage read_chunks ' + path + ' ' + chunkSize);
+
+  await waitForString('Size:', 3000);
+  await sleep(100);
+
+  const sizeMatch = readBuffer.match(/Size:\s*(\d+)/);
+  const size = sizeMatch ? parseInt(sizeMatch[1]) : 0;
+
+  const chunks = [];
+  let received = 0;
+
+  while (received < size) {
+    await waitForString('Ready?', 5000);
+    await sleep(50);
+    readBuffer = '';
+
+    await sendRaw('\r');
+    await sleep(100);
+
+    const expectedBytes = Math.min(chunkSize, size - received);
+    const start = Date.now();
+    while (readBuffer.length < expectedBytes && Date.now() - start < 5000) {
+      await sleep(50);
+    }
+
+    const chunkData = readBuffer.substring(0, expectedBytes);
+    chunks.push(chunkData);
+    received += expectedBytes;
+    readBuffer = readBuffer.substring(expectedBytes);
+  }
+
+  await waitForPrompt(3000);
+
+  // Combine chunks into text content
+  const fullData = chunks.join('');
+  const content = fullData;
+
+  // Show edit dialog
+  const newContent = prompt('Edit file content:', content);
+  if (newContent === null) return; // Cancelled
+
+  // Upload the modified content
+  setFilesystemStatus('Saving ' + filename + '...');
+
+  await sendCommand('storage remove ' + path);
+  await waitForPrompt(3000);
+
+  const data = encoder.encode(newContent);
+  const totalSize = data.length;
+
+  readBuffer = '';
+  await sendCommand('storage write_chunk ' + path + ' ' + totalSize);
+
+  const ready = await waitForString('Ready', 5000);
+  if (!ready) {
+    setFilesystemError('Device did not respond with Ready');
+    return;
+  }
+  await sleep(100);
+  readBuffer = '';
+
+  const sendChunkSize = 512;
+  let sent = 0;
+
+  while (sent < totalSize) {
+    const end = Math.min(sent + sendChunkSize, totalSize);
+    const chunk = data.slice(sent, end);
+    await writer.write(chunk);
+    sent = end;
+
+    const pct = Math.round((sent / totalSize) * 100);
+    setFilesystemStatus('Saving ' + filename + '... ' + pct + '%');
+    await sleep(20);
+  }
+
+  await waitForPrompt(10000);
+  setFilesystemStatus('Saved ' + filename);
+  await listDir(currentPath);
+}
+
+// ── UI Functions ──
+
+function renderFileList(entries) {
+  const list = $('file-list');
+  list.innerHTML = '';
+
+  // Parent directory entry
+  if (currentPath !== '/ext') {
+    const row = createFileRow('..', 'parent', '');
+    row.querySelector('.entry-name').onclick = () => {
+      const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/ext';
+      listDir(parent);
+    };
+    list.appendChild(row);
+  }
+
+  // Sort: dirs first, then files
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const entry of entries) {
+    const row = createFileRow(entry.name, entry.type, entry.type === 'file' ? formatSize(entry.size) : '');
+    const nameEl = row.querySelector('.entry-name');
+
+    if (entry.type === 'dir') {
+      nameEl.onclick = () => listDir(currentPath + '/' + entry.name);
+    } else {
+      nameEl.onclick = () => downloadFile(currentPath + '/' + entry.name, entry.name, entry.size);
+    }
+
+    const editBtn = row.querySelector('.btn-edit');
+    if (editBtn) {
+      editBtn.onclick = () => editFile(currentPath + '/' + entry.name, entry.name);
+    }
+
+    const deleteBtn = row.querySelector('.btn-delete');
+    deleteBtn.onclick = () => deleteEntry(entry.name, entry.type);
+
+    list.appendChild(row);
+  }
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="empty">Empty directory</div>';
+  }
+}
+
+function createFileRow(name, type, size) {
+  const row = document.createElement('div');
+  row.className = 'file-row';
+
+  const icon = type === 'dir' ? '[DIR]' : type === 'parent' ? '[UP]' : '[FILE]';
+  row.innerHTML = `
+    <span class="entry-icon">${icon}</span>
+    <span class="entry-name">${escHtml(name)}</span>
+    <span class="entry-size">${size}</span>
+    ${type === 'file' ? '<button class="btn-edit" title="Edit">EDIT</button>' : ''}
+    ${type !== 'parent' ? '<button class="btn-delete" title="Delete">DEL</button>' : ''}
+  `;
+  return row;
+}
+
+function updateBreadcrumb() {
+  const parts = currentPath.split('/').filter(Boolean);
+  let html = '';
+  let path = '';
+  for (let i = 0; i < parts.length; i++) {
+    path += '/' + parts[i];
+    const p = path;
+    if (i < parts.length - 1) {
+      html += `<span class="crumb" onclick="window._nav('${p}')">${escHtml(parts[i])}</span> / `;
+    } else {
+      html += `<span class="crumb active">${escHtml(parts[i])}</span>`;
+    }
+  }
+  $('breadcrumb').innerHTML = html;
+}
+
+function setFilesystemStatus(msg) {
+  $('filesystem-status').textContent = msg;
+  $('filesystem-status').style.color = '';
+}
+
+function setFilesystemError(msg) {
+  $('filesystem-status').textContent = msg;
+  $('filesystem-status').style.color = '#ff5555';
+  setTimeout(() => { $('filesystem-status').style.color = ''; }, 3000);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Navigation helper
+window._nav = (path) => listDir(path);
+
+async function connectFilesystem() {
+  if (!port) {
+    setError('No serial port available. Please connect first.');
+    return;
+  }
+
+  try {
+    setFilesystemStatus('Connecting to device...');
+
+    // Reinitialize serial connection for CLI
+    if (transport) {
+      await transport.disconnect();
+    }
+
+    // Create new transport for CLI mode
+    transport = new Transport(port, false); // false = no reset
+
+    // Get reader and writer
+    reader = port.readable.getReader();
+    writer = port.writable.getWriter();
+
+    connected = true;
+
+    // Start reading loop
+    startReading();
+
+    // Wait a bit for connection to stabilize
+    await sleep(1000);
+
+    // Send a command to enter CLI mode
+    await sendCommand('');
+    await waitForPrompt(5000);
+
+    setFilesystemStatus('Connected');
+    await listDir('/ext');
+
+  } catch (e) {
+    console.error('Filesystem connection error:', e);
+    setFilesystemError('Failed to connect: ' + e.message);
+    connected = false;
+  }
+}
+
+async function disconnectFilesystem() {
+  connected = false;
+
+  if (reader) {
+    try {
+      await reader.cancel();
+      reader.releaseLock();
+      reader = null;
+    } catch (e) {
+      console.error('Error releasing reader:', e);
+    }
+  }
+
+  if (writer) {
+    try {
+      await writer.close();
+      writer = null;
+    } catch (e) {
+      console.error('Error closing writer:', e);
+    }
+  }
+
+  if (transport) {
+    try {
+      await transport.disconnect();
+      transport = null;
+    } catch (e) {
+      console.error('Error disconnecting transport:', e);
+    }
+  }
+
+  readBuffer = '';
+  currentPath = '/ext';
+  setFilesystemStatus('Disconnected');
+}
+
 window.handleConnect = handleConnect;
 window.selectBoard = selectBoard;
 window.goBack = goBack;
+window.connectFilesystem = connectFilesystem;
+window.disconnectFilesystem = disconnectFilesystem;
 
 // Check WebSerial support
 if (!('serial' in navigator)) {
@@ -406,21 +948,106 @@ if (!('serial' in navigator)) {
     font-size: 0.85rem;
   }
 
-  /* Screen 3: Success */
-  .success-icon {
-    font-size: 4rem;
+  /* Screen 4: Filesystem */
+  #screen-filesystem h2 {
+    color: #ff8c00;
+    margin-bottom: 16px;
+    font-size: 1.5rem;
+  }
+  #filesystem-status {
+    color: #888;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    min-height: 1.2em;
+  }
+  #breadcrumb {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+    text-align: left;
+  }
+  .crumb {
+    color: #ff8c00;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .crumb:hover { background: #2a2a2a; }
+  .crumb.active { color: #e0e0e0; cursor: default; }
+  .crumb.active:hover { background: none; }
+  #file-list {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    max-height: 300px;
+    overflow-y: auto;
     margin-bottom: 16px;
   }
-  .success-text {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #00c853;
-    margin-bottom: 12px;
+  .file-row {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #2a2a2a;
+    cursor: pointer;
+    transition: background 0.2s;
   }
-  .success-sub {
-    color: #666;
+  .file-row:hover { background: #2a2a2a; }
+  .file-row:last-child { border-bottom: none; }
+  .entry-icon {
+    font-size: 1.2rem;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  .entry-name {
+    flex: 1;
     font-size: 0.9rem;
+    color: #e0e0e0;
   }
+  .entry-size {
+    font-size: 0.8rem;
+    color: #888;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  .btn-edit, .btn-delete {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    margin-left: 4px;
+    transition: all 0.2s;
+  }
+  .btn-edit:hover { color: #ff8c00; background: #2a2a2a; }
+  .btn-delete:hover { color: #ff5555; background: #2a2a2a; }
+  .empty {
+    padding: 20px;
+    color: #666;
+    font-style: italic;
+    text-align: center;
+  }
+  .filesystem-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .filesystem-controls button {
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    color: #e0e0e0;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  .filesystem-controls button:hover { background: #3a3a3a; border-color: #ff8c00; }
   /* Discord button */
 .discord-btn {
   position: fixed;
@@ -553,6 +1180,26 @@ for (let i = 0; i < starCount; i++) {
       <div class="success-icon">&#10003;</div>
       <div class="success-text">Success!</div>
       <p class="success-sub">Firmware flashed successfully!.<br>Your device is rebooting.</p>
+      <br>
+      <div style="display: flex; gap: 12px; flex-direction: column;">
+        <button class="btn" onclick="setConnectState('filesystem'); showScreen('screen-connect');">Manage Files</button>
+        <button class="btn-back" onclick="goBack()">&larr; Flash Another Device</button>
+      </div>
+    </div>
+
+    <!-- Screen 4: Filesystem -->
+    <div id="screen-filesystem" class="screen">
+      <h2>SD Card Filesystem</h2>
+      <div id="filesystem-status">Not connected</div>
+      <div id="breadcrumb"></div>
+      <div id="file-list"></div>
+      <div class="filesystem-controls">
+        <button onclick="uploadFile()">UPLOAD</button>
+        <button onclick="createDir()">NEW DIR</button>
+        <button onclick="listDir(currentPath)">REFRESH</button>
+      </div>
+      <br>
+      <button class="btn-back" onclick="disconnectFilesystem(); goBack();">&larr; Back to Board Selection</button>
     </div>
   </div>
   <center>
