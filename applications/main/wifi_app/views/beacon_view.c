@@ -26,8 +26,9 @@ static void beacon_view_draw_callback(Canvas* canvas, void* model) {
 }
 
 static bool beacon_view_input_callback(InputEvent* event, void* context) {
-    UNUSED(context);
+    ViewDispatcher* vd = context;
     if(event->type == InputTypePress && event->key == InputKeyOk) {
+        view_dispatcher_send_custom_event(vd, InputKeyOk);
         return true;
     }
     return false;
