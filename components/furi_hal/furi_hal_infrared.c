@@ -107,18 +107,19 @@ static bool IRAM_ATTR ir_rmt_rx_done_callback(rmt_channel_handle_t channel,
     for(size_t i = 0; i < edata->num_symbols; i++) {
         const rmt_symbol_word_t* sym = &edata->received_symbols[i];
 
-        /* Each RMT symbol has two phases: duration0/level0 then duration1/level1 */
+        /* Each RMT symbol has two phases: duration0/level0 then duration1/level1.
+         * invert_in=true on the RX channel already converts the active-low IR
+         * receiver output to logical mark=1/space=0, so pass sym->level through
+         * unchanged. Negating here would drop the leader mark via the worker's
+         * "skip first space" rule. */
         if(sym->duration0 > 0 && ir_rx.capture_callback) {
-            /* IR receiver output is typically inverted:
-             * level0=0 (IR mark/burst) -> report as level=1
-             * level0=1 (IR space/idle) -> report as level=0 */
             ir_rx.capture_callback(
-                ir_rx.capture_context, !sym->level0, sym->duration0);
+                ir_rx.capture_context, sym->level0, sym->duration0);
             ir_rx_restart_timeout();
         }
         if(sym->duration1 > 0 && ir_rx.capture_callback) {
             ir_rx.capture_callback(
-                ir_rx.capture_context, !sym->level1, sym->duration1);
+                ir_rx.capture_context, sym->level1, sym->duration1);
             ir_rx_restart_timeout();
         }
     }
