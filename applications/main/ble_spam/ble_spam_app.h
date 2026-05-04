@@ -20,6 +20,7 @@ typedef enum {
     BleSpamAttackSamsungBuds,
     BleSpamAttackSamsungWatch,
     BleSpamAttackXiaomi,
+    BleSpamAttackPairSpam,
     BleSpamAttackCount,
 } BleSpamAttackType;
 
