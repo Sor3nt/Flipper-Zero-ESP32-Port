@@ -96,6 +96,7 @@ COMMON_INCLUDES=(
     -I"$PROJECT_DIR/components/nfc"
     -I"$PROJECT_DIR/components/infrared"
     -I"$PROJECT_DIR/components/lfrfid"
+    -I"$PROJECT_DIR/components/ble_serial"
     -I"$PROJECT_DIR/targets"
     -I"$PROJECT_DIR/lib/subghz"
 )
@@ -139,6 +140,7 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/lwip/port/esp32xx/include"
     -I"$IDF/driver/deprecated"
     -I"$IDF/driver/i2c/include"
+    -I"$IDF/esp_driver_i2s/include"
     -I"$IDF/esp_adc/include"
     -I"$IDF/mbedtls/port/include"
     -I"$IDF/mbedtls/mbedtls/include"
@@ -161,6 +163,28 @@ COMMON_CFLAGS=(
     -Wno-unused-parameter
     -Wno-sign-compare
     -Os
+    -g
+    -DESP_PLATFORM
+    -DIDF_VER=\"v5.4.1\"
+    -DSOC_MMU_PAGE_SIZE=CONFIG_MMU_PAGE_SIZE
+    -DSOC_XTAL_FREQ_MHZ=CONFIG_XTAL_FREQ
+)
+
+COMMON_CXXFLAGS=(
+    -fno-common
+    -ffunction-sections
+    -fdata-sections
+    -fno-builtin
+    -fno-jump-tables
+    -fno-tree-switch-conversion
+    -std=gnu++17
+    -fno-exceptions
+    -fno-rtti
+    -Wall
+    -Wno-unused-parameter
+    -Wno-sign-compare
+    -Os
+    -g
     -DESP_PLATFORM
     -DIDF_VER=\"v5.4.1\"
     -DSOC_MMU_PAGE_SIZE=CONFIG_MMU_PAGE_SIZE
@@ -175,6 +199,7 @@ build_for_target() {
     local FW_BUILD_DIR="$4"
 
     local CC="${TOOLCHAIN}-gcc"
+    local CXX="${TOOLCHAIN}-g++"
     local LD="${TOOLCHAIN}-ld"
     local OBJCOPY="${TOOLCHAIN}-objcopy"
     local READELF="${TOOLCHAIN}-readelf"
@@ -284,26 +309,51 @@ build_for_target() {
     fi
 
     # Find source files
-    local -a SOURCES=($(find "$APP_DIR" -name '*.c' -type f))
+    local -a C_SOURCES=($(find "$APP_DIR" -name '*.c' -type f))
+    local -a CXX_SOURCES=($(find "$APP_DIR" -name '*.cpp' -type f))
     # Add generated icon .c files
     if [ -d "$ICONS_GEN_DIR" ]; then
         for icon_src in "$ICONS_GEN_DIR"/*.c; do
-            [ -f "$icon_src" ] && SOURCES+=("$icon_src")
+            [ -f "$icon_src" ] && C_SOURCES+=("$icon_src")
         done
     fi
 
-    echo "  Sources: ${#SOURCES[@]} files"
+    local TOTAL_SOURCES=$(( ${#C_SOURCES[@]} + ${#CXX_SOURCES[@]} ))
+    echo "  Sources: $TOTAL_SOURCES files (${#C_SOURCES[@]} C, ${#CXX_SOURCES[@]} C++)"
 
-    # Compile
+    # Auto-discover private lib include paths under $APP_DIR/lib/<libname>/
+    # (entspricht fap_private_libs[*].fap_include_paths in application.fam)
+    local -a APP_INCLUDES=(
+        -I"$APP_DIR" -I"$APP_DIR/helpers" -I"$APP_DIR/scenes"
+        -I"$APP_DIR/views" -I"$APP_DIR/protocols"
+        -I"$APP_DIR/app" -I"$APP_DIR/lib"
+    )
+    if [ -d "$APP_DIR/lib" ]; then
+        for libdir in "$APP_DIR"/lib/*/; do
+            [ -d "$libdir" ] && APP_INCLUDES+=(-I"${libdir%/}")
+        done
+    fi
+
+    # Compile C sources
     local -a OBJECTS=()
-    for src in "${SOURCES[@]}"; do
+    for src in "${C_SOURCES[@]}"; do
         local obj="$BUILD_DIR/$(echo "$src" | sed 's|/|_|g' | sed 's|\.c$|.o|')"
         OBJECTS+=("$obj")
 
         "$CC" "${COMMON_CFLAGS[@]}" "${TARGET_CFLAGS[@]}" \
             "${COMMON_INCLUDES[@]}" "${IDF_COMMON_INCLUDES[@]}" "${TARGET_INCLUDES[@]}" \
-            -I"$APP_DIR" -I"$APP_DIR/helpers" -I"$APP_DIR/scenes" \
-            -I"$APP_DIR/views" -I"$APP_DIR/protocols" \
+            "${APP_INCLUDES[@]}" \
+            -c "$src" -o "$obj"
+    done
+
+    # Compile C++ sources
+    for src in "${CXX_SOURCES[@]}"; do
+        local obj="$BUILD_DIR/$(echo "$src" | sed 's|/|_|g' | sed 's|\.cpp$|.o|')"
+        OBJECTS+=("$obj")
+
+        "$CXX" "${COMMON_CXXFLAGS[@]}" "${TARGET_CFLAGS[@]}" \
+            "${COMMON_INCLUDES[@]}" "${IDF_COMMON_INCLUDES[@]}" "${TARGET_INCLUDES[@]}" \
+            "${APP_INCLUDES[@]}" \
             -c "$src" -o "$obj"
     done
 
@@ -326,9 +376,14 @@ build_for_target() {
         $ICON_ARG \
         --output "$BUILD_DIR/manifest.bin"
 
-    # Inject manifest into ELF
+    # Inject manifest into ELF + strip Debug-Sections.
+    # --strip-debug entfernt .debug_* (DWARF) und ihre .rela.debug_* — bei Doom
+    # ~4.3 MB von 4.7 MB. Symbol-Tabelle (.symtab/.strtab) und Code-Relocations
+    # (.rela.text/.data/.rodata) bleiben erhalten, sind für ELF-Loader essentiell.
+    # app.elf bleibt mit voller Debug-Info verfügbar für lokale Analyse.
     "$OBJCOPY" --add-section .fapmeta="$BUILD_DIR/manifest.bin" \
         --set-section-flags .fapmeta=contents,readonly \
+        --strip-debug \
         "$BUILD_DIR/app.elf" "$OUTPUT"
 
     local SIZE=$(wc -c < "$OUTPUT")
