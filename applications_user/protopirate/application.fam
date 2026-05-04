@@ -1,0 +1,12 @@
+App(
+    appid="proto_pirate",
+    name="ProtoPirate",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="protopirate_app",
+    stack_size=4 * 1024,
+    icon="A_Sub1ghz_14",
+    order=70,
+    fap_libs=["assets"],
+    fap_icon_assets="images",
+    cdefines=["FAP_VERSION=\"2.6\""],
+)
