@@ -620,3 +620,89 @@ static inline uint8_t ble_spam_build_xiaomi(uint8_t* buf) {
     memset(&buf[i], 0, 6); i += 6;
     return i; /* 28 */
 }
+
+
+static const char* pair_spam_device_names[] = {
+    "Your Sister's Apple Watch",
+    "Mom's iPad",
+    "Dad's Headphones",
+    "Neighbor's Doorbell",
+    "Justin Bieber's Phone",
+    "FBI Van WiFi",
+    "Totally Not A Scam",
+    "Free Bitcoin Wallet",
+    "Government Tracking Device",
+    "Space Laser Transmitter",
+    "Aliens Communicator",
+    "DeLorean Time Machine",
+    "Mr. Whiskers' Collar",
+    "Lost AirPods (Not Mine)",
+    "Quantum Toaster",
+    "Bathroom Scale",
+    "Smart Fridge (Judgy)",
+    "AI Pillow",
+    "Self-Aware Microwave",
+    "Sentient USB Cable",
+    "Philosophical Doorbell",
+    "Existential Crisis Hub",
+    "Bluetooth Sock Matcher",
+    "The Matrix Server",
+    "Coffee Maker From Future",
+    "Portal Gun Charger",
+    "Rickroll Transmitter",
+    "Rickroll Controller",
+    "Hamster Wheel Tracker",
+    "Rubber Duck Debugger",
+    "Echo's Evil Twin",
+    "Smart Rock",
+    "AI Rubber Band",
+    "Procrastination Device",
+    "Motivation Booster",
+    "WiFi Extender 2: The Sequel",
+    "5G Microwave",
+    "Cloud Storage IRL",
+    "Bluetooth Soap Dispenser",
+    "Smart Plant Whisperer",
+    "AI Pet Rock",
+    "Kitchen Gadget Simulator",
+    "Weather Control Unit",
+    "Interdimensional Portal",
+    "Spice Rack AI",
+    "Sentient Salad",
+    "Philosophy Machine",
+    "Regret Recorder",
+    "Debt Simulator",
+    "Cake Baking AI",
+};
+
+#define PAIR_SPAM_DEVICE_COUNT (sizeof(pair_spam_device_names) / sizeof(pair_spam_device_names[0]))
+
+/**
+ * Pair Spam -- Generic Pairable BLE Device.
+ *
+ * Creates a simple BLE advertisement that shows up as a pairable device.
+ * Layout (AD structure):
+ *   [0..2]   02 01 06                       -- AD Flags (LE Discoverable, LE Connectable)
+ *   [3]      LEN                            -- Complete Local Name length + type
+ *   [4]      09                             -- AD type: Complete Local Name
+ *   [5..]    NAME_BYTES                     -- UTF-8 device name
+ *
+ * Returns: up to 31 bytes
+ */
+static inline uint8_t ble_spam_build_pair_spam(uint8_t* buf, const char* name) {
+    size_t name_len = strlen(name);
+    if(name_len > 24) name_len = 24;  // Keep total under 31 bytes
+    
+    uint8_t i = 0;
+    
+    // AD Flags: Discoverable, Connectable
+    buf[i++] = 0x02; buf[i++] = 0x01; buf[i++] = 0x06;
+    
+    // Complete Local Name
+    buf[i++] = (uint8_t)(name_len + 1);  // Length: name + type byte
+    buf[i++] = 0x09;                      // AD type: Complete Local Name
+    memcpy(&buf[i], name, name_len);
+    i += name_len;
+    
+    return i;
+}

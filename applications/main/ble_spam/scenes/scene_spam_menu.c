@@ -9,6 +9,7 @@ static const char* attack_names[] = {
     [BleSpamAttackSamsungBuds] = "Samsung Buds",
     [BleSpamAttackSamsungWatch] = "Samsung Watch",
     [BleSpamAttackXiaomi] = "Xiaomi QuickConnect",
+    [BleSpamAttackPairSpam] = "Pair Spam",
 };
 
 static void spam_menu_callback(void* context, uint32_t index) {
