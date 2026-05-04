@@ -17,6 +17,7 @@ static const char* attack_short_names[] = {
     [BleSpamAttackSamsungBuds] = "Samsung Buds",
     [BleSpamAttackSamsungWatch] = "Samsung Watch",
     [BleSpamAttackXiaomi] = "Xiaomi",
+    [BleSpamAttackPairSpam] = "Pair Spam",
 };
 
 static const uint32_t speed_steps[] = {50, 100, 150, 200, 300, 500};
@@ -89,6 +90,13 @@ static uint8_t build_next_payload(BleSpamApp* app, uint8_t* buf) {
         name = "Xiaomi Device";
         len = ble_spam_build_xiaomi(buf);
         break;
+    case BleSpamAttackPairSpam: {
+        uint16_t idx = app->current_index % PAIR_SPAM_DEVICE_COUNT;
+        name = pair_spam_device_names[idx];
+        len = ble_spam_build_pair_spam(buf, pair_spam_device_names[idx]);
+        app->current_index = idx + 1;
+        break;
+    }
     default:
         break;
     }
