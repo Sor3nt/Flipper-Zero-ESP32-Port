@@ -5,6 +5,7 @@
 #include <gui/scene_manager.h>
 #include <gui/view_dispatcher.h>
 #include <gui/modules/submenu.h>
+#include <gui/modules/text_input.h>
 
 #include "ble_tracker_hal.h"
 #include "scenes/scenes.h"
@@ -21,6 +22,8 @@ typedef enum {
     BleSpamAttackSamsungWatch,
     BleSpamAttackXiaomi,
     BleSpamAttackPairSpam,
+    BleSpamAttackPairSpamRickroll,
+    BleSpamAttackPairSpamCustom,
     BleSpamAttackCount,
 } BleSpamAttackType;
 
@@ -37,6 +40,7 @@ typedef enum {
 typedef enum {
     BleSpamViewSubmenu,
     BleSpamViewRunning,
+    BleSpamViewTextInput,
     BleSpamViewWalkScan,
     BleSpamViewWalkDetail,
     BleSpamViewAutoWalk,
@@ -52,6 +56,7 @@ typedef struct {
 
     Submenu* submenu;
     View* view_running;
+    TextInput* text_input;
 
     // Attack state
     BleSpamAttackType attack_type;
@@ -60,6 +65,7 @@ typedef struct {
     uint32_t delay_ms;
     uint16_t current_index;
     char current_device[48];
+    char custom_pair_name[32];
 
     // BLE Walk state
     View* view_walk_scan;

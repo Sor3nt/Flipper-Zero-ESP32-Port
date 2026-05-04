@@ -677,6 +677,21 @@ static const char* pair_spam_device_names[] = {
 
 #define PAIR_SPAM_DEVICE_COUNT (sizeof(pair_spam_device_names) / sizeof(pair_spam_device_names[0]))
 
+static const char* pair_spam_rickroll_names[] = {
+    "Never Gonna Give You Up",
+    "Rick Astley Bluetooth",
+    "Never Gonna Let You Down",
+    "Never Gonna Run Around",
+    "Never Gonna Desert You",
+    "Rickroll Device",
+    "Uptown Funk Device",
+    "Rickroll Remote",
+    "Never Gonna Make You Cry",
+    "Never Gonna Say Goodbye",
+};
+
+#define PAIR_SPAM_RICKROLL_COUNT (sizeof(pair_spam_rickroll_names) / sizeof(pair_spam_rickroll_names[0]))
+
 /**
  * Pair Spam -- Generic Pairable BLE Device.
  *
