@@ -10,6 +10,8 @@ static const char* attack_names[] = {
     [BleSpamAttackSamsungWatch] = "Samsung Watch",
     [BleSpamAttackXiaomi] = "Xiaomi QuickConnect",
     [BleSpamAttackPairSpam] = "Pair Spam",
+    [BleSpamAttackPairSpamRickroll] = "Pair Spam (Rickroll)",
+    [BleSpamAttackPairSpamCustom] = "Pair Spam (Custom)",
 };
 
 static void spam_menu_callback(void* context, uint32_t index) {
@@ -34,7 +36,11 @@ bool ble_spam_scene_spam_menu_on_event(void* context, SceneManagerEvent event) {
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event < BleSpamAttackCount) {
             app->attack_type = event.event;
-            scene_manager_next_scene(app->scene_manager, BleSpamSceneRunning);
+            if(event.event == BleSpamAttackPairSpamCustom) {
+                scene_manager_next_scene(app->scene_manager, BleSpamScenePairSpamCustom);
+            } else {
+                scene_manager_next_scene(app->scene_manager, BleSpamSceneRunning);
+            }
             consumed = true;
         }
     }
