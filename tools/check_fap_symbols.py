@@ -59,12 +59,12 @@ def main():
             missing.append((sym, h))
 
     if missing:
-        print(f"  ⚠ {len(missing)} missing API symbols:")
+        print(f"  [!] {len(missing)} missing API symbols:")
         for sym, h in sorted(missing):
             print(f"    {sym} (hash=0x{h:08x})")
         return 1
     else:
-        print(f"  ✓ All {len(symbols)} symbols resolved")
+        print(f"  [OK] All {len(symbols)} symbols resolved")
         return 0
 
 

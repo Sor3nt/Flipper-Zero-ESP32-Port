@@ -19,9 +19,16 @@ if [ -z "$APP_DIR" ] || [ ! -d "$APP_DIR" ]; then
     exit 1
 fi
 
-# Source ESP-IDF for toolchain access
-if [ -f "$HOME/esp/esp-idf/export.sh" ]; then
-    . "$HOME/esp/esp-idf/export.sh" >/dev/null 2>&1
+# Source ESP-IDF for toolchain access. Honor ESP_IDF_DIR if set; fall back to
+# the canonical ~/esp/esp-idf path; finally try the Windows default install.
+if [ -z "$IDF_PATH" ]; then
+    if [ -n "$ESP_IDF_DIR" ] && [ -f "$ESP_IDF_DIR/export.sh" ]; then
+        . "$ESP_IDF_DIR/export.sh" >/dev/null 2>&1
+    elif [ -f "$HOME/esp/esp-idf/export.sh" ]; then
+        . "$HOME/esp/esp-idf/export.sh" >/dev/null 2>&1
+    elif [ -f "/c/Espressif/frameworks/esp-idf-v5.4.1/export.sh" ]; then
+        . "/c/Espressif/frameworks/esp-idf-v5.4.1/export.sh" >/dev/null 2>&1
+    fi
 fi
 
 # ── Parse application.fam ───────────────────────────────────────────
@@ -80,6 +87,9 @@ COMMON_INCLUDES=(
     -I"$PROJECT_DIR/components/u8g2"
     -I"$PROJECT_DIR/components/furi_hal"
     -I"$PROJECT_DIR/components/furi_hal/boards"
+    -I"$PROJECT_DIR/components/furi_ble"
+    -I"$PROJECT_DIR/components/bt"
+    -I"$PROJECT_DIR/components/btshim"
     -I"$PROJECT_DIR/components/subghz"
     -I"$PROJECT_DIR/components/bit_lib"
     -I"$PROJECT_DIR/components/archive"
@@ -90,8 +100,12 @@ COMMON_INCLUDES=(
     -I"$PROJECT_DIR/lib/subghz"
 )
 
-# ESP-IDF common includes
-IDF="$HOME/esp/esp-idf/components"
+# ESP-IDF common includes — derive from IDF_PATH (set by export.sh) when present.
+if [ -n "$IDF_PATH" ] && [ -d "$IDF_PATH/components" ]; then
+    IDF="$IDF_PATH/components"
+else
+    IDF="$HOME/esp/esp-idf/components"
+fi
 IDF_COMMON_INCLUDES=(
     -I"$IDF/newlib/platform_include"
     -I"$IDF/esp_hw_support/include"
@@ -128,6 +142,10 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/esp_adc/include"
     -I"$IDF/mbedtls/port/include"
     -I"$IDF/mbedtls/mbedtls/include"
+    -I"$IDF/esp_lcd/include"
+    -I"$IDF/esp_lcd/interface"
+    -I"$IDF/esp_lcd/rgb/include"
+    -I"$IDF/esp_lcd/priv_include"
 )
 
 # ── Common compiler flags ───────────────────────────────────────────
