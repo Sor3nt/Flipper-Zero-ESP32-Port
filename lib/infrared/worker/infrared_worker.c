@@ -439,8 +439,10 @@ static bool infrared_worker_tx_fill_buffer(InfraredWorker* instance) {
             status = infrared_encode(instance->infrared_encoder, &timing.duration, &timing.level);
         } else {
             timing.duration = instance->signal.raw.timings[instance->tx.tx_raw_cnt];
-            /* raw always starts from Mark, but we fill it with space delay at start */
-            timing.level = (instance->tx.tx_raw_cnt % 2);
+            /* raw always starts with a Mark, then alternates Mark/Space.
+             * On ESP32 the TX HAL emits carrier when level=true, so emit
+             * level=true for even indices (marks) and false for odd (spaces). */
+            timing.level = !(instance->tx.tx_raw_cnt % 2);
             ++instance->tx.tx_raw_cnt;
             if(instance->tx.tx_raw_cnt >= instance->signal.timings_cnt) {
                 instance->tx.tx_raw_cnt = 0;
