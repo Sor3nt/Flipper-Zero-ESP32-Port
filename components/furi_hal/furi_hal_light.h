@@ -49,6 +49,22 @@ void furi_hal_light_blink_set_color(Light light);
  */
 void furi_hal_light_sequence(const char* sequence);
 
+/** Set RGB color on ALL WS2812 pixels and push immediately.
+ *  No-op on boards without an addressable LED ring. */
+void furi_hal_light_set_rgb_all(uint8_t r, uint8_t g, uint8_t b);
+
+/** Set RGB color on a specific WS2812 pixel WITHOUT pushing.
+ *  Call furi_hal_light_refresh() after staging all pixels you want.
+ *  No-op on boards without an addressable LED ring. */
+void furi_hal_light_set_pixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b);
+
+/** Push staged pixel data to the strip.
+ *  No-op on boards without an addressable LED ring. */
+void furi_hal_light_refresh(void);
+
+/** Number of WS2812 pixels on this board (0 if no addressable ring). */
+uint16_t furi_hal_light_pixel_count(void);
+
 #ifdef __cplusplus
 }
 #endif
