@@ -45,9 +45,11 @@ static const char* TAG = "FuriHalDisplay";
 #define MARGIN_X ((LCD_H_RES - SCALED_WIDTH) / 2)
 #define MARGIN_Y ((LCD_V_RES - SCALED_HEIGHT) / 2)
 
-/* Colors from board config — fg_color is set at runtime based on reset reason */
-#define BG_COLOR BOARD_LCD_BG_COLOR
+/* Colors from board config — both are set at runtime so the user can pick
+ * UI Background (fg_color, the field that fills "unset" mono pixels) and
+ * UI Foreground (bg_color, what fills "set" pixels = drawn UI elements). */
 static uint16_t fg_color;
+static uint16_t bg_color;
 
 /* SPI configuration from board config */
 #define LCD_SPI_HOST   BOARD_LCD_SPI_HOST
@@ -117,6 +119,28 @@ static void display_fill_color(uint16_t color) {
     }
     furi_hal_spi_bus_unlock();
     free(line);
+}
+
+/* Paint a solid-color rectangle using rgb565_buf as scratch. Caller must hold
+ * the SPI bus lock. Chunks vertically at STRIPE_HEIGHT to stay within the
+ * buffer's capacity (STRIPE_HEIGHT rows × SCALED_WIDTH cols). Used by the
+ * commit path to keep the LCD margins in sync with fg_color changes. */
+static void display_paint_rect(
+    size_t x, size_t y, size_t w, size_t h, uint16_t color) {
+    if(w == 0 || h == 0 || w > SCALED_WIDTH) return;
+
+    for(size_t y_off = 0; y_off < h; y_off += STRIPE_HEIGHT) {
+        size_t chunk_h = h - y_off;
+        if(chunk_h > STRIPE_HEIGHT) chunk_h = STRIPE_HEIGHT;
+
+        const size_t px_count = w * chunk_h;
+        for(size_t i = 0; i < px_count; i++) rgb565_buf[i] = color;
+
+        furi_hal_display_prepare_flush();
+        esp_lcd_panel_draw_bitmap(
+            panel_handle, x, y + y_off, x + w, y + y_off + chunk_h, rgb565_buf);
+        furi_hal_display_wait_flush();
+    }
 }
 
 void furi_hal_display_init(void) {
@@ -199,6 +223,7 @@ void furi_hal_display_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
     fg_color = BOARD_LCD_FG_COLOR;
+    bg_color = BOARD_LCD_BG_COLOR;
 
     furi_hal_display_init_scale_lut();
 
@@ -234,6 +259,18 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
      */
     furi_hal_spi_bus_lock();
 
+    /* Repaint top/bottom margin strips with the current fg_color every frame
+     * so the entire screen tracks UI Color changes. Without this the init-time
+     * fill persists and the margins keep showing the boot-time orange while
+     * the central framebuffer area updates. Side strips (MARGIN_X) skipped;
+     * SCALED_WIDTH = LCD_H_RES on T-Embed Plus so MARGIN_X=0 in practice. */
+    if(MARGIN_Y > 0) {
+        display_paint_rect(MARGIN_X, 0, SCALED_WIDTH, MARGIN_Y, fg_color);
+        display_paint_rect(
+            MARGIN_X, MARGIN_Y + SCALED_HEIGHT,
+            SCALED_WIDTH, LCD_V_RES - MARGIN_Y - SCALED_HEIGHT, fg_color);
+    }
+
     for(size_t stripe_y = 0; stripe_y < SCALED_HEIGHT; stripe_y += STRIPE_HEIGHT) {
         size_t stripe_h = STRIPE_HEIGHT;
         if(stripe_y + stripe_h > SCALED_HEIGHT) {
@@ -251,7 +288,7 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
             for(size_t sx = 0; sx < SCALED_WIDTH; sx++) {
                 const uint8_t mono_x = x_scale_lut[sx];
                 const bool pixel_set = (data[page * FB_WIDTH + mono_x] & bit_mask) != 0;
-                dst[sx] = pixel_set ? BG_COLOR : fg_color;
+                dst[sx] = pixel_set ? bg_color : fg_color;
             }
         }
 
@@ -282,4 +319,20 @@ uint16_t furi_hal_display_get_v_res(void) {
 
 esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void) {
     return panel_handle;
+}
+
+void furi_hal_display_set_fg_color(uint16_t color) {
+    fg_color = color;
+}
+
+uint16_t furi_hal_display_get_fg_color(void) {
+    return fg_color;
+}
+
+void furi_hal_display_set_bg_color(uint16_t color) {
+    bg_color = color;
+}
+
+uint16_t furi_hal_display_get_bg_color(void) {
+    return bg_color;
 }

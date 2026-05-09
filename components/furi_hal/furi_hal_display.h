@@ -34,6 +34,27 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size);
  */
 void furi_hal_display_set_backlight(uint8_t brightness);
 
+/** Set the UI foreground color (the tint that fills the "ink" of every
+ * monochrome u8g2 frame on this color port). Stored as RGB565, byte-swapped
+ * for the ST7789 SPI byte order.
+ *
+ * Takes effect on the next frame commit (no full redraw needed).
+ *
+ * @param      color  RGB565 (byte-swapped) color value
+ */
+void furi_hal_display_set_fg_color(uint16_t color);
+
+/** Get the current UI foreground color (RGB565 byte-swapped). Useful for
+ * spectrum/animation drivers that need to derive the next frame's color.
+ */
+uint16_t furi_hal_display_get_fg_color(void);
+
+/** Set/get the UI background color — fills the "set" mono pixels (the drawn
+ * UI elements). Default is BOARD_LCD_BG_COLOR (typically black). Pairs with
+ * fg_color to give the user full control of the bichromatic UI palette. */
+void furi_hal_display_set_bg_color(uint16_t color);
+uint16_t furi_hal_display_get_bg_color(void);
+
 /** Get native panel dimensions (post swap_xy). Intended for full-screen
  * takeover apps (e.g. game emulators) that bypass the 128x64 framebuffer.
  */
