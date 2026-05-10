@@ -42,6 +42,7 @@ extern "C" {
 #define EMV_TAG_CARDHOLDER_NAME_EXTENDED 0x9F0B
 #define EMV_TAG_TRACK_2_DATA             0x9F6B
 #define EMV_TAG_GPO_FMT1                 0x80
+#define EMV_TAG_CVM_LIST                 0x8E
 
 #define EMV_TAG_RESP_BUF_SIZE        0x6C
 #define EMV_TAG_RESP_BYTES_AVAILABLE 0x61
@@ -96,11 +97,21 @@ typedef struct {
     uint8_t effective_year;
     uint16_t country_code;
     uint16_t currency_code;
+    uint16_t service_code; /* 3-digit ISO 7813 code from Track 2, 0 if absent */
     uint8_t pin_try_counter;
     uint16_t transaction_counter;
     uint16_t last_online_atc;
     APDU pdol;
     APDU afl;
+    /* Cardholder Verification Method list (tag 0x8E). Format:
+     *   [Amount X (4)] [Amount Y (4)] [CV Rule (2)]+
+     * where each CV Rule = (CVM byte, Condition byte). */
+    uint8_t cvm_list[64];
+    uint8_t cvm_list_len;
+    /* Raw record dumps (read via READ RECORD for forensic / debug view).
+     * Records are concatenated with a single 0xFF separator between them. */
+    uint8_t records_raw[512];
+    uint16_t records_raw_len;
 } EmvApplication;
 
 typedef enum {
