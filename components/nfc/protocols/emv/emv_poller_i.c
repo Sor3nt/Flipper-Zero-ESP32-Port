@@ -296,6 +296,14 @@ static bool
         success = true;
         FURI_LOG_T(TAG, "found EMV_TAG_PIN_TRY_COUNTER %x: %d", tag, app->pin_try_counter);
         break;
+    case EMV_TAG_CVM_LIST:
+        if(tlen <= sizeof(app->cvm_list)) {
+            memcpy(app->cvm_list, &buff[i], tlen);
+            app->cvm_list_len = tlen;
+            success = true;
+            FURI_LOG_T(TAG, "found EMV_TAG_CVM_LIST %x: %d bytes", tag, tlen);
+        }
+        break;
     }
     return success;
 }
@@ -624,6 +632,21 @@ EmvError emv_poller_read_sfi_record(EmvPoller* instance, uint8_t sfi, uint8_t re
             FURI_LOG_E(TAG, "Failed to read SFI 0x%X record %d", sfi, record_num);
             error = emv_process_error(iso14443_4a_error);
             break;
+        }
+
+        /* Append raw record bytes to records_raw for the forensic hex view.
+         * Records are concatenated with a 0xFF separator. Truncate cleanly if
+         * the buffer fills (some cards have many large records). */
+        EmvApplication* app = &instance->data->emv_application;
+        size_t resp_len = bit_buffer_get_size_bytes(instance->rx_buffer);
+        const uint8_t* resp_data = bit_buffer_get_data(instance->rx_buffer);
+        if(resp_len >= 2) resp_len -= 2; /* trim SW1 SW2 */
+        size_t avail = sizeof(app->records_raw) - app->records_raw_len;
+        size_t need = resp_len + (app->records_raw_len ? 1 : 0);
+        if(need <= avail && resp_len > 0) {
+            if(app->records_raw_len) app->records_raw[app->records_raw_len++] = 0xFF;
+            memcpy(&app->records_raw[app->records_raw_len], resp_data, resp_len);
+            app->records_raw_len += resp_len;
         }
     } while(false);
 

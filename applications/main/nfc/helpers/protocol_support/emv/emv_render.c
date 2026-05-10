@@ -277,6 +277,72 @@ static void nfc_render_emv_service_code(const EmvApplication* apl, FuriString* s
     furi_string_cat_printf(str, "SC %u%u%u %s/%s/%s\n", d1, d2, d3, tech, auth, svc);
 }
 
+static void nfc_render_emv_cvm_list(const EmvApplication* apl, FuriString* str) {
+    if(apl->cvm_list_len < 10) {
+        /* Need at least 8 bytes (X+Y amounts) + 1 CV rule (2 bytes) */
+        return;
+    }
+    /* CVM List: [X amount: 4][Y amount: 4][CV rule: 2]+ */
+    uint32_t amount_x = (apl->cvm_list[0] << 24) | (apl->cvm_list[1] << 16) |
+                       (apl->cvm_list[2] << 8) | apl->cvm_list[3];
+    uint32_t amount_y = (apl->cvm_list[4] << 24) | (apl->cvm_list[5] << 16) |
+                       (apl->cvm_list[6] << 8) | apl->cvm_list[7];
+    furi_string_cat_printf(str, "\e#CVM list\n");
+    if(amount_x) furi_string_cat_printf(str, "X amount: %lu\n", (unsigned long)amount_x);
+    if(amount_y) furi_string_cat_printf(str, "Y amount: %lu\n", (unsigned long)amount_y);
+
+    for(uint8_t pos = 8; pos + 1 < apl->cvm_list_len; pos += 2) {
+        uint8_t cvm = apl->cvm_list[pos] & 0x3F;
+        bool fail_continue = (apl->cvm_list[pos] & 0x40) != 0;
+        uint8_t cond = apl->cvm_list[pos + 1];
+
+        const char* method;
+        switch(cvm) {
+        case 0x00: method = "Fail CVM"; break;
+        case 0x01: method = "Plain PIN"; break;
+        case 0x02: method = "Online PIN"; break;
+        case 0x03: method = "Plain PIN + sig"; break;
+        case 0x04: method = "Enciphered PIN"; break;
+        case 0x05: method = "Enciphered PIN + sig"; break;
+        case 0x1E: method = "Signature"; break;
+        case 0x1F: method = "No CVM"; break;
+        default: method = "?"; break;
+        }
+        const char* condition;
+        switch(cond) {
+        case 0x00: condition = "always"; break;
+        case 0x01: condition = "if cash"; break;
+        case 0x02: condition = "if not cash"; break;
+        case 0x03: condition = "if terminal supports"; break;
+        case 0x04: condition = "if manual cash"; break;
+        case 0x05: condition = "if purchase + cashback"; break;
+        case 0x06: condition = "if X currency, < X"; break;
+        case 0x07: condition = "if X currency, > X"; break;
+        case 0x08: condition = "if Y currency, < Y"; break;
+        case 0x09: condition = "if Y currency, > Y"; break;
+        default: condition = "?"; break;
+        }
+        furi_string_cat_printf(
+            str, "%s%s, %s\n", method, fail_continue ? " (try next on fail)" : "", condition);
+    }
+}
+
+static void nfc_render_emv_records_hex(const EmvApplication* apl, FuriString* str) {
+    if(apl->records_raw_len == 0) return;
+    furi_string_cat_printf(str, "\e#Records (%u bytes)\n", apl->records_raw_len);
+    for(uint16_t k = 0; k < apl->records_raw_len; k++) {
+        if(apl->records_raw[k] == 0xFF && k > 0 && k + 1 < apl->records_raw_len) {
+            /* separator between records: insert a newline */
+            furi_string_cat_printf(str, "\n");
+        } else {
+            furi_string_cat_printf(str, "%02X", apl->records_raw[k]);
+            if((k % 16) == 15) furi_string_cat_printf(str, "\n");
+            else if((k % 2) == 1) furi_string_cat_printf(str, " ");
+        }
+    }
+    furi_string_cat_printf(str, "\n");
+}
+
 static void nfc_render_emv_counters(const EmvApplication* apl, FuriString* str) {
     if(apl->transaction_counter)
         furi_string_cat_printf(str, "ATC: %d\n", apl->transaction_counter);
@@ -304,4 +370,6 @@ void nfc_render_emv_extra(const EmvData* data, FuriString* str) {
     nfc_render_emv_counters(apl, str);
     nfc_render_emv_currency(apl->currency_code, str);
     nfc_render_emv_country(apl->country_code, str);
+    nfc_render_emv_cvm_list(apl, str);
+    nfc_render_emv_records_hex(apl, str);
 }
