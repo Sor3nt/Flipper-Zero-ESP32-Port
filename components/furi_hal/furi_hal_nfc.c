@@ -970,6 +970,10 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     if(err == FuriHalNfcErrorNone && resp_len >= 1) {
         uint8_t status = resp[0];
         if(status == PN532_STATUS_OK) {
+            /* Refresh cache timestamp on every successful card transaction.
+             * This keeps the cache "alive" through a multi-APDU EMV read
+             * that may take longer than the TTL window. */
+            pn532_cache_time_us = esp_timer_get_time();
             size_t data_len = resp_len - 1; /* strip status byte */
 
             if(pn532_iso_dep_mode) {
