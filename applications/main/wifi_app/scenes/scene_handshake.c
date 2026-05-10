@@ -15,8 +15,10 @@
 // ---------------------------------------------------------------------------
 // Ring buffer for captured packets (single producer, single consumer)
 // ---------------------------------------------------------------------------
-#define HS_PKT_POOL_SIZE 32
+#define HS_PKT_POOL_SIZE 64
 #define HS_PKT_MAX_LEN  512
+// Cap drain work per tick to avoid blocking GUI when buffer is saturated.
+#define HS_DRAIN_MAX_PER_TICK 32
 
 typedef struct {
     uint16_t len;
@@ -191,13 +193,14 @@ static void hs_rx_callback(void* buf, wifi_promiscuous_pkt_type_t type) {
         if(memcmp(&payload[16], s_capture.bssid, 6) != 0) return;
         // Fall through to enqueue
     }
-    // Data frame — quick EAPOL pre-filter
+    // Data frame — quick EAPOL pre-filter (full address parse runs in drain)
     else if(frame_type == 2) {
-        int hdr_len = 24;
         uint8_t to_ds = (fc & 0x0100) >> 8;
         uint8_t from_ds = (fc & 0x0200) >> 9;
-        if(to_ds && from_ds) hdr_len = 30;
-        if((frame_subtype & 0x08) == 0x08) hdr_len += 2;
+        if(to_ds && from_ds) return; // 4-address WDS — not handled
+        int hdr_len = 24;
+        if((frame_subtype & 0x08) == 0x08) hdr_len += 2; // QoS
+        if(fc & 0x8000) hdr_len += 4;                    // HT Control (Order)
         if(len < hdr_len + 8) return;
         const uint8_t* llc = &payload[hdr_len];
         if(!(llc[0] == 0xAA && llc[1] == 0xAA && llc[6] == 0x88 && llc[7] == 0x8E)) return;
@@ -222,7 +225,8 @@ static void hs_rx_callback(void* buf, wifi_promiscuous_pkt_type_t type) {
 // Drain ring buffer, process packets, write to PCAP
 // ---------------------------------------------------------------------------
 static void hs_drain_and_process(WifiApp* app) {
-    while(s_hs_read_idx != s_hs_write_idx) {
+    int budget = HS_DRAIN_MAX_PER_TICK;
+    while(s_hs_read_idx != s_hs_write_idx && budget-- > 0) {
         HsPkt* pkt = &s_pkt_pool[s_hs_read_idx];
 
         uint8_t msg = hs_process_packet(pkt->data, pkt->len);
@@ -237,30 +241,6 @@ static void hs_drain_and_process(WifiApp* app) {
 
         s_hs_read_idx = (s_hs_read_idx + 1) % HS_PKT_POOL_SIZE;
     }
-}
-
-// ---------------------------------------------------------------------------
-// SSID sanitization for filename
-// ---------------------------------------------------------------------------
-static void hs_sanitize_ssid(const char* ssid, const uint8_t* bssid, char* out, size_t out_len) {
-    if(ssid[0] == '\0') {
-        // Hidden SSID — use BSSID hex
-        snprintf(out, out_len, "%02X%02X%02X%02X%02X%02X",
-                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
-        return;
-    }
-
-    size_t j = 0;
-    for(size_t i = 0; ssid[i] && j < out_len - 1; i++) {
-        char c = ssid[i];
-        if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-           (c >= '0' && c <= '9') || c == '-' || c == '_') {
-            out[j++] = c;
-        } else {
-            out[j++] = '_';
-        }
-    }
-    out[j] = '\0';
 }
 
 // ---------------------------------------------------------------------------
@@ -321,25 +301,13 @@ void wifi_app_scene_handshake_on_enter(void* context) {
 
     // Open PCAP file
     s_hs_storage = furi_record_open(RECORD_STORAGE);
-    storage_common_mkdir(s_hs_storage, "/ext/wifi");
-    storage_common_mkdir(s_hs_storage, "/ext/wifi/handshakes");
-
-    char safe_ssid[64];
-    hs_sanitize_ssid(target ? target->ssid : "", target ? target->bssid : s_capture.bssid,
-                     safe_ssid, sizeof(safe_ssid));
 
     char path[128];
-    // Find next available file (avoid overwriting)
-    snprintf(path, sizeof(path), "/ext/wifi/handshakes/%s.pcap", safe_ssid);
-    if(!storage_common_stat(s_hs_storage, path, NULL)) {
-        // File exists, find next number
-        for(int i = 1; i < 999; i++) {
-            snprintf(path, sizeof(path), "/ext/wifi/handshakes/%s_%d.pcap", safe_ssid, i);
-            if(storage_common_stat(s_hs_storage, path, NULL)) {
-                break; // file doesn't exist, use this
-            }
-        }
-    }
+    hs_make_pcap_path(
+        s_hs_storage,
+        target ? target->ssid : "",
+        target ? target->bssid : s_capture.bssid,
+        path, sizeof(path));
     s_hs_pcap_file = wifi_pcap_open(s_hs_storage, path);
 
     // Init view

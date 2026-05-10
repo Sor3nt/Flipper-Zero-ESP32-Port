@@ -23,6 +23,7 @@
 
 #include <driver/i2s_std.h>
 #include <driver/gpio.h>
+#include <esp_timer.h>
 
 #include <math.h>
 #ifndef M_PI
@@ -41,17 +42,35 @@
  * memory usage reasonable (~4 KB for stereo 16-bit). */
 #define SPEAKER_MAX_CYCLE_SAMPLES 1024
 
+/* GDO-mirror mode: sample-rate and per-write buffer size.
+ * 16 kHz sample rate is plenty for 1-bit OOK/FM audio (typical RF audio
+ * bandwidth <5 kHz) and keeps CPU cost reasonable. 64-frame buffer ⇒ ~4 ms
+ * per write, which sets the pacing for the I2S writer loop. */
+#define MIRROR_SAMPLE_RATE 16000
+#define MIRROR_BUF_FRAMES  64
+
+typedef enum {
+    SpeakerModeIdle,
+    SpeakerModeTone,
+    SpeakerModeGdoMirror,
+} SpeakerMode;
+
 /* ---- Static state ---- */
 static FuriMutex* speaker_mutex = NULL;
 static i2s_chan_handle_t i2s_tx_handle = NULL;
 static bool i2s_channel_enabled = false;
 
-/* Tone state — protected by speaker_mutex for ownership,
- * individual fields accessed atomically by the writer thread. */
-static volatile bool speaker_playing = false;
+/* Active mode — read by writer thread, written by API callers under ownership. */
+static volatile SpeakerMode speaker_mode = SpeakerModeIdle;
+
+/* Tone-mode state */
 static volatile float speaker_frequency = 0.0f;
 static volatile float speaker_volume = 0.0f;
 static volatile bool speaker_buffer_dirty = true;
+
+/* GDO-mirror-mode state */
+static volatile gpio_num_t speaker_mirror_pin = (gpio_num_t)-1;
+static volatile float speaker_mirror_volume = 0.0f;
 
 /* Background writer thread */
 static FuriThread* speaker_thread = NULL;
@@ -103,25 +122,55 @@ static void speaker_generate_buffer(void) {
     speaker_buffer_dirty = false;
 }
 
-/** Background thread: continuously writes the waveform buffer to I2S. */
+/** Background thread: continuously writes audio to I2S in the active mode. */
 static int32_t speaker_writer_thread(void* context) {
     UNUSED(context);
 
+    /* Stack-allocated mirror buffer (stereo int16). Kept here, not on the
+     * thread stack of every iteration, so its lifetime spans the whole loop. */
+    static int16_t mirror_buf[MIRROR_BUF_FRAMES * 2];
+
     while(speaker_thread_run) {
-        if(!speaker_playing) {
-            furi_delay_ms(5);
+        SpeakerMode mode = speaker_mode;
+
+        if(mode == SpeakerModeTone) {
+            if(speaker_buffer_dirty) {
+                speaker_generate_buffer();
+            }
+            if(wave_buffer && wave_buffer_bytes > 0) {
+                size_t bytes_written = 0;
+                i2s_channel_write(i2s_tx_handle, wave_buffer, wave_buffer_bytes, &bytes_written, 100);
+            }
             continue;
         }
 
-        /* Regenerate buffer if frequency or volume changed */
-        if(speaker_buffer_dirty) {
-            speaker_generate_buffer();
+        if(mode == SpeakerModeGdoMirror) {
+            const gpio_num_t pin = speaker_mirror_pin;
+            const float vol = speaker_volume_curve(speaker_mirror_volume);
+            const int16_t amp = (int16_t)(vol * 32767.0f);
+            const int64_t period_us = 1000000 / MIRROR_SAMPLE_RATE;
+
+            /* Sample the GPIO at MIRROR_SAMPLE_RATE, busy-waiting between
+             * samples so each sample reflects the GDO0 level at the right
+             * moment. The i2s_channel_write below provides the longer-term
+             * pacing (DMA back-pressure) — busy-wait only handles intra-buffer
+             * spacing (~62 µs at 16 kHz). */
+            int64_t next_us = esp_timer_get_time();
+            for(int i = 0; i < MIRROR_BUF_FRAMES; i++) {
+                while(esp_timer_get_time() < next_us) { /* spin */ }
+                next_us += period_us;
+                int16_t s = gpio_get_level(pin) ? amp : (int16_t)-amp;
+                mirror_buf[i * 2] = s;
+                mirror_buf[i * 2 + 1] = s;
+            }
+
+            size_t bytes_written = 0;
+            i2s_channel_write(i2s_tx_handle, mirror_buf, sizeof(mirror_buf), &bytes_written, 100);
+            continue;
         }
 
-        if(wave_buffer && wave_buffer_bytes > 0) {
-            size_t bytes_written = 0;
-            i2s_channel_write(i2s_tx_handle, wave_buffer, wave_buffer_bytes, &bytes_written, 100);
-        }
+        /* Idle */
+        furi_delay_ms(5);
     }
 
     return 0;
@@ -162,7 +211,7 @@ void furi_hal_speaker_init(void) {
     };
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(i2s_tx_handle, &std_cfg));
 
-    /* Start the writer thread (it idles until speaker_playing is set) */
+    /* Start the writer thread (it idles until speaker_mode != Idle) */
     speaker_thread = furi_thread_alloc_ex("SpeakerWorker", SPEAKER_THREAD_STACK, speaker_writer_thread, NULL);
     speaker_thread_run = true;
     furi_thread_start(speaker_thread);
@@ -236,7 +285,22 @@ void furi_hal_speaker_start(float frequency, float volume) {
     speaker_frequency = frequency;
     speaker_volume = volume;
     speaker_buffer_dirty = true;
-    speaker_playing = true;
+    speaker_mode = SpeakerModeTone;
+}
+
+void furi_hal_speaker_start_gdo_mirror(const GpioPin* gdo_pin, float volume) {
+    furi_check(furi_hal_speaker_is_mine());
+    furi_check(gdo_pin);
+    furi_check(gdo_pin->pin < GPIO_NUM_MAX);
+
+    if(volume <= 0.0f) {
+        furi_hal_speaker_stop();
+        return;
+    }
+
+    speaker_mirror_pin = (gpio_num_t)gdo_pin->pin;
+    speaker_mirror_volume = volume;
+    speaker_mode = SpeakerModeGdoMirror;
 }
 
 void furi_hal_speaker_set_volume(float volume) {
@@ -247,13 +311,15 @@ void furi_hal_speaker_set_volume(float volume) {
         return;
     }
 
+    /* Update whichever mode is active */
     speaker_volume = volume;
+    speaker_mirror_volume = volume;
     speaker_buffer_dirty = true;
 }
 
 void furi_hal_speaker_stop(void) {
     furi_check(furi_hal_speaker_is_mine());
-    speaker_playing = false;
+    speaker_mode = SpeakerModeIdle;
 }
 
 #else /* !BOARD_HAS_SPEAKER */
@@ -280,6 +346,11 @@ bool furi_hal_speaker_is_mine(void) {
 
 void furi_hal_speaker_start(float frequency, float volume) {
     (void)frequency;
+    (void)volume;
+}
+
+void furi_hal_speaker_start_gdo_mirror(const GpioPin* gdo_pin, float volume) {
+    (void)gdo_pin;
     (void)volume;
 }
 

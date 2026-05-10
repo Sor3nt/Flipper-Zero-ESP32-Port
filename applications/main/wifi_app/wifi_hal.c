@@ -1,5 +1,6 @@
 #include "wifi_hal.h"
 #include <esp_wifi.h>
+#include <esp_private/wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
 #include <esp_log.h>
@@ -16,7 +17,7 @@
 #include <time.h>
 
 #define TAG "WifiHal"
-#define WORKER_STACK_SIZE 4096
+#define WORKER_STACK_SIZE 8192
 
 static bool s_wifi_started = false;
 static bool s_bt_was_on = false;
@@ -35,6 +36,7 @@ typedef enum {
     WCMD_SET_CHANNEL,
     WCMD_SET_PROMISC,
     WCMD_SEND_RAW,
+    WCMD_SEND_ETH_RAW,
     WCMD_CONNECT,
     WCMD_DISCONNECT,
     WCMD_BEACON_SPAM_START,
@@ -57,6 +59,11 @@ typedef struct {
             uint8_t buf[64];
             uint16_t len;
         } send_raw;
+        struct {
+            uint8_t buf[1600]; // ARP frames are 42B, but throttle-mode forwards
+                               // full IPv4 packets (MTU ~1500).
+            uint16_t len;
+        } send_eth;
         struct {
             wifi_scan_config_t* config;
             wifi_ap_record_t** out_records;
@@ -373,7 +380,10 @@ static void wifi_worker_fn(void* arg) {
             break;
 
         case WCMD_SET_PROMISC:
-            if(cmd.set_promisc.enable && cmd.set_promisc.cb) {
+            // Always update the callback when enabling — passing cb=NULL must
+            // actively clear any previously registered callback (e.g. sniffer)
+            // so it does not keep firing into a freed context.
+            if(cmd.set_promisc.enable) {
                 esp_wifi_set_promiscuous_rx_cb(cmd.set_promisc.cb);
             }
             esp_wifi_set_promiscuous(cmd.set_promisc.enable);
@@ -388,6 +398,14 @@ static void wifi_worker_fn(void* arg) {
                 ESP_LOGE(TAG, "80211_tx: %s", esp_err_to_name(tx_err));
             }
             break;
+
+        case WCMD_SEND_ETH_RAW: {
+            int eth_err = esp_wifi_internal_tx(WIFI_IF_STA, cmd.send_eth.buf, cmd.send_eth.len);
+            if(eth_err != 0) {
+                ESP_LOGD(TAG, "internal_tx: %d", eth_err);
+            }
+            break;
+        }
 
         case WCMD_CONNECT:
             s_wifi_auto_reconnect = false;
@@ -590,6 +608,15 @@ bool wifi_hal_send_raw(const uint8_t* data, uint16_t len) {
     WifiCmd cmd = {.type = WCMD_SEND_RAW, .done = NULL, .result = NULL};
     memcpy(cmd.send_raw.buf, data, len);
     cmd.send_raw.len = len;
+    return xQueueSend(s_cmd_queue, &cmd, 0) == pdTRUE;
+}
+
+bool wifi_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
+    if(!s_wifi_started || !s_cmd_queue || len > sizeof(((WifiCmd*)0)->send_eth.buf)) return false;
+    if(!data || len < 14) return false; // Eth-Header minimum
+    WifiCmd cmd = {.type = WCMD_SEND_ETH_RAW, .done = NULL, .result = NULL};
+    memcpy(cmd.send_eth.buf, data, len);
+    cmd.send_eth.len = len;
     return xQueueSend(s_cmd_queue, &cmd, 0) == pdTRUE;
 }
 

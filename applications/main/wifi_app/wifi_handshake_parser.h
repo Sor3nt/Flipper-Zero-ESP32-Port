@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <storage/storage.h>
 
 /** Check if frame is a beacon (management type 0, subtype 8) */
 bool hs_is_beacon(const uint8_t* payload, int len);
@@ -25,3 +27,11 @@ uint8_t hs_get_eapol_msg_num(const uint8_t* eapol_start, int eapol_len);
  *  Writes up to max_len-1 chars + null terminator.
  *  Returns true if SSID was found. */
 bool hs_extract_beacon_ssid(const uint8_t* payload, int len, char* ssid_out, int max_len);
+
+/** Build a unique PCAP path under /ext/wifi/handshakes/<ssid>[_<n>].pcap.
+ *  Creates the directory tree if needed. Sanitizes SSID; falls back to
+ *  BSSID-hex when SSID is empty. Probes for the next free numbered suffix
+ *  to avoid overwriting an existing capture. */
+void hs_make_pcap_path(
+    Storage* storage, const char* ssid, const uint8_t* bssid,
+    char* out_path, size_t out_len);

@@ -1,8 +1,34 @@
 #include "wifi_handshake_parser.h"
 #include <string.h>
+#include <stdio.h>
 #include <esp_log.h>
 
 #define TAG "HsParser"
+
+static void hs_sanitize_ssid_internal(
+    const char* ssid, const uint8_t* bssid, char* out, size_t out_len) {
+    if(out_len == 0) return;
+    if(!ssid || ssid[0] == '\0') {
+        snprintf(out, out_len, "%02X%02X%02X%02X%02X%02X",
+                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+        return;
+    }
+    size_t j = 0;
+    for(size_t i = 0; ssid[i] && j < out_len - 1; i++) {
+        char c = ssid[i];
+        if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '-' || c == '_') {
+            out[j++] = c;
+        } else {
+            out[j++] = '_';
+        }
+    }
+    out[j] = '\0';
+    if(j == 0) {
+        snprintf(out, out_len, "%02X%02X%02X%02X%02X%02X",
+                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+    }
+}
 
 bool hs_is_beacon(const uint8_t* payload, int len) {
     if(len < 24) return false;
@@ -23,10 +49,15 @@ bool hs_parse_addresses(
     uint8_t frame_subtype = (fc & 0xF0) >> 4;
     uint8_t to_ds = (fc & 0x0100) >> 8;
     uint8_t from_ds = (fc & 0x0200) >> 9;
+    bool order = (fc & 0x8000) != 0;
+
+    // 4-Address (WDS/Mesh) frames have no canonical AP/STA mapping for the
+    // 4-way handshake — bail out instead of guessing.
+    if(to_ds && from_ds) return false;
 
     *header_len = 24;
-    if(to_ds && from_ds) *header_len = 30;
-    if((frame_subtype & 0x08) == 0x08) *header_len += 2; // QoS
+    if((frame_subtype & 0x08) == 0x08) *header_len += 2; // QoS Control
+    if(order) *header_len += 4;                          // HT Control (802.11n+)
 
     if(len < *header_len + 8) return false;
 
@@ -38,10 +69,8 @@ bool hs_parse_addresses(
         *bssid = addr2; *ap = addr2; *station = addr1;
     } else if(to_ds && !from_ds) {
         *bssid = addr1; *ap = addr1; *station = addr2;
-    } else if(!to_ds && !from_ds) {
-        *bssid = addr3; *station = addr2; *ap = addr1;
     } else {
-        *bssid = addr1; *station = addr2; *ap = addr1;
+        *bssid = addr3; *station = addr2; *ap = addr1;
     }
 
     return true;
@@ -76,6 +105,27 @@ uint8_t hs_get_eapol_msg_num(const uint8_t* eapol_start, int eapol_len) {
     if(pairwise && key_ack && install && key_mic) return 3;
     if(pairwise && !key_ack && !install && key_mic && secure) return 4;
     return 0;
+}
+
+void hs_make_pcap_path(
+    Storage* storage, const char* ssid, const uint8_t* bssid,
+    char* out_path, size_t out_len) {
+    if(!storage || !out_path || out_len == 0) return;
+
+    storage_common_mkdir(storage, "/ext/wifi");
+    storage_common_mkdir(storage, "/ext/wifi/handshakes");
+
+    char safe_ssid[64];
+    hs_sanitize_ssid_internal(ssid, bssid, safe_ssid, sizeof(safe_ssid));
+
+    snprintf(out_path, out_len, "/ext/wifi/handshakes/%s.pcap", safe_ssid);
+    // storage_common_stat returns FSE_OK (0) when the file exists.
+    if(storage_common_stat(storage, out_path, NULL) != 0) return;
+
+    for(int i = 1; i < 999; i++) {
+        snprintf(out_path, out_len, "/ext/wifi/handshakes/%s_%d.pcap", safe_ssid, i);
+        if(storage_common_stat(storage, out_path, NULL) != 0) return;
+    }
 }
 
 bool hs_extract_beacon_ssid(const uint8_t* payload, int len, char* ssid_out, int max_len) {

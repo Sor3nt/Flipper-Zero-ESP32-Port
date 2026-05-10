@@ -22,7 +22,6 @@ static void hs_channel_view_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_str_aligned(canvas, 64, 38, AlignCenter, AlignCenter,
                                 model->running ? "Listening..." : "Idle");
         canvas_set_font(canvas, FontPrimary);
-        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "Up/Dn:Channel");
         return;
     }
 
@@ -59,8 +58,6 @@ static void hs_channel_view_draw_callback(Canvas* canvas, void* _model) {
 
         // Checkmark if complete
         if(e->complete) {
-            canvas_draw_str(canvas, 115, y + 10, "\x01"); // tick char, fallback below
-            // Draw a simple checkmark manually
             int cx = 117, cy = y + 3;
             canvas_draw_line(canvas, cx, cy + 4, cx + 2, cy + 6);
             canvas_draw_line(canvas, cx + 2, cy + 6, cx + 6, cy);
@@ -82,14 +79,9 @@ static bool hs_channel_view_input_callback(InputEvent* event, void* context) {
     ViewDispatcher* vd = context;
     if(event->type != InputTypeShort && event->type != InputTypeRepeat) return false;
 
-    if(event->key == InputKeyUp || event->key == InputKeyDown) {
-        // Scroll handled internally — but also forward to scene for potential use
-        // Actually, just forward to scene; scene updates model
-        view_dispatcher_send_custom_event(vd, event->key);
-        return true;
-    }
-    if(event->key == InputKeyLeft || event->key == InputKeyRight) {
-        // Channel change
+    // Up/Down: scroll target list. Left/Right: change channel.
+    if(event->key == InputKeyUp || event->key == InputKeyDown ||
+       event->key == InputKeyLeft || event->key == InputKeyRight) {
         view_dispatcher_send_custom_event(vd, event->key);
         return true;
     }

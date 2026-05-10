@@ -22,6 +22,11 @@ void wifi_hal_set_promiscuous(bool enable, wifi_promiscuous_cb_t cb);
 
 bool wifi_hal_send_raw(const uint8_t* data, uint16_t len);
 
+/** Send a raw Ethernet frame (Eth-Header + payload) over the WiFi STA
+ *  interface via esp_wifi_internal_tx(). Used by NetCut for ARP injection.
+ *  Up to 128 bytes (ARP frames are 42 B, leaves room for ICMP/etc.). */
+bool wifi_hal_send_eth_raw(const uint8_t* data, uint16_t len);
+
 bool wifi_hal_connect(const char* ssid, const char* password, const uint8_t* bssid, uint8_t channel);
 
 void wifi_hal_disconnect(void);

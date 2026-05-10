@@ -22,6 +22,8 @@ typedef struct {
     bool has_extended_events;
 
     bool locked;
+    bool is_separator;
+    bool centered;
     FuriString* locked_message;
 } SubmenuItem;
 
@@ -31,6 +33,8 @@ static void SubmenuItem_init(SubmenuItem* item) {
     item->callback = NULL;
     item->callback_context = NULL;
     item->locked = false;
+    item->is_separator = false;
+    item->centered = false;
     item->locked_message = furi_string_alloc();
 }
 
@@ -40,6 +44,8 @@ static void SubmenuItem_init_set(SubmenuItem* item, const SubmenuItem* src) {
     item->callback = src->callback;
     item->callback_context = src->callback_context;
     item->locked = src->locked;
+    item->is_separator = src->is_separator;
+    item->centered = src->centered;
     item->locked_message = furi_string_alloc_set(src->locked_message);
 }
 
@@ -49,6 +55,8 @@ static void SubmenuItem_set(SubmenuItem* item, const SubmenuItem* src) {
     item->callback = src->callback;
     item->callback_context = src->callback_context;
     item->locked = src->locked;
+    item->is_separator = src->is_separator;
+    item->centered = src->centered;
     furi_string_set(item->locked_message, src->locked_message);
 }
 
@@ -73,6 +81,7 @@ typedef struct {
 
     bool locked_message_visible;
     bool is_vertical;
+    bool header_centered;
 } SubmenuModel;
 
 static void submenu_process_up(Submenu* submenu);
@@ -94,7 +103,17 @@ static void submenu_view_draw_callback(Canvas* canvas, void* _model) {
 
     if(!furi_string_empty(model->header)) {
         canvas_set_font(canvas, FontPrimary);
-        canvas_draw_str(canvas, 4, 11, furi_string_get_cstr(model->header));
+        if(model->header_centered) {
+            canvas_draw_str_aligned(
+                canvas,
+                canvas_width(canvas) / 2,
+                11,
+                AlignCenter,
+                AlignBottom,
+                furi_string_get_cstr(model->header));
+        } else {
+            canvas_draw_str(canvas, 4, 11, furi_string_get_cstr(model->header));
+        }
     }
 
     canvas_set_font(canvas, FontSecondary);
@@ -109,6 +128,15 @@ static void submenu_view_draw_callback(Canvas* canvas, void* _model) {
         bool is_locked = SubmenuItemArray_cref(it)->locked;
 
         if(item_position < items_on_screen) {
+            if(SubmenuItemArray_cref(it)->is_separator) {
+                // Schmale horizontale Linie quer durch die Item-Zeile.
+                canvas_set_color(canvas, ColorBlack);
+                uint8_t cy = y_offset + (item_position * item_height) + item_height / 2;
+                canvas_draw_line(canvas, 4, cy, item_width - 4, cy);
+                position++;
+                continue;
+            }
+
             if(position == model->position) {
                 canvas_set_color(canvas, ColorBlack);
                 elements_slightly_rounded_box(
@@ -133,11 +161,21 @@ static void submenu_view_draw_callback(Canvas* canvas, void* _model) {
             FuriString* disp_str = furi_string_alloc_set(SubmenuItemArray_cref(it)->label);
             elements_string_fit_width(canvas, disp_str, item_width - (is_locked ? 21 : 11));
 
-            canvas_draw_str(
-                canvas,
-                6,
-                y_offset + (item_position * item_height) + item_height - 4,
-                furi_string_get_cstr(disp_str));
+            if(SubmenuItemArray_cref(it)->centered) {
+                canvas_draw_str_aligned(
+                    canvas,
+                    item_width / 2,
+                    y_offset + (item_position * item_height) + item_height - 4,
+                    AlignCenter,
+                    AlignBottom,
+                    furi_string_get_cstr(disp_str));
+            } else {
+                canvas_draw_str(
+                    canvas,
+                    6,
+                    y_offset + (item_position * item_height) + item_height - 4,
+                    furi_string_get_cstr(disp_str));
+            }
 
             furi_string_free(disp_str);
         }
@@ -281,6 +319,32 @@ void submenu_add_item(
     submenu_add_lockable_item(submenu, label, index, callback, callback_context, false, NULL);
 }
 
+void submenu_add_item_centered(
+    Submenu* submenu,
+    const char* label,
+    uint32_t index,
+    SubmenuItemCallback callback,
+    void* callback_context) {
+    SubmenuItem* item = NULL;
+    furi_check(label);
+    furi_check(submenu);
+
+    with_view_model(
+        submenu->view,
+        SubmenuModel * model,
+        {
+            item = SubmenuItemArray_push_new(model->items);
+            furi_string_set_str(item->label, label);
+            item->index = index;
+            item->callback = callback;
+            item->callback_context = callback_context;
+            item->has_extended_events = false;
+            item->locked = false;
+            item->centered = true;
+        },
+        true);
+}
+
 void submenu_add_lockable_item(
     Submenu* submenu,
     const char* label,
@@ -334,6 +398,23 @@ void submenu_add_item_ex(
             item->callback_ex = callback;
             item->callback_context = callback_context;
             item->has_extended_events = true;
+        },
+        true);
+}
+
+void submenu_add_separator(Submenu* submenu) {
+    furi_check(submenu);
+
+    with_view_model(
+        submenu->view,
+        SubmenuModel * model,
+        {
+            SubmenuItem* item = SubmenuItemArray_push_new(model->items);
+            item->is_separator = true;
+            item->callback = NULL;
+            item->callback_context = NULL;
+            item->has_extended_events = false;
+            item->locked = false;
         },
         true);
 }
@@ -456,6 +537,11 @@ void submenu_set_selected_item(Submenu* submenu, uint32_t index) {
         true);
 }
 
+static bool submenu_item_at_is_separator(SubmenuModel* model, size_t pos) {
+    if(pos >= SubmenuItemArray_size(model->items)) return false;
+    return SubmenuItemArray_cget(model->items, pos)->is_separator;
+}
+
 void submenu_process_up(Submenu* submenu) {
     with_view_model(
         submenu->view,
@@ -464,16 +550,24 @@ void submenu_process_up(Submenu* submenu) {
             const size_t items_on_screen = submenu_items_on_screen(model);
             const size_t items_size = SubmenuItemArray_size(model->items);
 
-            if(model->position > 0) {
-                model->position--;
-                if((model->position == model->window_position) && (model->window_position > 0)) {
-                    model->window_position--;
+            // Mindestens einmal nach oben bewegen, dann eventuelle Separators
+            // überspringen. Bei Wraparound von oben nach unten dasselbe.
+            for(size_t step = 0; step < items_size; ++step) {
+                if(model->position > 0) {
+                    model->position--;
+                    if((model->position == model->window_position) &&
+                       (model->window_position > 0)) {
+                        model->window_position--;
+                    }
+                } else {
+                    model->position = items_size - 1;
+                    if(model->position > items_on_screen - 1) {
+                        model->window_position = model->position - (items_on_screen - 1);
+                    } else {
+                        model->window_position = 0;
+                    }
                 }
-            } else {
-                model->position = items_size - 1;
-                if(model->position > items_on_screen - 1) {
-                    model->window_position = model->position - (items_on_screen - 1);
-                }
+                if(!submenu_item_at_is_separator(model, model->position)) break;
             }
         },
         true);
@@ -487,15 +581,18 @@ void submenu_process_down(Submenu* submenu) {
             const size_t items_on_screen = submenu_items_on_screen(model);
             const size_t items_size = SubmenuItemArray_size(model->items);
 
-            if(model->position < items_size - 1) {
-                model->position++;
-                if((model->position - model->window_position > items_on_screen - 2) &&
-                   (model->window_position < items_size - items_on_screen)) {
-                    model->window_position++;
+            for(size_t step = 0; step < items_size; ++step) {
+                if(model->position < items_size - 1) {
+                    model->position++;
+                    if((model->position - model->window_position > items_on_screen - 2) &&
+                       (model->window_position < items_size - items_on_screen)) {
+                        model->window_position++;
+                    }
+                } else {
+                    model->position = 0;
+                    model->window_position = 0;
                 }
-            } else {
-                model->position = 0;
-                model->window_position = 0;
+                if(!submenu_item_at_is_separator(model, model->position)) break;
             }
         },
         true);
@@ -521,6 +618,7 @@ void submenu_process_ok(Submenu* submenu, InputType input_type) {
         true);
 
     if(!item) return;
+    if(item->is_separator) return;
     if(item->locked) {
         return;
     }
@@ -544,6 +642,24 @@ void submenu_set_header(Submenu* submenu, const char* header) {
             } else {
                 furi_string_set_str(model->header, header);
             }
+            model->header_centered = false;
+        },
+        true);
+}
+
+void submenu_set_header_centered(Submenu* submenu, const char* header) {
+    furi_check(submenu);
+
+    with_view_model(
+        submenu->view,
+        SubmenuModel * model,
+        {
+            if(header == NULL) {
+                furi_string_reset(model->header);
+            } else {
+                furi_string_set_str(model->header, header);
+            }
+            model->header_centered = true;
         },
         true);
 }

@@ -12,6 +12,9 @@
 #include "views/portscan_view.h"
 #include "views/evil_portal_view.h"
 #include "views/evil_portal_captured_view.h"
+#include "views/netcut_view.h"
+#include "views/spectrum_view.h"
+#include "netcut/netcut_engine.h"
 
 static bool wifi_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -100,6 +103,19 @@ static WifiApp* wifi_app_alloc(void) {
         WifiAppViewEvilPortalCaptured,
         evil_portal_captured_view_get_view(app->evil_portal_captured_view_obj));
 
+    // Spectrum view
+    app->view_spectrum = spectrum_view_alloc();
+    view_set_context(app->view_spectrum, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewSpectrum, app->view_spectrum);
+
+    // NetCut view
+    app->view_netcut = netcut_view_alloc();
+    view_set_context(app->view_netcut, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, WifiAppViewNetCut, app->view_netcut);
+    app->netcut_engine = NULL;
+    app->netcut_selected = 0;
+    app->netcut_complete_mode = false;
+
     app->ap_records = malloc(sizeof(WifiApRecord) * WIFI_APP_MAX_APS);
     app->ap_count = 0;
     app->selected_index = 0;
@@ -133,6 +149,10 @@ static WifiApp* wifi_app_alloc(void) {
 }
 
 static void wifi_app_free(WifiApp* app) {
+    if(app->netcut_engine) {
+        netcut_engine_free(app->netcut_engine);
+        app->netcut_engine = NULL;
+    }
     if(wifi_hal_is_connected()) {
         wifi_hal_cleanup_keep_connection();
     } else {
@@ -155,6 +175,8 @@ static void wifi_app_free(WifiApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewPortscan);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewEvilPortal);
     view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewEvilPortalCaptured);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewNetCut);
+    view_dispatcher_remove_view(app->view_dispatcher, WifiAppViewSpectrum);
     submenu_free(app->submenu);
     widget_free(app->widget);
     loading_free(app->loading);
@@ -172,6 +194,8 @@ static void wifi_app_free(WifiApp* app) {
     beacon_view_free(app->beacon_view_obj);
     evil_portal_view_free(app->evil_portal_view_obj);
     evil_portal_captured_view_free(app->evil_portal_captured_view_obj);
+    netcut_view_free(app->view_netcut);
+    spectrum_view_free(app->view_spectrum);
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);
     free(app->ap_records);

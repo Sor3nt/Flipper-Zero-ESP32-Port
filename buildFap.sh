@@ -80,6 +80,7 @@ COMMON_INCLUDES=(
     -I"$PROJECT_DIR/components/notification"
     -I"$PROJECT_DIR/components/assets"
     -I"$PROJECT_DIR/components/loader"
+    -I"$PROJECT_DIR/applications/services"
     -I"$PROJECT_DIR/components/flipper_application"
     -I"$PROJECT_DIR/components/flipper_format"
     -I"$PROJECT_DIR/components/dialogs"

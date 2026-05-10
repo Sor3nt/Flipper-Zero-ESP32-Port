@@ -353,25 +353,48 @@ void subbrute_worker_subghz_transmit(SubBruteWorker* instance, FlipperFormat* fl
         instance->transmitter = NULL;
     }
 
-    // instance->protocol_name = subbrute_protocol_file(instance->file);
-
     instance->transmitter =
         subghz_transmitter_alloc_init(instance->environment, instance->protocol_name);
-    subghz_transmitter_deserialize(instance->transmitter, flipper_format);
+    if(instance->transmitter == NULL) {
+        FURI_LOG_E(TAG, "Protocol '%s' not found in registry", instance->protocol_name);
+        instance->transmit_mode = false;
+        return;
+    }
+
+    SubGhzProtocolStatus deser_status =
+        subghz_transmitter_deserialize(instance->transmitter, flipper_format);
+    if(deser_status != SubGhzProtocolStatusOk) {
+        FURI_LOG_E(
+            TAG,
+            "Deserialize '%s' failed: %d",
+            instance->protocol_name,
+            deser_status);
+        subghz_transmitter_free(instance->transmitter);
+        instance->transmitter = NULL;
+        instance->transmit_mode = false;
+        return;
+    }
 
     subghz_devices_reset(instance->radio_device);
     subghz_devices_idle(instance->radio_device);
     subghz_devices_load_preset(instance->radio_device, instance->preset, NULL);
-    subghz_devices_set_frequency(
-        instance->radio_device, instance->frequency); // TODO is freq valid check
+    subghz_devices_set_frequency(instance->radio_device, instance->frequency);
 
-    if(subghz_devices_set_tx(instance->radio_device)) {
-        subghz_devices_start_async_tx(
-            instance->radio_device, subghz_transmitter_yield, instance->transmitter);
+    // start_async_tx already drives CC1101 into TX state internally; no separate set_tx needed
+    // (matches the working playlist TX path).
+    bool tx_started = subghz_devices_start_async_tx(
+        instance->radio_device, subghz_transmitter_yield, instance->transmitter);
+    if(tx_started) {
         while(!subghz_devices_is_async_complete_tx(instance->radio_device)) {
             furi_delay_ms(timeout);
         }
         subghz_devices_stop_async_tx(instance->radio_device);
+    } else {
+        FURI_LOG_E(
+            TAG,
+            "start_async_tx failed (freq=%lu preset=%d)",
+            (unsigned long)instance->frequency,
+            instance->preset);
     }
 
     subghz_devices_idle(instance->radio_device);
@@ -384,7 +407,6 @@ void subbrute_worker_subghz_transmit(SubBruteWorker* instance, FlipperFormat* fl
 
     Stream* stream = flipper_format_get_raw_stream(flipper_format);
     stream_rewind(stream);
-    //test_read_full_stream(stream, "Transmit data");
 
     subghz_custom_btns_reset();
 }

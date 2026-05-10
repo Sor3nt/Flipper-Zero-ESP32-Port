@@ -15,8 +15,9 @@
 // ---------------------------------------------------------------------------
 // Ring buffer (same pattern as scene_handshake.c)
 // ---------------------------------------------------------------------------
-#define HSC_PKT_POOL_SIZE 32
+#define HSC_PKT_POOL_SIZE 64
 #define HSC_PKT_MAX_LEN  512
+#define HSC_DRAIN_MAX_PER_TICK 32
 
 typedef struct {
     uint16_t len;
@@ -32,16 +33,22 @@ static volatile uint32_t s_hsc_read_idx = 0;
 // Multi-target handshake state
 // ---------------------------------------------------------------------------
 #define HSC_MAX_TARGETS 16
+// Cached beacon to flush into the PCAP once it gets opened on first EAPOL.
+#define HSC_BEACON_CACHE_LEN 384
 
 typedef struct {
     uint8_t bssid[6];
     char ssid[33];
     bool has_beacon;
+    bool ssid_resolved; // true once we've seen a non-hidden SSID tag
     bool has_m1;
     bool has_m2;
     bool has_m3;
     bool has_m4;
-    File* pcap_file; // per-target PCAP
+    File* pcap_file;
+    uint8_t cached_beacon[HSC_BEACON_CACHE_LEN];
+    uint16_t cached_beacon_len;
+    uint32_t cached_beacon_ts;
 } HscTarget;
 
 static HscTarget s_targets[HSC_MAX_TARGETS];
@@ -76,54 +83,28 @@ static bool hsc_is_complete(HscTarget* t) {
 }
 
 // ---------------------------------------------------------------------------
-// SSID sanitization for filename
-// ---------------------------------------------------------------------------
-static void hsc_sanitize_ssid(const char* ssid, const uint8_t* bssid, char* out, size_t out_len) {
-    if(ssid[0] == '\0') {
-        snprintf(out, out_len, "%02X%02X%02X%02X%02X%02X",
-                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
-        return;
-    }
-    size_t j = 0;
-    for(size_t i = 0; ssid[i] && j < out_len - 1; i++) {
-        char c = ssid[i];
-        if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-           (c >= '0' && c <= '9') || c == '-' || c == '_') {
-            out[j++] = c;
-        } else {
-            out[j++] = '_';
-        }
-    }
-    out[j] = '\0';
-}
-
-// ---------------------------------------------------------------------------
-// Ensure PCAP file for target
+// Open PCAP for target on first EAPOL and flush cached beacon if any
 // ---------------------------------------------------------------------------
 static void hsc_ensure_pcap(HscTarget* t) {
     if(t->pcap_file || !s_hsc_storage) return;
 
-    storage_common_mkdir(s_hsc_storage, "/ext/wifi");
-    storage_common_mkdir(s_hsc_storage, "/ext/wifi/handshakes");
-
-    char safe_ssid[64];
-    hsc_sanitize_ssid(t->ssid, t->bssid, safe_ssid, sizeof(safe_ssid));
-
     char path[128];
-    snprintf(path, sizeof(path), "/ext/wifi/handshakes/%s.pcap", safe_ssid);
-    if(!storage_common_stat(s_hsc_storage, path, NULL)) {
-        for(int i = 1; i < 999; i++) {
-            snprintf(path, sizeof(path), "/ext/wifi/handshakes/%s_%d.pcap", safe_ssid, i);
-            if(storage_common_stat(s_hsc_storage, path, NULL)) break;
-        }
-    }
+    hs_make_pcap_path(s_hsc_storage, t->ssid, t->bssid, path, sizeof(path));
     t->pcap_file = wifi_pcap_open(s_hsc_storage, path);
+    if(!t->pcap_file) return;
+
+    // Flush cached beacon — aircrack-ng needs it for the SSID/BSSID binding.
+    if(t->cached_beacon_len > 0) {
+        wifi_pcap_write_packet(
+            t->pcap_file, t->cached_beacon_ts,
+            t->cached_beacon, t->cached_beacon_len);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Process a single packet for multi-target capture
 // ---------------------------------------------------------------------------
-static void hsc_process_packet(const uint8_t* payload, int len) {
+static void hsc_process_packet(const uint8_t* payload, int len, uint32_t ts_us) {
     if(len < 24) return;
 
     // Beacon — extract BSSID and SSID
@@ -132,15 +113,28 @@ static void hsc_process_packet(const uint8_t* payload, int len) {
         HscTarget* t = hsc_find_or_create_target(bssid);
         if(!t) return;
 
-        if(!t->has_beacon) {
-            t->has_beacon = true;
-            // Extract SSID from beacon tagged parameters
-            if(t->ssid[0] == '\0') {
-                hs_extract_beacon_ssid(payload, len, t->ssid, sizeof(t->ssid));
+        t->has_beacon = true;
+
+        // Update SSID if not yet resolved (first beacon may be hidden,
+        // a later one may carry the real SSID tag).
+        if(!t->ssid_resolved) {
+            char ssid_buf[33] = {0};
+            if(hs_extract_beacon_ssid(payload, len, ssid_buf, sizeof(ssid_buf))) {
+                strncpy(t->ssid, ssid_buf, sizeof(t->ssid) - 1);
+                t->ssid[sizeof(t->ssid) - 1] = '\0';
+                t->ssid_resolved = true;
             }
         }
-        // Write beacon to PCAP
-        // (defer PCAP open until we have EAPOL — beacons alone aren't useful)
+
+        // Either cache the beacon (until PCAP exists) or write it directly.
+        if(t->pcap_file) {
+            wifi_pcap_write_packet(t->pcap_file, ts_us, payload, len);
+        } else {
+            uint16_t cache_len = (len > HSC_BEACON_CACHE_LEN) ? HSC_BEACON_CACHE_LEN : (uint16_t)len;
+            memcpy(t->cached_beacon, payload, cache_len);
+            t->cached_beacon_len = cache_len;
+            t->cached_beacon_ts = ts_us;
+        }
         return;
     }
 
@@ -154,6 +148,8 @@ static void hsc_process_packet(const uint8_t* payload, int len) {
     const uint8_t* ap = NULL;
     int header_len = 0;
     if(!hs_parse_addresses(payload, len, &bssid, &station, &ap, &header_len)) return;
+    UNUSED(station);
+    UNUSED(ap);
     if(!hs_is_eapol(payload, header_len, len)) return;
 
     const uint8_t* llc = &payload[header_len];
@@ -177,10 +173,10 @@ static void hsc_process_packet(const uint8_t* payload, int len) {
     case 4: t->has_m4 = true; break;
     }
 
-    // Open PCAP on first EAPOL and write the packet
+    // Open PCAP on first EAPOL (flushes cached beacon) and write the EAPOL.
     hsc_ensure_pcap(t);
     if(t->pcap_file) {
-        wifi_pcap_write_packet(t->pcap_file, 0, payload, len);
+        wifi_pcap_write_packet(t->pcap_file, ts_us, payload, len);
     }
 }
 
@@ -215,13 +211,14 @@ static void hsc_rx_callback(void* buf, wifi_promiscuous_pkt_type_t type) {
         }
         // Fall through to enqueue
     }
-    // Data frame — quick EAPOL check
+    // Data frame — quick EAPOL pre-filter
     else if(frame_type == 2) {
-        int hdr_len = 24;
         uint8_t to_ds = (fc & 0x0100) >> 8;
         uint8_t from_ds = (fc & 0x0200) >> 9;
-        if(to_ds && from_ds) hdr_len = 30;
-        if((frame_subtype & 0x08) == 0x08) hdr_len += 2;
+        if(to_ds && from_ds) return; // 4-address WDS — not handled
+        int hdr_len = 24;
+        if((frame_subtype & 0x08) == 0x08) hdr_len += 2; // QoS
+        if(fc & 0x8000) hdr_len += 4;                    // HT Control (Order)
         if(len < hdr_len + 8) return;
         const uint8_t* llc = &payload[hdr_len];
         if(!(llc[0] == 0xAA && llc[1] == 0xAA && llc[6] == 0x88 && llc[7] == 0x8E)) return;
@@ -245,9 +242,10 @@ static void hsc_rx_callback(void* buf, wifi_promiscuous_pkt_type_t type) {
 // Drain ring buffer
 // ---------------------------------------------------------------------------
 static void hsc_drain_and_process(void) {
-    while(s_hsc_read_idx != s_hsc_write_idx) {
+    int budget = HSC_DRAIN_MAX_PER_TICK;
+    while(s_hsc_read_idx != s_hsc_write_idx && budget-- > 0) {
         HscPkt* pkt = &s_hsc_pkt_pool[s_hsc_read_idx];
-        hsc_process_packet(pkt->data, pkt->len);
+        hsc_process_packet(pkt->data, pkt->len, pkt->timestamp_us);
         s_hsc_read_idx = (s_hsc_read_idx + 1) % HSC_PKT_POOL_SIZE;
     }
 }
@@ -268,6 +266,21 @@ static void hsc_update_view(WifiApp* app) {
     }
     model->hs_complete_count = hs_done;
 
+    // Clamp selection to current target count
+    if(model->count == 0) {
+        model->selected = 0;
+        model->window_offset = 0;
+    } else if(model->selected >= model->count) {
+        model->selected = model->count - 1;
+    }
+
+    // Adjust window so selection is always visible
+    if(model->selected < model->window_offset) {
+        model->window_offset = model->selected;
+    } else if(model->selected >= model->window_offset + HS_CHANNEL_ITEMS_ON_SCREEN) {
+        model->window_offset = model->selected - HS_CHANNEL_ITEMS_ON_SCREEN + 1;
+    }
+
     for(int i = 0; i < s_target_count && i < HS_CHANNEL_VIEW_MAX; i++) {
         HscTarget* t = &s_targets[i];
         HsChannelEntry* e = &model->entries[i];
@@ -283,6 +296,18 @@ static void hsc_update_view(WifiApp* app) {
     }
 
     view_commit_model(app->view_handshake_channel, true);
+}
+
+// ---------------------------------------------------------------------------
+// Channel switch helper
+// ---------------------------------------------------------------------------
+static void hsc_change_channel(uint8_t new_channel) {
+    s_hsc_channel = new_channel;
+    wifi_hal_set_promiscuous(false, NULL);
+    wifi_hal_set_channel(s_hsc_channel);
+    furi_delay_ms(20);
+    wifi_hal_set_promiscuous(true, hsc_rx_callback);
+    ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,8 +334,7 @@ void wifi_app_scene_handshake_channel_on_enter(void* context) {
         wifi_hal_start();
     }
 
-    // Set channel and start promiscuous
-    wifi_hal_set_promiscuous(true, NULL);
+    // Set channel and start promiscuous (single call — registers cb atomically)
     wifi_hal_set_channel(s_hsc_channel);
     wifi_hal_set_promiscuous(true, hsc_rx_callback);
 
@@ -335,20 +359,24 @@ bool wifi_app_scene_handshake_channel_on_event(void* context, SceneManagerEvent 
 
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == InputKeyUp) {
-            if(s_hsc_channel < 13) s_hsc_channel++; else s_hsc_channel = 1;
-            wifi_hal_set_promiscuous(false, NULL);
-            wifi_hal_set_channel(s_hsc_channel);
-            furi_delay_ms(20);
-            wifi_hal_set_promiscuous(true, hsc_rx_callback);
-            ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
+            // Scroll target list up
+            HsChannelViewModel* model = view_get_model(app->view_handshake_channel);
+            if(model->selected > 0) model->selected--;
+            view_commit_model(app->view_handshake_channel, true);
             consumed = true;
         } else if(event.event == InputKeyDown) {
-            if(s_hsc_channel > 1) s_hsc_channel--; else s_hsc_channel = 13;
-            wifi_hal_set_promiscuous(false, NULL);
-            wifi_hal_set_channel(s_hsc_channel);
-            furi_delay_ms(20);
-            wifi_hal_set_promiscuous(true, hsc_rx_callback);
-            ESP_LOGI(TAG, "Channel changed to %d", s_hsc_channel);
+            // Scroll target list down
+            HsChannelViewModel* model = view_get_model(app->view_handshake_channel);
+            if(model->count > 0 && model->selected + 1 < model->count) model->selected++;
+            view_commit_model(app->view_handshake_channel, true);
+            consumed = true;
+        } else if(event.event == InputKeyRight) {
+            uint8_t next = s_hsc_channel < 13 ? s_hsc_channel + 1 : 1;
+            hsc_change_channel(next);
+            consumed = true;
+        } else if(event.event == InputKeyLeft) {
+            uint8_t prev = s_hsc_channel > 1 ? s_hsc_channel - 1 : 13;
+            hsc_change_channel(prev);
             consumed = true;
         }
     } else if(event.type == SceneManagerEventTypeTick) {
