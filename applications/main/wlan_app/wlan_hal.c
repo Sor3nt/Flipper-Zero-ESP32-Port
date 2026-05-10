@@ -211,7 +211,14 @@ static void wlan_worker_fn(void* arg) {
         case WCMD_SEND_ETH_RAW: {
             int eth_err = esp_wifi_internal_tx(WIFI_IF_STA, cmd.send_eth.buf, cmd.send_eth.len);
             if(eth_err != 0) {
-                ESP_LOGD(TAG, "internal_tx: %d", eth_err);
+                static uint32_t eth_err_count = 0;
+                static uint32_t eth_err_last_log = 0;
+                eth_err_count++;
+                if(eth_err_count - eth_err_last_log >= 20) {
+                    eth_err_last_log = eth_err_count;
+                    ESP_LOGW(TAG, "internal_tx err=%d (count=%lu)",
+                        eth_err, (unsigned long)eth_err_count);
+                }
             }
             free(cmd.send_eth.buf);
             break;
@@ -406,15 +413,29 @@ uint32_t wlan_hal_get_gw_ip(void) {
 }
 
 bool wlan_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
-    if(!s_started || !s_cmd_queue) return false;
+    if(!s_started || !s_cmd_queue) {
+        ESP_LOGW(TAG, "send_eth_raw: not started (s=%d q=%p)", s_started, s_cmd_queue);
+        return false;
+    }
     if(!data || len < 14 || len > 1600) return false;
     uint8_t* buf = malloc(len);
-    if(!buf) return false;
+    if(!buf) {
+        ESP_LOGE(TAG, "send_eth_raw: malloc(%u) failed", (unsigned)len);
+        return false;
+    }
     memcpy(buf, data, len);
     WlanCmd cmd = {.type = WCMD_SEND_ETH_RAW, .done = NULL, .result = NULL};
     cmd.send_eth.buf = buf;
     cmd.send_eth.len = len;
     if(xQueueSend(s_cmd_queue, &cmd, 0) != pdTRUE) {
+        static uint32_t qfull_count = 0;
+        static uint32_t qfull_last_log = 0;
+        qfull_count++;
+        if(qfull_count - qfull_last_log >= 20) {
+            qfull_last_log = qfull_count;
+            ESP_LOGW(TAG, "send_eth_raw: cmd queue full (count=%lu)",
+                (unsigned long)qfull_count);
+        }
         free(buf);
         return false;
     }

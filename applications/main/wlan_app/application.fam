@@ -1,6 +1,6 @@
 App(
     appid="wlan",
-    name="WLAN",
+    name="WiFi",
     apptype=FlipperAppType.MENUEXTERNAL,
     entry_point="wlan_app",
     stack_size=8 * 1024,

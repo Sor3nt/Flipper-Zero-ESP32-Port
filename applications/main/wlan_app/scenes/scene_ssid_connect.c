@@ -36,7 +36,7 @@ static void ssid_connect_popup_cb(void* context) {
 
 static void ssid_connect_show_popup(WlanApp* app, const char* text, uint32_t timeout_ms) {
     popup_reset(app->popup);
-    popup_set_header(app->popup, "WLAN", 64, 10, AlignCenter, AlignTop);
+    popup_set_header(app->popup, "WiFi", 64, 10, AlignCenter, AlignTop);
     popup_set_text(app->popup, text, 64, 32, AlignCenter, AlignCenter);
     popup_set_context(app->popup, app);
     popup_set_callback(app->popup, ssid_connect_popup_cb);
