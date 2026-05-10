@@ -177,6 +177,17 @@ static bool
                 app->pan_len = x + 1;
                 app->exp_year = (buff[i + x + 1] << 4) | (buff[i + x + 2] >> 4);
                 app->exp_month = (buff[i + x + 2] << 4) | (buff[i + x + 3] >> 4);
+                /* Service code: 3 BCD digits after the expiry month nibble.
+                 * Track 2 layout (BCD nibbles): ...D YY YM MS SS DD...
+                 * After expiry MM low at (x+3 high), service starts at (x+3 low). */
+                if(x + 4 < tlen) {
+                    uint8_t s_hundreds = buff[i + x + 3] & 0x0F;
+                    uint8_t s_tens = (buff[i + x + 4] >> 4) & 0x0F;
+                    uint8_t s_units = buff[i + x + 4] & 0x0F;
+                    if(s_hundreds <= 9 && s_tens <= 9 && s_units <= 9) {
+                        app->service_code = s_hundreds * 100 + s_tens * 10 + s_units;
+                    }
+                }
                 break;
             }
         }
@@ -204,12 +215,12 @@ static bool
         memcpy(app->cardholder_name, &buff[i], tlen);
         app->cardholder_name[tlen] = '\0';
 
-        // use space char as terminator
-        for(size_t i = 0; i < tlen; i++)
-            if(app->cardholder_name[i] == 0x20) {
-                app->cardholder_name[i] = '\0';
-                break;
-            }
+        /* Strip trailing space padding only — interior spaces are valid
+         * (e.g. "JOHN DOE"). Walk back from end while seeing 0x20. */
+        size_t end = tlen;
+        while(end > 0 && app->cardholder_name[end - 1] == 0x20) {
+            app->cardholder_name[--end] = '\0';
+        }
 
         success = true;
         FURI_LOG_T(TAG, "found EMV_TAG_CARDHOLDER_NAME %x: %s", tag, app->cardholder_name);
@@ -284,6 +295,14 @@ static bool
         app->pin_try_counter = buff[i];
         success = true;
         FURI_LOG_T(TAG, "found EMV_TAG_PIN_TRY_COUNTER %x: %d", tag, app->pin_try_counter);
+        break;
+    case EMV_TAG_CVM_LIST:
+        if(tlen <= sizeof(app->cvm_list)) {
+            memcpy(app->cvm_list, &buff[i], tlen);
+            app->cvm_list_len = tlen;
+            success = true;
+            FURI_LOG_T(TAG, "found EMV_TAG_CVM_LIST %x: %d bytes", tag, tlen);
+        }
         break;
     }
     return success;
@@ -613,6 +632,21 @@ EmvError emv_poller_read_sfi_record(EmvPoller* instance, uint8_t sfi, uint8_t re
             FURI_LOG_E(TAG, "Failed to read SFI 0x%X record %d", sfi, record_num);
             error = emv_process_error(iso14443_4a_error);
             break;
+        }
+
+        /* Append raw record bytes to records_raw for the forensic hex view.
+         * Records are concatenated with a 0xFF separator. Truncate cleanly if
+         * the buffer fills (some cards have many large records). */
+        EmvApplication* app = &instance->data->emv_application;
+        size_t resp_len = bit_buffer_get_size_bytes(instance->rx_buffer);
+        const uint8_t* resp_data = bit_buffer_get_data(instance->rx_buffer);
+        if(resp_len >= 2) resp_len -= 2; /* trim SW1 SW2 */
+        size_t avail = sizeof(app->records_raw) - app->records_raw_len;
+        size_t need = resp_len + (app->records_raw_len ? 1 : 0);
+        if(need <= avail && resp_len > 0) {
+            if(app->records_raw_len) app->records_raw[app->records_raw_len++] = 0xFF;
+            memcpy(&app->records_raw[app->records_raw_len], resp_data, resp_len);
+            app->records_raw_len += resp_len;
         }
     } while(false);
 

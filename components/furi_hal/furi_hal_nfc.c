@@ -119,6 +119,8 @@ static uint8_t pn532_cached_ats_len;
 static bool pn532_iso_dep_active; /* SAK & 0x20 → PN532 activated ISO-DEP */
 static bool pn532_iso_dep_mode;   /* RATS completed, Flipper stack in ISO-DEP mode */
 static uint8_t pn532_block_number; /* I-block sequence toggle (0/1) */
+static int64_t pn532_cache_time_us; /* esp_timer_get_time() at last activation */
+#define PN532_CACHE_TTL_US (1000000) /* 1 second; longer = stale, force fresh poll */
 
 /* Software timers */
 static esp_timer_handle_t fwt_timer = NULL;
@@ -445,11 +447,23 @@ FuriHalNfcError furi_hal_nfc_low_power_mode_stop(void) {
 
 FuriHalNfcError furi_hal_nfc_set_mode(FuriHalNfcMode mode, FuriHalNfcTech tech) {
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
+    /* Preserve cached target across set_mode() within the same tech.
+     * Sor3nt's NfcScanner allocs a new NfcPoller per child protocol it tries
+     * (Ntag4xx -> Type4Tag -> Emv, all under Iso14443_4a -> Iso14443_3a).
+     * Each cycle calls nfc_set_mode() which wiped the activation cache,
+     * forcing the chip to re-poll. PN532's InListPassiveTarget issues REQA,
+     * which doesn't wake a card already in IDLE-in-field state, so subsequent
+     * child pollers fail to even activate and the EMV poller never gets to
+     * send PPSE. By preserving target_number/atqa/sak/uid/ats across same-tech
+     * transitions, the next short-frame REQA can use the existing cache. */
+    bool tech_changed = (tech != nfc_current_tech);
     nfc_current_mode = mode;
     nfc_current_tech = tech;
-    pn532_target_number = 0;
     pn532_iso_dep_mode = false;
     pn532_block_number = 0;
+    if(tech_changed) {
+        pn532_target_number = 0;
+    }
 
     /* Log unsupported technologies */
     if(tech == FuriHalNfcTechIso15693) {
@@ -467,9 +481,18 @@ FuriHalNfcError furi_hal_nfc_set_mode(FuriHalNfcMode mode, FuriHalNfcTech tech) 
 }
 
 FuriHalNfcError furi_hal_nfc_reset_mode(void) {
+    /* Don't wipe target/ATS cache here. The upper stack calls reset_mode()
+     * between every nfc_poller_alloc/free cycle (i.e. between each child
+     * protocol the scanner tries). Wiping forces every child poller to
+     * re-activate from scratch via REQA, which fails for ISO14443-4 cards
+     * already in IDLE-in-field. The cache only invalidates on:
+     *   - HALT (50 00) interception
+     *   - tech change in set_mode()
+     *   - low_power_mode_start (RF off)
+     * Don't toggle RF field off either — leave it on so the card stays
+     * powered and the cache stays valid for the next poller's REQA hit. */
     nfc_current_mode = FuriHalNfcModeNum;
     nfc_current_tech = FuriHalNfcTechInvalid;
-    pn532_target_number = 0;
     pn532_iso_dep_mode = false;
     pn532_block_number = 0;
     pn532_mf_authed = false;
@@ -477,9 +500,6 @@ FuriHalNfcError furi_hal_nfc_reset_mode(void) {
     listener_activated = false;
     listener_rx_len = 0;
     felica_listener_configured = false;
-    /* Turn off RF field */
-    uint8_t cmd[] = {PN532_CMD_RFCONFIGURATION, PN532_RFCFG_FIELD, 0x00};
-    pn532_send_command(cmd, sizeof(cmd), NULL, NULL, 500);
     return FuriHalNfcErrorNone;
 }
 
@@ -950,6 +970,10 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     if(err == FuriHalNfcErrorNone && resp_len >= 1) {
         uint8_t status = resp[0];
         if(status == PN532_STATUS_OK) {
+            /* Refresh cache timestamp on every successful card transaction.
+             * This keeps the cache "alive" through a multi-APDU EMV read
+             * that may take longer than the TTL window. */
+            pn532_cache_time_us = esp_timer_get_time();
             size_t data_len = resp_len - 1; /* strip status byte */
 
             if(pn532_iso_dep_mode) {
@@ -982,12 +1006,35 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         } else {
             err = pn532_status_to_error(status);
             FURI_LOG_I(TAG, "TRX err: %02X", status);
+            /* Self-heal stale cache: clear on any PN532 status that means "the
+             * cached target is no longer present / valid". Comm-level errors
+             * (CRC 0x02, parity 0x03, framing 0x05 within ISO-DEP, collision
+             * 0x06) leave cache intact since the card is still there.
+             *   0x01 timeout, 0x0A RF active too long, 0x25 invalid device state,
+             *   0x26 operation not allowed, 0x29 target released,
+             *   0x2A UID mismatch, anything >= 0x40 catastrophic. */
+            if(status == 0x01 || status == 0x0A || status == 0x25 || status == 0x26 ||
+               status == 0x29 || status == 0x2A || status >= 0x40) {
+                FURI_LOG_I(TAG, "InDataExchange err 0x%02X -> invalidate cache", status);
+                pn532_target_number = 0;
+                pn532_iso_dep_active = false;
+                pn532_iso_dep_mode = false;
+                pn532_cached_ats_len = 0;
+                pn532_target_uid_len = 0;
+            }
             if(nfc_event_flags)
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
         }
     } else {
         if(err == FuriHalNfcErrorNone) err = FuriHalNfcErrorCommunicationTimeout;
+        /* Communication-level failure (I2C error or no response) — also stale */
+        FURI_LOG_I(TAG, "InDataExchange comm fail err=%d -> invalidate cache", (int)err);
+        pn532_target_number = 0;
+        pn532_iso_dep_active = false;
+        pn532_iso_dep_mode = false;
+        pn532_cached_ats_len = 0;
+        pn532_target_uid_len = 0;
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
                 FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
@@ -1086,17 +1133,53 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
     UNUSED(frame); /* PN532 always does REQA internally */
 
-    FURI_LOG_D(TAG, "InListPassiveTarget");
+    /* Time-based cache invalidation: if the cached activation is older than
+     * PN532_CACHE_TTL_US, treat it as stale. The cache is valuable for
+     * back-to-back child poller transitions during a single scan (a few
+     * hundred ms apart), but a re-tap or a re-entered NFC scene more than
+     * 1s later is almost certainly a fresh attempt that needs a real poll. */
+    if(pn532_target_number > 0) {
+        int64_t now = esp_timer_get_time();
+        if(now - pn532_cache_time_us > PN532_CACHE_TTL_US) {
+            FURI_LOG_I(TAG, "REQA cache aged out (%lld us) - invalidating",
+                (long long)(now - pn532_cache_time_us));
+            pn532_target_number = 0;
+            pn532_iso_dep_active = false;
+            pn532_iso_dep_mode = false;
+            pn532_cached_ats_len = 0;
+            pn532_target_uid_len = 0;
+        }
+    }
 
-    /* Release any previously listed target (for clean re-scan) */
-    pn532_target_number = 0;
+    /* If we already have a fresh cached target from a prior activation
+     * (same tech, < 1 s old), synthesize the ATQA response without polling
+     * the chip. PN532 issues REQA in InListPassiveTarget; an ISO14443-4 card
+     * already activated (by a prior child poller's RATS) is in IDLE-in-field
+     * and will not respond to REQA - only WUPA wakes it. Cache hit lets the
+     * upper-stack flow continue using the existing UID/SAK/ATS, then the
+     * SELECT and RATS interceptions further down also hit cache, and the
+     * next I-block exchange (PPSE for EMV) goes to the chip via
+     * InDataExchange. */
+    if(pn532_target_number > 0 && pn532_target_uid_len > 0) {
+        pn532_rx_buf[0] = pn532_target_atqa[0];
+        pn532_rx_buf[1] = pn532_target_atqa[1];
+        pn532_rx_bits = 16;
+        FURI_LOG_I(TAG, "REQA cache hit (target=%u ATQA=%02X%02X)",
+            pn532_target_number, pn532_target_atqa[0], pn532_target_atqa[1]);
+        if(nfc_event_flags)
+            furi_event_flag_set(nfc_event_flags,
+                FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
+        return FuriHalNfcErrorNone;
+    }
+
+    FURI_LOG_D(TAG, "InListPassiveTarget");
 
     uint8_t cmd[] = {PN532_CMD_INLISTPASSIVETARGET, 0x01, PN532_BRTY_ISO14443A};
     uint8_t resp[64];
     size_t resp_len = sizeof(resp);
-    FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 200);
+    FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
 
-    FURI_LOG_D(TAG, "InListPassiveTarget: err=%d resp_len=%u", (int)err, (unsigned)resp_len);
+    FURI_LOG_I(TAG, "InListPassiveTarget: err=%d resp_len=%u", (int)err, (unsigned)resp_len);
 
     pn532_rx_bits = 0;
 
@@ -1126,6 +1209,7 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
             memcpy(pn532_cached_ats, &resp[ats_offset], pn532_cached_ats_len);
         }
 
+        pn532_cache_time_us = esp_timer_get_time();
         FURI_LOG_I(TAG, "Tag: ATQA=%02X%02X SAK=%02X UID=%dB iso_dep=%d",
             pn532_target_atqa[0], pn532_target_atqa[1], pn532_target_sak,
             pn532_target_uid_len, pn532_iso_dep_active);
