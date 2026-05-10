@@ -137,7 +137,6 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/lwip/include"
     -I"$IDF/lwip/lwip/src/include"
     -I"$IDF/lwip/port/include"
-    -I"$IDF/lwip/port/include"
     -I"$IDF/lwip/port/freertos/include"
     -I"$IDF/lwip/port/esp32xx/include"
     -I"$IDF/driver/deprecated"
