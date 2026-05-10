@@ -467,7 +467,7 @@ FuriHalNfcError furi_hal_nfc_set_mode(FuriHalNfcMode mode, FuriHalNfcTech tech) 
 
     /* Log unsupported technologies */
     if(tech == FuriHalNfcTechIso15693) {
-        FURI_LOG_W(TAG, "ISO15693 (NFC-V) not supported by PN532 hardware");
+        FURI_LOG_D(TAG, "ISO15693 (NFC-V) not supported by PN532 hardware");
     }
 
     /* For poller mode, use short passive-activation retries so InListPassiveTarget
@@ -915,7 +915,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     if(pn532_target_number == 0 && nfc_current_tech == FuriHalNfcTechIso14443b &&
        payload_len >= 3 && payload[0] == 0x05) {
         /* REQB/WUPB: [APF=0x05] [AFI] [PARAM] */
-        FURI_LOG_I(TAG, "ISO14443B REQB/WUPB");
+        FURI_LOG_D(TAG, "ISO14443B REQB/WUPB");
 
         uint8_t ilpt_cmd[] = {PN532_CMD_INLISTPASSIVETARGET, 0x01, PN532_BRTY_ISO14443B};
         uint8_t resp[64];
@@ -1179,7 +1179,7 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
     size_t resp_len = sizeof(resp);
     FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
 
-    FURI_LOG_I(TAG, "InListPassiveTarget: err=%d resp_len=%u", (int)err, (unsigned)resp_len);
+    FURI_LOG_D(TAG, "InListPassiveTarget: err=%d resp_len=%u", (int)err, (unsigned)resp_len);
 
     pn532_rx_bits = 0;
 
