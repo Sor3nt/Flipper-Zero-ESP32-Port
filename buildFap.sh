@@ -136,6 +136,7 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/bt/include/esp32c3/include"
     -I"$IDF/bt/host/bluedroid/api/include/api"
     -I"$IDF/lwip/include"
+    -I"$IDF/lwip/lwip/src/include"
     -I"$IDF/lwip/port/include"
     -I"$IDF/lwip/port/freertos/include"
     -I"$IDF/lwip/port/esp32xx/include"
@@ -153,6 +154,7 @@ IDF_COMMON_INCLUDES=(
 
 # ── Common compiler flags ───────────────────────────────────────────
 COMMON_CFLAGS=(
+    -D_GNU_SOURCE
     -fno-common
     -ffunction-sections
     -fdata-sections
