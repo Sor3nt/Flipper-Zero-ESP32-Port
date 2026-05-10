@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Windows build/flash/monitor helper for Flipper-Zero-ESP32-Port.
+"""Cross-platform build/flash/monitor helper for Flipper-Zero-ESP32-Port.
 
 Replaces the legacy _winbuild_*.bat and _winbuild_monitor*.py scripts with a
-single CLI. Designed for Windows + ESP-IDF v5.4.x. The bash-side build.sh is
-unaffected.
+single Python CLI. Originally Windows-only; cross-build is portable across
+any OS that has ESP-IDF installed and Python 3.6+. The bash-side build.sh
+is unaffected.
 
 Usage examples:
-    python winbuild.py setup                 # install ESP-IDF python env (rare)
-    python winbuild.py check                 # verify env activates
-    python winbuild.py build                 # build T-Embed CC1101 firmware
+    python winbuild.py setup                          # install ESP-IDF python env (rare)
+    python winbuild.py check                          # verify env activates
+    python winbuild.py build                          # build T-Embed CC1101 firmware
     python winbuild.py build --board waveshare_c6
     python winbuild.py flash --port COM14
     python winbuild.py monitor --duration 60          # stream live output
     python winbuild.py monitor --duration 15 --reset  # pulse DTR/RTS reset (UART bridges only)
-    python winbuild.py all --port COM14      # build + flash + monitor (boot log captured)
+    python winbuild.py all --port COM14               # build + flash + monitor (boot log captured)
+    python winbuild.py cross-build                    # build for ALL supported boards in sequence
+    python winbuild.py cross-build --boards t_embed waveshare_c6
 
 Env vars (overridable):
     ESP_IDF_DIR  - path to ESP-IDF (default: C:\\Espressif\\frameworks\\esp-idf-v5.4.1)
@@ -22,6 +25,7 @@ Env vars (overridable):
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -167,6 +171,88 @@ def cmd_all(args):
     return cmd_monitor(args)
 
 
+def _sdkconfig_target(path: Path):
+    """Return CONFIG_IDF_TARGET="..." value from a sdkconfig file, or None."""
+    try:
+        text = path.read_text(errors='ignore')
+    except OSError:
+        return None
+    m = re.search(r'^CONFIG_IDF_TARGET="([^"]+)"', text, re.MULTILINE)
+    return m.group(1) if m else None
+
+
+def _purge_stale_sdkconfig(target: str, build_dir: str):
+    """Mirror build.sh: delete root sdkconfig and BUILD_DIR/sdkconfig if their
+    cached CONFIG_IDF_TARGET doesn't match the target we're about to build.
+    Without this, switching boards (esp32s3 → esp32c6) leaves a contaminated
+    cmake cache and the next build fails with 'sdkconfig was generated for
+    target X, but CMakeCache.txt contains Y'. """
+    for p in (REPO_ROOT / "sdkconfig", REPO_ROOT / build_dir / "sdkconfig"):
+        if not p.exists():
+            continue
+        cached = _sdkconfig_target(p)
+        if cached and cached != target:
+            print(f"[cross-build] {p.relative_to(REPO_ROOT)} is for {cached!r}, "
+                  f"removing for {target!r}")
+            p.unlink()
+
+
+def cmd_cross_build(args):
+    """Build firmware for every supported board in sequence. Verifies that
+    a change doesn't break boards the developer can't physically test.
+
+    Use --boards to limit the set. Builds are sequential — running two
+    ESP-IDF builds in parallel against the same source tree contaminates
+    the shared root sdkconfig and breaks both builds.
+    """
+    esp_idf_dir = get_esp_idf_dir()
+    boards_to_build = args.boards if args.boards else list(BOARDS.keys())
+
+    print(f"[cross-build] Building {len(boards_to_build)} board(s): "
+          f"{', '.join(boards_to_build)}")
+
+    results = {}
+    for board in boards_to_build:
+        if board not in BOARDS:
+            print(f"\n[cross-build] Unknown board {board!r}, skipping "
+                  f"(known: {', '.join(BOARDS.keys())})")
+            results[board] = "unknown"
+            continue
+
+        flipper_board, target, build_dir = BOARDS[board]
+        print(f"\n=== {board} ({target}, FLIPPER_BOARD={flipper_board}) ===")
+
+        _purge_stale_sdkconfig(target, build_dir)
+
+        common = f"-B {build_dir} -DFLIPPER_BOARD={flipper_board}"
+        extra = {"FLIPPER_BOARD": flipper_board}
+
+        rc = run_with_idf_env(esp_idf_dir, f"{common} set-target {target}", extra)
+        if rc != 0:
+            results[board] = f"set-target failed (rc={rc})"
+            continue
+
+        rc = run_with_idf_env(esp_idf_dir, f"{common} reconfigure build", extra)
+        results[board] = "OK" if rc == 0 else f"build failed (rc={rc})"
+
+    print("\n=== cross-build summary ===")
+    failures = 0
+    for board, status in results.items():
+        # ASCII-only markers — Windows cmd.exe defaults to cp1252 and
+        # crashes on Unicode glyphs in print().
+        marker = "[OK]  " if status == "OK" else "[FAIL]"
+        print(f"  {marker} {board}: {status}")
+        if status != "OK":
+            failures += 1
+
+    if failures:
+        print(f"\n[cross-build] {failures} board(s) failed.")
+    else:
+        print(f"\n[cross-build] All {len(results)} board(s) built successfully.")
+
+    return 1 if failures else 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="winbuild.py",
@@ -212,6 +298,16 @@ def build_parser():
     # so the follow-up monitor never needs (and on USB-Serial/JTAG must not
     # attempt) its own reset pulse.
     pa.set_defaults(func=cmd_all, reset=False)
+
+    pcb = sub.add_parser(
+        "cross-build",
+        help="Build for every supported board in sequence (cross-board "
+             "compatibility check). Useful before opening a PR when the "
+             "developer doesn't have all boards on hand to test.")
+    pcb.add_argument(
+        "--boards", nargs="*", choices=BOARDS, default=None,
+        help=f"Subset of boards to build (default: all {len(BOARDS)}).")
+    pcb.set_defaults(func=cmd_cross_build)
 
     return p
 
