@@ -227,6 +227,16 @@ static void nfc_render_emv_dates(const EmvApplication* apl, FuriString* str) {
 static void nfc_render_emv_cardholder(const EmvApplication* apl, FuriString* str) {
     if(apl->cardholder_name[0] && apl->cardholder_name[0] != ' ') {
         furi_string_cat_printf(str, "Holder: %s\n", apl->cardholder_name);
+        return;
+    }
+    /* Card didn't return tag 0x5F20 — emit the network's default placeholder
+     * the way OFW EMV reader does. Inferred from AID prefix. */
+    if(apl->aid_len >= 5) {
+        const uint8_t* a = apl->aid;
+        if(a[0] == 0xA0 && a[1] == 0x00 && a[2] == 0x00 && a[3] == 0x00 && a[4] == 0x03)
+            furi_string_cat_printf(str, "Holder: CARDHOLDER/VISA\n");
+        else if(a[0] == 0xA0 && a[1] == 0x00 && a[2] == 0x00 && a[3] == 0x00 && a[4] == 0x04)
+            furi_string_cat_printf(str, "Holder: CARDHOLDER/MASTERCARD\n");
     }
 }
 
@@ -279,7 +289,15 @@ static void nfc_render_emv_service_code(const EmvApplication* apl, FuriString* s
 
 static void nfc_render_emv_cvm_list(const EmvApplication* apl, FuriString* str) {
     if(apl->cvm_list_len < 10) {
-        /* Need at least 8 bytes (X+Y amounts) + 1 CV rule (2 bytes) */
+        /* Card didn't expose a CVM list (most contactless cards don't).
+         * Tell the user we checked, and infer the practical PIN policy:
+         * if no CVM rules are published, the card relies on the terminal's
+         * floor limit — small purchases skip cardholder verification, large
+         * purchases prompt the terminal (typically signature or no-CVM). */
+        furi_string_cat_printf(str, "\e#CVM list\n");
+        furi_string_cat_printf(str, "(no CVM list found)\n");
+        furi_string_cat_printf(str, "PIN: card never asks\n");
+        furi_string_cat_printf(str, "(terminal limit applies)\n");
         return;
     }
     /* CVM List: [X amount: 4][Y amount: 4][CV rule: 2]+ */

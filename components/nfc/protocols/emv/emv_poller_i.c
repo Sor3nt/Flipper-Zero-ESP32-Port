@@ -215,12 +215,12 @@ static bool
         memcpy(app->cardholder_name, &buff[i], tlen);
         app->cardholder_name[tlen] = '\0';
 
-        // use space char as terminator
-        for(size_t i = 0; i < tlen; i++)
-            if(app->cardholder_name[i] == 0x20) {
-                app->cardholder_name[i] = '\0';
-                break;
-            }
+        /* Strip trailing space padding only — interior spaces are valid
+         * (e.g. "JOHN DOE"). Walk back from end while seeing 0x20. */
+        size_t end = tlen;
+        while(end > 0 && app->cardholder_name[end - 1] == 0x20) {
+            app->cardholder_name[--end] = '\0';
+        }
 
         success = true;
         FURI_LOG_T(TAG, "found EMV_TAG_CARDHOLDER_NAME %x: %s", tag, app->cardholder_name);
