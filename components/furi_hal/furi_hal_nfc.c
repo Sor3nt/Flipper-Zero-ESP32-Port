@@ -1000,12 +1000,31 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         } else {
             err = pn532_status_to_error(status);
             FURI_LOG_I(TAG, "TRX err: %02X", status);
+            /* Self-heal stale cache: if chip says "no target listed" (status 0x01
+             * timeout, 0x05 RF target activation lost, 0x0A target released, or
+             * any non-recoverable error), invalidate the activation cache so the
+             * next REQA polls the chip fresh instead of returning stale ATQA. */
+            if(status == 0x01 || status == 0x05 || status == 0x0A || status >= 0x40) {
+                FURI_LOG_I(TAG, "InDataExchange err 0x%02X -> invalidate cache", status);
+                pn532_target_number = 0;
+                pn532_iso_dep_active = false;
+                pn532_iso_dep_mode = false;
+                pn532_cached_ats_len = 0;
+                pn532_target_uid_len = 0;
+            }
             if(nfc_event_flags)
                 furi_event_flag_set(nfc_event_flags,
                     FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
         }
     } else {
         if(err == FuriHalNfcErrorNone) err = FuriHalNfcErrorCommunicationTimeout;
+        /* Communication-level failure (I2C error or no response) — also stale */
+        FURI_LOG_I(TAG, "InDataExchange comm fail err=%d -> invalidate cache", (int)err);
+        pn532_target_number = 0;
+        pn532_iso_dep_active = false;
+        pn532_iso_dep_mode = false;
+        pn532_cached_ats_len = 0;
+        pn532_target_uid_len = 0;
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
                 FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);

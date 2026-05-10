@@ -96,6 +96,7 @@ typedef struct {
     uint8_t effective_year;
     uint16_t country_code;
     uint16_t currency_code;
+    uint16_t service_code; /* 3-digit ISO 7813 code from Track 2, 0 if absent */
     uint8_t pin_try_counter;
     uint16_t transaction_counter;
     uint16_t last_online_atc;
