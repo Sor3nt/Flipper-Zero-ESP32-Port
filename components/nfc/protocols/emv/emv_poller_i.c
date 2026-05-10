@@ -177,6 +177,17 @@ static bool
                 app->pan_len = x + 1;
                 app->exp_year = (buff[i + x + 1] << 4) | (buff[i + x + 2] >> 4);
                 app->exp_month = (buff[i + x + 2] << 4) | (buff[i + x + 3] >> 4);
+                /* Service code: 3 BCD digits after the expiry month nibble.
+                 * Track 2 layout (BCD nibbles): ...D YY YM MS SS DD...
+                 * After expiry MM low at (x+3 high), service starts at (x+3 low). */
+                if(x + 4 < tlen) {
+                    uint8_t s_hundreds = buff[i + x + 3] & 0x0F;
+                    uint8_t s_tens = (buff[i + x + 4] >> 4) & 0x0F;
+                    uint8_t s_units = buff[i + x + 4] & 0x0F;
+                    if(s_hundreds <= 9 && s_tens <= 9 && s_units <= 9) {
+                        app->service_code = s_hundreds * 100 + s_tens * 10 + s_units;
+                    }
+                }
                 break;
             }
         }
