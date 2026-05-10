@@ -54,6 +54,22 @@ void submenu_add_item(
     SubmenuItemCallback callback,
     void* callback_context);
 
+/** Add item to submenu with horizontally centered label.
+ *
+ * @param      submenu           Submenu instance
+ * @param      label             menu item label
+ * @param      index             menu item index, used for callback, may be
+ *                               the same with other items
+ * @param      callback          menu item callback
+ * @param      callback_context  menu item callback context
+ */
+void submenu_add_item_centered(
+    Submenu* submenu,
+    const char* label,
+    uint32_t index,
+    SubmenuItemCallback callback,
+    void* callback_context);
+
 /** Add lockable item to submenu
  *
  * @param      submenu           Submenu instance
@@ -98,6 +114,14 @@ void submenu_add_item_ex(
  */
 void submenu_change_item_label(Submenu* submenu, uint32_t index, const char* label);
 
+/** Add a non-selectable horizontal separator to the submenu.
+ * Drawn as a thin centered line; up/down navigation skips it,
+ * OK does nothing on it.
+ *
+ * @param      submenu  Submenu instance
+ */
+void submenu_add_separator(Submenu* submenu);
+
 /** Remove item from submenu
  *
  * @param      submenu           Submenu instance
@@ -134,6 +158,15 @@ void submenu_set_selected_item(Submenu* submenu, uint32_t index);
  * @param      header   header to set
  */
 void submenu_set_header(Submenu* submenu, const char* header);
+
+/** Set optional header for submenu, rendered horizontally centered.
+ * Like submenu_set_header() but draws the header text centered instead of
+ * left-aligned at x=4. NULL/empty clears the header.
+ *
+ * @param      submenu  Submenu instance
+ * @param      header   header to set
+ */
+void submenu_set_header_centered(Submenu* submenu, const char* header);
 
 /** Set submenu orientation
  *

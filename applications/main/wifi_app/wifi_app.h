@@ -12,6 +12,7 @@
 
 #include "scenes/scenes.h"
 #include "wifi_crawler.h"
+#include "netcut/netcut_engine.h"
 
 #define WIFI_APP_MAX_APS 64
 #define WIFI_APP_LOG_TAG "WifiApp"
@@ -58,6 +59,8 @@ typedef enum {
     WifiAppViewEvilPortal,
     WifiAppViewVariableItemList,
     WifiAppViewEvilPortalCaptured,
+    WifiAppViewNetCut,
+    WifiAppViewSpectrum,
 } WifiAppView;
 
 typedef enum {
@@ -121,6 +124,7 @@ struct WifiApp {
     View* view_beacon;
     View* view_portscan;
     View* view_evil_portal;
+    View* view_spectrum;
     void* beacon_view_obj;
     void* evil_portal_view_obj;
     void* evil_portal_captured_view_obj;
@@ -160,6 +164,13 @@ struct WifiApp {
     volatile uint8_t evil_portal_cred_head;
     volatile uint8_t evil_portal_cred_tail;
     uint32_t evil_portal_cred_total;
+
+    // NetCut
+    View*           view_netcut;
+    NetCutEngine*   netcut_engine;
+    int             netcut_selected;        // currently focused device idx
+    NetCutSettings  netcut_settings_edit;   // working copy edited by settings scene
+    bool            netcut_complete_mode;   // entered via "Complete Network" pre-menu
 };
 
 static inline const char* wifi_auth_mode_str(int authmode) {

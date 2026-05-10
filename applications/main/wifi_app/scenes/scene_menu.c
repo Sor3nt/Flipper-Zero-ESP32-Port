@@ -2,6 +2,7 @@
 #include "../wifi_hal.h"
 
 enum SubmenuIndex {
+    SubmenuIndexSpectrum,
     SubmenuIndexSelect,
     SubmenuIndexSsidAttack,
     SubmenuIndexChannelAttack,
@@ -25,6 +26,8 @@ void wifi_app_scene_menu_on_enter(void* context) {
 
     bool connected = wifi_hal_is_connected();
     bool has_target = connected || app->ap_selected;
+
+    submenu_add_item(app->submenu, "Spectrum Analyzer", SubmenuIndexSpectrum, wifi_app_scene_menu_submenu_callback, app);
 
     if(has_target) {
         char label[48];
@@ -55,6 +58,10 @@ bool wifi_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
+        case SubmenuIndexSpectrum:
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneSpectrum);
+            consumed = true;
+            break;
         case SubmenuIndexSelect:
             app->scanner_next_scene = WifiAppSceneApDetail;
             scene_manager_next_scene(app->scene_manager, WifiAppSceneScanner);

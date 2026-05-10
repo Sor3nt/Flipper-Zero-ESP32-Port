@@ -1,0 +1,10 @@
+App(
+    appid="wlan",
+    name="WLAN",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="wlan_app",
+    stack_size=8 * 1024,
+    icon="A_Sub1ghz_14",
+    order=67,
+    fap_libs=["assets"],
+)

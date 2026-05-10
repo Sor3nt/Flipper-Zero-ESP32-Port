@@ -7,6 +7,7 @@ enum SsidAttackIndex {
     SsidAttackIndexNetscan,
     SsidAttackIndexAirSnitch,
     SsidAttackIndexCrawler,
+    SsidAttackIndexNetCut,
 };
 
 static void ssid_attack_callback(void* context, uint32_t index) {
@@ -27,6 +28,9 @@ void wifi_app_scene_ssid_attack_menu_on_enter(void* context) {
     if(connected) {
         submenu_add_item(
             app->submenu, "Network Scanner", SsidAttackIndexNetscan,
+            ssid_attack_callback, app);
+        submenu_add_item(
+            app->submenu, "NetCut", SsidAttackIndexNetCut,
             ssid_attack_callback, app);
         submenu_add_item(
             app->submenu, "AirSnitch", SsidAttackIndexAirSnitch,
@@ -64,6 +68,10 @@ bool wifi_app_scene_ssid_attack_menu_on_event(void* context, SceneManagerEvent e
             break;
         case SsidAttackIndexCrawler:
             scene_manager_next_scene(app->scene_manager, WifiAppSceneCrawlerInput);
+            consumed = true;
+            break;
+        case SsidAttackIndexNetCut:
+            scene_manager_next_scene(app->scene_manager, WifiAppSceneNetCutMode);
             consumed = true;
             break;
         }
