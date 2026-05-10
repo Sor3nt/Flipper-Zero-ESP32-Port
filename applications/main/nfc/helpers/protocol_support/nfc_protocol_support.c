@@ -12,6 +12,9 @@
 #include "nfc_protocol_support_base.h"
 #include "nfc_protocol_support_gui_common.h"
 
+#include <protocols/iso14443_3a/iso14443_3a.h>
+#include <protocols/iso14443_4a/iso14443_4a.h>
+
 #include <flipper_application/plugins/plugin_manager.h>
 
 #define TAG "NfcProtocolSupport"
@@ -378,9 +381,58 @@ static void nfc_protocol_support_scene_read_on_exit(NfcApp* instance) {
     nfc_blink_stop(instance);
 }
 
+/* Payment card guard: never expose Emulate / Write / Change UID for cards
+ * that look like contactless EMV credit cards. The risk surface (PAN
+ * cloning, fraudulent transactions) makes it not worth offering, even
+ * though the underlying ISO14443-3A/4A layer technically supports UID
+ * emulation. Triggers when ANY of:
+ *   - leaf protocol is EMV
+ *   - any sibling scan in this session detected EMV (handles the case
+ *     where EMV's deep poller fell back to the parent ISO14443-3A/4A leaf)
+ *   - leaf is ISO14443-3A or ISO14443-4A AND the ISO14443-3A signature
+ *     matches contactless EMV (ATQA = 0x0004, SAK = 0x20, 4-byte random
+ *     UID starting with 0x08). This catches the regression case where the
+ *     EMV deep poller failed but the card is clearly a payment card. */
+static bool nfc_protocol_support_is_payment_card(NfcApp* instance, NfcProtocol leaf) {
+    if(leaf == NfcProtocolEmv) return true;
+    if(instance->detected_protocols) {
+        uint32_t n = nfc_detected_protocols_get_num(instance->detected_protocols);
+        for(uint32_t i = 0; i < n; i++) {
+            if(nfc_detected_protocols_get_protocol(instance->detected_protocols, i) ==
+               NfcProtocolEmv) {
+                return true;
+            }
+        }
+    }
+    if(leaf == NfcProtocolIso14443_3a || leaf == NfcProtocolIso14443_4a) {
+        const Iso14443_3aData* p3a = NULL;
+        if(leaf == NfcProtocolIso14443_3a) {
+            p3a = nfc_device_get_data(instance->nfc_device, NfcProtocolIso14443_3a);
+        } else {
+            const Iso14443_4aData* p4a =
+                nfc_device_get_data(instance->nfc_device, NfcProtocolIso14443_4a);
+            if(p4a) p3a = p4a->iso14443_3a_data;
+        }
+        if(p3a) {
+            uint8_t atqa[2];
+            iso14443_3a_get_atqa(p3a, atqa);
+            uint8_t sak = iso14443_3a_get_sak(p3a);
+            size_t uid_len = 0;
+            const uint8_t* uid = iso14443_3a_get_uid(p3a, &uid_len);
+            bool atqa_emv = (atqa[0] == 0x04 && atqa[1] == 0x00) ||
+                            (atqa[0] == 0x00 && atqa[1] == 0x04);
+            bool sak_emv = (sak == 0x20 || sak == 0x28);
+            bool uid_random = (uid_len == 4 && uid && uid[0] == 0x08);
+            if(atqa_emv && sak_emv && uid_random) return true;
+        }
+    }
+    return false;
+}
+
 // SceneReadMenu
 static void nfc_protocol_support_scene_read_menu_on_enter(NfcApp* instance) {
     const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+    const bool is_payment = nfc_protocol_support_is_payment_card(instance, protocol);
 
     Submenu* submenu = instance->submenu;
 
@@ -391,7 +443,8 @@ static void nfc_protocol_support_scene_read_menu_on_enter(NfcApp* instance) {
         nfc_protocol_support_common_submenu_callback,
         instance);
 
-    if(scene_manager_has_previous_scene(instance->scene_manager, NfcSceneGenerateInfo)) {
+    if(!is_payment &&
+       scene_manager_has_previous_scene(instance->scene_manager, NfcSceneGenerateInfo)) {
         submenu_add_item(
             submenu,
             "Change UID",
@@ -400,7 +453,9 @@ static void nfc_protocol_support_scene_read_menu_on_enter(NfcApp* instance) {
             instance);
     }
 
-    if(nfc_protocol_support_has_feature(protocol, instance, NfcProtocolFeatureEmulateUid)) {
+    if(is_payment) {
+        /* Skip Emulate options for payment cards. */
+    } else if(nfc_protocol_support_has_feature(protocol, instance, NfcProtocolFeatureEmulateUid)) {
         submenu_add_item(
             submenu,
             "Emulate UID",
