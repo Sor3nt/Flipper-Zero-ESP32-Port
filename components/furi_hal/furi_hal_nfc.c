@@ -119,6 +119,8 @@ static uint8_t pn532_cached_ats_len;
 static bool pn532_iso_dep_active; /* SAK & 0x20 → PN532 activated ISO-DEP */
 static bool pn532_iso_dep_mode;   /* RATS completed, Flipper stack in ISO-DEP mode */
 static uint8_t pn532_block_number; /* I-block sequence toggle (0/1) */
+static int64_t pn532_cache_time_us; /* esp_timer_get_time() at last activation */
+#define PN532_CACHE_TTL_US (1000000) /* 1 second; longer = stale, force fresh poll */
 
 /* Software timers */
 static esp_timer_handle_t fwt_timer = NULL;
@@ -1000,11 +1002,15 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         } else {
             err = pn532_status_to_error(status);
             FURI_LOG_I(TAG, "TRX err: %02X", status);
-            /* Self-heal stale cache: if chip says "no target listed" (status 0x01
-             * timeout, 0x05 RF target activation lost, 0x0A target released, or
-             * any non-recoverable error), invalidate the activation cache so the
-             * next REQA polls the chip fresh instead of returning stale ATQA. */
-            if(status == 0x01 || status == 0x05 || status == 0x0A || status >= 0x40) {
+            /* Self-heal stale cache: clear on any PN532 status that means "the
+             * cached target is no longer present / valid". Comm-level errors
+             * (CRC 0x02, parity 0x03, framing 0x05 within ISO-DEP, collision
+             * 0x06) leave cache intact since the card is still there.
+             *   0x01 timeout, 0x0A RF active too long, 0x25 invalid device state,
+             *   0x26 operation not allowed, 0x29 target released,
+             *   0x2A UID mismatch, anything >= 0x40 catastrophic. */
+            if(status == 0x01 || status == 0x0A || status == 0x25 || status == 0x26 ||
+               status == 0x29 || status == 0x2A || status >= 0x40) {
                 FURI_LOG_I(TAG, "InDataExchange err 0x%02X -> invalidate cache", status);
                 pn532_target_number = 0;
                 pn532_iso_dep_active = false;
@@ -1123,14 +1129,33 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
     UNUSED(frame); /* PN532 always does REQA internally */
 
-    /* If we already have a cached target from a prior activation in this NFC
-     * session (same tech), synthesize the ATQA response without polling the
-     * chip. PN532 issues REQA in InListPassiveTarget; an ISO14443-4 card that's
-     * already been activated (by a prior child poller's RATS) is in IDLE-in-
-     * field and will not respond to REQA - only WUPA wakes it. Cache hit lets
-     * the upper-stack flow continue using the existing UID/SAK/ATS, then the
-     * SELECT and RATS interceptions further down also hit cache, and the next
-     * I-block exchange (PPSE for EMV) goes to the chip via InDataExchange. */
+    /* Time-based cache invalidation: if the cached activation is older than
+     * PN532_CACHE_TTL_US, treat it as stale. The cache is valuable for
+     * back-to-back child poller transitions during a single scan (a few
+     * hundred ms apart), but a re-tap or a re-entered NFC scene more than
+     * 1s later is almost certainly a fresh attempt that needs a real poll. */
+    if(pn532_target_number > 0) {
+        int64_t now = esp_timer_get_time();
+        if(now - pn532_cache_time_us > PN532_CACHE_TTL_US) {
+            FURI_LOG_I(TAG, "REQA cache aged out (%lld us) - invalidating",
+                (long long)(now - pn532_cache_time_us));
+            pn532_target_number = 0;
+            pn532_iso_dep_active = false;
+            pn532_iso_dep_mode = false;
+            pn532_cached_ats_len = 0;
+            pn532_target_uid_len = 0;
+        }
+    }
+
+    /* If we already have a fresh cached target from a prior activation
+     * (same tech, < 1 s old), synthesize the ATQA response without polling
+     * the chip. PN532 issues REQA in InListPassiveTarget; an ISO14443-4 card
+     * already activated (by a prior child poller's RATS) is in IDLE-in-field
+     * and will not respond to REQA - only WUPA wakes it. Cache hit lets the
+     * upper-stack flow continue using the existing UID/SAK/ATS, then the
+     * SELECT and RATS interceptions further down also hit cache, and the
+     * next I-block exchange (PPSE for EMV) goes to the chip via
+     * InDataExchange. */
     if(pn532_target_number > 0 && pn532_target_uid_len > 0) {
         pn532_rx_buf[0] = pn532_target_atqa[0];
         pn532_rx_buf[1] = pn532_target_atqa[1];
@@ -1180,6 +1205,7 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
             memcpy(pn532_cached_ats, &resp[ats_offset], pn532_cached_ats_len);
         }
 
+        pn532_cache_time_us = esp_timer_get_time();
         FURI_LOG_I(TAG, "Tag: ATQA=%02X%02X SAK=%02X UID=%dB iso_dep=%d",
             pn532_target_atqa[0], pn532_target_atqa[1], pn532_target_sak,
             pn532_target_uid_len, pn532_iso_dep_active);
