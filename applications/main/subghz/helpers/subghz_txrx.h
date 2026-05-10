@@ -165,50 +165,6 @@ void subghz_txrx_hopper_unpause(SubGhzTxRx* instance);
 void subghz_txrx_hopper_pause(SubGhzTxRx* instance);
 
 /**
- * Speaker on
- * 
- * @param instance Pointer to a SubGhzTxRx 
- */
-void subghz_txrx_speaker_on(SubGhzTxRx* instance);
-
-/**
- * Speaker off
- * 
- * @param instance Pointer to a SubGhzTxRx 
- */
-void subghz_txrx_speaker_off(SubGhzTxRx* instance);
-
-/**
- * Speaker mute
- * 
- * @param instance Pointer to a SubGhzTxRx 
- */
-void subghz_txrx_speaker_mute(SubGhzTxRx* instance);
-
-/**
- * Speaker unmute
- * 
- * @param instance Pointer to a SubGhzTxRx 
- */
-void subghz_txrx_speaker_unmute(SubGhzTxRx* instance);
-
-/**
- * Set state speaker
- * 
- * @param instance Pointer to a SubGhzTxRx 
- * @param state State speaker
- */
-void subghz_txrx_speaker_set_state(SubGhzTxRx* instance, SubGhzSpeakerState state);
-
-/**
- * Get state speaker
- * 
- * @param instance Pointer to a SubGhzTxRx 
- * @return SubGhzSpeakerState 
- */
-SubGhzSpeakerState subghz_txrx_speaker_get_state(SubGhzTxRx* instance);
-
-/**
  * load decoder by name protocol
  * 
  * @param instance Pointer to a SubGhzTxRx

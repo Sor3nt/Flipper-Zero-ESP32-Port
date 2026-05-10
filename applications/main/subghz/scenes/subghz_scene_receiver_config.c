@@ -14,7 +14,6 @@ enum SubGhzSettingIndex {
     SubGhzSettingIndexIgnorePrinceton,
     SubGhzSettingIndexIgnoreNiceFlorS,
     SubGhzSettingIndexDeleteOldSignals,
-    SubGhzSettingIndexSound,
     SubGhzSettingIndexResetToDefault,
     SubGhzSettingIndexLock,
     SubGhzSettingIndexRAWThresholdRSSI,
@@ -86,11 +85,6 @@ const float hopping_mode_value[HOPPING_MODE_COUNT] = {
 const uint32_t hopping_value[COMBO_BOX_COUNT] = {
     SubGhzHopperStateOFF,
     SubGhzHopperStateRunning,
-};
-
-const uint32_t speaker_value[COMBO_BOX_COUNT] = {
-    SubGhzSpeakerStateShutdown,
-    SubGhzSpeakerStateEnable,
 };
 
 const uint32_t bin_raw_value[COMBO_BOX_COUNT] = {
@@ -276,14 +270,6 @@ static void subghz_scene_receiver_config_set_hopping(VariableItem* item) {
         subghz->txrx, index != 0 ? SubGhzHopperStateRunning : SubGhzHopperStateOFF);
 }
 
-static void subghz_scene_receiver_config_set_speaker(VariableItem* item) {
-    SubGhz* subghz = variable_item_get_context(item);
-    uint8_t index = variable_item_get_current_value_index(item);
-
-    variable_item_set_current_value_text(item, combobox_text[index]);
-    subghz_txrx_speaker_set_state(subghz->txrx, speaker_value[index]);
-}
-
 static void subghz_scene_receiver_config_set_bin_raw(VariableItem* item) {
     SubGhz* subghz = variable_item_get_context(item);
     uint8_t index = variable_item_get_current_value_index(item);
@@ -380,7 +366,6 @@ static void subghz_scene_receiver_config_var_list_enter_callback(void* context, 
         subghz->last_settings->filter = subghz->filter;
         subghz->last_settings->delete_old_signals = false;
         subghz->last_settings->tx_power = subghz->tx_power = 0;
-        subghz_txrx_speaker_set_state(subghz->txrx, speaker_value[default_index]);
 
         subghz_txrx_hopper_set_state(subghz->txrx, hopping_value[default_index]);
         subghz->last_settings->enable_hopping = hopping_value[default_index];
@@ -536,18 +521,6 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, combobox_text[value_index]);
     }
-
-    // Enable speaker, will send all incoming noises and signals to speaker so you can listen how your remote sounds like :)
-    item = variable_item_list_add(
-        subghz->variable_item_list,
-        "Sound",
-        COMBO_BOX_COUNT,
-        subghz_scene_receiver_config_set_speaker,
-        subghz);
-    value_index = value_index_uint32(
-        subghz_txrx_speaker_get_state(subghz->txrx), speaker_value, COMBO_BOX_COUNT);
-    variable_item_set_current_value_index(item, value_index);
-    variable_item_set_current_value_text(item, combobox_text[value_index]);
 
     if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
        SubGhzCustomEventManagerSet) {

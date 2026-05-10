@@ -20,7 +20,6 @@ struct SubGhzTxRx {
     SubGhzHopperState hopper_state;
 
     SubGhzTxRxState txrx_state;
-    SubGhzSpeakerState speaker_state;
     const SubGhzDevice* radio_device;
     SubGhzRadioDeviceType radio_device_type;
 

@@ -20,7 +20,7 @@ static void wlan_app_scene_main_submenu_cb(void* context, uint32_t index) {
 void wlan_app_scene_main_on_enter(void* context) {
     WlanApp* app = context;
     submenu_reset(app->submenu);
-    submenu_set_header_centered(app->submenu, "WLAN");
+    submenu_set_header_centered(app->submenu, "WiFi");
 
     // Channel-Aktionen sind immer sichtbar; Verbindungs-Aktionen sind state-abhängig.
     app->channel_mode_active = false;

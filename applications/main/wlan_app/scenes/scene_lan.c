@@ -73,7 +73,7 @@ static void lan_popup_done_cb(void* context) {
 
 static void lan_show_popup(WlanApp* app, const char* text) {
     popup_reset(app->popup);
-    popup_set_header(app->popup, "WLAN", 64, 10, AlignCenter, AlignTop);
+    popup_set_header(app->popup, "WiFi", 64, 10, AlignCenter, AlignTop);
     popup_set_text(app->popup, text, 64, 32, AlignCenter, AlignCenter);
     popup_set_context(app->popup, app);
     popup_set_callback(app->popup, lan_popup_done_cb);
