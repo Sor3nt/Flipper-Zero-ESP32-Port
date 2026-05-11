@@ -13,6 +13,10 @@ build_waveshare_c6/
 # Local-dev tooling (not for upstream)
 _flash_helper.py
 
+# Multi-boot: the Bruce firmware checkout is managed by patchBruce.py
+# (clone + git pull + tools/bruce_multiboot.patch), not checked in.
+multi-boot/bruce/
+
 # Managed components are pulled by IDF component manager from idf_component.yml
 # + dependencies.lock; the source-of-truth is those two files.
 managed_components/

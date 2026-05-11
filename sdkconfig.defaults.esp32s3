@@ -7,6 +7,13 @@
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
+# Multi-boot: dual-app (OTA) partition table shared with the Bruce firmware.
+# ota_0 = this firmware (default boot), ota_1 = Bruce. See partitions_multiboot.csv
+# and 00_Skills/multi-boot.md. Switching is done via esp_ota_set_boot_partition().
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_multiboot.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_multiboot.csv"
+
 # ESP32-S3 is dual-core Xtensa — keep unicore for Furi compatibility
 CONFIG_FREERTOS_UNICORE=y
 
