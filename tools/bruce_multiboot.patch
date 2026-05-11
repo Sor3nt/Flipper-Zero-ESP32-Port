@@ -1,0 +1,114 @@
+diff --git a/src/core/main_menu.cpp b/src/core/main_menu.cpp
+index 4dcbbda..faa88a2 100644
+--- a/src/core/main_menu.cpp
++++ b/src/core/main_menu.cpp
+@@ -32,6 +32,7 @@ MainMenu::MainMenu() {
+         &connectMenu,
+ #endif
+         &configMenu,
++        &flipperOsMenu, // multi-boot add-on (patchBruce.py)
+     };
+ 
+     _totalItems = _menuItems.size();
+diff --git a/src/core/main_menu.h b/src/core/main_menu.h
+index ce28f98..7a5d66e 100644
+--- a/src/core/main_menu.h
++++ b/src/core/main_menu.h
+@@ -20,9 +20,11 @@
+ #include "menu_items/ScriptsMenu.h"
+ #include "menu_items/WifiMenu.h"
+ #include "menu_items/AppsMenu.h"
++#include "menu_items/FlipperOsMenu.h" // multi-boot add-on (patchBruce.py)
+ class MainMenu {
+ public:
+     AppsMenu appsMenu;
++    FlipperOsMenu flipperOsMenu; // multi-boot add-on (patchBruce.py)
+     FileMenu fileMenu;
+     BleMenu bleMenu;
+     ClockMenu clockMenu;
+diff --git a/src/core/menu_items/FlipperOsMenu.cpp b/src/core/menu_items/FlipperOsMenu.cpp
+new file mode 100644
+index 0000000..8ac06cf
+--- /dev/null
++++ b/src/core/menu_items/FlipperOsMenu.cpp
+@@ -0,0 +1,53 @@
++// --- Multi-boot add-on (not part of upstream Bruce) ---------------------------
++// "Flipper Zero" main-menu entry: reboots into the Flipper Zero firmware that
++// lives in the ota_0 partition (this firmware lives in ota_1). Created by
++// patchBruce.py / tools/bruce_multiboot.patch in the Flipper repo.
++#include "FlipperOsMenu.h"
++
++#include "core/display.h"
++#include "core/utils.h"
++
++#include <esp_ota_ops.h>
++#include <esp_partition.h>
++
++// The Flipper Zero port is flashed into the ota_0 slot.
++#define FLIPPEROS_TARGET_SUBTYPE ESP_PARTITION_SUBTYPE_APP_OTA_0
++
++static void rebootToFlipperOs(void) {
++    const esp_partition_t *target =
++        esp_partition_find_first(ESP_PARTITION_TYPE_APP, FLIPPEROS_TARGET_SUBTYPE, NULL);
++    if (target == NULL) {
++        displayError("No ota_0 partition.\nNot a multi-boot image.", true);
++        return;
++    }
++    if (esp_ota_set_boot_partition(target) != ESP_OK) {
++        displayError("Could not select\nthe Flipper partition.", true);
++        return;
++    }
++    displayInfo("Rebooting to Flipper Zero...");
++    delay(150);
++    ESP.restart();
++}
++
++void FlipperOsMenu::optionsMenu() {
++    options = {
++        {"Reboot to Flipper", []() { rebootToFlipperOs(); }},
++    };
++    addOptionToMainMenu();
++    loopOptions(options, MENU_TYPE_SUBMENU, "Flipper Zero");
++}
++
++void FlipperOsMenu::drawIcon(float scale) {
++    clearIconArea();
++
++    int r = scale * 8;
++    int w = 6 * r;
++    int h = 4 * r;
++    int x = iconCenterX - w / 2;
++    int y = iconCenterY - h / 2;
++
++    // Body of the "Flipper" — a rounded rectangle with a screen and a dot.
++    tft.fillRoundRect(x, y, w, h, r, bruceConfig.priColor);
++    tft.fillRoundRect(x + r / 2, y + r / 2, w - r, h - 2 * r, r / 2, bruceConfig.bgColor);
++    tft.fillCircle(x + w - r, y + h - r, r / 3, bruceConfig.priColor);
++}
+diff --git a/src/core/menu_items/FlipperOsMenu.h b/src/core/menu_items/FlipperOsMenu.h
+new file mode 100644
+index 0000000..f98b543
+--- /dev/null
++++ b/src/core/menu_items/FlipperOsMenu.h
+@@ -0,0 +1,21 @@
++// --- Multi-boot add-on (not part of upstream Bruce) ---------------------------
++// Provides the "Flipper Zero" main-menu entry that reboots the device into the
++// ESP32 Flipper Zero port living in the ota_0 partition. Mirrors the "Bruce"
++// entry on the Flipper side. See 00_Skills/multi-boot.md in the Flipper repo.
++// This file is created by patchBruce.py / tools/bruce_multiboot.patch.
++#ifndef __FLIPPEROS_MENU_H__
++#define __FLIPPEROS_MENU_H__
++
++#include <MenuItemInterface.h>
++
++class FlipperOsMenu : public MenuItemInterface {
++public:
++    FlipperOsMenu() : MenuItemInterface("Flipper Zero") {}
++
++    void optionsMenu(void);
++    void drawIcon(float scale);
++    bool hasTheme() { return false; }
++    String themePath() { return ""; }
++};
++
++#endif // __FLIPPEROS_MENU_H__
