@@ -1,0 +1,27 @@
+# Name,   Type, SubType,   Offset,    Size,      Flags
+# ---------------------------------------------------------------------------
+# Multi-boot layout for 16 MB flash boards (LilyGo T-Embed CC1101).
+#
+#   ota_0  = this ESP32 Flipper Zero port  (default boot target)
+#   ota_1  = Bruce firmware                (https://github.com/BruceDevices/firmware)
+#   spiffs = LittleFS scratch area used by Bruce at runtime
+#
+# Switching is done via esp_ota_set_boot_partition() + reboot from either
+# firmware ("Other OS" menu entry: "Bruce" on our side, "Flipper Zero" in Bruce).
+# otadata starts erased (0xFF) so the bootloader boots ota_0 by default.
+#
+# IMPORTANT: this exact table must be used by BOTH builds. patchBruce.py copies
+# it over Bruce's custom_16Mb.csv. Bruce's PlatformIO build only uses it for the
+# app-size limit check; flashing Bruce's firmware.bin to the ota_1 offset is done
+# by buildAndFlash_T-Embed.sh via esptool.
+#
+# Bootloader occupies 0x0..0x8000 on the ESP32-S3, the partition table lives at
+# 0x8000 (CONFIG_PARTITION_TABLE_OFFSET).
+# ---------------------------------------------------------------------------
+nvs,        data, nvs,       0x9000,    0x6000,
+otadata,    data, ota,       0xf000,    0x2000,
+phy_init,   data, phy,       0x11000,   0x1000,
+ota_0,      app,  ota_0,     0x20000,   0x500000,
+ota_1,      app,  ota_1,     0x520000,  0x500000,
+spiffs,     data, spiffs,    0xa20000,  0x5c0000,
+coredump,   data, coredump,  0xfe0000,  0x20000,
