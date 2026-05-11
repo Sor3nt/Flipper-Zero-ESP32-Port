@@ -9,12 +9,18 @@
  * This app sits in the main menu as "Bruce". Selecting it asks for
  * confirmation, points the OTA boot slot at ota_1 and reboots. Bruce has the
  * mirror-image entry ("Flipper Zero") that points back at ota_0.
+ *
+ * The confirmation screen is a custom view (the T-Embed rotary encoder maps to
+ * Up/Down): Up = Cancel, Down = Load.
  */
 
 #include <furi.h>
 #include <furi_hal.h>
 #include <gui/gui.h>
+#include <gui/view_port.h>
+#include <gui/elements.h>
 #include <dialogs/dialogs.h>
+#include <input/input.h>
 
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
@@ -24,6 +30,17 @@
 // The firmware we want to jump to lives in the ota_1 slot.
 #define OTHER_OS_TARGET_SUBTYPE ESP_PARTITION_SUBTYPE_APP_OTA_1
 #define OTHER_OS_NAME           "Bruce"
+
+typedef enum {
+    OtherOsChoiceNone,
+    OtherOsChoiceCancel,
+    OtherOsChoiceLoad,
+} OtherOsChoice;
+
+typedef struct {
+    OtherOsChoice choice;
+    FuriSemaphore* done;
+} OtherOsCtx;
 
 static bool other_os_select_boot_partition(void) {
     const esp_partition_t* target =
@@ -43,21 +60,64 @@ static bool other_os_select_boot_partition(void) {
     return true;
 }
 
-static DialogMessageButton other_os_confirm(DialogsApp* dialogs) {
-    DialogMessage* message = dialog_message_alloc();
-    dialog_message_set_header(message, "Switch to " OTHER_OS_NAME, 64, 0, AlignCenter, AlignTop);
-    dialog_message_set_text(
-        message,
-        "Reboot into the " OTHER_OS_NAME " firmware?\n"
-        "Use \"Flipper Zero\" in " OTHER_OS_NAME "\nto come back.",
-        64,
-        32,
-        AlignCenter,
-        AlignCenter);
-    dialog_message_set_buttons(message, "Cancel", "Reboot", NULL);
-    DialogMessageButton result = dialog_message_show(dialogs, message);
-    dialog_message_free(message);
-    return result;
+static void other_os_draw_callback(Canvas* canvas, void* context) {
+    UNUSED(context);
+    canvas_clear(canvas);
+
+    const char* title = "Switch Firmware";
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str_aligned(canvas, 64, 2, AlignCenter, AlignTop, title);
+    uint16_t tw = canvas_string_width(canvas, title);
+    canvas_draw_line(canvas, 64 - tw / 2, 13, 64 + tw / 2, 13);
+
+    canvas_set_font(canvas, FontSecondary);
+    canvas_draw_str_aligned(
+        canvas, 64, 32, AlignCenter, AlignCenter, "Reboot into " OTHER_OS_NAME " ?");
+
+    elements_button_left(canvas, "Cancel");
+    elements_button_right(canvas, "Load");
+}
+
+static void other_os_input_callback(InputEvent* event, void* context) {
+    OtherOsCtx* ctx = context;
+    if(event->type != InputTypeShort) return;
+
+    switch(event->key) {
+    case InputKeyDown:
+        ctx->choice = OtherOsChoiceLoad;
+        furi_semaphore_release(ctx->done);
+        break;
+    case InputKeyUp:
+    case InputKeyBack:
+        ctx->choice = OtherOsChoiceCancel;
+        furi_semaphore_release(ctx->done);
+        break;
+    default:
+        break;
+    }
+}
+
+static OtherOsChoice other_os_confirm(void) {
+    OtherOsCtx ctx = {
+        .choice = OtherOsChoiceNone,
+        .done = furi_semaphore_alloc(1, 0),
+    };
+
+    ViewPort* view_port = view_port_alloc();
+    view_port_draw_callback_set(view_port, other_os_draw_callback, &ctx);
+    view_port_input_callback_set(view_port, other_os_input_callback, &ctx);
+
+    Gui* gui = furi_record_open(RECORD_GUI);
+    gui_add_view_port(gui, view_port, GuiLayerFullscreen);
+
+    furi_semaphore_acquire(ctx.done, FuriWaitForever);
+
+    gui_remove_view_port(gui, view_port);
+    furi_record_close(RECORD_GUI);
+    view_port_free(view_port);
+    furi_semaphore_free(ctx.done);
+
+    return ctx.choice;
 }
 
 static void other_os_show_error(DialogsApp* dialogs) {
@@ -78,20 +138,18 @@ static void other_os_show_error(DialogsApp* dialogs) {
 int32_t other_os_app(void* p) {
     UNUSED(p);
 
-    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
-
-    if(other_os_confirm(dialogs) == DialogMessageButtonCenter) {
+    if(other_os_confirm() == OtherOsChoiceLoad) {
         if(other_os_select_boot_partition()) {
-            furi_record_close(RECORD_DIALOGS);
             FURI_LOG_I(TAG, "rebooting into %s", OTHER_OS_NAME);
             furi_delay_ms(100);
             furi_hal_power_reset();
             // not reached
             return 0;
         }
+        DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
         other_os_show_error(dialogs);
+        furi_record_close(RECORD_DIALOGS);
     }
 
-    furi_record_close(RECORD_DIALOGS);
     return 0;
 }
