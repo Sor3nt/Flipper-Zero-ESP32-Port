@@ -191,33 +191,60 @@ void furi_hal_display_init(void) {
 #endif
         .bits_per_pixel = 16,
     };
-    /* Hard-reset the ST7789 *before* creating the panel driver.
-     * After a flash-reset the ESP32 GPIOs float during early boot, so the
-     * display controller may never have seen a clean reset edge.  Toggling
-     * the pin here (with generous timing) guarantees that the ST7789
-     * registers — including MADCTL/color-order — are in their power-on
-     * default state, regardless of how the ESP32 was reset. */
+    /* --- Bring the ST7789 to a known-clean state, every boot --------------
+     * A software reset (esp_restart) does NOT power-cycle the display: the
+     * ST7789 keeps every register — MADCTL/colour-order, COLMOD, inversion,
+     * rotation. That happens after an `esptool` flash *and* after switching
+     * back from the Bruce firmware (multi-boot). Bruce/TFT_eSPI configures
+     * the panel differently, and if any of that lingers the R/B channels end
+     * up swapped — Flipper orange shows up as blue — until the user pulls the
+     * battery (a real cold boot). So we do what a thorough driver (TFT_eSPI)
+     * does on every init: hardware-reset pulse → SWRESET command → full panel
+     * init → re-assert COLMOD. After that the panel is in *our* configuration
+     * regardless of what ran before. */
+
+    /* 1) Hardware reset pulse on RESX (HIGH → LOW → HIGH, generous timing). */
     gpio_config_t rst_cfg = {
         .mode = GPIO_MODE_OUTPUT,
         .pin_bit_mask = 1ULL << gpio_lcd_rst.pin,
     };
     gpio_config(&rst_cfg);
+    gpio_set_level((gpio_num_t)gpio_lcd_rst.pin, 1);   /* ensure a clean falling edge */
+    vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level((gpio_num_t)gpio_lcd_rst.pin, 0);   /* assert reset (active low) */
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(20));                      /* RESX min low is 10us; be generous */
     gpio_set_level((gpio_num_t)gpio_lcd_rst.pin, 1);   /* release reset */
-    vTaskDelay(pdMS_TO_TICKS(120));                     /* ST7789 needs ≥5ms, use 120ms to be safe */
+    vTaskDelay(pdMS_TO_TICKS(150));                     /* ST7789: wait ≥120ms after reset */
+
+    /* 2) Software reset (0x01) — re-loads all registers to factory defaults
+     *    even if the RESX pulse above didn't fully take (e.g. a glitch on the
+     *    line right after the ESP32 digital reset). The display still draws
+     *    pixels in that case, so this command reaches it just fine. */
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x01 /* SWRESET */, NULL, 0));
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
 
-    /* Reset and initialize (the esp_lcd driver reset is redundant now but harmless) */
+    /* 3) esp_lcd does another RESX pulse, then SLPOUT + COLMOD + MADCTL. */
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
-    /* Display orientation and corrections from board config */
+    /* Display orientation and corrections from board config (these (re)write
+     * MADCTL with our colour order + mirror/swap bits, and INVON/INVOFF). */
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, BOARD_LCD_INVERT_COLOR));
     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, BOARD_LCD_SWAP_XY));
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, BOARD_LCD_MIRROR_X, BOARD_LCD_MIRROR_Y));
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, BOARD_LCD_GAP_X, BOARD_LCD_GAP_Y));
+
+    /* 4) Belt-and-suspenders: pin down pixel format + normal display mode.
+     *    COLMOD 0x55 = 16 bits/pixel (RGB565) — matches bits_per_pixel=16 above;
+     *    NORON (0x13) = normal display mode (not partial/idle). Both are no-ops
+     *    when the state is already right and cost nothing. */
+    {
+        const uint8_t colmod = 0x55;
+        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x3A /* COLMOD */, &colmod, 1));
+    }
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x13 /* NORON */, NULL, 0));
 
     /* Turn on display */
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));

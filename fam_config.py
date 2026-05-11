@@ -35,6 +35,7 @@ APPS = [
     "example_apps_assets",
     "example_number_input",
     "clock",
+    "other_os",
     "bad_usb",
     "subghz",
     "cli_subghz",
@@ -101,6 +102,12 @@ if _board in _boards_without_subghz:
 
 if _board in _boards_without_nrf24:
     APPS = [a for a in APPS if a != "nrf24"]
+
+# Multi-boot ("Other OS" -> Bruce) only makes sense on the 16 MB T-Embed.
+# The 4 MB Waveshare boards can't host a second firmware.
+_boards_without_multiboot = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+if _board in _boards_without_multiboot:
+    APPS = [a for a in APPS if a != "other_os"]
 
 if _board in _boards_without_wolf3d:
     APPS = [a for a in APPS if a != "wolf3d"]

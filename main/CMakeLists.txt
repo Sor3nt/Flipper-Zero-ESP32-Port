@@ -32,7 +32,7 @@ endif()
 idf_component_register(
     SRCS "app_main.c" "${ESP32_FAM_REGISTRY_C}"
     INCLUDE_DIRS "."
-    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim
+    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim app_update
     LDFRAGMENTS "main.lf"
 )
 
@@ -42,6 +42,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     add_dependencies(${COMPONENT_LIB} esp32_fam_stage_assets)
 
     set(ESP32_FAM_PORTED_COMPONENT_LIBS
+        idf::app_update
         idf::archive
         idf::assets
         idf::ble_hid
