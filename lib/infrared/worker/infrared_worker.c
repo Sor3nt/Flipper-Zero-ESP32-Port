@@ -1,5 +1,6 @@
 #include "infrared_worker.h"
 
+#include <stdlib.h>
 #include <furi_hal_infrared.h>
 #include <float_tools.h>
 
@@ -7,6 +8,8 @@
 #include <core/common_defines.h>
 
 #include <notification/notification_messages.h>
+
+#include <lib/infrared/encoder_decoder/infrared.h>
 
 #define INFRARED_WORKER_RX_TIMEOUT INFRARED_RAW_RX_TIMING_DELAY_US
 
@@ -123,8 +126,10 @@ static void infrared_worker_process_timeout(InfraredWorker* instance) {
         instance->signal.message = *message_decoded;
         instance->signal.timings_cnt = 0;
         instance->signal.decoded = true;
+        infrared_reset_decoder(instance->infrared_decoder);
     } else {
         instance->signal.decoded = false;
+        infrared_reset_decoder(instance->infrared_decoder);
     }
     if(instance->rx.received_signal_callback)
         instance->rx.received_signal_callback(
@@ -140,6 +145,7 @@ static void
         instance->signal.message = *message_decoded;
         instance->signal.timings_cnt = 0;
         instance->signal.decoded = true;
+        infrared_reset_decoder(instance->infrared_decoder);
         if(instance->rx.received_signal_callback)
             instance->rx.received_signal_callback(
                 instance->rx.received_signal_context, &instance->signal);
@@ -157,6 +163,18 @@ static void
                 furi_thread_get_id(instance->thread), INFRARED_WORKER_OVERRUN);
             furi_check(flags_set & INFRARED_WORKER_OVERRUN);
             instance->rx.overrun = true;
+        }
+
+        /* Check if this looks like end of signal (long space after some timings) */
+        if(!level && instance->signal.timings_cnt >= 10 && duration > 5000) {
+            instance->signal.decoded = false;
+            instance->signal.raw.frequency = INFRARED_COMMON_CARRIER_FREQUENCY;
+            instance->signal.raw.duty_cycle = INFRARED_COMMON_DUTY_CYCLE;
+            infrared_reset_decoder(instance->infrared_decoder);
+            if(instance->rx.received_signal_callback)
+                instance->rx.received_signal_callback(
+                    instance->rx.received_signal_context, &instance->signal);
+            instance->signal.timings_cnt = 0;
         }
     }
 }
@@ -224,7 +242,7 @@ void infrared_worker_rx_set_received_signal_callback(
 }
 
 InfraredWorker* infrared_worker_alloc(void) {
-    InfraredWorker* instance = malloc(sizeof(InfraredWorker));
+    InfraredWorker* instance = calloc(1, sizeof(InfraredWorker));
 
     instance->thread = furi_thread_alloc_ex("InfraredWorker", 4096, NULL, instance);
 
@@ -439,10 +457,10 @@ static bool infrared_worker_tx_fill_buffer(InfraredWorker* instance) {
             status = infrared_encode(instance->infrared_encoder, &timing.duration, &timing.level);
         } else {
             timing.duration = instance->signal.raw.timings[instance->tx.tx_raw_cnt];
-            /* raw always starts with a Mark, then alternates Mark/Space.
+            /* raw timings start with a space (delay), then mark, space, mark...
              * On ESP32 the TX HAL emits carrier when level=true, so emit
-             * level=true for even indices (marks) and false for odd (spaces). */
-            timing.level = !(instance->tx.tx_raw_cnt % 2);
+             * level=false for even indices (spaces) and true for odd (marks). */
+            timing.level = instance->tx.tx_raw_cnt % 2;
             ++instance->tx.tx_raw_cnt;
             if(instance->tx.tx_raw_cnt >= instance->signal.timings_cnt) {
                 instance->tx.tx_raw_cnt = 0;

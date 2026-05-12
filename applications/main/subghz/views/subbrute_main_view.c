@@ -386,6 +386,7 @@ SubBruteMainView* subbrute_main_view_alloc() {
     view_set_enter_callback(instance->view, subbrute_main_view_enter);
     view_set_exit_callback(instance->view, subbrute_main_view_exit);
 
+    memset(instance->repeat_values, 0, sizeof(instance->repeat_values));
     instance->index = 0;
     instance->window_position = 0;
     instance->key_from_file = 0;
@@ -401,6 +402,7 @@ SubBruteMainView* subbrute_main_view_alloc() {
             model->key_from_file = instance->key_from_file;
             model->is_select_byte = instance->is_select_byte;
             model->two_bytes = instance->two_bytes;
+            memset(model->repeat_values, 0, sizeof(model->repeat_values));
         },
         true);
 

@@ -41,6 +41,7 @@ static const NfcProtocol supported_protocols[] = {
     NfcProtocolMfClassic,
     NfcProtocolSlix,
     NfcProtocolFelica,
+    NfcProtocolType4Tag,
 };
 
 static bool nfc_cli_emulate_protocol_supports_emulation(NfcProtocol protocol) {
@@ -76,7 +77,20 @@ static void nfc_cli_emulate_execute(PipeSide* pipe, NfcCliActionContext* context
         }
 
         const NfcDeviceData* data = nfc_device_get_data(instance->nfc_device, protocol);
+        if(!data) {
+            printf(
+                ANSI_FG_RED "Error. Invalid NFC data for %s\r\n" ANSI_RESET,
+                nfc_cli_get_protocol_name(protocol));
+            break;
+        }
+
         NfcListener* listener = nfc_listener_alloc(instance->nfc, protocol, data);
+        if(!listener) {
+            printf(
+                ANSI_FG_RED "Error. Emulation for %s is unavailable\r\n" ANSI_RESET,
+                nfc_cli_get_protocol_name(protocol));
+            break;
+        }
 
         nfc_listener_start(listener, NULL, NULL);
         printf("\r\nEmulating. Press Ctrl+C to abort\r\n");
