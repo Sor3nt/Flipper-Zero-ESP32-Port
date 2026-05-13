@@ -23,6 +23,7 @@
 #include "views/wlan_sniffer_view.h"
 #include "views/wlan_evil_portal_view.h"
 #include "views/wlan_evil_portal_captured_view.h"
+#include "views/wlan_live_creds_view.h"
 
 #define WLAN_APP_TAG "WlanApp"
 #define WLAN_APP_MAX_APS 64
@@ -47,6 +48,7 @@ typedef enum {
     WlanAppViewSniffer,
     WlanAppViewEvilPortal,
     WlanAppViewEvilPortalCaptured,
+    WlanAppViewLiveCreds,
 } WlanAppView;
 
 typedef struct {
@@ -66,6 +68,7 @@ typedef struct {
     bool active;            // VIP=false (default) / TARGET=true
     bool block_internet;    // exklusiv mit throttle_kbps
     uint16_t throttle_kbps; // 0 = aus
+    bool sniff_monitor;     // ARP-MITM + transparenter Forward (Live Creds); exklusiv mit block
 } WlanDeviceRecord;
 
 #define WLAN_APP_MAX_DEAUTH_CLIENTS 16
@@ -120,6 +123,9 @@ struct WlanApp {
     WlanEvilPortalView* evil_portal_view_obj;
     View* view_evil_portal_captured;
     WlanEvilPortalCapturedView* evil_portal_captured_view_obj;
+    View* view_live_creds;
+    WlanLiveCredsView* live_creds_view_obj;
+    WlanCredSniff* cred_sniff;
 
     // Evil Portal Settings/Captured State
     char evil_portal_ssid[33];

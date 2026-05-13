@@ -11,8 +11,7 @@ enum AttackItemIndex {
     AtIdxPortScanner,
     AtIdxPackageSniffer,
     AtIdxHandshake,
-    AtIdxSsidSpam,
-    AtIdxEvilPortal,
+    AtIdxLiveCreds,
     AtIdxCount,
 };
 
@@ -168,6 +167,7 @@ void wlan_app_scene_attack_targets_on_enter(void* context) {
     variable_item_list_add(list, "Port Scanner", 0, NULL, app);
     variable_item_list_add(list, "Package Sniffer", 0, NULL, app);
     variable_item_list_add(list, "Capture Handshake", 0, NULL, app);
+    variable_item_list_add(list, "Live Creds", 0, NULL, app);
 
     variable_item_list_set_enter_callback(list, enter_cb, app);
     variable_item_list_set_selected_item(
@@ -205,12 +205,9 @@ bool wlan_app_scene_attack_targets_on_event(void* context, SceneManagerEvent eve
             scene_manager_next_scene(app->scene_manager, WlanAppSceneHandshake);
             consumed = true;
             break;
-        case AtIdxSsidSpam:
-            scene_manager_next_scene(app->scene_manager, WlanAppSceneSsidSpam);
-            consumed = true;
-            break;
-        case AtIdxEvilPortal:
-            scene_manager_next_scene(app->scene_manager, WlanAppSceneEvilPortalMenu);
+        case AtIdxLiveCreds:
+            // Monitor-Mode auf den aktiven Targets — die Live-Creds-Scene armt.
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneLiveCreds);
             consumed = true;
             break;
         default:

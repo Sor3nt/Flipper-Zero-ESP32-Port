@@ -5,9 +5,16 @@
 #include <stdint.h>
 
 typedef struct WlanNetcut WlanNetcut;
+typedef struct WlanCredSniff WlanCredSniff;
 
 WlanNetcut* wlan_netcut_alloc(void);
 void wlan_netcut_free(WlanNetcut* nc);
+
+/** Optionalen Live-Credential-Dissektor anhängen. Solange dieser != NULL und
+ *  gearmt ist, bekommt er im L2-Hook jeden IPv4-Frame zu sehen (egal in
+ *  welchem Mode das Device steht). Einmal beim App-Alloc setzen, beim Free
+ *  wieder auf NULL. */
+void wlan_netcut_set_cred_sniff(WlanNetcut* nc, WlanCredSniff* cs);
 
 /** my_ip / my_mac / gw_ip / netmask sammeln und gw_mac aus der ARP-Tabelle lesen.
  *  Liefert false wenn STA nicht verbunden ist oder gw_mac nicht ermittelbar. */
@@ -15,6 +22,7 @@ bool wlan_netcut_preflight(WlanNetcut* nc);
 
 /** Synchronisiert die App-Device-Liste in den Netcut-Zustand:
  *  - device.block_internet=true  → Cut
+ *  - device.sniff_monitor=true   → Monitor (ARP-MITM + transparenter Forward)
  *  - device.throttle_kbps>0      → Throttle
  *  - sonst                       → Idle (Restore-Frames für 5 s)
  *  Startet einen Worker und installiert den L2-Hook beim ersten aktiven Device,

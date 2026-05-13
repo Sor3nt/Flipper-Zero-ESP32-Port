@@ -1,6 +1,7 @@
 #include "wlan_app.h"
 #include "wlan_hal.h"
 #include "wlan_netcut.h"
+#include "wlan_cred_sniff.h"
 
 static bool wlan_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -92,6 +93,10 @@ static WlanApp* wlan_app_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, WlanAppViewEvilPortalCaptured, app->view_evil_portal_captured);
 
+    app->live_creds_view_obj = wlan_live_creds_view_alloc();
+    app->view_live_creds = wlan_live_creds_view_get_view(app->live_creds_view_obj);
+    view_dispatcher_add_view(app->view_dispatcher, WlanAppViewLiveCreds, app->view_live_creds);
+
 
     app->ap_records = malloc(sizeof(WlanApRecord) * WLAN_APP_MAX_APS);
     app->ap_count = 0;
@@ -125,6 +130,8 @@ static WlanApp* wlan_app_alloc(void) {
 
     app->text_buf = furi_string_alloc();
     app->netcut = wlan_netcut_alloc();
+    app->cred_sniff = wlan_cred_sniff_alloc();
+    wlan_netcut_set_cred_sniff(app->netcut, app->cred_sniff);
 
     wlan_handshake_settings_load(&app->hs_settings);
 
@@ -132,10 +139,15 @@ static WlanApp* wlan_app_alloc(void) {
 }
 
 static void wlan_app_free(WlanApp* app) {
-    // Aktive ARP-Spoofs beenden + Restore-Frames senden, dann WiFi-Stack stoppen.
+    // Aktive ARP-Spoofs beenden + Restore-Frames senden (deinstalliert auch den
+    // L2-Hook, der den Cred-Sniffer referenziert), dann erst cred_sniff freigeben.
     if(app->netcut) {
         wlan_netcut_free(app->netcut);
         app->netcut = NULL;
+    }
+    if(app->cred_sniff) {
+        wlan_cred_sniff_free(app->cred_sniff);
+        app->cred_sniff = NULL;
     }
     wlan_hal_stop();
 
@@ -154,6 +166,7 @@ static void wlan_app_free(WlanApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSniffer);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortal);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortalCaptured);
+    view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewLiveCreds);
 
     submenu_free(app->submenu);
     widget_free(app->widget);
@@ -170,6 +183,7 @@ static void wlan_app_free(WlanApp* app) {
     wlan_sniffer_view_free(app->sniffer_view_obj);
     wlan_evil_portal_view_free(app->evil_portal_view_obj);
     wlan_evil_portal_captured_view_free(app->evil_portal_captured_view_obj);
+    wlan_live_creds_view_free(app->live_creds_view_obj);
 
     scene_manager_free(app->scene_manager);
     view_dispatcher_free(app->view_dispatcher);

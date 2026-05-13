@@ -11,10 +11,11 @@
 #define LAN_ACTION_RESCAN       (LAN_ACTION_BASE + 3)
 
 // Menu-Item user_ids (Long-OK Modal).
-#define LAN_MENU_BLOCK    1
-#define LAN_MENU_THROTTLE 2
-#define LAN_MENU_PORTSCAN 3
-#define LAN_MENU_SNIFFER  4
+#define LAN_MENU_BLOCK     1
+#define LAN_MENU_THROTTLE  2
+#define LAN_MENU_PORTSCAN  3
+#define LAN_MENU_SNIFFER   4
+#define LAN_MENU_LIVECREDS 5
 
 #define LAN_THROTTLE_DEFAULT_KBPS 64
 #define LAN_RESTORING_TICKS 12 // 12 * 250 ms ≈ 3 s
@@ -250,6 +251,7 @@ bool wlan_app_scene_lan_on_event(void* context, SceneManagerEvent event) {
                 LAN_MENU_THROTTLE);
             wlan_lan_view_add_menu_item(app->view_lan, "Ports", LAN_MENU_PORTSCAN);
             wlan_lan_view_add_menu_item(app->view_lan, "Sniffer", LAN_MENU_SNIFFER);
+            wlan_lan_view_add_menu_item(app->view_lan, "Live Creds", LAN_MENU_LIVECREDS);
             wlan_lan_view_open_menu(app->view_lan);
             consumed = true;
         }
@@ -299,6 +301,14 @@ bool wlan_app_scene_lan_on_event(void* context, SceneManagerEvent event) {
                     app->devices[i].active = (i == (uint16_t)devidx);
                 }
                 scene_manager_next_scene(app->scene_manager, WlanAppScenePackageSniffer);
+                consumed = true;
+                break;
+            case LAN_MENU_LIVECREDS:
+                // Genau dieses Device vormerken; die Live-Creds-Scene übernimmt
+                // das Armen des Monitor-Modes. Block ist exklusiv mit Monitor.
+                d->block_internet = false;
+                d->sniff_monitor = true;
+                scene_manager_next_scene(app->scene_manager, WlanAppSceneLiveCreds);
                 consumed = true;
                 break;
             }
