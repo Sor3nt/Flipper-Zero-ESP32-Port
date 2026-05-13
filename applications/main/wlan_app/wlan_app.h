@@ -127,6 +127,12 @@ struct WlanApp {
     WlanLiveCredsView* live_creds_view_obj;
     WlanCredSniff* cred_sniff;
 
+    // MiTM (vormals Live Creds) Settings — gesetzt in scene_mitm_menu, gelesen
+    // in scene_live_creds (Run-Scene).
+    bool mitm_inject_enabled;
+    bool mitm_store_cred;
+    char mitm_inject_code[256];
+
     // Evil Portal Settings/Captured State
     char evil_portal_ssid[33];
     uint8_t evil_portal_channel;

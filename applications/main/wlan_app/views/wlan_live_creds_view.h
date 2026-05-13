@@ -14,5 +14,8 @@ View* wlan_live_creds_view_get_view(WlanLiveCredsView* v);
 void wlan_live_creds_view_set_entries(
     WlanLiveCredsView* v, const WlanCredEntry* arr, uint32_t count, uint32_t total);
 
+/** Anzahl monitored Opfer-Devices setzen (Header zeigt "N victims"). */
+void wlan_live_creds_view_set_victim_count(WlanLiveCredsView* v, uint16_t count);
+
 /** View zurück in den Listen-Modus zwingen (Scene on_enter). */
 void wlan_live_creds_view_reset(WlanLiveCredsView* v);

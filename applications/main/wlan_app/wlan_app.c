@@ -1,4 +1,6 @@
 #include "wlan_app.h"
+#include "wlan_html_inject.h"
+#include "wlan_cred_sniff.h"
 #include "wlan_hal.h"
 #include "wlan_netcut.h"
 #include "wlan_cred_sniff.h"
@@ -132,6 +134,11 @@ static WlanApp* wlan_app_alloc(void) {
     app->netcut = wlan_netcut_alloc();
     app->cred_sniff = wlan_cred_sniff_alloc();
     wlan_netcut_set_cred_sniff(app->netcut, app->cred_sniff);
+    wlan_html_inject_set_cred_sniff(app->cred_sniff);
+
+    app->mitm_inject_enabled = true;
+    app->mitm_store_cred = true;
+    strcpy(app->mitm_inject_code, "<script>alert(1234);</script>");
 
     wlan_handshake_settings_load(&app->hs_settings);
 

