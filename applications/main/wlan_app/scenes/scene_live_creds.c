@@ -1,6 +1,7 @@
 #include "../wlan_app.h"
 #include "../wlan_netcut.h"
 #include "../wlan_cred_sniff.h"
+#include "../wlan_html_inject.h"
 
 #include <storage/storage.h>
 #include <furi_hal_rtc.h>
@@ -186,6 +187,7 @@ void wlan_app_scene_live_creds_on_enter(void* context) {
     }
 
     wlan_cred_sniff_set_armed(app->cred_sniff, true);
+    wlan_html_inject_set_armed(true);
     wlan_netcut_apply(app->netcut, app->devices, (uint8_t)app->device_count);
 
     wlan_live_creds_view_reset(app->live_creds_view_obj);
@@ -215,6 +217,7 @@ void wlan_app_scene_live_creds_on_exit(void* context) {
     WlanApp* app = context;
     lc_close_csv();
     wlan_cred_sniff_set_armed(app->cred_sniff, false);
+    wlan_html_inject_set_armed(false);
     lc_disarm_monitor(app);
     if(s_lc_active) {
         // Worker schickt im Hintergrund Restore-Frames für die ehemals

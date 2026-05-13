@@ -1,5 +1,6 @@
 #include "../wlan_app.h"
 #include "../wlan_netscan.h"
+#include "../wlan_lan_cache.h"
 
 #include <lwip/ip4_addr.h>
 
@@ -115,6 +116,17 @@ void wlan_app_scene_network_scanning_on_enter(void* context) {
     s_popup_shown = false;
     s_dialog_shown = false;
     app->device_count = 0;
+
+    uint16_t cached = 0;
+    if(wlan_lan_cache_load(
+           app->connected_ap.ssid, app->devices, WLAN_APP_MAX_DEVICES, &cached) &&
+       cached > 0) {
+        app->device_count = cached;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, WlanAppCustomEventNetworkScanComplete);
+        return;
+    }
+
     net_scan_set_state(app, NetScanStateArp);
 }
 
@@ -156,6 +168,8 @@ bool wlan_app_scene_network_scanning_on_event(void* context, SceneManagerEvent e
                s_tick_counter >= NET_SCAN_HOSTNAME_TIMEOUT_TICKS) {
                 wlan_netscan_stop_hostname_resolve();
                 net_scan_publish_devices(app);
+                wlan_lan_cache_save(
+                    app->connected_ap.ssid, app->devices, app->device_count);
                 view_dispatcher_send_custom_event(
                     app->view_dispatcher, WlanAppCustomEventNetworkScanComplete);
             }

