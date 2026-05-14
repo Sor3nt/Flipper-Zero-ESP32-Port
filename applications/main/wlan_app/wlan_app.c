@@ -139,6 +139,8 @@ static WlanApp* wlan_app_alloc(void) {
     app->mitm_inject_enabled = true;
     app->mitm_store_cred = true;
     strcpy(app->mitm_inject_code, "<script>alert(1234);</script>");
+    app->mitm_payloads.count = 0;
+    app->mitm_payload_index = 0; // wird in scene_mitm_menu_on_enter auf "custom" gesetzt
 
     wlan_handshake_settings_load(&app->hs_settings);
 

@@ -57,4 +57,5 @@ typedef enum {
     WlanAppCustomEventMitmMenuStoreCred = 192,
     WlanAppCustomEventMitmMenuStart = 193,
     WlanAppCustomEventMitmInjectCodeEntered = 194,
+    WlanAppCustomEventMitmMenuPayloadChanged = 195,
 } WlanAppCustomEvent;
