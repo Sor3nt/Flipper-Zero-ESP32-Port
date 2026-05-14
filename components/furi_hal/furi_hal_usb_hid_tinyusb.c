@@ -128,6 +128,13 @@ uint8_t const* tud_hid_descriptor_report_cb(uint8_t instance) {
     return hid_report_descriptor;
 }
 
+/* Exposed for the Composite Device (HID + CDC + MSC) descriptor in
+ * furi_hal_usb_tinyusb_composite.c which needs to patch wDescriptorLength. */
+const uint8_t* furi_hal_usb_hid_report_desc(size_t* out_len) {
+    if(out_len) *out_len = sizeof(hid_report_descriptor);
+    return hid_report_descriptor;
+}
+
 uint16_t tud_hid_get_report_cb(
     uint8_t instance,
     uint8_t report_id,

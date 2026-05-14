@@ -36,6 +36,7 @@ APPS = [
     "example_number_input",
     "clock",
     "other_os",
+    "usb_storage",
     "bad_usb",
     "subghz",
     "cli_subghz",
@@ -108,6 +109,12 @@ if _board in _boards_without_nrf24:
 _boards_without_multiboot = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 if _board in _boards_without_multiboot:
     APPS = [a for a in APPS if a != "other_os"]
+
+# USB-Storage requires USB-OTG (ESP32-S3/S2 only); the Waveshare C6 has no
+# USB-OTG peripheral and the TinyUSB composite descriptor would not enumerate.
+_boards_without_usb_otg = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+if _board in _boards_without_usb_otg:
+    APPS = [a for a in APPS if a != "usb_storage"]
 
 if _board in _boards_without_wolf3d:
     APPS = [a for a in APPS if a != "wolf3d"]

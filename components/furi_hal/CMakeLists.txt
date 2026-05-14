@@ -52,7 +52,11 @@ set(FURI_HAL_REQUIRES
 
 # HID backend: TinyUSB on SoCs with USB-OTG, stub elsewhere.
 if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32s2")
-    list(APPEND FURI_HAL_SRCS "furi_hal_usb_hid_tinyusb.c")
+    list(APPEND FURI_HAL_SRCS
+        "furi_hal_usb_hid_tinyusb.c"
+        "furi_hal_usb_tinyusb_composite.c"
+        "furi_hal_usb_msc.c"
+    )
     list(APPEND FURI_HAL_REQUIRES espressif__esp_tinyusb)
 else()
     list(APPEND FURI_HAL_SRCS "furi_hal_usb_hid_stub.c")

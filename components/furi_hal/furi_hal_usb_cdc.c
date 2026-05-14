@@ -86,3 +86,10 @@ int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
     memset(buf, 0, max_len);
     return 0;
 }
+
+/* Stub. The full bridge (tusb_cdc_acm events → CdcCallbacks fan-out) is WIP
+ * in furi_hal_usb_tinyusb_composite.c. Called once during composite install
+ * so the symbol must exist; once the bridge is implemented this becomes the
+ * place that calls tinyusb_cdcacm_register_callback for each event type. */
+void furi_hal_cdc_internal_register_tinyusb_callbacks(void) {
+}
