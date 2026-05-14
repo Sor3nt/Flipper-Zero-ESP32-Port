@@ -138,7 +138,10 @@ static WlanApp* wlan_app_alloc(void) {
 
     app->mitm_inject_enabled = true;
     app->mitm_store_cred = true;
-    strcpy(app->mitm_inject_code, "<script>alert(1234);</script>");
+    // Roher JS-Code — wlan_html_inject_set_code legt das <script>-Wrapping
+    // automatisch drumherum (gilt sowohl für diesen Custom-Default als auch
+    // für SD-Payloads).
+    strcpy(app->mitm_inject_code, "alert(1234);");
     app->mitm_payloads.count = 0;
     app->mitm_payload_index = 0; // wird in scene_mitm_menu_on_enter auf "custom" gesetzt
 

