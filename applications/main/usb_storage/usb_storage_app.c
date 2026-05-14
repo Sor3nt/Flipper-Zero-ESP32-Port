@@ -67,8 +67,13 @@ static void usb_storage_draw_callback(Canvas* canvas, void* context) {
         canvas_draw_str_aligned(canvas, 64, 32, AlignCenter, AlignCenter, "Mounting on PC ...");
         break;
     case UsbStorageStateActive:
-        canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignCenter, "SD-Card als USB-Stick");
-        canvas_draw_str_aligned(canvas, 64, 40, AlignCenter, AlignCenter, "auf dem PC sichtbar");
+        canvas_draw_str_aligned(canvas, 64, 22, AlignCenter, AlignCenter, "SD visible as USB drive");
+        canvas_set_font(canvas, FontBatteryPercent);
+        canvas_draw_str_aligned(
+            canvas, 64, 36, AlignCenter, AlignCenter, "Eject from PC first,");
+        canvas_draw_str_aligned(
+            canvas, 64, 46, AlignCenter, AlignCenter, "then press Disconnect.");
+        canvas_set_font(canvas, FontSecondary);
         elements_button_left(canvas, "Disconnect");
         break;
     case UsbStorageStateError:
@@ -84,7 +89,7 @@ static void usb_storage_draw_callback(Canvas* canvas, void* context) {
 static void usb_storage_input_callback(InputEvent* event, void* context) {
     UsbStorageCtx* ctx = context;
     if(event->type != InputTypeShort) return;
-    if(event->key == InputKeyBack || event->key == InputKeyLeft) {
+    if(event->key == InputKeyBack || event->key == InputKeyUp) {
         furi_semaphore_release(ctx->exit);
     }
 }
@@ -127,10 +132,14 @@ static bool usb_storage_enter(UsbStorageCtx* ctx, Storage* storage, bool* sd_was
 }
 
 static void usb_storage_leave(Storage* storage, bool sd_was_mounted) {
+    /* stop() flips s_active to false and arms the SCSI sense to
+     * NOT_READY/MEDIUM_NOT_PRESENT. The host polls TEST UNIT READY every
+     * ~1 sec; we wait long enough for at least one such poll so the host
+     * sees the medium go away and unmounts the volume before we re-attach
+     * the SD on the firmware side. Otherwise macOS keeps the kext mounted
+     * and any later access either hangs or returns I/O errors. */
     furi_hal_usb_msc_stop();
-    /* Give the host a moment to see the unit-not-ready response before we
-     * grab the SD back, otherwise an in-flight write could still hit us. */
-    furi_delay_ms(200);
+    furi_delay_ms(1500);
 
     if(sd_was_mounted) {
         FS_Error err = storage_sd_mount(storage);
