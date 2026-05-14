@@ -35,6 +35,8 @@ static void lc_build_row(const WlanCredEntry* e, char* out, int sz) {
         } else {
             snprintf(out, (size_t)sz, "[INJ] %s", e->host);
         }
+    } else if(strcmp(e->proto, "LOG") == 0) {
+        snprintf(out, (size_t)sz, "[LOG] %s", e->user[0] ? e->user : "(empty)");
     } else {
         // CRED-Eintrag: bevorzugt user, sonst secret, sonst host/proto.
         const char* who = e->user[0] ? e->user :

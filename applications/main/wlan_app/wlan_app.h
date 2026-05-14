@@ -14,6 +14,7 @@
 #include "scenes/scenes.h"
 #include "views/wlan_view_events.h"
 #include "wlan_handshake_settings.h"
+#include "wlan_mitm_payloads.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_connect_view.h"
 #include "views/wlan_portscan_view.h"
@@ -132,6 +133,11 @@ struct WlanApp {
     bool mitm_inject_enabled;
     bool mitm_store_cred;
     char mitm_inject_code[256];
+    // Payload-Auswahl: 0..mitm_payloads.count-1 = SD-File, == count = "custom"
+    // (verwendet mitm_inject_code aus dem Text-Input). Liste wird in
+    // scene_mitm_menu beim Enter neu gescannt.
+    WlanMitmPayloadList mitm_payloads;
+    uint8_t mitm_payload_index;
 
     // Evil Portal Settings/Captured State
     char evil_portal_ssid[33];

