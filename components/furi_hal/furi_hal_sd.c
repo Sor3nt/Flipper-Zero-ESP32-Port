@@ -691,3 +691,86 @@ bool furi_hal_sd_unmount(void) {
 bool furi_hal_sd_is_mounted(void) {
     return sd_mounted;
 }
+
+bool furi_hal_sd_release_fatfs(void) {
+    if(!sd_mounted) return true;
+
+    const FRESULT result = f_mount(NULL, SD_FATFS_DRIVE, 0);
+    if(result != FR_OK) {
+        ESP_LOGE(TAG, "FatFs soft-unmount failed: %d", result);
+        return false;
+    }
+    sd_mounted = false;
+    ESP_LOGI(TAG, "SD FATFS released (card stays initialized for raw access)");
+    return true;
+}
+
+bool furi_hal_sd_read_sectors_raw(uint32_t sector, void* buf, uint32_t count) {
+    if(!sd_initialized || sd_card == NULL || buf == NULL) return false;
+
+    esp_err_t err = ESP_OK;
+    furi_hal_spi_bus_lock();
+
+    if(sd_buf_is_dma_capable(buf)) {
+        err = sdmmc_read_sectors(sd_card, buf, sector, count);
+    } else if(sd_ensure_bounce_buf()) {
+        const size_t block_size = sd_card->csd.sector_size;
+        uint32_t remaining = count;
+        uint32_t cur_sector = sector;
+        uint8_t* cur_dst = buf;
+        while(remaining > 0) {
+            uint32_t chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
+            err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            if(err != ESP_OK) break;
+            memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
+            cur_dst += block_size * chunk;
+            cur_sector += chunk;
+            remaining -= chunk;
+        }
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+
+    furi_hal_spi_bus_unlock();
+    return err == ESP_OK;
+}
+
+bool furi_hal_sd_write_sectors_raw(uint32_t sector, const void* buf, uint32_t count) {
+    if(!sd_initialized || sd_card == NULL || buf == NULL) return false;
+
+    esp_err_t err = ESP_OK;
+    furi_hal_spi_bus_lock();
+
+    if(sd_buf_is_dma_capable(buf)) {
+        err = sdmmc_write_sectors(sd_card, buf, sector, count);
+    } else if(sd_ensure_bounce_buf()) {
+        const size_t block_size = sd_card->csd.sector_size;
+        uint32_t remaining = count;
+        uint32_t cur_sector = sector;
+        const uint8_t* cur_src = buf;
+        while(remaining > 0) {
+            uint32_t chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
+            memcpy(sd_bounce_buf, cur_src, block_size * chunk);
+            err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            if(err != ESP_OK) break;
+            cur_src += block_size * chunk;
+            cur_sector += chunk;
+            remaining -= chunk;
+        }
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+
+    furi_hal_spi_bus_unlock();
+    return err == ESP_OK;
+}
+
+uint32_t furi_hal_sd_sector_count(void) {
+    if(!sd_initialized || sd_card == NULL) return 0;
+    return (uint32_t)sd_card->csd.capacity;
+}
+
+uint16_t furi_hal_sd_sector_size(void) {
+    if(!sd_initialized || sd_card == NULL) return 0;
+    return (uint16_t)sd_card->csd.sector_size;
+}
