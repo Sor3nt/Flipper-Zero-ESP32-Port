@@ -8,11 +8,16 @@
 #include <string.h>
 
 #include "furi_hal_sd.h"
+#include "class/msc/msc.h"
 #include "class/msc/msc_device.h"
 
 #define TAG "FuriHalUsbMsc"
 
 static volatile bool s_active = false;
+/* Set to true while the host has locked the medium with SCSI Prevent/Allow
+ * Medium Removal (=1). Indicates the host considers the drive mounted and
+ * has unflushed cached writes; pulling the medium here corrupts the FS. */
+static volatile bool s_removal_locked = false;
 
 bool furi_hal_usb_msc_start(void) {
     if(s_active) return true;
@@ -26,7 +31,11 @@ bool furi_hal_usb_msc_start(void) {
         return false;
     }
 
+    s_removal_locked = false;
     s_active = true;
+    /* Clear any stale sense (medium-not-present from a previous stop) so the
+     * host doesn't keep rejecting commands right after re-attach. */
+    tud_msc_set_sense(0, 0, 0, 0);
     FURI_LOG_I(
         TAG,
         "MSC started: %" PRIu32 " sectors x %u bytes",
@@ -38,11 +47,20 @@ bool furi_hal_usb_msc_start(void) {
 void furi_hal_usb_msc_stop(void) {
     if(!s_active) return;
     s_active = false;
-    FURI_LOG_I(TAG, "MSC stopped");
+    /* Tell the host the medium is gone. The next TEST UNIT READY answers
+     * "not ready" with sense NOT_READY/MEDIUM_NOT_PRESENT, which is the
+     * signal macOS/Linux/Windows interpret as an ejected USB drive. */
+    tud_msc_set_sense(0, SCSI_SENSE_NOT_READY, 0x3A /*MEDIUM NOT PRESENT*/, 0x00);
+    s_removal_locked = false;
+    FURI_LOG_I(TAG, "MSC stopped (sense=NOT_READY/MEDIUM_NOT_PRESENT)");
 }
 
 bool furi_hal_usb_msc_is_active(void) {
     return s_active;
+}
+
+bool furi_hal_usb_msc_is_removal_locked(void) {
+    return s_removal_locked;
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -97,11 +115,29 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
     (void)power_condition;
     (void)start;
     if(load_eject && !start) {
-        /* Host requested eject — we honor it by stopping the MSC layer.
-         * The firmware-side app will then re-mount FATFS on its own. */
-        FURI_LOG_I(TAG, "Host requested eject");
-        furi_hal_usb_msc_stop();
+        /* Host requested eject — clear the removal lock so the app can
+         * leave cleanly without waiting for a second eject signal. We do
+         * NOT call furi_hal_usb_msc_stop() here: that's the app's job once
+         * the user presses Back. Otherwise re-mount would happen behind
+         * the UI's back. */
+        FURI_LOG_I(TAG, "Host ejected the medium");
+        s_removal_locked = false;
     }
+    return true;
+}
+
+bool tud_msc_prevent_allow_medium_removal_cb(
+    uint8_t lun,
+    uint8_t prohibit_removal,
+    uint8_t control) {
+    (void)lun;
+    (void)control;
+    /* The host sends PREVENT(=1) right after mount to "lock" the medium
+     * (i.e. flag that there are unflushed buffers in its FS cache). It
+     * sends ALLOW(=0) on eject. We use this as the signal of whether it's
+     * safe to yank the SD back. */
+    s_removal_locked = (prohibit_removal != 0);
+    FURI_LOG_I(TAG, "Host %s removal", s_removal_locked ? "PREVENT" : "ALLOW");
     return true;
 }
 

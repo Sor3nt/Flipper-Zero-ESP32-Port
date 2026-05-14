@@ -39,6 +39,11 @@ void furi_hal_usb_msc_stop(void);
 /** @return true if MSC is currently active. */
 bool furi_hal_usb_msc_is_active(void);
 
+/** @return true if the host has sent SCSI Prevent Medium Removal — i.e. the
+ * host considers the volume mounted and probably has dirty cache for it.
+ * Apps should warn the user to eject from the host before stopping MSC. */
+bool furi_hal_usb_msc_is_removal_locked(void);
+
 #ifdef __cplusplus
 }
 #endif
