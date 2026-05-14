@@ -998,17 +998,18 @@ void wlan_cred_sniff_push_log(WlanCredSniff* cs, uint32_t client_ip, const char*
 }
 
 void wlan_cred_sniff_push_inject(
-    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port) {
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port,
+    const char* host, const char* path) {
     if(!cs) return;
-    char host[WLAN_CRED_STR_MAX] = {0};
-    char path[WLAN_CRED_STR_MAX] = {0};
-    if(!url_track_lookup(cs, server_ip, victim_port, host, sizeof(host), path, sizeof(path))) {
-        // Kein Lookup-Treffer — Fallback: Server-IP als Host.
+    (void)victim_port;
+    char host_buf[WLAN_CRED_STR_MAX];
+    if(host && host[0]) {
+        copy_cstr(host_buf, sizeof(host_buf), host);
+    } else {
         const uint8_t* b = (const uint8_t*)&server_ip;
-        snprintf(host, sizeof(host), "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
-        path[0] = 0;
+        snprintf(host_buf, sizeof(host_buf), "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
     }
-    cred_push(cs, "INJ", victim_ip, server_ip, 80, host, path, "", NULL);
+    cred_push(cs, "INJ", victim_ip, server_ip, 80, host_buf, path ? path : "", "", NULL);
 }
 
 bool wlan_cred_sniff_armed(WlanCredSniff* cs) {

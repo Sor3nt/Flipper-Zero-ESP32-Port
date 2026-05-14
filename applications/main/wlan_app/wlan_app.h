@@ -132,7 +132,10 @@ struct WlanApp {
     // in scene_live_creds (Run-Scene).
     bool mitm_inject_enabled;
     bool mitm_store_cred;
-    char mitm_inject_code[256];
+    // Bytes-grenze ist auch text-input-Limit für custom JS sowie Lade-Limit für
+    // SD-Payloads in scene_live_creds (sizeof(...)). Muss zur USER_PAYLOAD_MAX
+    // im wlan_html_inject passen, sonst wird der payload abgeschnitten.
+    char mitm_inject_code[1024];
     // Payload-Auswahl: 0..mitm_payloads.count-1 = SD-File, == count = "custom"
     // (verwendet mitm_inject_code aus dem Text-Input). Liste wird in
     // scene_mitm_menu beim Enter neu gescannt.
