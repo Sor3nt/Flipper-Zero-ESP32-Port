@@ -123,34 +123,46 @@ static void mf_classic_poller_check_key_b_is_readable(
 NfcCommand mf_classic_poller_handler_detect_type(MfClassicPoller* instance) {
     NfcCommand command = NfcCommandReset;
 
-    if(instance->current_type_check == MfClassicType4k) {
-        iso14443_3a_copy(
-            instance->data->iso14443_3a_data,
-            iso14443_3a_poller_get_data(instance->iso14443_3a_poller));
-        MfClassicError error =
-            mf_classic_poller_get_nt(instance, 254, MfClassicKeyTypeA, NULL, false);
-        if(error == MfClassicErrorNone) {
-            instance->data->type = MfClassicType4k;
-            instance->state = MfClassicPollerStateStart;
-            instance->current_type_check = MfClassicType4k;
-            FURI_LOG_D(TAG, "4K detected");
-        } else {
-            instance->current_type_check = MfClassicType1k;
-        }
-    } else if(instance->current_type_check == MfClassicType1k) {
-        MfClassicError error =
-            mf_classic_poller_get_nt(instance, 62, MfClassicKeyTypeA, NULL, false);
-        if(error == MfClassicErrorNone) {
-            instance->data->type = MfClassicType1k;
-            FURI_LOG_D(TAG, "1K detected");
-        } else {
-            instance->data->type = MfClassicTypeMini;
-            FURI_LOG_D(TAG, "Mini detected");
-        }
-        instance->current_type_check = MfClassicType4k;
-        instance->state = MfClassicPollerStateStart;
+    /* ESP32/PN532: Determine card type from SAK, not from raw AUTH probes.
+     * The original ST25R3916-based detection sends raw [0x60, block] frames
+     * and treats a 4-byte WrongCRC response as "block exists". The PN532
+     * cannot pass raw 0x60 through InDataExchange (it gets interpreted as
+     * a malformed native MIFARE Auth command and is rejected with err=7),
+     * so the AUTH probe always fails on this hardware.
+     *
+     * SAK is unambiguous for the MIFARE Classic family:
+     *   0x08 → Classic 1K           0x09 → Mini
+     *   0x18 → Classic 4K           0x88 → Classic 1K (Infineon SLE66)
+     *   0x98 → Classic Pro 4K       0x28 → Classic 1K (emulated)
+     *   0x38 → Classic 4K (emulated)
+     */
+    iso14443_3a_copy(
+        instance->data->iso14443_3a_data,
+        iso14443_3a_poller_get_data(instance->iso14443_3a_poller));
+
+    uint8_t sak = iso14443_3a_get_sak(instance->data->iso14443_3a_data);
+    switch(sak) {
+    case 0x09:
+        instance->data->type = MfClassicTypeMini;
+        FURI_LOG_D(TAG, "Mini detected by SAK=09");
+        break;
+    case 0x18:
+    case 0x38:
+    case 0x98:
+        instance->data->type = MfClassicType4k;
+        FURI_LOG_D(TAG, "4K detected by SAK=%02X", sak);
+        break;
+    case 0x08:
+    case 0x28:
+    case 0x88:
+    default:
+        instance->data->type = MfClassicType1k;
+        FURI_LOG_D(TAG, "1K detected by SAK=%02X", sak);
+        break;
     }
 
+    instance->current_type_check = MfClassicType4k;
+    instance->state = MfClassicPollerStateStart;
     return command;
 }
 
@@ -742,7 +754,7 @@ NfcCommand mf_classic_poller_handler_auth_a(MfClassicPoller* instance) {
         MfClassicError error = mf_classic_poller_auth(
             instance, block, &dict_attack_ctx->current_key, MfClassicKeyTypeA, NULL, false);
         if(error == MfClassicErrorNone) {
-            FURI_LOG_I(TAG, "Key A found");
+            FURI_LOG_I(TAG, "S%02d KA=%012llx OK", dict_attack_ctx->current_sector, key);
             mf_classic_set_key_found(
                 instance->data, dict_attack_ctx->current_sector, MfClassicKeyTypeA, key);
 
@@ -789,7 +801,7 @@ NfcCommand mf_classic_poller_handler_auth_b(MfClassicPoller* instance) {
         MfClassicError error = mf_classic_poller_auth(
             instance, block, &dict_attack_ctx->current_key, MfClassicKeyTypeB, NULL, false);
         if(error == MfClassicErrorNone) {
-            FURI_LOG_I(TAG, "Key B found");
+            FURI_LOG_I(TAG, "S%02d KB=%012llx OK", dict_attack_ctx->current_sector, key);
             mf_classic_set_key_found(
                 instance->data, dict_attack_ctx->current_sector, MfClassicKeyTypeB, key);
 
@@ -865,9 +877,12 @@ NfcCommand mf_classic_poller_handler_read_sector(MfClassicPoller* instance) {
         if(error != MfClassicErrorNone) {
             mf_classic_poller_halt(instance);
             dict_attack_ctx->auth_passed = false;
-            FURI_LOG_D(TAG, "Failed to read block %d", block_num);
+            FURI_LOG_W(TAG, "S%02d B%02d read FAIL (err=%d)",
+                dict_attack_ctx->current_sector, block_num, error);
         } else {
             mf_classic_set_block_read(instance->data, block_num, &block);
+            FURI_LOG_I(TAG, "S%02d B%02d read OK",
+                dict_attack_ctx->current_sector, block_num);
             if(dict_attack_ctx->current_key_type == MfClassicKeyTypeA) {
                 mf_classic_poller_check_key_b_is_readable(instance, block_num, &block);
             }
@@ -969,7 +984,7 @@ NfcCommand mf_classic_poller_handler_key_reuse_auth_key_a(MfClassicPoller* insta
         MfClassicError error = mf_classic_poller_auth(
             instance, block, &dict_attack_ctx->current_key, MfClassicKeyTypeA, NULL, false);
         if(error == MfClassicErrorNone) {
-            FURI_LOG_I(TAG, "Key A found");
+            FURI_LOG_D(TAG, "Key A found");
             mf_classic_set_key_found(
                 instance->data, dict_attack_ctx->reuse_key_sector, MfClassicKeyTypeA, key);
 
@@ -1005,7 +1020,7 @@ NfcCommand mf_classic_poller_handler_key_reuse_auth_key_b(MfClassicPoller* insta
         MfClassicError error = mf_classic_poller_auth(
             instance, block, &dict_attack_ctx->current_key, MfClassicKeyTypeB, NULL, false);
         if(error == MfClassicErrorNone) {
-            FURI_LOG_I(TAG, "Key B found");
+            FURI_LOG_D(TAG, "Key B found");
             mf_classic_set_key_found(
                 instance->data, dict_attack_ctx->reuse_key_sector, MfClassicKeyTypeB, key);
 
@@ -1056,9 +1071,12 @@ NfcCommand mf_classic_poller_handler_key_reuse_read_sector(MfClassicPoller* inst
         if(error != MfClassicErrorNone) {
             mf_classic_poller_halt(instance);
             dict_attack_ctx->auth_passed = false;
-            FURI_LOG_D(TAG, "Failed to read block %d", block_num);
+            FURI_LOG_W(TAG, "S%02d B%02d read FAIL (reuse, err=%d)",
+                dict_attack_ctx->reuse_key_sector, block_num, error);
         } else {
             mf_classic_set_block_read(instance->data, block_num, &block);
+            FURI_LOG_I(TAG, "S%02d B%02d read OK (reuse)",
+                dict_attack_ctx->reuse_key_sector, block_num);
             if(dict_attack_ctx->current_key_type == MfClassicKeyTypeA) {
                 mf_classic_poller_check_key_b_is_readable(instance, block_num, &block);
             }
@@ -1860,6 +1878,25 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
     // This function guides the nested attack through its phases, and iterates over the target keys
     NfcCommand command = mf_classic_poller_handle_data_update(instance);
     MfClassicPollerDictAttackContext* dict_attack_ctx = &instance->mode_ctx.dict_attack_ctx;
+
+    /* ESP32/PN532 short-circuit: nested attack requires raw Crypto1 frames
+     * (encrypted 0x60/0x61 with custom parity) that the PN532 cannot send.
+     * If the standard dict attack already filled the card (all keys + all
+     * blocks), skip nested entirely and finish — the original ST25R3916
+     * code falls into a tight loop here on PN532 because get_nt fails and
+     * the AnalyzePRNG branch returns to NestedCollectNt forever. */
+    {
+        uint8_t total = mf_classic_get_total_sectors_num(instance->data->type);
+        uint8_t sread = 0, kfound = 0;
+        mf_classic_get_read_sectors_and_keys(instance->data, &sread, &kfound);
+        FURI_LOG_I(TAG, "Nested entry: sectors %d/%d keys %d/%d",
+            sread, total, kfound, total * 2);
+        if(mf_classic_is_card_read(instance->data)) {
+            instance->state = MfClassicPollerStateSuccess;
+            return command;
+        }
+    }
+
     bool initial_dict_attack_iter = false;
     if(dict_attack_ctx->nested_phase == MfClassicNestedPhaseNone) {
         dict_attack_ctx->auth_passed = true;
@@ -1891,6 +1928,20 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
     }
     // Identify PRNG type
     if(dict_attack_ctx->nested_phase == MfClassicNestedPhaseAnalyzePRNG) {
+        /* Check NoTag before count check: on PN532 the raw-AUTH probe in
+         * nested_collect_nt always fails (Crypto1 cannot be sent raw),
+         * setting prng_type=NoTag while count stays at 0. Without this
+         * reorder the AnalyzePRNG branch loops NestedCollectNt forever. */
+        if(dict_attack_ctx->prng_type == MfClassicPrngTypeNoTag) {
+            FURI_LOG_E(TAG, "No tag detected");
+            if(dict_attack_ctx->nested_nonce.nonces) {
+                free(dict_attack_ctx->nested_nonce.nonces);
+                dict_attack_ctx->nested_nonce.nonces = NULL;
+                dict_attack_ctx->nested_nonce.count = 0;
+            }
+            instance->state = MfClassicPollerStateFail;
+            return command;
+        }
         if(dict_attack_ctx->nested_nonce.count < MF_CLASSIC_NESTED_ANALYZE_NT_COUNT) {
             instance->state = MfClassicPollerStateNestedCollectNt;
             return command;
@@ -1900,7 +1951,7 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
             instance->state = MfClassicPollerStateNestedAnalyzePRNG;
             return command;
         } else if(dict_attack_ctx->prng_type == MfClassicPrngTypeNoTag) {
-            FURI_LOG_E(TAG, "No tag detected");
+            FURI_LOG_E(TAG, "No tag detected (legacy path)");
             // Free nonce array
             // TODO FL-3926: Consider using .count here
             if(dict_attack_ctx->nested_nonce.nonces) {
@@ -2176,6 +2227,12 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
 
 NfcCommand mf_classic_poller_handler_success(MfClassicPoller* instance) {
     NfcCommand command = NfcCommandContinue;
+    uint8_t sectors_total = mf_classic_get_total_sectors_num(instance->data->type);
+    uint8_t sectors_read = 0;
+    uint8_t keys_found = 0;
+    mf_classic_get_read_sectors_and_keys(instance->data, &sectors_read, &keys_found);
+    FURI_LOG_I(TAG, "Done: sectors %d/%d, keys %d/%d",
+        sectors_read, sectors_total, keys_found, sectors_total * 2);
     instance->mfc_event.type = MfClassicPollerEventTypeSuccess;
     command = instance->callback(instance->general_event, instance->context);
 
@@ -2263,23 +2320,40 @@ bool mf_classic_poller_detect(NfcGenericEvent event, void* context) {
     Iso14443_3aPoller* iso3_poller = event.instance;
     Iso14443_3aPollerEvent* iso14443_3a_event = event.event_data;
     bool detected = false;
-    const uint8_t auth_cmd[] = {MF_CLASSIC_CMD_AUTH_KEY_A, 0};
-    BitBuffer* tx_buffer = bit_buffer_alloc(COUNT_OF(auth_cmd));
-    bit_buffer_copy_bytes(tx_buffer, auth_cmd, COUNT_OF(auth_cmd));
-    BitBuffer* rx_buffer = bit_buffer_alloc(sizeof(MfClassicNt));
 
     if(iso14443_3a_event->type == Iso14443_3aPollerEventTypeReady) {
-        Iso14443_3aError error = iso14443_3a_poller_send_standard_frame(
-            iso3_poller, tx_buffer, rx_buffer, MF_CLASSIC_FWT_FC);
-        if(error == Iso14443_3aErrorWrongCrc) {
-            if(bit_buffer_get_size_bytes(rx_buffer) == sizeof(MfClassicNt)) {
+        /* ESP32/PN532: The PN532 does not pass raw MIFARE AUTH (0x60/0x61) frames
+         * through InDataExchange — it interprets them as native MIFARE auth and
+         * rejects the malformed parameters. The original ST25R3916-based detection
+         * (send AUTH, expect 4-byte nonce with WrongCRC) therefore cannot work.
+         *
+         * Use SAK-based detection instead: after ISO14443-3A anti-collision the
+         * SAK uniquely identifies MIFARE Classic family cards.
+         *   0x08 MIFARE Classic 1K           0x09 MIFARE Mini
+         *   0x18 MIFARE Classic 4K           0x28 MIFARE Classic 1K (emulated)
+         *   0x38 MIFARE Classic 4K (emulated)
+         *   0x88 MIFARE Classic 1K (Infineon SLE66)
+         *   0x98 MIFARE Pro 4K
+         */
+        const Iso14443_3aData* iso_data = iso14443_3a_poller_get_data(iso3_poller);
+        if(iso_data) {
+            uint8_t sak = iso14443_3a_get_sak(iso_data);
+            switch(sak) {
+            case 0x08:
+            case 0x09:
+            case 0x18:
+            case 0x28:
+            case 0x38:
+            case 0x88:
+            case 0x98:
                 detected = true;
+                FURI_LOG_I(TAG, "MIFARE Classic detected by SAK=%02X", sak);
+                break;
+            default:
+                break;
             }
         }
     }
-
-    bit_buffer_free(tx_buffer);
-    bit_buffer_free(rx_buffer);
 
     return detected;
 }

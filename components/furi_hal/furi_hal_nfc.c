@@ -738,6 +738,24 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     size_t tx_bytes = (tx_bits + 7) / 8;
     pn532_rx_bits = 0;
 
+    /* === 0. MIFARE Backdoor Auth (FM11RF08 clones): 0x64/0x65 ===
+     * The PN532 cannot send raw Crypto1 frames through InDataExchange — it
+     * interprets 0x60/0x61 as native MIFARE Auth and rejects the unknown
+     * 0x64/0x65 commands with a data-format error. The Flipper's MIFARE
+     * Classic poller probes these to detect Fudan/Infineon backdoors and
+     * expects a Timeout / Protocol error to mean "no backdoor". Returning
+     * the data-format error from the PN532 leaves the poller stuck in
+     * MfClassicPollerStateAnalyzeBackdoor (no state transition matches
+     * MfClassicErrorNotPresent). Short-circuit with a clean Timeout so the
+     * backdoor probe terminates and the standard dictionary attack starts. */
+    if(pn532_target_number > 0 && tx_bytes >= 2 &&
+       (tx_data[0] == 0x64 || tx_data[0] == 0x65)) {
+        if(nfc_event_flags)
+            furi_event_flag_set(nfc_event_flags,
+                FuriHalNfcEventTxEnd | FuriHalNfcEventTimerFwtExpired);
+        return FuriHalNfcErrorCommunicationTimeout;
+    }
+
     /* === 1. SELECT interception (CL1/CL2/CL3 with NVB=0x70) === */
     if(pn532_target_number > 0 && tx_bytes >= 2 &&
        (tx_data[0] == 0x93 || tx_data[0] == 0x95 || tx_data[0] == 0x97) &&
@@ -749,7 +767,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         pn532_rx_buf[0] = sak;
         crc_a_append(pn532_rx_buf, 1);
         pn532_rx_bits = 24;
-        FURI_LOG_I(TAG, "SELECT CL%d SAK=%02X", cascade + 1, sak);
+        FURI_LOG_D(TAG, "SELECT CL%d SAK=%02X", cascade + 1, sak);
         if(nfc_event_flags)
             furi_event_flag_set(nfc_event_flags,
                 FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
@@ -952,7 +970,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         return FuriHalNfcErrorCommunicationTimeout;
     }
 
-    FURI_LOG_I(TAG, "TRX: %u bytes dep=%d cmd=%02X",
+    FURI_LOG_D(TAG, "TRX: %u bytes dep=%d cmd=%02X",
         (unsigned)payload_len, pn532_iso_dep_mode,
         payload_len > 0 ? payload[0] : 0);
 
@@ -994,7 +1012,12 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
                 pn532_rx_bits = (data_len + 2) * 8;
             }
 
-            FURI_LOG_I(TAG, "TRX OK: %u bits [%02X %02X %02X %02X...]",
+            if(payload_len > 0 && payload[0] == 0x30) {
+                FURI_LOG_I(TAG, "READ block=%d -> resp_len=%u rx_bits=%u",
+                    payload_len >= 2 ? payload[1] : 0xFF,
+                    (unsigned)resp_len, (unsigned)pn532_rx_bits);
+            }
+            FURI_LOG_D(TAG, "TRX OK: %u bits [%02X %02X %02X %02X...]",
                 (unsigned)pn532_rx_bits,
                 pn532_rx_buf[0],
                 pn532_rx_bits > 8 ? pn532_rx_buf[1] : 0,
@@ -1005,7 +1028,11 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
         } else {
             err = pn532_status_to_error(status);
-            FURI_LOG_I(TAG, "TRX err: %02X", status);
+            if(payload_len > 0 && payload[0] == 0x30) {
+                FURI_LOG_W(TAG, "READ block=%d -> PN532 status=%02X",
+                    payload_len >= 2 ? payload[1] : 0xFF, status);
+            }
+            FURI_LOG_D(TAG, "TRX err: %02X", status);
             /* Self-heal stale cache: clear on any PN532 status that means "the
              * cached target is no longer present / valid". Comm-level errors
              * (CRC 0x02, parity 0x03, framing 0x05 within ISO-DEP, collision
@@ -1015,7 +1042,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
              *   0x2A UID mismatch, anything >= 0x40 catastrophic. */
             if(status == 0x01 || status == 0x0A || status == 0x25 || status == 0x26 ||
                status == 0x29 || status == 0x2A || status >= 0x40) {
-                FURI_LOG_I(TAG, "InDataExchange err 0x%02X -> invalidate cache", status);
+                FURI_LOG_D(TAG, "InDataExchange err 0x%02X -> invalidate cache", status);
                 pn532_target_number = 0;
                 pn532_iso_dep_active = false;
                 pn532_iso_dep_mode = false;
@@ -1029,7 +1056,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
     } else {
         if(err == FuriHalNfcErrorNone) err = FuriHalNfcErrorCommunicationTimeout;
         /* Communication-level failure (I2C error or no response) — also stale */
-        FURI_LOG_I(TAG, "InDataExchange comm fail err=%d -> invalidate cache", (int)err);
+        FURI_LOG_D(TAG, "InDataExchange comm fail err=%d -> invalidate cache", (int)err);
         pn532_target_number = 0;
         pn532_iso_dep_active = false;
         pn532_iso_dep_mode = false;
@@ -1210,7 +1237,7 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
         }
 
         pn532_cache_time_us = esp_timer_get_time();
-        FURI_LOG_I(TAG, "Tag: ATQA=%02X%02X SAK=%02X UID=%dB iso_dep=%d",
+        FURI_LOG_D(TAG, "Tag: ATQA=%02X%02X SAK=%02X UID=%dB iso_dep=%d",
             pn532_target_atqa[0], pn532_target_atqa[1], pn532_target_sak,
             pn532_target_uid_len, pn532_iso_dep_active);
 
@@ -1528,7 +1555,7 @@ FuriHalNfcError furi_hal_nfc_pn532_mf_auth(
 
     if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] == PN532_STATUS_OK) {
         pn532_mf_authed = true;
-        FURI_LOG_I(TAG, "MF auth OK: block=%d key_type=%d", block_num, key_type);
+        FURI_LOG_D(TAG, "MF auth OK: block=%d key_type=%d", block_num, key_type);
         return FuriHalNfcErrorNone;
     }
 

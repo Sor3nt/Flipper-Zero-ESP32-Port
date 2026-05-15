@@ -342,13 +342,21 @@ static bool nfc_protocol_support_scene_read_on_event(NfcApp* instance, SceneMana
         } else if(event.event == NfcCustomEventPollerIncomplete) {
             nfc_poller_stop(instance->poller);
             nfc_poller_free(instance->poller);
-            /* Show partial read result (UID, ATQA, SAK, ATS) directly.
-             * Skip nfc_supported_cards_read — it starts new pollers which
-             * can deadlock on ESP32 due to synchronous event dispatch. */
-            notification_message(instance->notifications, &sequence_single_vibro);
-            scene_manager_next_scene(instance->scene_manager, NfcSceneReadSuccess);
-            dolphin_deed(DolphinDeedNfcReadSuccess);
-            consumed = true;
+            /* Skip nfc_supported_cards_read — it starts new pollers which can
+             * deadlock on ESP32 due to synchronous event dispatch. Forward the
+             * event to the protocol-specific handler so e.g. MIFARE Classic can
+             * advance to its DictAttack scene. */
+            const NfcProtocol protocol =
+                nfc_detected_protocols_get_selected(instance->detected_protocols);
+            consumed =
+                nfc_protocol_support_get(protocol, instance)->scene_read.on_event(instance, event);
+            if(!consumed) {
+                /* Protocol did not consume the event — show partial read result. */
+                notification_message(instance->notifications, &sequence_single_vibro);
+                scene_manager_next_scene(instance->scene_manager, NfcSceneReadSuccess);
+                dolphin_deed(DolphinDeedNfcReadSuccess);
+                consumed = true;
+            }
         } else if(event.event == NfcCustomEventPollerFailure) {
             nfc_poller_stop(instance->poller);
             nfc_poller_free(instance->poller);

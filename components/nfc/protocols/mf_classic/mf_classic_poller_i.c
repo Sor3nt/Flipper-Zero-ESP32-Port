@@ -318,28 +318,39 @@ MfClassicError mf_classic_poller_read_block(
             break;
         }
 
-        BitBuffer* result_buf = furi_hal_nfc_pn532_mf_is_authed() ?
-            instance->rx_plain_buffer : instance->rx_encrypted_buffer;
+        if(furi_hal_nfc_pn532_mf_is_authed()) {
+            /* PN532 path: iso14443_3a_poller_send_standard_frame() already
+             * verified and stripped the CRC, so rx_plain_buffer holds exactly
+             * the 16-byte block. No Crypto1 decrypt / CRC re-check needed. */
+            if(bit_buffer_get_size_bytes(instance->rx_plain_buffer) !=
+               sizeof(MfClassicBlock)) {
+                ret = MfClassicErrorProtocol;
+                break;
+            }
+            bit_buffer_write_bytes(
+                instance->rx_plain_buffer, data->data, sizeof(MfClassicBlock));
+        } else {
+            /* Crypto1 path: raw encrypted response (block + CRC), decrypt then
+             * verify CRC. */
+            if(bit_buffer_get_size_bytes(instance->rx_encrypted_buffer) !=
+               (sizeof(MfClassicBlock) + 2)) {
+                ret = MfClassicErrorProtocol;
+                break;
+            }
 
-        if(bit_buffer_get_size_bytes(result_buf) !=
-           (sizeof(MfClassicBlock) + 2)) {
-            ret = MfClassicErrorProtocol;
-            break;
-        }
-
-        if(!furi_hal_nfc_pn532_mf_is_authed()) {
             crypto1_decrypt(
                 instance->crypto, instance->rx_encrypted_buffer, instance->rx_plain_buffer);
-        }
 
-        if(!iso14443_crc_check(Iso14443CrcTypeA, instance->rx_plain_buffer)) {
-            FURI_LOG_D(TAG, "CRC error");
-            ret = MfClassicErrorProtocol;
-            break;
-        }
+            if(!iso14443_crc_check(Iso14443CrcTypeA, instance->rx_plain_buffer)) {
+                FURI_LOG_D(TAG, "CRC error");
+                ret = MfClassicErrorProtocol;
+                break;
+            }
 
-        iso14443_crc_trim(instance->rx_plain_buffer);
-        bit_buffer_write_bytes(instance->rx_plain_buffer, data->data, sizeof(MfClassicBlock));
+            iso14443_crc_trim(instance->rx_plain_buffer);
+            bit_buffer_write_bytes(
+                instance->rx_plain_buffer, data->data, sizeof(MfClassicBlock));
+        }
     } while(false);
 
     return ret;
