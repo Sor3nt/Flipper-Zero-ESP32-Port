@@ -18,6 +18,12 @@ static volatile bool s_active = false;
  * Medium Removal (=1). Indicates the host considers the drive mounted and
  * has unflushed cached writes; pulling the medium here corrupts the FS. */
 static volatile bool s_removal_locked = false;
+/* One-shot: tells the next TEST UNIT READY to fail with UNIT ATTENTION /
+ * MEDIUM MAY HAVE CHANGED. This is the SCSI signal that makes a host that
+ * has cached "no medium" re-run INQUIRY + READ_CAPACITY and pick up the
+ * drive again. Crucial after an unsafe unplug, where macOS otherwise stops
+ * polling and the volume never reappears until the next reboot. */
+static volatile bool s_signal_medium_change = false;
 
 bool furi_hal_usb_msc_start(void) {
     if(s_active) return true;
@@ -32,13 +38,15 @@ bool furi_hal_usb_msc_start(void) {
     }
 
     s_removal_locked = false;
+    /* Arm the unit-attention shot before flipping active. The next host
+     * TEST UNIT READY will fail with UNIT ATTENTION / 0x28 / 0x00, forcing
+     * the host to re-probe the drive instead of trusting its cached "no
+     * medium" state from a previous session. */
+    s_signal_medium_change = true;
     s_active = true;
-    /* Clear any stale sense (medium-not-present from a previous stop) so the
-     * host doesn't keep rejecting commands right after re-attach. */
-    tud_msc_set_sense(0, 0, 0, 0);
     FURI_LOG_I(
         TAG,
-        "MSC started: %" PRIu32 " sectors x %u bytes",
+        "MSC started: %" PRIu32 " sectors x %u bytes (arming UNIT_ATTENTION)",
         furi_hal_sd_sector_count(),
         (unsigned)furi_hal_sd_sector_size());
     return true;
@@ -89,10 +97,22 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
 bool tud_msc_test_unit_ready_cb(uint8_t lun) {
     (void)lun;
     if(!s_active) {
-        /* Per spec: when test_unit_ready returns false, follow up with a
-         * "MEDIUM NOT PRESENT" sense via tud_msc_request_sense_cb. TinyUSB
-         * pulls this automatically from tud_msc_get_sense_cb if available,
-         * but the default path also works (sense data = 0). */
+        /* TinyUSB auto-fills sense = NOT_READY / MEDIUM_NOT_PRESENT (the
+         * "stick was unplugged" signal) when we return false here and the
+         * sense is otherwise clear. */
+        return false;
+    }
+    if(s_signal_medium_change) {
+        /* Once per start(): tell the host the medium just (re)appeared.
+         * The host will follow up with REQUEST SENSE, read the UA, and
+         * then re-INQUIRY + READ_CAPACITY — which is exactly what we want
+         * because the host may have cached "no medium" from before. */
+        s_signal_medium_change = false;
+        tud_msc_set_sense(
+            lun,
+            SCSI_SENSE_UNIT_ATTENTION,
+            0x28 /*NOT READY TO READY TRANSITION, MEDIUM MAY HAVE CHANGED*/,
+            0x00);
         return false;
     }
     return furi_hal_sd_get_card_state() == FuriStatusOk;
