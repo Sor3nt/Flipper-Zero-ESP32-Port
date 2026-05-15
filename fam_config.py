@@ -112,6 +112,10 @@ if _board in _boards_without_multiboot:
 
 # USB-Storage requires USB-OTG (ESP32-S3/S2 only); the Waveshare C6 has no
 # USB-OTG peripheral and the TinyUSB composite descriptor would not enumerate.
+# Note: we deliberately do NOT auto-start usb_rpc (which would install the
+# TinyUSB composite at boot) — that would kill the USB-Serial-JTAG bridge used
+# by esptool, breaking the next `./buildAndFlash_T-Embed.sh` cycle. The
+# composite is installed lazily when the user enters the USB-Storage app.
 _boards_without_usb_otg = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 if _board in _boards_without_usb_otg:
     APPS = [a for a in APPS if a != "usb_storage"]

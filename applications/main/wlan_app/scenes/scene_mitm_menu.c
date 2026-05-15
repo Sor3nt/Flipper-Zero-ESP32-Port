@@ -1,26 +1,17 @@
 #include "../wlan_app.h"
 
 // Menu-Layout ist dynamisch: das "Code"-Item erscheint nur, wenn als Payload
-// "custom" gewählt ist. Damit der Enter-Callback weiss, was an einer gegebenen
-// Position liegt, mappen wir Position → Action über eine kleine Tabelle, die
-// beim Aufbau gefüllt wird.
-typedef enum {
-    MitmAct_Inject = 0,
-    MitmAct_Payload,
-    MitmAct_Code,
-    MitmAct_StoreCred,
-    MitmAct_Start,
-    MitmAct_None = 0xFF,
-} MitmAction;
-
-#define MITM_MENU_MAX_ITEMS 5
+// "custom" gewählt ist. Enter-Callback nutzt s_code_pos / s_start_pos, die
+// beim Aufbau mit der jeweiligen Listenposition (oder 0xFF wenn fehlend)
+// belegt werden.
+#define MITM_POS_NONE 0xFF
 
 static const char* const onoff_text[2] = {"Off", "On"};
 static const char* const k_custom_label = "custom";
 
-static MitmAction s_pos_to_act[MITM_MENU_MAX_ITEMS];
-static uint8_t s_item_count;
 static VariableItem* s_item_inject_code;
+static uint8_t s_code_pos = MITM_POS_NONE;
+static uint8_t s_start_pos = MITM_POS_NONE;
 
 static bool payload_is_custom(WlanApp* app) {
     return app->mitm_payload_index >= app->mitm_payloads.count;
@@ -74,29 +65,23 @@ static void mitm_menu_set_store(VariableItem* item) {
 
 static void mitm_menu_enter_cb(void* context, uint32_t index) {
     WlanApp* app = context;
-    if(index >= s_item_count) return;
-    MitmAction act = s_pos_to_act[index];
-    switch(act) {
-    case MitmAct_Code:
+    if(index == s_code_pos) {
         view_dispatcher_send_custom_event(
             app->view_dispatcher, WlanAppCustomEventMitmMenuInjectCode);
-        break;
-    case MitmAct_Start:
+    } else if(index == s_start_pos) {
         view_dispatcher_send_custom_event(
             app->view_dispatcher, WlanAppCustomEventMitmMenuStart);
-        break;
-    default:
-        break;
     }
 }
 
 // Baut die Variable-Item-Liste aus dem aktuellen App-State auf. Setzt
-// s_pos_to_act / s_item_count / s_item_inject_code als Seiten-Effekt.
+// s_item_inject_code / s_code_pos / s_start_pos als Seiten-Effekt.
 static void mitm_menu_build(WlanApp* app, uint8_t selected_pos) {
     variable_item_list_reset(app->variable_item_list);
     s_item_inject_code = NULL;
-    s_item_count = 0;
-    for(uint8_t i = 0; i < MITM_MENU_MAX_ITEMS; i++) s_pos_to_act[i] = MitmAct_None;
+    s_code_pos = MITM_POS_NONE;
+    s_start_pos = MITM_POS_NONE;
+    uint8_t pos = 0;
 
     VariableItem* item;
 
@@ -104,7 +89,7 @@ static void mitm_menu_build(WlanApp* app, uint8_t selected_pos) {
         app->variable_item_list, "Inject", 2, mitm_menu_set_inject, app);
     variable_item_set_current_value_index(item, app->mitm_inject_enabled ? 1 : 0);
     variable_item_set_current_value_text(item, onoff_text[app->mitm_inject_enabled ? 1 : 0]);
-    s_pos_to_act[s_item_count++] = MitmAct_Inject;
+    pos++;
 
     // Payload-Selector: alle SD-Files plus "custom" als letzter Eintrag.
     uint8_t payload_options = (uint8_t)(app->mitm_payloads.count + 1);
@@ -116,27 +101,27 @@ static void mitm_menu_build(WlanApp* app, uint8_t selected_pos) {
     variable_item_set_current_value_index(item, app->mitm_payload_index);
     variable_item_set_current_value_text(
         item, payload_label_for_index(app, app->mitm_payload_index));
-    s_pos_to_act[s_item_count++] = MitmAct_Payload;
+    pos++;
 
     if(payload_is_custom(app)) {
         s_item_inject_code = variable_item_list_add(
             app->variable_item_list, "Code", 1, NULL, app);
         mitm_menu_refresh_code_item(app);
-        s_pos_to_act[s_item_count++] = MitmAct_Code;
+        s_code_pos = pos++;
     }
 
     item = variable_item_list_add(
         app->variable_item_list, "Store Cred", 2, mitm_menu_set_store, app);
     variable_item_set_current_value_index(item, app->mitm_store_cred ? 1 : 0);
     variable_item_set_current_value_text(item, onoff_text[app->mitm_store_cred ? 1 : 0]);
-    s_pos_to_act[s_item_count++] = MitmAct_StoreCred;
+    pos++;
 
     variable_item_list_add(app->variable_item_list, "Start", 1, NULL, app);
-    s_pos_to_act[s_item_count++] = MitmAct_Start;
+    s_start_pos = pos++;
 
     variable_item_list_set_enter_callback(app->variable_item_list, mitm_menu_enter_cb, app);
 
-    if(selected_pos >= s_item_count) selected_pos = 0;
+    if(selected_pos >= pos) selected_pos = 0;
     variable_item_list_set_selected_item(app->variable_item_list, selected_pos);
 }
 
@@ -197,6 +182,7 @@ void wlan_app_scene_mitm_menu_on_exit(void* context) {
     WlanApp* app = context;
     variable_item_list_reset(app->variable_item_list);
     s_item_inject_code = NULL;
-    s_item_count = 0;
+    s_code_pos = MITM_POS_NONE;
+    s_start_pos = MITM_POS_NONE;
     UNUSED(app);
 }

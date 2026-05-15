@@ -21,8 +21,6 @@ void wlan_mitm_server_start(struct WlanCredSniff* cs);
 /** Stoppt den Server und löst alle Sockets auf. Idempotent. */
 void wlan_mitm_server_stop(void);
 
-bool wlan_mitm_server_running(void);
-
 #ifdef __cplusplus
 }
 #endif

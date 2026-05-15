@@ -3,7 +3,6 @@
 #include "wlan_cred_sniff.h"
 #include "wlan_hal.h"
 #include "wlan_netcut.h"
-#include "wlan_cred_sniff.h"
 
 static bool wlan_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -138,9 +137,8 @@ static WlanApp* wlan_app_alloc(void) {
 
     app->mitm_inject_enabled = true;
     app->mitm_store_cred = true;
-    // Roher JS-Code — wlan_html_inject_set_code legt das <script>-Wrapping
-    // automatisch drumherum (gilt sowohl für diesen Custom-Default als auch
-    // für SD-Payloads).
+    // Default-Payload für "custom". Wird raw als JS am mitm-server /code
+    // ausgeliefert; in HTML injizieren wir nur einen <script src=...>-Loader.
     strcpy(app->mitm_inject_code, "alert(1234);");
     app->mitm_payloads.count = 0;
     app->mitm_payload_index = 0; // wird in scene_mitm_menu_on_enter auf "custom" gesetzt

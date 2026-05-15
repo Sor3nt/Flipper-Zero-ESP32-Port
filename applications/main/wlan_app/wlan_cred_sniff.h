@@ -49,7 +49,7 @@ void wlan_cred_sniff_feed_eth(WlanCredSniff* cs, const uint8_t* eth, uint16_t le
  *  → Server-IP als Host-Fallback.
  *  Aus dem lwIP-tcpip_thread aufzurufen (single producer). */
 void wlan_cred_sniff_push_inject(
-    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port,
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip,
     const char* host, const char* path);
 
 /** Lookup im Per-Flow-Tracking. host_out/path_out werden mit dem letzten
@@ -76,8 +76,6 @@ uint32_t wlan_cred_sniff_drain(WlanCredSniff* cs, WlanCredEntry* out, uint32_t m
 /** Stabiler Snapshot des Rings (neueste zuerst) für die Listen-View. */
 uint32_t wlan_cred_sniff_snapshot(WlanCredSniff* cs, WlanCredEntry* out, uint32_t max);
 
-uint32_t wlan_cred_sniff_total(WlanCredSniff* cs);
-uint32_t wlan_cred_sniff_count_for_ip(WlanCredSniff* cs, uint32_t ip);
 
 /** Tap (de)aktivieren. Beim Armen wird die DNS-Dedup-Bitmap zurückgesetzt
  *  (frische Session). */

