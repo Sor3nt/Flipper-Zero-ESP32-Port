@@ -96,6 +96,9 @@ static NfcError nfc_process_hal_error(FuriHalNfcError error) {
     case FuriHalNfcErrorDataFormat:
         ret = NfcErrorDataFormat;
         break;
+    case FuriHalNfcErrorCommunicationTimeout:
+        ret = NfcErrorTimeout;
+        break;
 
     default:
         ret = NfcErrorInternal;
