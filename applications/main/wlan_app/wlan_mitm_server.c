@@ -261,7 +261,3 @@ void wlan_mitm_server_stop(void) {
     wlan_hal_run_in_worker(mitm_server_stop_worker, NULL);
     s_cs = NULL;
 }
-
-bool wlan_mitm_server_running(void) {
-    return s_server != NULL;
-}

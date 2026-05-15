@@ -1,18 +1,16 @@
 #include "../wlan_app.h"
 #include "../wlan_netcut.h"
+#include "scene_restoring.h"
 
 // Mit Goto verlinkte Items kommen via custom event in den Event-Handler.
-// Toggle-Items mutieren direkt das App-State; Restore-Logik beim onExit
-// kommt in Session 3.
+// Toggle-Items (Block/Throttle, Positionen 0/1) mutieren direkt das App-State
+// per VariableItem-Callback und werden hier nicht behandelt.
 
 enum AttackItemIndex {
-    AtIdxBlockInternet,
-    AtIdxThrottle,
-    AtIdxPortScanner,
-    AtIdxPackageSniffer,
-    AtIdxHandshake,
-    AtIdxLiveCreds,
-    AtIdxCount,
+    AtIdxPortScanner = 2,
+    AtIdxPackageSniffer = 3,
+    AtIdxHandshake = 4,
+    AtIdxLiveCreds = 5,
 };
 
 static const char* const throttle_labels[WlanAppThrottleCount] = {
@@ -28,17 +26,7 @@ static const uint16_t throttle_kbps_values[WlanAppThrottleCount] = {
 static VariableItem* s_block_item = NULL;
 static VariableItem* s_throttle_item = NULL;
 
-#define AT_RESTORING_TICKS 12 // ~3 s
 static uint16_t s_at_restoring_ticks;
-
-static void at_show_restoring(WlanApp* app) {
-    widget_reset(app->widget);
-    widget_add_rect_element(app->widget, 14, 22, 100, 20, 3, false);
-    widget_add_string_element(
-        app->widget, 64, 32, AlignCenter, AlignCenter, FontSecondary, "Restoring device...");
-    s_at_restoring_ticks = AT_RESTORING_TICKS;
-    view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewWidget);
-}
 
 static void at_finish_restoring(WlanApp* app) {
     widget_reset(app->widget);
@@ -95,7 +83,7 @@ static void cb_block_internet(VariableItem* item) {
 
     {
         bool r = wlan_netcut_apply(app->netcut, app->devices, app->device_count);
-        if(r) at_show_restoring(app);
+        if(r) wlan_scene_show_restoring(app, "Restoring device...", &s_at_restoring_ticks);
     }
 }
 
@@ -117,7 +105,7 @@ static void cb_throttle(VariableItem* item) {
 
     {
         bool r = wlan_netcut_apply(app->netcut, app->devices, app->device_count);
-        if(r) at_show_restoring(app);
+        if(r) wlan_scene_show_restoring(app, "Restoring device...", &s_at_restoring_ticks);
     }
 }
 

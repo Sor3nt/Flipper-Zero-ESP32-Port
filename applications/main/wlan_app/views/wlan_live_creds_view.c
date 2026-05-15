@@ -18,7 +18,6 @@
 typedef struct {
     WlanCredEntry entries[WLAN_CRED_RING_SIZE];
     uint32_t count;
-    uint32_t total;
     uint16_t victims;
     int sel;
 } WlanLiveCredsModel;
@@ -101,7 +100,6 @@ static void lc_draw(Canvas* canvas, void* model) {
 // ---------------------------------------------------------------------------
 static bool lc_input(InputEvent* event, void* context) {
     WlanLiveCredsView* v = context;
-    bool short_or_repeat = (event->type == InputTypeShort || event->type == InputTypeRepeat);
     if(event->type != InputTypeShort && event->type != InputTypeRepeat) return false;
 
     bool consumed = false;
@@ -112,13 +110,13 @@ static bool lc_input(InputEvent* event, void* context) {
             int n = (int)m->count;
             switch(event->key) {
             case InputKeyUp:
-                if(short_or_repeat && n > 0) {
+                if(n > 0) {
                     if(m->sel > 0) m->sel--;
                     consumed = true;
                 }
                 break;
             case InputKeyDown:
-                if(short_or_repeat && n > 0) {
+                if(n > 0) {
                     if(m->sel < n - 1) m->sel++;
                     consumed = true;
                 }
@@ -158,7 +156,7 @@ View* wlan_live_creds_view_get_view(WlanLiveCredsView* v) {
 }
 
 void wlan_live_creds_view_set_entries(
-    WlanLiveCredsView* v, const WlanCredEntry* arr, uint32_t count, uint32_t total) {
+    WlanLiveCredsView* v, const WlanCredEntry* arr, uint32_t count) {
     if(count > WLAN_CRED_RING_SIZE) count = WLAN_CRED_RING_SIZE;
     with_view_model(
         v->view,
@@ -166,7 +164,6 @@ void wlan_live_creds_view_set_entries(
         {
             if(count > 0 && arr) memcpy(m->entries, arr, count * sizeof(WlanCredEntry));
             m->count = count;
-            m->total = total;
             if(m->sel >= (int)count) m->sel = count > 0 ? (int)count - 1 : 0;
         },
         true);
@@ -183,7 +180,6 @@ void wlan_live_creds_view_reset(WlanLiveCredsView* v) {
         {
             m->sel = 0;
             m->count = 0;
-            m->total = 0;
             m->victims = 0;
         },
         true);
