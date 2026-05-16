@@ -123,9 +123,16 @@ bool wlan_app_scene_ssid_connect_on_event(void* context, SceneManagerEvent event
             app->connected = true;
             app->target_selected = false;
             app->lan_scan_complete = false;
-            // gw_mac aus DHCP-Antwort sollte jetzt in der ARP-Tabelle stehen.
-            wlan_netcut_preflight(app->netcut);
-            scene_manager_next_scene(app->scene_manager, WlanAppSceneNetworkScanning);
+            if(app->update_sd_flow) {
+                // Update-SD-Flow braucht keinen ARP-Scan → direkt zur
+                // Bestätigung/Download-Scene.
+                scene_manager_next_scene(app->scene_manager, WlanAppSceneUpdateSd);
+            } else {
+                // gw_mac aus DHCP-Antwort sollte jetzt in der ARP-Tabelle stehen.
+                wlan_netcut_preflight(app->netcut);
+                scene_manager_next_scene(
+                    app->scene_manager, WlanAppSceneNetworkScanning);
+            }
             consumed = true;
         } else if(event.event == WlanAppCustomEventConnectFailed) {
             // Bei Failed: gespeichertes Passwort verwerfen damit der User es erneut eingibt.

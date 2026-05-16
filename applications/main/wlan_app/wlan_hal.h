@@ -93,6 +93,8 @@ typedef struct {
     const char* ssid;
     uint8_t channel;
     bool verify_creds;            // Router-Mode: gegen echte APs verifizieren
+    bool karma;                   // Karma: Probe-Requests sniffen + AP-SSID
+                                  // dynamisch auf die meistgesuchte SSID stellen
     const char* html;
     size_t html_len;
     const char* router_ssid_options; // optional, ersetzt %SSID_OPTIONS%
@@ -113,3 +115,10 @@ void wlan_hal_evil_portal_resume(void);
 bool wlan_hal_evil_portal_is_paused(void);
 uint32_t wlan_hal_evil_portal_get_cred_count(void);
 uint16_t wlan_hal_evil_portal_get_client_count(void);
+
+/** Karma: Anzahl bisher geernteter (eindeutiger) Probe-SSIDs. */
+uint16_t wlan_hal_evil_portal_karma_get_ssid_count(void);
+
+/** Karma: aktuell vom SoftAP gespoofte SSID nach out kopieren.
+ *  Liefert false wenn Karma inaktiv. */
+bool wlan_hal_evil_portal_karma_get_current(char* out, size_t out_size);

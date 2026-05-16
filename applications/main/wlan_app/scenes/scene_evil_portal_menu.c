@@ -4,8 +4,11 @@ enum EvilPortalMenuIndex {
     EpMenuIdxSsid,
     EpMenuIdxChannel,
     EpMenuIdxTemplate,
+    EpMenuIdxKarma,
     EpMenuIdxStart,
 };
+
+static const char* const karma_text[2] = {"Off", "On"};
 
 #define EP_CHANNEL_COUNT 12
 static const char* const channel_text[EP_CHANNEL_COUNT] = {
@@ -36,6 +39,13 @@ static void ep_menu_set_template(VariableItem* item) {
     if(idx >= EP_TEMPLATE_COUNT) idx = EP_TEMPLATE_COUNT - 1;
     app->evil_portal_template_index = idx;
     variable_item_set_current_value_text(item, template_names[idx]);
+}
+
+static void ep_menu_set_karma(VariableItem* item) {
+    WlanApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item) ? 1 : 0;
+    app->evil_portal_karma = (idx == 1);
+    variable_item_set_current_value_text(item, karma_text[idx]);
 }
 
 static void ep_menu_enter_cb(void* context, uint32_t index) {
@@ -75,6 +85,14 @@ void wlan_app_scene_evil_portal_menu_on_enter(void* context) {
         uint8_t idx = app->evil_portal_template_index;
         variable_item_set_current_value_index(item, idx);
         variable_item_set_current_value_text(item, template_names[idx]);
+    }
+
+    item = variable_item_list_add(
+        app->variable_item_list, "Karma", 2, ep_menu_set_karma, app);
+    {
+        uint8_t idx = app->evil_portal_karma ? 1 : 0;
+        variable_item_set_current_value_index(item, idx);
+        variable_item_set_current_value_text(item, karma_text[idx]);
     }
 
     variable_item_list_add(app->variable_item_list, "Start", 1, NULL, app);

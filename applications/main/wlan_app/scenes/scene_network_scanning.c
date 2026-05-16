@@ -117,6 +117,14 @@ void wlan_app_scene_network_scanning_on_enter(void* context) {
     s_dialog_shown = false;
     app->device_count = 0;
 
+    // Re-Scan erzwingt echten ARP-Scan; der Cache wird am Ende von
+    // NetScanStateHostnames ohnehin per FSOM_CREATE_ALWAYS überschrieben.
+    if(app->lan_force_rescan) {
+        app->lan_force_rescan = false;
+        net_scan_set_state(app, NetScanStateArp);
+        return;
+    }
+
     uint16_t cached = 0;
     if(wlan_lan_cache_load(
            app->connected_ap.ssid, app->devices, WLAN_APP_MAX_DEVICES, &cached) &&

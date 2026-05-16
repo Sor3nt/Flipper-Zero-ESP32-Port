@@ -15,6 +15,7 @@
 #include "views/wlan_view_events.h"
 #include "wlan_handshake_settings.h"
 #include "wlan_mitm_payloads.h"
+#include "wlan_sd_update.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_connect_view.h"
 #include "views/wlan_portscan_view.h"
@@ -25,6 +26,7 @@
 #include "views/wlan_evil_portal_view.h"
 #include "views/wlan_evil_portal_captured_view.h"
 #include "views/wlan_live_creds_view.h"
+#include "views/wlan_sd_update_view.h"
 
 #define WLAN_APP_TAG "WlanApp"
 #define WLAN_APP_MAX_APS 64
@@ -50,6 +52,7 @@ typedef enum {
     WlanAppViewEvilPortal,
     WlanAppViewEvilPortalCaptured,
     WlanAppViewLiveCreds,
+    WlanAppViewSdUpdate,
 } WlanAppView;
 
 typedef struct {
@@ -146,6 +149,7 @@ struct WlanApp {
     char evil_portal_ssid[33];
     uint8_t evil_portal_channel;
     uint8_t evil_portal_template_index; // 0 = Google, 1 = Router
+    bool evil_portal_karma;             // Karma-Modus aktiv
     char evil_portal_valid_ssid[33];
     char evil_portal_valid_pwd[65];
 
@@ -176,6 +180,7 @@ struct WlanApp {
     int16_t lan_menu_device_idx; // -1 = kein Menü aktiv, sonst Device-Index
     bool lan_popup_active;        // true wenn LAN-Scene gerade einen Popup overlayt
     bool lan_scan_complete;       // true wenn ARP-Scan einmal durchgelaufen ist
+    bool lan_force_rescan;        // true → SD-Cache überspringen, echten ARP-Scan erzwingen
 
     // Deauther-/Sniffer-Picker-Scene-State (shared)
     WlanDeauthClient deauth_clients[WLAN_APP_MAX_DEAUTH_CLIENTS];
@@ -209,6 +214,13 @@ struct WlanApp {
     FuriString* text_buf;
 
     WlanNetcut* netcut;
+
+    // Update-SD-Flow: true sobald der User "Update SD" gewählt hat; steuert,
+    // dass scene_ssid_connect nach erfolgreichem Connect zur Update-SD-Scene
+    // statt zum ARP-Scan springt. Wird in scene_update_sd konsumiert.
+    bool update_sd_flow;
+    WlanSdUpdate* sd_update;
+    View* view_sd_update;
 };
 
 /** Schlüssel der aktuellen Picker-Assoziation: Channel-Key im Channel-Mode,

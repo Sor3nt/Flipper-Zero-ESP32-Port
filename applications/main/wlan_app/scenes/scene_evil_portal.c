@@ -255,6 +255,7 @@ void wlan_app_scene_evil_portal_on_enter(void* context) {
         .ssid = app->evil_portal_ssid,
         .channel = channel,
         .verify_creds = router_template,
+        .karma = app->evil_portal_karma,
         .html = html,
         .html_len = html_len,
         .router_ssid_options = s_router_options,
@@ -300,6 +301,15 @@ bool wlan_app_scene_evil_portal_on_event(void* context, SceneManagerEvent event)
         wlan_evil_portal_view_set_clients(
             app->evil_portal_view_obj,
             wlan_hal_evil_portal_get_client_count());
+        if(app->evil_portal_karma) {
+            char cur[33];
+            if(wlan_hal_evil_portal_karma_get_current(cur, sizeof(cur)) && cur[0]) {
+                wlan_evil_portal_view_set_ssid(app->evil_portal_view_obj, cur);
+            }
+            wlan_evil_portal_view_set_karma(
+                app->evil_portal_view_obj,
+                wlan_hal_evil_portal_karma_get_ssid_count());
+        }
     }
 
     return consumed;

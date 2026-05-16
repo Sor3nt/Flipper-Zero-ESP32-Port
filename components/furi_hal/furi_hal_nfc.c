@@ -566,9 +566,20 @@ FuriHalNfcEvent furi_hal_nfc_listener_wait_event(uint32_t timeout_ms) {
         uint8_t cmd[40];
         size_t idx = 0;
         cmd[idx++] = PN532_CMD_TGINITASTARGET;
-        cmd[idx++] = 0x05; /* Mode: passive 106kbps, PICC only */
+        /* Mode 0x01 = PassiveOnly (bit0). PICCOnly (bit2) MUST NOT be set:
+         * it tells the PN532 to emulate an ISO14443-4 PICC, which makes
+         * readers see the tag as a generic ISO14443-3A / ISO-DEP target (or
+         * fall back to a FeliCa probe) instead of MIFARE Classic. With
+         * PassiveOnly the PN532 answers REQA/anti-collision with our cached
+         * SENS_RES (ATQA) / NFCID1 / SEL_RES (SAK), so the reader detects a
+         * MIFARE Classic 1K. (Crypto1 AUTH still can't be answered — PN532
+         * hardware limitation — but UID/SAK-level emulation works.) */
+        cmd[idx++] = 0x01;
 
-        /* Mifare params: SENS_RES (2) + NFCID1 (3) + SEL_RES (1) */
+        /* Mifare params: SENS_RES (2) + NFCID1 (3) + SEL_RES (1).
+         * TgInitAsTarget only accepts a 3-byte NFCID1 — for a 4-byte MIFARE
+         * UID the PN532 generates the 4th byte itself, so the emulated UID's
+         * last byte cannot be controlled (PN532 limitation). */
         cmd[idx++] = listener_atqa[0];
         cmd[idx++] = listener_atqa[1];
         cmd[idx++] = (listener_uid_len >= 1) ? listener_uid[0] : 0x00;
@@ -1012,11 +1023,6 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
                 pn532_rx_bits = (data_len + 2) * 8;
             }
 
-            if(payload_len > 0 && payload[0] == 0x30) {
-                FURI_LOG_I(TAG, "READ block=%d -> resp_len=%u rx_bits=%u",
-                    payload_len >= 2 ? payload[1] : 0xFF,
-                    (unsigned)resp_len, (unsigned)pn532_rx_bits);
-            }
             FURI_LOG_D(TAG, "TRX OK: %u bits [%02X %02X %02X %02X...]",
                 (unsigned)pn532_rx_bits,
                 pn532_rx_buf[0],
@@ -1028,10 +1034,6 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
                     FuriHalNfcEventTxEnd | FuriHalNfcEventRxStart | FuriHalNfcEventRxEnd);
         } else {
             err = pn532_status_to_error(status);
-            if(payload_len > 0 && payload[0] == 0x30) {
-                FURI_LOG_W(TAG, "READ block=%d -> PN532 status=%02X",
-                    payload_len >= 2 ? payload[1] : 0xFF, status);
-            }
             FURI_LOG_D(TAG, "TRX err: %02X", status);
             /* Self-heal stale cache: clear on any PN532 status that means "the
              * cached target is no longer present / valid". Comm-level errors
