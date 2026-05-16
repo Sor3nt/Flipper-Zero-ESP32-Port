@@ -10,6 +10,7 @@ enum MainIndex {
     MainIndexChannelDeauth = 11,
     MainIndexChannelSniffer = 12,
     MainIndexChannelEvilPortal = 13,
+    MainIndexUpdateSd = 14,
 };
 
 static void wlan_app_scene_main_submenu_cb(void* context, uint32_t index) {
@@ -24,6 +25,8 @@ void wlan_app_scene_main_on_enter(void* context) {
 
     // Channel-Aktionen sind immer sichtbar; Verbindungs-Aktionen sind state-abhängig.
     app->channel_mode_active = false;
+    // Hub-Scene: ein evtl. abgebrochener Update-SD-Flow wird hier zurückgesetzt.
+    app->update_sd_flow = false;
 
     if(!app->connected && !app->target_selected) {
         submenu_add_item_centered(
@@ -59,6 +62,9 @@ void wlan_app_scene_main_on_enter(void* context) {
         wlan_app_scene_main_submenu_cb, app);
     submenu_add_item(
         app->submenu, "Evil Portal", MainIndexChannelEvilPortal,
+        wlan_app_scene_main_submenu_cb, app);
+    submenu_add_item(
+        app->submenu, "Update SD", MainIndexUpdateSd,
         wlan_app_scene_main_submenu_cb, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewSubmenu);
@@ -119,6 +125,17 @@ bool wlan_app_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainIndexChannelEvilPortal:
             scene_manager_next_scene(app->scene_manager, WlanAppSceneEvilPortalMenu);
+            consumed = true;
+            break;
+        case MainIndexUpdateSd:
+            app->update_sd_flow = true;
+            if(app->connected) {
+                // Bereits verbunden → direkt zur Bestätigung.
+                scene_manager_next_scene(app->scene_manager, WlanAppSceneUpdateSd);
+            } else {
+                // Kein WLAN → gleicher Connect-Flow wie "Select Wifi".
+                scene_manager_next_scene(app->scene_manager, WlanAppSceneConnect);
+            }
             consumed = true;
             break;
         }

@@ -17,5 +17,7 @@ void wlan_evil_portal_view_set_creds(WlanEvilPortalView* v, uint32_t count);
 void wlan_evil_portal_view_set_last(WlanEvilPortalView* v, const char* user);
 void wlan_evil_portal_view_set_busy(WlanEvilPortalView* v, bool busy, const char* msg);
 void wlan_evil_portal_view_set_paused(WlanEvilPortalView* v, bool paused);
+/** Karma: Anzahl geernteter Probe-SSIDs (>0 blendet "K:N" ein). */
+void wlan_evil_portal_view_set_karma(WlanEvilPortalView* v, uint16_t harvested);
 void wlan_evil_portal_view_set_action_callback(
     WlanEvilPortalView* v, WlanEvilPortalViewActionCb cb, void* ctx);

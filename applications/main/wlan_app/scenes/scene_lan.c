@@ -209,6 +209,7 @@ bool wlan_app_scene_lan_on_event(void* context, SceneManagerEvent event) {
                 break;
             case LAN_ACTION_RESCAN:
                 app->lan_scan_complete = false;
+                app->lan_force_rescan = true;
                 scene_manager_next_scene(app->scene_manager, WlanAppSceneNetworkScanning);
                 consumed = true;
                 break;

@@ -42,3 +42,11 @@ CONFIG_FATFS_MAX_LFN=255
 
 # NFC needs 3DES (felica, mf_ultralight)
 CONFIG_MBEDTLS_DES_C=y
+
+# WiFi "Update SD": HTTPS-Download ohne Server-Zertifikatsprüfung erlauben
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+# mbedTLS-Allokationen ins PSRAM (interner DRAM reicht mit WiFi nicht für den
+# TLS-Handshake → sonst -0x7F00/-0x2880). Langsamer als intern, aber stabil;
+# DYNAMIC_BUFFER + SPIRAM_TRY_ALLOCATE_WIFI_LWIP crashen den WiFi-Treiber.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

@@ -13,6 +13,7 @@ typedef struct {
     char busy_msg[24];
     uint32_t cred_count;
     uint16_t client_count;
+    uint16_t karma_harvested;
     uint8_t channel;
     uint8_t hourglass_frame;
     bool busy;
@@ -58,8 +59,13 @@ static void wlan_evil_portal_view_draw(Canvas* canvas, void* model) {
     // Channel rechts oben (FontSecondary, 3 px Abstand zum Rand).
     if(m->channel) {
         canvas_set_font(canvas, FontSecondary);
-        char ch_buf[12];
-        snprintf(ch_buf, sizeof(ch_buf), "Ch:%u", (unsigned)m->channel);
+        char ch_buf[20];
+        if(m->karma_harvested) {
+            snprintf(ch_buf, sizeof(ch_buf), "Ch:%u K:%u",
+                     (unsigned)m->channel, (unsigned)m->karma_harvested);
+        } else {
+            snprintf(ch_buf, sizeof(ch_buf), "Ch:%u", (unsigned)m->channel);
+        }
         uint16_t cw = canvas_string_width(canvas, ch_buf);
         canvas_draw_str(
             canvas, 128 - 3 - cw, WLAN_VIEW_HEADER_BASELINE_Y, ch_buf);
@@ -141,6 +147,7 @@ WlanEvilPortalView* wlan_evil_portal_view_alloc(void) {
     m->busy_msg[0] = 0;
     m->cred_count = 0;
     m->client_count = 0;
+    m->karma_harvested = 0;
     m->channel = 0;
     m->hourglass_frame = 0;
     m->busy = false;
@@ -205,6 +212,11 @@ void wlan_evil_portal_view_set_busy(WlanEvilPortalView* v, bool busy, const char
 
 void wlan_evil_portal_view_set_paused(WlanEvilPortalView* v, bool paused) {
     with_view_model(v->view, WlanEvilPortalViewModel * m, { m->paused = paused; }, true);
+}
+
+void wlan_evil_portal_view_set_karma(WlanEvilPortalView* v, uint16_t harvested) {
+    with_view_model(
+        v->view, WlanEvilPortalViewModel * m, { m->karma_harvested = harvested; }, true);
 }
 
 void wlan_evil_portal_view_set_action_callback(
