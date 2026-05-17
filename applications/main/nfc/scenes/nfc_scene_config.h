@@ -74,3 +74,5 @@ ADD_SCENE(nfc, felica_more_info, FelicaMoreInfo)
 ADD_SCENE(nfc, felica_system, FelicaSystem)
 
 ADD_SCENE(nfc, generate_info, GenerateInfo)
+ADD_SCENE(nfc, chameleon_wipe, ChameleonWipe)
+ADD_SCENE(nfc, clone_place_blank, ClonePlaceBlank)

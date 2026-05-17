@@ -33,4 +33,10 @@ typedef enum {
     NfcCustomEventListenerUpdate,
 
     NfcCustomEventEmulationTimeExpired,
+
+    // ChameleonUltra BLE backend
+    NfcCustomEventChameleonButton,
+    NfcCustomEventChameleonConnected,
+    NfcCustomEventChameleonFailed,
+    NfcCustomEventChameleonCardRead,
 } NfcCustomEvent;

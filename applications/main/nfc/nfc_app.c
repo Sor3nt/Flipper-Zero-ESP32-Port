@@ -1,6 +1,7 @@
 #include "nfc_app_i.h"
 #include "api/nfc_app_api_interface.h"
 #include "helpers/protocol_support/nfc_protocol_support.h"
+#include "chameleon/chameleon.h"
 
 #include <dolphin/dolphin.h>
 #include <loader/firmware_api/firmware_api.h>
@@ -541,6 +542,13 @@ int32_t nfc_app(void* p) {
     }
 
     view_dispatcher_run(nfc->view_dispatcher);
+
+    /* Restore the BT peripheral stack / RPC if the user leaves the NFC app
+     * while still connected to a ChameleonUltra (the connection persists
+     * across the Read/Emulate scenes by design, but not past app exit). */
+    if(chameleon_is_connected()) {
+        chameleon_disconnect();
+    }
 
     nfc_app_free(nfc);
 

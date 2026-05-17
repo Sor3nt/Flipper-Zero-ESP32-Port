@@ -190,6 +190,10 @@ struct NfcApp {
     FuriString* file_path;
     FuriString* file_name;
     FuriTimer* timer;
+
+    /* "Clone" flow: read a card, then go straight to the "Place blank Card"
+     * dialog (Write / Wipe / Chameleon) instead of the normal ReadSuccess UI. */
+    bool clone_mode;
 };
 
 typedef enum {

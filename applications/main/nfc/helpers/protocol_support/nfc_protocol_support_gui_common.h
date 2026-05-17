@@ -21,6 +21,7 @@ enum {
     SubmenuIndexCommonRename, /**< Rename menu option. */
     SubmenuIndexCommonDelete, /**< Delete menu option. */
     SubmenuIndexCommonRestore, /**< Restore menu option. */
+    SubmenuIndexCommonWipe, /**< Wipe target card to blank via Chameleon. */
     SubmenuIndexCommonMax, /**< Special value, internal use. */
 };
 
