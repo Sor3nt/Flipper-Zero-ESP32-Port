@@ -3,6 +3,7 @@
 
 enum SubmenuIndex {
     SubmenuIndexRead,
+    SubmenuIndexClone,
     SubmenuIndexDetectReader,
     SubmenuIndexSaved,
     SubmenuIndexExtraAction,
@@ -26,8 +27,11 @@ void nfc_scene_start_on_enter(void* context) {
     iso14443_3a_reset(nfc->iso14443_3a_edit_data);
     // Reset detected protocols list
     nfc_detected_protocols_reset(nfc->detected_protocols);
+    // Returning to the main menu always leaves the Clone flow
+    nfc->clone_mode = false;
 
     submenu_add_item(submenu, "Read", SubmenuIndexRead, nfc_scene_start_submenu_callback, nfc);
+    submenu_add_item(submenu, "Clone", SubmenuIndexClone, nfc_scene_start_submenu_callback, nfc);
     submenu_add_item(
         submenu,
         "Extract MFC Keys",
@@ -58,6 +62,11 @@ bool nfc_scene_start_on_event(void* context, SceneManagerEvent event) {
     if(event.type == SceneManagerEventTypeCustom) {
         consumed = true;
         if(event.event == SubmenuIndexRead) {
+            nfc->clone_mode = false;
+            scene_manager_next_scene(nfc->scene_manager, NfcSceneDetect);
+            dolphin_deed(DolphinDeedNfcRead);
+        } else if(event.event == SubmenuIndexClone) {
+            nfc->clone_mode = true;
             scene_manager_next_scene(nfc->scene_manager, NfcSceneDetect);
             dolphin_deed(DolphinDeedNfcRead);
         } else if(event.event == SubmenuIndexDetectReader) {

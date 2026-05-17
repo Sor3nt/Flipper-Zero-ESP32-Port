@@ -115,8 +115,8 @@ static void nfc_scene_read_menu_on_enter_mf_classic(NfcApp* instance) {
     Submenu* submenu = instance->submenu;
     const MfClassicData* data = nfc_device_get_data(instance->nfc_device, NfcProtocolMfClassic);
 
-    // Doesn't make sense to show "Write to Initial Card" right after reading
-    submenu_remove_item(submenu, SubmenuIndexCommonWrite);
+    // Keep "Write" available right after reading (consistent with NTAG/UL),
+    // so a read-then-write flow works without saving first.
 
     if(!mf_classic_is_card_read(data)) {
         submenu_add_item(

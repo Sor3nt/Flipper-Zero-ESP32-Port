@@ -195,6 +195,7 @@ extern const Icon I_Modern_reader_18x34;
 extern const Icon I_Move_flipper_26x39;
 extern const Icon I_NFC_dolphin_emulation_51x64;
 extern const Icon I_NFC_manual_60x50;
+extern const Icon I_NFC_manual_chameleon_60x50;
 extern const Icon I_Release_arrow_18x15;
 extern const Icon I_check_big_20x17;
 extern const Icon I_Pin_arrow_up_7x9;

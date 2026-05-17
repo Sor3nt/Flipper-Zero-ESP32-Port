@@ -8,6 +8,8 @@
 #include "nfc_protocol_support.h"
 
 #include "nfc/nfc_app_i.h"
+#include "nfc/chameleon/chameleon.h"
+#include "nfc/chameleon/chameleon_nfc.h"
 
 #include "nfc_protocol_support_base.h"
 #include "nfc_protocol_support_gui_common.h"
@@ -311,19 +313,113 @@ static void nfc_protocol_support_scene_more_info_on_exit(NfcApp* instance) {
 }
 
 // SceneRead
-static void nfc_protocol_support_scene_read_on_enter(NfcApp* instance) {
-    popup_set_header(instance->popup, "Don't move", 85, 27, AlignCenter, AlignTop);
-    popup_set_icon(instance->popup, 12, 23, &A_Loading_24);
 
-    view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
+/* ---- ChameleonUltra read backend (optional, toggled by a button) ----
+ * Mirrors nfc_scene_detect.c so the "Read Specific Card Type" flow
+ * (Extra Actions -> SelectProtocol -> Read) can also read via an external
+ * ChameleonUltra over BLE instead of the local PN532. */
+typedef struct {
+    FuriThread* thread;
+    volatile bool abort;
+    bool running;
+    bool pn532_started;
+} NfcChamRead;
 
+static NfcChamRead s_chrd;
+
+static int32_t nfc_protocol_support_chameleon_read_worker(void* context) {
+    NfcApp* instance = context;
+    if(!chameleon_is_connected()) {
+        if(!chameleon_connect(&s_chrd.abort)) {
+            view_dispatcher_send_custom_event(
+                instance->view_dispatcher, NfcCustomEventChameleonFailed);
+            return 0;
+        }
+    }
+    view_dispatcher_send_custom_event(
+        instance->view_dispatcher, NfcCustomEventChameleonConnected);
+
+    while(!s_chrd.abort) {
+        if(chameleon_nfc_read_card(instance->nfc_device, &s_chrd.abort)) {
+            view_dispatcher_send_custom_event(
+                instance->view_dispatcher, NfcCustomEventChameleonCardRead);
+            break;
+        }
+        furi_delay_ms(300);
+    }
+    return 0;
+}
+
+static void nfc_protocol_support_chameleon_read_worker_start(NfcApp* instance) {
+    if(s_chrd.running) return;
+    s_chrd.abort = false;
+    s_chrd.thread = furi_thread_alloc_ex(
+        "ChamRead", 8 * 1024, nfc_protocol_support_chameleon_read_worker, instance);
+    furi_thread_start(s_chrd.thread);
+    s_chrd.running = true;
+}
+
+static void nfc_protocol_support_chameleon_read_worker_stop(void) {
+    if(!s_chrd.running) return;
+    s_chrd.abort = true;
+    furi_thread_join(s_chrd.thread);
+    furi_thread_free(s_chrd.thread);
+    s_chrd.thread = NULL;
+    s_chrd.running = false;
+}
+
+static void nfc_protocol_support_read_button_cb(
+    GuiButtonType result,
+    InputType type,
+    void* context) {
+    NfcApp* instance = context;
+    if(type == InputTypeShort && result == GuiButtonTypeCenter) {
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventChameleonButton);
+    }
+}
+
+static void nfc_protocol_support_read_build_view(NfcApp* instance) {
+    bool cham = chameleon_is_connected();
+    Widget* widget = instance->widget;
+    widget_reset(widget);
+    widget_add_string_element(widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Reading");
+    widget_add_icon_element(
+        widget, 0, 13, cham ? &I_NFC_manual_chameleon_60x50 : &I_NFC_manual_60x50);
+    widget_add_string_multiline_element(
+        widget,
+        90,
+        22,
+        AlignCenter,
+        AlignTop,
+        FontSecondary,
+        cham ? "Place Card\nat\nChameleon" : "Don't move");
+    widget_add_button_element(
+        widget,
+        GuiButtonTypeCenter,
+        cham ? "Disconnect" : "Chameleon",
+        nfc_protocol_support_read_button_cb,
+        instance);
+    view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+}
+
+static void nfc_protocol_support_read_start_pn532(NfcApp* instance) {
     const NfcProtocol protocol = nfc_detected_protocols_get_selected(instance->detected_protocols);
     instance->poller = nfc_poller_alloc(instance->nfc, protocol);
-
-    view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
-
     // Start poller with the appropriate callback
     nfc_protocol_support_get(protocol, instance)->scene_read.on_enter(instance);
+    s_chrd.pn532_started = true;
+}
+
+static void nfc_protocol_support_scene_read_on_enter(NfcApp* instance) {
+    nfc_protocol_support_read_build_view(instance);
+
+    if(chameleon_is_connected()) {
+        s_chrd.pn532_started = false;
+        nfc_protocol_support_chameleon_read_worker_start(instance);
+    } else {
+        nfc_protocol_support_read_start_pn532(instance);
+    }
 
     nfc_blink_read_start(instance);
 }
@@ -332,7 +428,48 @@ static bool nfc_protocol_support_scene_read_on_event(NfcApp* instance, SceneMana
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == NfcCustomEventPollerSuccess) {
+        if(event.event == NfcCustomEventChameleonButton) {
+            if(chameleon_is_connected()) {
+                /* Disconnect: stop loop, drop BLE link, resume PN532 */
+                nfc_protocol_support_chameleon_read_worker_stop();
+                chameleon_disconnect();
+                nfc_protocol_support_read_build_view(instance);
+                nfc_protocol_support_read_start_pn532(instance);
+            } else {
+                /* Connect: stop PN532 poller, spawn connect+read worker */
+                if(s_chrd.pn532_started && instance->poller) {
+                    nfc_poller_stop(instance->poller);
+                    nfc_poller_free(instance->poller);
+                    instance->poller = NULL;
+                    s_chrd.pn532_started = false;
+                }
+                widget_reset(instance->widget);
+                widget_add_string_element(
+                    instance->widget,
+                    64,
+                    28,
+                    AlignCenter,
+                    AlignCenter,
+                    FontPrimary,
+                    "Connecting Chameleon...");
+                view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+                nfc_protocol_support_chameleon_read_worker_start(instance);
+            }
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonConnected) {
+            nfc_protocol_support_read_build_view(instance);
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonFailed) {
+            nfc_protocol_support_chameleon_read_worker_stop();
+            nfc_protocol_support_read_build_view(instance);
+            nfc_protocol_support_read_start_pn532(instance);
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonCardRead) {
+            notification_message(instance->notifications, &sequence_success);
+            scene_manager_next_scene(instance->scene_manager, NfcSceneReadSuccess);
+            dolphin_deed(DolphinDeedNfcReadSuccess);
+            consumed = true;
+        } else if(event.event == NfcCustomEventPollerSuccess) {
             nfc_poller_stop(instance->poller);
             nfc_poller_free(instance->poller);
             notification_message(instance->notifications, &sequence_success);
@@ -372,8 +509,13 @@ static bool nfc_protocol_support_scene_read_on_event(NfcApp* instance, SceneMana
                 nfc_protocol_support_get(protocol, instance)->scene_read.on_event(instance, event);
         }
     } else if(event.type == SceneManagerEventTypeBack) {
-        nfc_poller_stop(instance->poller);
-        nfc_poller_free(instance->poller);
+        nfc_protocol_support_chameleon_read_worker_stop();
+        if(s_chrd.pn532_started && instance->poller) {
+            nfc_poller_stop(instance->poller);
+            nfc_poller_free(instance->poller);
+            instance->poller = NULL;
+            s_chrd.pn532_started = false;
+        }
         static const uint32_t possible_scenes[] = {NfcSceneSelectProtocol, NfcSceneStart};
         scene_manager_search_and_switch_to_previous_scene_one_of(
             instance->scene_manager, possible_scenes, COUNT_OF(possible_scenes));
@@ -384,7 +526,9 @@ static bool nfc_protocol_support_scene_read_on_event(NfcApp* instance, SceneMana
 }
 
 static void nfc_protocol_support_scene_read_on_exit(NfcApp* instance) {
+    nfc_protocol_support_chameleon_read_worker_stop();
     popup_reset(instance->popup);
+    widget_reset(instance->widget);
 
     nfc_blink_stop(instance);
 }
@@ -487,6 +631,12 @@ static void nfc_protocol_support_scene_read_menu_on_enter(NfcApp* instance) {
             SubmenuIndexCommonWrite,
             nfc_protocol_support_common_submenu_callback,
             instance);
+        submenu_add_item(
+            submenu,
+            "Wipe (Chameleon)",
+            SubmenuIndexCommonWipe,
+            nfc_protocol_support_common_submenu_callback,
+            instance);
     }
 
     nfc_protocol_support_get(protocol, instance)->scene_read_menu.on_enter(instance);
@@ -526,6 +676,9 @@ static bool
             dolphin_deed(DolphinDeedNfcEmulate);
             scene_manager_next_scene(instance->scene_manager, NfcSceneWrite);
             consumed = true;
+        } else if(event.event == SubmenuIndexCommonWipe) {
+            scene_manager_next_scene(instance->scene_manager, NfcSceneChameleonWipe);
+            consumed = true;
         } else if(event.event == SubmenuIndexCommonEdit) {
             scene_manager_next_scene(instance->scene_manager, NfcSceneSetUid);
             consumed = true;
@@ -550,6 +703,27 @@ static void nfc_protocol_support_scene_read_saved_menu_on_exit(NfcApp* instance)
 // SceneReadSuccess
 static void nfc_protocol_support_scene_read_success_on_enter(NfcApp* instance) {
     Widget* widget = instance->widget;
+
+    /* Clone flow: skip the normal ReadSuccess UI. If the card supports Write,
+     * go straight to the "Place blank Card" dialog; otherwise show a hint. */
+    if(instance->clone_mode) {
+        const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+        if(nfc_protocol_support_has_feature(protocol, instance, NfcProtocolFeatureWrite)) {
+            scene_manager_next_scene(instance->scene_manager, NfcSceneClonePlaceBlank);
+            return;
+        }
+        widget_reset(widget);
+        widget_add_string_multiline_element(
+            widget,
+            64,
+            28,
+            AlignCenter,
+            AlignCenter,
+            FontPrimary,
+            "Card type not\nsupported for Clone");
+        view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+        return;
+    }
 
     popup_set_header(instance->popup, "Parsing", 85, 27, AlignCenter, AlignTop);
     popup_set_icon(instance->popup, 12, 23, &A_Loading_24);
@@ -589,8 +763,14 @@ static bool
         }
 
     } else if(event.type == SceneManagerEventTypeBack) {
-        scene_manager_next_scene(instance->scene_manager, NfcSceneExitConfirm);
-        consumed = true;
+        if(instance->clone_mode) {
+            /* "not supported for Clone" hint -> back to the NFC main menu */
+            consumed = scene_manager_search_and_switch_to_previous_scene(
+                instance->scene_manager, NfcSceneStart);
+        } else {
+            scene_manager_next_scene(instance->scene_manager, NfcSceneExitConfirm);
+            consumed = true;
+        }
     }
 
     return consumed;
@@ -630,6 +810,12 @@ static void nfc_protocol_support_scene_saved_menu_on_enter(NfcApp* instance) {
             submenu,
             "Write",
             SubmenuIndexCommonWrite,
+            nfc_protocol_support_common_submenu_callback,
+            instance);
+        submenu_add_item(
+            submenu,
+            "Wipe (Chameleon)",
+            SubmenuIndexCommonWipe,
             nfc_protocol_support_common_submenu_callback,
             instance);
     }
@@ -712,6 +898,9 @@ static bool
                 scene_manager_has_previous_scene(instance->scene_manager, NfcSceneSetType);
             dolphin_deed(is_added ? DolphinDeedNfcAddEmulate : DolphinDeedNfcEmulate);
             scene_manager_next_scene(instance->scene_manager, NfcSceneWrite);
+            consumed = true;
+        } else if(event.event == SubmenuIndexCommonWipe) {
+            scene_manager_next_scene(instance->scene_manager, NfcSceneChameleonWipe);
             consumed = true;
         } else if(event.event == SubmenuIndexCommonEdit) {
             scene_manager_next_scene(instance->scene_manager, NfcSceneSetUid);
@@ -832,106 +1021,16 @@ enum {
     NfcSceneEmulateStateTextBox, /**< TextBox view is displayed. */
 };
 
-static void nfc_protocol_support_scene_emulate_on_enter(NfcApp* instance) {
-    Widget* widget = instance->widget;
-    TextBox* text_box = instance->text_box;
+/* ---- ChameleonUltra emulation backend (optional, toggled by a button) ---- */
 
-    FuriString* temp_str = furi_string_alloc();
-    const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+typedef struct {
+    FuriThread* thread;
+    volatile bool abort;
+    bool running;
+    bool pn532_started; /* true: local PN532 listener active; false: Chameleon */
+} NfcChamEmu;
 
-    widget_add_icon_element(widget, 0, 0, &I_NFC_dolphin_emulation_51x64);
-
-    if(nfc_protocol_support_has_feature(protocol, instance, NfcProtocolFeatureEmulateUid)) {
-        widget_add_string_element(
-            widget, 90, 26, AlignCenter, AlignCenter, FontPrimary, "Emulating UID");
-
-        size_t uid_len;
-        const uint8_t* uid = nfc_device_get_uid(instance->nfc_device, &uid_len);
-
-        for(size_t i = 0; i < uid_len; ++i) {
-            furi_string_cat_printf(temp_str, "%02X ", uid[i]);
-        }
-
-        furi_string_trim(temp_str);
-
-    } else {
-        widget_add_string_element(
-            widget, 90, 26, AlignCenter, AlignCenter, FontPrimary, "Emulating");
-        if(!furi_string_empty(instance->file_name)) {
-            furi_string_printf(
-                temp_str,
-                "%s\n%s",
-                nfc_device_get_name(instance->nfc_device, NfcDeviceNameTypeFull),
-                furi_string_get_cstr(instance->file_name));
-        } else {
-            furi_string_printf(
-                temp_str,
-                "Unsaved\n%s",
-                nfc_device_get_name(instance->nfc_device, NfcDeviceNameTypeFull));
-            furi_string_replace_str(temp_str, "Mifare", "MIFARE");
-        }
-    }
-
-    widget_add_text_box_element(
-        widget, 50, 33, 78, 31, AlignCenter, AlignTop, furi_string_get_cstr(temp_str), false);
-
-    furi_string_free(temp_str);
-
-    text_box_set_font(text_box, TextBoxFontHex);
-    text_box_set_focus(text_box, TextBoxFocusEnd);
-    furi_string_reset(instance->text_box_store);
-
-    // instance->listener is allocated in the respective on_enter() handler
-    nfc_protocol_support_get(protocol, instance)->scene_emulate.on_enter(instance);
-
-    scene_manager_set_scene_state(
-        instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateWidget);
-
-    view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
-    nfc_blink_emulate_start(instance);
-}
-
-static bool
-    nfc_protocol_support_scene_emulate_on_event(NfcApp* instance, SceneManagerEvent event) {
-    bool consumed = false;
-
-    const uint32_t state = scene_manager_get_scene_state(instance->scene_manager, NfcSceneEmulate);
-
-    if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == NfcCustomEventListenerUpdate) {
-            // Add data button to widget if data is received for the first time
-            if(furi_string_size(instance->text_box_store)) {
-                widget_add_button_element(
-                    instance->widget,
-                    GuiButtonTypeCenter,
-                    "Log",
-                    nfc_protocol_support_common_widget_callback,
-                    instance);
-                scene_manager_set_scene_state(
-                    instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateWidgetLog);
-            }
-            // Update TextBox data
-            text_box_set_text(instance->text_box, furi_string_get_cstr(instance->text_box_store));
-            consumed = true;
-        } else if(event.event == GuiButtonTypeCenter) {
-            if(state == NfcSceneEmulateStateWidgetLog) {
-                view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewTextBox);
-                scene_manager_set_scene_state(
-                    instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateTextBox);
-                consumed = true;
-            }
-        }
-    } else if(event.type == SceneManagerEventTypeBack) {
-        if(state == NfcSceneEmulateStateTextBox) {
-            view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
-            scene_manager_set_scene_state(
-                instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateWidgetLog);
-            consumed = true;
-        }
-    }
-
-    return consumed;
-}
+static NfcChamEmu s_chemu;
 
 static void nfc_protocol_support_scene_emulate_stop_listener(NfcApp* instance) {
     nfc_listener_stop(instance->listener);
@@ -950,8 +1049,204 @@ static void nfc_protocol_support_scene_emulate_stop_listener(NfcApp* instance) {
     nfc_listener_free(instance->listener);
 }
 
+static int32_t nfc_protocol_support_chameleon_emu_worker(void* context) {
+    NfcApp* instance = context;
+    if(!chameleon_is_connected()) {
+        if(!chameleon_connect(&s_chemu.abort)) {
+            view_dispatcher_send_custom_event(
+                instance->view_dispatcher, NfcCustomEventChameleonFailed);
+            return 0;
+        }
+    }
+    chameleon_nfc_emulate(instance->nfc_device);
+    view_dispatcher_send_custom_event(
+        instance->view_dispatcher, NfcCustomEventChameleonConnected);
+    return 0;
+}
+
+static void nfc_protocol_support_chameleon_emu_worker_start(NfcApp* instance) {
+    if(s_chemu.running) return;
+    s_chemu.abort = false;
+    s_chemu.thread = furi_thread_alloc_ex(
+        "ChamEmu", 8 * 1024, nfc_protocol_support_chameleon_emu_worker, instance);
+    furi_thread_start(s_chemu.thread);
+    s_chemu.running = true;
+}
+
+static void nfc_protocol_support_chameleon_emu_worker_stop(void) {
+    if(!s_chemu.running) return;
+    s_chemu.abort = true;
+    furi_thread_join(s_chemu.thread);
+    furi_thread_free(s_chemu.thread);
+    s_chemu.thread = NULL;
+    s_chemu.running = false;
+}
+
+static void nfc_protocol_support_emulate_button_cb(
+    GuiButtonType result,
+    InputType type,
+    void* context) {
+    NfcApp* instance = context;
+    if(type == InputTypeShort && result == GuiButtonTypeCenter) {
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventChameleonButton);
+    }
+}
+
+static void nfc_protocol_support_emulate_build_view(NfcApp* instance) {
+    Widget* widget = instance->widget;
+    TextBox* text_box = instance->text_box;
+    bool cham = chameleon_is_connected();
+
+    widget_reset(widget);
+
+    FuriString* temp_str = furi_string_alloc();
+    const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+
+    widget_add_icon_element(widget, 0, 0, &I_NFC_dolphin_emulation_51x64);
+
+    if(nfc_protocol_support_has_feature(protocol, instance, NfcProtocolFeatureEmulateUid)) {
+        widget_add_string_element(
+            widget, 90, 26, AlignCenter, AlignCenter, FontPrimary,
+            "Emulating UID");
+
+        size_t uid_len;
+        const uint8_t* uid = nfc_device_get_uid(instance->nfc_device, &uid_len);
+
+        for(size_t i = 0; i < uid_len; ++i) {
+            furi_string_cat_printf(temp_str, "%02X ", uid[i]);
+        }
+
+        furi_string_trim(temp_str);
+
+    } else {
+        widget_add_string_element(
+            widget, 90, 17, AlignCenter, AlignCenter, FontPrimary,
+             "Emulating");
+        if(!furi_string_empty(instance->file_name)) {
+            furi_string_printf(
+                temp_str,
+                "%s\n%s",
+                nfc_device_get_name(instance->nfc_device, NfcDeviceNameTypeFull),
+                furi_string_get_cstr(instance->file_name));
+        } else {
+            furi_string_printf(
+                temp_str,
+                "Unsaved\n%s",
+                nfc_device_get_name(instance->nfc_device, NfcDeviceNameTypeFull));
+            furi_string_replace_str(temp_str, "Mifare", "MIFARE");
+        }
+    }
+
+    widget_add_text_box_element(
+        widget, 50, 23, 78, 31, AlignCenter, AlignTop, furi_string_get_cstr(temp_str), false);
+
+    furi_string_free(temp_str);
+
+    widget_add_button_element(
+        widget,
+        GuiButtonTypeCenter,
+        cham ? "Disconnect" : "Chameleon",
+        nfc_protocol_support_emulate_button_cb,
+        instance);
+
+    text_box_set_font(text_box, TextBoxFontHex);
+    text_box_set_focus(text_box, TextBoxFocusEnd);
+    furi_string_reset(instance->text_box_store);
+}
+
+static void nfc_protocol_support_emulate_start_pn532(NfcApp* instance) {
+    const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+    // instance->listener is allocated in the respective on_enter() handler
+    nfc_protocol_support_get(protocol, instance)->scene_emulate.on_enter(instance);
+    s_chemu.pn532_started = true;
+}
+
+static void nfc_protocol_support_scene_emulate_on_enter(NfcApp* instance) {
+    nfc_protocol_support_emulate_build_view(instance);
+
+    if(chameleon_is_connected()) {
+        s_chemu.pn532_started = false;
+        nfc_protocol_support_chameleon_emu_worker_start(instance);
+    } else {
+        nfc_protocol_support_emulate_start_pn532(instance);
+    }
+
+    scene_manager_set_scene_state(
+        instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateWidget);
+
+    view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+    nfc_blink_emulate_start(instance);
+}
+
+static bool
+    nfc_protocol_support_scene_emulate_on_event(NfcApp* instance, SceneManagerEvent event) {
+    bool consumed = false;
+
+    const uint32_t state = scene_manager_get_scene_state(instance->scene_manager, NfcSceneEmulate);
+
+    if(event.type == SceneManagerEventTypeCustom) {
+        if(event.event == NfcCustomEventChameleonButton) {
+            if(chameleon_is_connected()) {
+                /* Disconnect → drop BLE link, resume local PN532 emulation */
+                nfc_protocol_support_chameleon_emu_worker_stop();
+                chameleon_disconnect();
+                nfc_protocol_support_emulate_build_view(instance);
+                nfc_protocol_support_emulate_start_pn532(instance);
+                view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+            } else {
+                /* Connect → stop PN532, hand emulation to the Chameleon */
+                if(s_chemu.pn532_started) {
+                    nfc_protocol_support_scene_emulate_stop_listener(instance);
+                    s_chemu.pn532_started = false;
+                }
+                widget_reset(instance->widget);
+                widget_add_string_element(
+                    instance->widget,
+                    64,
+                    28,
+                    AlignCenter,
+                    AlignCenter,
+                    FontPrimary,
+                    "Connecting Chameleon...");
+                view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+                nfc_protocol_support_chameleon_emu_worker_start(instance);
+            }
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonConnected) {
+            nfc_protocol_support_emulate_build_view(instance);
+            view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonFailed) {
+            nfc_protocol_support_chameleon_emu_worker_stop();
+            nfc_protocol_support_emulate_build_view(instance);
+            nfc_protocol_support_emulate_start_pn532(instance);
+            view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+            consumed = true;
+        } else if(event.event == NfcCustomEventListenerUpdate) {
+            // Update TextBox data (Log button suppressed: center is the
+            // Chameleon button now)
+            text_box_set_text(instance->text_box, furi_string_get_cstr(instance->text_box_store));
+            consumed = true;
+        }
+    } else if(event.type == SceneManagerEventTypeBack) {
+        if(state == NfcSceneEmulateStateTextBox) {
+            view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewWidget);
+            scene_manager_set_scene_state(
+                instance->scene_manager, NfcSceneEmulate, NfcSceneEmulateStateWidgetLog);
+            consumed = true;
+        }
+    }
+
+    return consumed;
+}
+
 static void nfc_protocol_support_scene_emulate_on_exit(NfcApp* instance) {
-    nfc_protocol_support_scene_emulate_stop_listener(instance);
+    nfc_protocol_support_chameleon_emu_worker_stop();
+    if(s_chemu.pn532_started) {
+        nfc_protocol_support_scene_emulate_stop_listener(instance);
+        s_chemu.pn532_started = false;
+    }
 
     // Clear view
     widget_reset(instance->widget);
@@ -993,6 +1288,71 @@ void nfc_protocol_support_scene_write_widget_callback(
     }
 }
 
+/* ---- ChameleonUltra write backend (optional, toggled by a button) ---- */
+
+typedef struct {
+    FuriThread* thread;
+    volatile bool abort;
+    bool running;
+    bool pn532_started;
+} NfcChamWrite;
+
+static NfcChamWrite s_chwr;
+
+static int32_t nfc_protocol_support_chameleon_write_worker(void* context) {
+    NfcApp* instance = context;
+    if(!chameleon_is_connected()) {
+        if(!chameleon_connect(&s_chwr.abort)) {
+            view_dispatcher_send_custom_event(
+                instance->view_dispatcher, NfcCustomEventChameleonFailed);
+            return 0;
+        }
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventChameleonConnected);
+    } else {
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventChameleonConnected);
+    }
+    while(!s_chwr.abort) {
+        if(chameleon_nfc_write_card(instance->nfc_device, &s_chwr.abort)) {
+            view_dispatcher_send_custom_event(
+                instance->view_dispatcher, NfcCustomEventPollerSuccess);
+            break;
+        }
+        furi_delay_ms(400);
+    }
+    return 0;
+}
+
+static void nfc_protocol_support_chameleon_write_worker_start(NfcApp* instance) {
+    if(s_chwr.running) return;
+    s_chwr.abort = false;
+    s_chwr.thread = furi_thread_alloc_ex(
+        "ChamWrite", 8 * 1024, nfc_protocol_support_chameleon_write_worker, instance);
+    furi_thread_start(s_chwr.thread);
+    s_chwr.running = true;
+}
+
+static void nfc_protocol_support_chameleon_write_worker_stop(void) {
+    if(!s_chwr.running) return;
+    s_chwr.abort = true;
+    furi_thread_join(s_chwr.thread);
+    furi_thread_free(s_chwr.thread);
+    s_chwr.thread = NULL;
+    s_chwr.running = false;
+}
+
+static void nfc_protocol_support_write_button_cb(
+    GuiButtonType result,
+    InputType type,
+    void* context) {
+    NfcApp* instance = context;
+    if(type == InputTypeShort && result == GuiButtonTypeCenter) {
+        view_dispatcher_send_custom_event(
+            instance->view_dispatcher, NfcCustomEventChameleonButton);
+    }
+}
+
 static void nfc_protocol_support_scene_write_setup_view(NfcApp* instance) {
     Popup* popup = instance->popup;
     Widget* widget = instance->widget;
@@ -1002,15 +1362,26 @@ static void nfc_protocol_support_scene_write_setup_view(NfcApp* instance) {
     NfcView view = NfcViewPopup;
 
     if(state == NfcSceneWriteStateSearching) {
-        popup_set_header(popup, "Writing", 95, 20, AlignCenter, AlignCenter);
-        popup_set_text(
-            popup,
-            furi_string_get_cstr(instance->text_box_store),
-            95,
-            38,
-            AlignCenter,
-            AlignCenter);
-        popup_set_icon(popup, 0, 8, &I_NFC_manual_60x50);
+        /* Widget (not Popup) so the Chameleon backend button fits */
+        view = NfcViewWidget;
+        bool cham = chameleon_is_connected();
+        widget_add_string_element(
+            widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Writing");
+        widget_add_icon_element(
+            widget, 0, 13, cham ? &I_NFC_manual_chameleon_60x50 : &I_NFC_manual_60x50);
+        widget_add_string_multiline_element(
+            widget, 90, 22, AlignCenter, AlignTop, FontSecondary,
+            cham ? "via\nChameleon" : furi_string_get_cstr(instance->text_box_store));
+        /* In the Clone flow the Chameleon link is managed by the preceding
+         * "Place blank Card" dialog — no (dis)connect button mid-write. */
+        if(!instance->clone_mode) {
+            widget_add_button_element(
+                widget,
+                GuiButtonTypeCenter,
+                cham ? "Disconnect" : "Chameleon",
+                nfc_protocol_support_write_button_cb,
+                instance);
+        }
     } else if(state == NfcSceneWriteStateWriting) {
         popup_set_header(popup, "Writing\nDon't move...", 52, 32, AlignLeft, AlignCenter);
         popup_set_icon(popup, 12, 23, &A_Loading_24);
@@ -1070,8 +1441,14 @@ static void nfc_protocol_support_scene_write_on_enter(NfcApp* instance) {
 
     const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
 
-    // instance->poller is allocated in the respective on_enter() handler
-    nfc_protocol_support_get(protocol, instance)->scene_write.on_enter(instance);
+    if(chameleon_is_connected()) {
+        s_chwr.pn532_started = false;
+        nfc_protocol_support_chameleon_write_worker_start(instance);
+    } else {
+        // instance->poller is allocated in the respective on_enter() handler
+        nfc_protocol_support_get(protocol, instance)->scene_write.on_enter(instance);
+        s_chwr.pn532_started = true;
+    }
 
     nfc_protocol_support_scene_write_setup_view(instance);
     nfc_blink_emulate_start(instance);
@@ -1113,9 +1490,39 @@ static bool nfc_protocol_support_scene_write_on_event(NfcApp* instance, SceneMan
             nfc_protocol_support_scenes[NfcProtocolSupportSceneWrite].on_exit(instance);
             nfc_protocol_support_scenes[NfcProtocolSupportSceneWrite].on_enter(instance);
             consumed = true;
+        } else if(event.event == NfcCustomEventChameleonButton) {
+            if(chameleon_is_connected()) {
+                nfc_protocol_support_chameleon_write_worker_stop();
+                chameleon_disconnect();
+                const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+                nfc_protocol_support_get(protocol, instance)->scene_write.on_enter(instance);
+                s_chwr.pn532_started = true;
+            } else {
+                if(s_chwr.pn532_started && instance->poller) {
+                    nfc_poller_stop(instance->poller);
+                    nfc_poller_free(instance->poller);
+                    instance->poller = NULL;
+                    s_chwr.pn532_started = false;
+                }
+                furi_string_set(instance->text_box_store, "Connecting\nChameleon...");
+                nfc_protocol_support_chameleon_write_worker_start(instance);
+            }
+            new_state = NfcSceneWriteStateSearching;
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonConnected) {
+            new_state = NfcSceneWriteStateSearching;
+            consumed = true;
+        } else if(event.event == NfcCustomEventChameleonFailed) {
+            nfc_protocol_support_chameleon_write_worker_stop();
+            const NfcProtocol protocol = nfc_device_get_protocol(instance->nfc_device);
+            nfc_protocol_support_get(protocol, instance)->scene_write.on_enter(instance);
+            s_chwr.pn532_started = true;
+            new_state = NfcSceneWriteStateSearching;
+            consumed = true;
         }
 
         if(stop_poller) {
+            nfc_protocol_support_chameleon_write_worker_stop();
             if(instance->poller) {
                 nfc_poller_stop(instance->poller);
                 nfc_poller_free(instance->poller);
@@ -1133,9 +1540,11 @@ static bool nfc_protocol_support_scene_write_on_event(NfcApp* instance, SceneMan
 }
 
 static void nfc_protocol_support_scene_write_on_exit(NfcApp* instance) {
+    nfc_protocol_support_chameleon_write_worker_stop();
     if(instance->poller) {
         nfc_poller_stop(instance->poller);
         nfc_poller_free(instance->poller);
+        instance->poller = NULL;
     }
 
     // Clear view
