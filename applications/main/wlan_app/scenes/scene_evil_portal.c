@@ -10,8 +10,10 @@
 
 #define EP_TEMPLATE_GOOGLE 0
 #define EP_TEMPLATE_ROUTER 1
+#define EP_TEMPLATE_SD_BASE 2
 
 static char* s_router_options = NULL;
+static char* s_template_html = NULL; // geladenes SD-Template, gehört der Scene
 static File* s_cred_file = NULL;
 static Storage* s_storage = NULL;
 
@@ -229,16 +231,52 @@ void wlan_app_scene_evil_portal_on_enter(void* context) {
 
     ep_open_cred_file(app);
 
-    bool router_template = (app->evil_portal_template_index == EP_TEMPLATE_ROUTER);
+    if(s_template_html) {
+        free(s_template_html);
+        s_template_html = NULL;
+    }
+
+    bool router_template;
     const char* html;
     size_t html_len;
-    if(router_template) {
+
+    uint8_t ti = app->evil_portal_template_index;
+    if(ti >= EP_TEMPLATE_SD_BASE &&
+       (uint8_t)(ti - EP_TEMPLATE_SD_BASE) < app->evil_portal_templates.count) {
+        // SD-Template: HTML aus Datei laden, Typ (login/router) aus dem Eintrag.
+        const WlanEvilPortalTemplateEntry* e =
+            &app->evil_portal_templates.items[ti - EP_TEMPLATE_SD_BASE];
+        router_template = e->is_router;
+        size_t len = 0;
+        s_template_html = wlan_evil_portal_templates_load(e, &len);
+        if(s_template_html) {
+            html = s_template_html;
+            html_len = len;
+        } else {
+            // Laden fehlgeschlagen -> Fallback auf passendes Builtin.
+            wlan_evil_portal_view_set_busy(
+                app->evil_portal_view_obj, true, "Template load failed");
+            html = router_template ? EVIL_PORTAL_HTML_ROUTER : EVIL_PORTAL_HTML_GOOGLE;
+            html_len = router_template ? EVIL_PORTAL_HTML_ROUTER_LEN :
+                                         EVIL_PORTAL_HTML_GOOGLE_LEN;
+        }
+    } else if(ti == EP_TEMPLATE_ROUTER) {
+        router_template = true;
         html = EVIL_PORTAL_HTML_ROUTER;
         html_len = EVIL_PORTAL_HTML_ROUTER_LEN;
     } else {
+        router_template = false;
         html = EVIL_PORTAL_HTML_GOOGLE;
         html_len = EVIL_PORTAL_HTML_GOOGLE_LEN;
     }
+
+    // Der WLAN-Worker muss existieren, sonst scheitert der Dispatch in
+    // wlan_hal_evil_portal_start ("worker dispatch failed"). Bei Router-
+    // Templates erledigt das ep_build_router_options() implizit; für
+    // Google-/Login-Templates hier explizit sicherstellen — nur den Worker,
+    // KEIN voller wlan_hal_start() (dessen WiFi-STA-Init/Deinit fragmentiert
+    // den internen Heap direkt vor der knappen Evil-Portal-WiFi-Init).
+    wlan_hal_ensure_worker();
 
     if(router_template) {
         wlan_evil_portal_view_set_busy(
@@ -325,6 +363,10 @@ void wlan_app_scene_evil_portal_on_exit(void* context) {
     if(s_router_options) {
         free(s_router_options);
         s_router_options = NULL;
+    }
+    if(s_template_html) {
+        free(s_template_html);
+        s_template_html = NULL;
     }
     wlan_evil_portal_view_set_busy(app->evil_portal_view_obj, false, NULL);
 }

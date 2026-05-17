@@ -825,6 +825,13 @@ static void evil_portal_start_worker(void* arg) {
 
     ESP_LOGI(TAG, "[worker] esp_wifi_init");
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
+    // Interner DRAM ist mit BLE-Restore + httpd extrem knapp. Die Default-
+    // RX/TX-Buffer (static_rx=10*1600 + dynamic_rx=32) sprengen den Heap
+    // ("wifi:malloc buffer fail" -> ESP_ERR_NO_MEM). Gleiches Trimming wie
+    // im STA-Pfad (wlan_hal.c) — für einen Captive-AP völlig ausreichend.
+    wcfg.static_rx_buf_num = 2;
+    wcfg.dynamic_rx_buf_num = 4;
+    wcfg.dynamic_tx_buf_num = 8;
     esp_err_t err = esp_wifi_init(&wcfg);
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  wifi_init: %s", esp_err_to_name(err));

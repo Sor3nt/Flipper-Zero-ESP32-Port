@@ -14,6 +14,12 @@ void wlan_hal_stop(void);
 
 bool wlan_hal_is_started(void);
 
+/** Stellt nur den WLAN-Worker-Task + Command-Queue sicher, ohne den WiFi-
+ *  Stack zu initialisieren. Nötig, bevor wlan_hal_run_in_worker()/Evil-
+ *  Portal aufgerufen werden, falls vorher kein wlan_hal_start() lief.
+ *  Idempotent. */
+bool wlan_hal_ensure_worker(void);
+
 /** Synchroner aktiver Scan auf allen Channels. Allokiert *out_records via
  *  malloc; Caller frees. Bei *out_count == 0 ist *out_records NULL. */
 void wlan_hal_scan(wifi_ap_record_t** out_records, uint16_t* out_count, uint16_t max_count);
