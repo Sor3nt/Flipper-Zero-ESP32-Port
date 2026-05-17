@@ -15,11 +15,28 @@ static const char* const channel_text[EP_CHANNEL_COUNT] = {
     "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
 };
 
-#define EP_TEMPLATE_COUNT 2
-static const char* const template_names[EP_TEMPLATE_COUNT] = {
+// Index 0/1 = Builtin, ab 2 = SD-Templates (app->evil_portal_templates).
+#define EP_TEMPLATE_BUILTIN 2
+#define EP_TEMPLATE_SD_BASE EP_TEMPLATE_BUILTIN
+static const char* const builtin_template_names[EP_TEMPLATE_BUILTIN] = {
     "Google",
     "Router",
 };
+
+// Gesamtzahl der wählbaren Templates (Builtin + SD).
+static uint8_t ep_template_total(WlanApp* app) {
+    return (uint8_t)(EP_TEMPLATE_BUILTIN + app->evil_portal_templates.count);
+}
+
+// Stabiler Label-Pointer für einen Template-Index (Builtin oder SD-Basename).
+static const char* ep_template_label(WlanApp* app, uint8_t idx) {
+    if(idx < EP_TEMPLATE_BUILTIN) return builtin_template_names[idx];
+    uint8_t s = (uint8_t)(idx - EP_TEMPLATE_SD_BASE);
+    if(s < app->evil_portal_templates.count) {
+        return app->evil_portal_templates.items[s].name;
+    }
+    return builtin_template_names[0];
+}
 
 static uint8_t channel_index(uint8_t channel) {
     if(channel >= 1 && channel <= EP_CHANNEL_COUNT) return (uint8_t)(channel - 1);
@@ -36,9 +53,10 @@ static void ep_menu_set_channel(VariableItem* item) {
 static void ep_menu_set_template(VariableItem* item) {
     WlanApp* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    if(idx >= EP_TEMPLATE_COUNT) idx = EP_TEMPLATE_COUNT - 1;
+    uint8_t total = ep_template_total(app);
+    if(idx >= total) idx = (uint8_t)(total - 1);
     app->evil_portal_template_index = idx;
-    variable_item_set_current_value_text(item, template_names[idx]);
+    variable_item_set_current_value_text(item, ep_template_label(app, idx));
 }
 
 static void ep_menu_set_karma(VariableItem* item) {
@@ -62,7 +80,8 @@ void wlan_app_scene_evil_portal_menu_on_enter(void* context) {
     if(app->evil_portal_channel == 0) {
         app->evil_portal_channel = 6;
     }
-    if(app->evil_portal_template_index >= EP_TEMPLATE_COUNT) {
+    wlan_evil_portal_templates_scan(&app->evil_portal_templates);
+    if(app->evil_portal_template_index >= ep_template_total(app)) {
         app->evil_portal_template_index = 0;
     }
 
@@ -80,11 +99,12 @@ void wlan_app_scene_evil_portal_menu_on_enter(void* context) {
     }
 
     item = variable_item_list_add(
-        app->variable_item_list, "Template", EP_TEMPLATE_COUNT, ep_menu_set_template, app);
+        app->variable_item_list, "Template", ep_template_total(app),
+        ep_menu_set_template, app);
     {
         uint8_t idx = app->evil_portal_template_index;
         variable_item_set_current_value_index(item, idx);
-        variable_item_set_current_value_text(item, template_names[idx]);
+        variable_item_set_current_value_text(item, ep_template_label(app, idx));
     }
 
     item = variable_item_list_add(

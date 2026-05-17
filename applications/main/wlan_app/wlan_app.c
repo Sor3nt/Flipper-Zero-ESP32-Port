@@ -121,6 +121,7 @@ static WlanApp* wlan_app_alloc(void) {
     strcpy(app->evil_portal_ssid, "Free WiFi");
     app->evil_portal_channel = 6;
     app->evil_portal_template_index = 0;
+    app->evil_portal_templates.count = 0;
     app->evil_portal_valid_ssid[0] = '\0';
     app->evil_portal_valid_pwd[0] = '\0';
 

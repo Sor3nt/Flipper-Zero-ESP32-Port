@@ -309,6 +309,10 @@ static bool wlan_ensure_worker(void) {
     return s_worker_task != NULL;
 }
 
+bool wlan_hal_ensure_worker(void) {
+    return wlan_ensure_worker();
+}
+
 static void wlan_send_cmd_sync(WlanCmd* cmd) {
     volatile bool done = false;
     cmd->done = &done;

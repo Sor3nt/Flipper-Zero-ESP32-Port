@@ -15,6 +15,7 @@
 #include "views/wlan_view_events.h"
 #include "wlan_handshake_settings.h"
 #include "wlan_mitm_payloads.h"
+#include "wlan_evil_portal_templates.h"
 #include "wlan_sd_update.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_connect_view.h"
@@ -148,7 +149,11 @@ struct WlanApp {
     // Evil Portal Settings/Captured State
     char evil_portal_ssid[33];
     uint8_t evil_portal_channel;
-    uint8_t evil_portal_template_index; // 0 = Google, 1 = Router
+    // 0 = Builtin Google, 1 = Builtin Router,
+    // >=2 = SD-Template evil_portal_templates.items[index-2].
+    // Liste wird in scene_evil_portal_menu beim Enter neu gescannt.
+    uint8_t evil_portal_template_index;
+    WlanEvilPortalTemplateList evil_portal_templates;
     bool evil_portal_karma;             // Karma-Modus aktiv
     char evil_portal_valid_ssid[33];
     char evil_portal_valid_pwd[65];
