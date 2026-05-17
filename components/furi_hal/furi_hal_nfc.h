@@ -257,6 +257,20 @@ FuriHalNfcError furi_hal_nfc_listener_tx(const uint8_t* tx_data, size_t tx_bits)
 FuriHalNfcError furi_hal_nfc_listener_rx(uint8_t* rx_data, size_t rx_data_size, size_t* rx_bits);
 
 /**
+ * @brief Arm Bruce-style ISO-DEP Type-4 NDEF card emulation (PN532 backend).
+ *
+ * When an NDEF message is set, the listener emulates a generic NFC-Forum
+ * Type-4 tag (ISO14443-4 / ISO-DEP) serving this message, instead of raw
+ * type-A. ISO-DEP WTX tolerates host latency, so emulation works reliably
+ * (a reader sees an ISO14443-4 NDEF tag, not a byte-exact NTAG clone).
+ * Pass msg=NULL or len=0 to disable and fall back to raw type-A emulation.
+ *
+ * @param[in] msg pointer to the raw NDEF message bytes (records only).
+ * @param[in] len NDEF message length in bytes (0 disables).
+ */
+void furi_hal_nfc_emu_set_ndef(const uint8_t* msg, size_t len);
+
+/**
  * @brief Go to sleep in listener mode.
  *
  * Puts the passive target logic into Sleep (Halt) state.

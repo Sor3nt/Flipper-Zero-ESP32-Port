@@ -283,9 +283,49 @@ static void nfc_scene_read_success_on_enter_mf_ultralight(NfcApp* instance) {
     furi_string_free(temp_str);
 }
 
+/* Extract the raw NDEF message (TLV type 0x03) from an NTAG/UL dump and arm
+ * the HAL's Bruce-style ISO-DEP Type-4 emulation. Raw type-A NTAG emulation
+ * via the PN532 can't meet the MIFARE-UL FWT (no WTX), so for tags carrying
+ * an NDEF message we emulate a generic Type-4 NDEF tag instead — readers see
+ * ISO14443-4, but the NDEF content transfers reliably. No NDEF → len 0 →
+ * HAL falls back to the legacy raw type-A path. */
+static void nfc_mf_ultralight_arm_ndef_emulation(const MfUltralightData* data) {
+    furi_hal_nfc_emu_set_ndef(NULL, 0);
+    if(data == NULL) return;
+
+    const uint8_t* cc = data->page[3].data;
+    if(cc[0] != 0xE1) return; /* no NFC-Forum capability container */
+
+    size_t area = (size_t)cc[2] * 8;
+    size_t total_bytes = mf_ultralight_get_pages_total(data->type) * MF_ULTRALIGHT_PAGE_SIZE;
+    size_t avail = (total_bytes > 16) ? (total_bytes - 16) : 0; /* pages 4.. */
+    if(area > 0 && area < avail) avail = area;
+
+    const uint8_t* ud = &data->page[4].data[0]; /* pages are contiguous */
+    size_t i = 0;
+    while(i < avail) {
+        uint8_t t = ud[i++];
+        if(t == 0x00) continue; /* NULL TLV */
+        if(t == 0xFE) break; /* terminator */
+        if(i >= avail) break;
+        uint32_t l = ud[i++];
+        if(l == 0xFF) { /* 3-byte length */
+            if(i + 1 >= avail) break;
+            l = ((uint32_t)ud[i] << 8) | ud[i + 1];
+            i += 2;
+        }
+        if(t == 0x03) { /* NDEF message TLV */
+            if(l > 0 && i + l <= avail) furi_hal_nfc_emu_set_ndef(&ud[i], l);
+            return;
+        }
+        i += l; /* skip lock/memory-control TLVs */
+    }
+}
+
 static void nfc_scene_emulate_on_enter_mf_ultralight(NfcApp* instance) {
     const MfUltralightData* data =
         nfc_device_get_data(instance->nfc_device, NfcProtocolMfUltralight);
+    nfc_mf_ultralight_arm_ndef_emulation(data);
     instance->listener = nfc_listener_alloc(instance->nfc, NfcProtocolMfUltralight, data);
     nfc_listener_start(instance->listener, NULL, NULL);
 }
