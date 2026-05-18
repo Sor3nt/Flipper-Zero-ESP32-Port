@@ -49,6 +49,8 @@ typedef enum {
     WlanAppCustomEventEvilPortalCredCaptured = 172,
     WlanAppCustomEventEvilPortalCredsValid = 173,
     WlanAppCustomEventEvilPortalTogglePause = 174,
+    WlanAppCustomEventEvilPortalBridgeSsidEntered = 175,
+    WlanAppCustomEventEvilPortalBridgePwdEntered = 176,
 
     WlanAppCustomEventMitmMenuInjectCode = 191,
     WlanAppCustomEventMitmMenuStart = 193,
