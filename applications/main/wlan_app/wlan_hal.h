@@ -110,6 +110,11 @@ typedef struct {
     void* valid_cb_ctx;
     WlanHalEvilPortalBusyCb busy_cb;
     void* busy_cb_ctx;
+    // If true, after step=2 cred capture the portal serves a "Connecting..."
+    // page that meta-refreshes to google.com after ~7s (gives bridge time to
+    // come up + NAPT to activate). If false, serves the "Couldn't sign you in"
+    // page as before.
+    bool bridge_redirect;
 } WlanHalEvilPortalConfig;
 
 bool wlan_hal_evil_portal_start(const WlanHalEvilPortalConfig* cfg);
@@ -128,3 +133,11 @@ uint16_t wlan_hal_evil_portal_karma_get_ssid_count(void);
 /** Karma: aktuell vom SoftAP gespoofte SSID nach out kopieren.
  *  Liefert false wenn Karma inaktiv. */
 bool wlan_hal_evil_portal_karma_get_current(char* out, size_t out_size);
+
+// DNS forward mode: when set with non-zero upstream_ip, the evil portal's DNS
+// task stops hijacking and instead forwards queries to upstream_ip:53 (the
+// upstream DNS server learned from STA DHCP). Set to 0 to re-enable
+// hijack. Called by the bridge when it goes active so clients can resolve
+// real hostnames and browse the internet via NAT. upstream_ip is in network
+// byte order (matches esp_netif_ip_info_t / lwIP ip4_addr_t layout).
+void wlan_hal_evil_portal_set_dns_upstream(uint32_t upstream_ip_be);

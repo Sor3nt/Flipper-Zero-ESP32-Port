@@ -467,7 +467,11 @@ bool wlan_hal_send_raw(const uint8_t* data, uint16_t len) {
 }
 
 bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg) {
-    if(!fn || !s_cmd_queue) return false;
+    if(!fn) return false;
+    // Lazy-init the worker queue + task. Evil Portal is entered directly from
+    // the menu without going through wlan_hal_start (no STA scan), so the
+    // worker may not exist yet. Safe to call repeatedly; no-ops if already up.
+    if(!wlan_ensure_worker()) return false;
     WlanCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}};
     wlan_send_cmd_sync(&cmd);
     return true;
