@@ -1939,7 +1939,13 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
                 dict_attack_ctx->nested_nonce.nonces = NULL;
                 dict_attack_ctx->nested_nonce.count = 0;
             }
-            instance->state = MfClassicPollerStateFail;
+            /* PN532 cannot perform the nested attack (no raw Crypto1 TX).
+             * Finish with a PARTIAL read instead of Fail: handler_fail resets
+             * the FSM to DetectType, which restarts the whole attack forever
+             * for cards where the dictionary only recovered some keys. Success
+             * emits the keys/sectors found so far and lets the dict-attack
+             * scene advance to ReadSuccess. */
+            instance->state = MfClassicPollerStateSuccess;
             return command;
         }
         if(dict_attack_ctx->nested_nonce.count < MF_CLASSIC_NESTED_ANALYZE_NT_COUNT) {
@@ -1959,7 +1965,9 @@ NfcCommand mf_classic_poller_handler_nested_controller(MfClassicPoller* instance
                 dict_attack_ctx->nested_nonce.nonces = NULL;
                 dict_attack_ctx->nested_nonce.count = 0;
             }
-            instance->state = MfClassicPollerStateFail;
+            /* See above: PN532 has no nested attack — finish with the partial
+             * read instead of Fail→DetectType→infinite restart loop. */
+            instance->state = MfClassicPollerStateSuccess;
             return command;
         }
         if(dict_attack_ctx->nested_nonce.nonces) {

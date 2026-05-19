@@ -45,6 +45,10 @@ static esp_gatt_if_t s_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t s_conn_id = 0;
 static volatile bool s_connected = false;
 static bool s_hal_started = false;
+/* True if BT was disabled in settings when we connected: we force-started the
+ * stack so the ESP controller gets initialized, and must disable it again on
+ * disconnect to honor the user's setting. */
+static bool s_bt_was_disabled = false;
 
 static volatile bool s_scanning = false;
 static volatile bool s_dev_found = false;
@@ -268,6 +272,17 @@ static bool cham_hal_start(void) {
     if(s_hal_started) return true;
 
     Bt* bt = furi_record_open(RECORD_BT);
+    /* If BT is disabled in settings the radio stack was never started, so the
+     * ESP BT controller is uninitialized. Bring it up through the normal
+     * service path first (ble_serial does esp_bt_controller_init); otherwise
+     * the controller takeover below dereferences an uninitialized controller
+     * and crashes. */
+    s_bt_was_disabled = !bt_is_enabled(bt);
+    if(s_bt_was_disabled) {
+        ESP_LOGI(TAG, "BT disabled in settings, force-starting stack first");
+        bt_start_stack(bt);
+        furi_delay_ms(300);
+    }
     bt_stop_stack(bt);
     furi_record_close(RECORD_BT);
     furi_delay_ms(100);
@@ -329,6 +344,13 @@ static void cham_hal_stop(void) {
 
     Bt* bt = furi_record_open(RECORD_BT);
     bt_start_stack(bt);
+    if(s_bt_was_disabled) {
+        /* BT was off in settings before we connected — put it back off so we
+         * don't leave the device advertising against the user's choice. */
+        furi_delay_ms(200);
+        bt_stop_stack(bt);
+        s_bt_was_disabled = false;
+    }
     furi_record_close(RECORD_BT);
 
     s_gattc_if = ESP_GATT_IF_NONE;

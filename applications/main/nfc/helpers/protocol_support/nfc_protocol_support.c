@@ -323,6 +323,7 @@ typedef struct {
     volatile bool abort;
     bool running;
     bool pn532_started;
+    bool allow_chameleon; /* false: legacy Popup path (reached via Detect) */
 } NfcChamRead;
 
 static NfcChamRead s_chrd;
@@ -383,17 +384,17 @@ static void nfc_protocol_support_read_build_view(NfcApp* instance) {
     bool cham = chameleon_is_connected();
     Widget* widget = instance->widget;
     widget_reset(widget);
-    widget_add_string_element(widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Reading");
-    widget_add_icon_element(
-        widget, 0, 13, cham ? &I_NFC_manual_chameleon_60x50 : &I_NFC_manual_60x50);
+    /* Mirror the standard "Don't move" read popup (A_Loading_24 spinner +
+     * header), but as a Widget so the Chameleon button fits below. */
+    widget_add_icon_element(widget, 12, 20, &A_Loading_24);
     widget_add_string_multiline_element(
         widget,
-        90,
-        22,
+        85,
+        25,
         AlignCenter,
         AlignTop,
-        FontSecondary,
-        cham ? "Place Card\nat\nChameleon" : "Don't move");
+        FontPrimary,
+        cham ? "Place Card\nat Chameleon" : "Don't move");
     widget_add_button_element(
         widget,
         GuiButtonTypeCenter,
@@ -412,12 +413,27 @@ static void nfc_protocol_support_read_start_pn532(NfcApp* instance) {
 }
 
 static void nfc_protocol_support_scene_read_on_enter(NfcApp* instance) {
-    nfc_protocol_support_read_build_view(instance);
+    /* Only offer the Chameleon read backend when this scene was NOT reached
+     * via NfcSceneDetect (i.e. the "Read Specific Card Type" flow:
+     * Extra Actions -> SelectProtocol -> Read). On the normal Read path
+     * Detect already exposed the Chameleon button, and the extra Widget +
+     * animated icon here would contend with the timing-critical MIFARE
+     * Classic dict/nested attack — keep the original lightweight Popup. */
+    s_chrd.allow_chameleon =
+        !scene_manager_has_previous_scene(instance->scene_manager, NfcSceneDetect);
 
-    if(chameleon_is_connected()) {
-        s_chrd.pn532_started = false;
-        nfc_protocol_support_chameleon_read_worker_start(instance);
+    if(s_chrd.allow_chameleon) {
+        nfc_protocol_support_read_build_view(instance);
+        if(chameleon_is_connected()) {
+            s_chrd.pn532_started = false;
+            nfc_protocol_support_chameleon_read_worker_start(instance);
+        } else {
+            nfc_protocol_support_read_start_pn532(instance);
+        }
     } else {
+        popup_set_header(instance->popup, "Don't move", 85, 27, AlignCenter, AlignTop);
+        popup_set_icon(instance->popup, 12, 23, &A_Loading_24);
+        view_dispatcher_switch_to_view(instance->view_dispatcher, NfcViewPopup);
         nfc_protocol_support_read_start_pn532(instance);
     }
 
