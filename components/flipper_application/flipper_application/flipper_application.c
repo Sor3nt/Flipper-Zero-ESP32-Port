@@ -1,6 +1,10 @@
 #include "flipper_application.h"
 #include "elf/elf_file.h"
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include <esp_intr_alloc.h> /* esp_intr_noniram_disable/enable */
+#endif
+
 #include <toolbox/path.h>
 
 #include <string.h>
@@ -193,8 +197,15 @@ FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplicatio
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
         extern void Cache_WriteBack_All(void);
         extern void Cache_Invalidate_ICache_All(void);
+        /* The ROM Cache_* helpers briefly disable the cache. Any non-IRAM ISR
+         * firing in that window faults with "Cache disabled but cached memory
+         * region accessed" (seen as an RMT TX ISR crash during plugin load).
+         * Mask non-IRAM interrupts across the cache ops — the same guard the
+         * IDF flash driver uses for cache-disabled sections. */
+        esp_intr_noniram_disable();
         Cache_WriteBack_All();
         Cache_Invalidate_ICache_All();
+        esp_intr_noniram_enable();
         FURI_LOG_I(TAG, "Cache flushed: DCache writeback + ICache invalidate");
 #endif
 

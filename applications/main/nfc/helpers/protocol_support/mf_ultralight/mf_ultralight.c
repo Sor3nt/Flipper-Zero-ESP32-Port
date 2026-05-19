@@ -291,15 +291,27 @@ static void nfc_scene_read_success_on_enter_mf_ultralight(NfcApp* instance) {
  * HAL falls back to the legacy raw type-A path. */
 static void nfc_mf_ultralight_arm_ndef_emulation(const MfUltralightData* data) {
     furi_hal_nfc_emu_set_ndef(NULL, 0);
-    if(data == NULL) return;
+    if(data == NULL) {
+        FURI_LOG_W("NfcEmu", "arm_ndef: data == NULL → raw type-A fallback");
+        return;
+    }
 
     const uint8_t* cc = data->page[3].data;
-    if(cc[0] != 0xE1) return; /* no NFC-Forum capability container */
+    FURI_LOG_I("NfcEmu", "arm_ndef: type=%d pages_read=%u/%u CC=%02X %02X %02X %02X",
+        (int)data->type, (unsigned)data->pages_read, (unsigned)data->pages_total,
+        cc[0], cc[1], cc[2], cc[3]);
+    if(cc[0] != 0xE1) {
+        FURI_LOG_W("NfcEmu", "arm_ndef: CC[0]=0x%02X != 0xE1 (not NFC-Forum) → raw fallback",
+            cc[0]);
+        return; /* no NFC-Forum capability container */
+    }
 
     size_t area = (size_t)cc[2] * 8;
     size_t total_bytes = mf_ultralight_get_pages_total(data->type) * MF_ULTRALIGHT_PAGE_SIZE;
     size_t avail = (total_bytes > 16) ? (total_bytes - 16) : 0; /* pages 4.. */
     if(area > 0 && area < avail) avail = area;
+    FURI_LOG_I("NfcEmu", "arm_ndef: area=%u total=%u avail=%u",
+        (unsigned)area, (unsigned)total_bytes, (unsigned)avail);
 
     const uint8_t* ud = &data->page[4].data[0]; /* pages are contiguous */
     size_t i = 0;

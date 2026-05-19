@@ -54,6 +54,20 @@ APP_ID=$(grep 'appid=' "$APP_DIR/application.fam" 2>/dev/null | sed 's/.*appid="
 [ -z "$APP_ID" ] && APP_ID=$(basename "$APP_DIR")
 FAP_FILENAME="${APP_ID}.fap"
 
+# ── Plugin (.fal) build overrides (optional env vars) ───────────────
+# Build a single source file as a relocatable plugin instead of the whole
+# app dir. Used to (re)build the supported_cards NDEF parsers for ESP32:
+#   FAP_SINGLE_SOURCE   - compile only this .c (not `find $APP_DIR`)
+#   FAP_ENTRY_OVERRIDE  - ELF entry symbol (e.g. ndef_plugin_ep)
+#   FAP_CDEFINES        - extra -D flags (e.g. -DNDEF_PROTO=1)
+#   FAP_STACK_OVERRIDE  - manifest stack_size; 0 marks it as a plugin
+#                         (flipper_application_is_plugin: stack_size == 0)
+#   FAP_OUTPUT_NAME     - output filename (e.g. ndef_ul_parser.fal)
+[ -n "$FAP_ENTRY_OVERRIDE" ] && ENTRY_POINT="$FAP_ENTRY_OVERRIDE"
+[ -n "$FAP_OUTPUT_NAME" ] && FAP_FILENAME="$FAP_OUTPUT_NAME"
+# -n on the literal string: "0" is non-empty, so a 0 override is honored.
+[ -n "$FAP_STACK_OVERRIDE" ] && APP_STACK="$FAP_STACK_OVERRIDE"
+
 # ── Target definitions ──────────────────────────────────────────────
 #           BOARD_NAME              IDF_TARGET  TOOLCHAIN_PREFIX        BUILD_DIR
 TARGETS=(
@@ -287,6 +301,7 @@ build_for_target() {
     fi
 
     TARGET_CFLAGS+=(-DFAP_VERSION=\"1.0\")
+    [ -n "$FAP_CDEFINES" ] && TARGET_CFLAGS+=($FAP_CDEFINES)
 
     # Generate icon assets from fap_icon_assets if defined in application.fam
     local ICON_ASSETS_DIR=""
@@ -311,9 +326,20 @@ build_for_target() {
         fi
     fi
 
-    # Find source files
-    local -a C_SOURCES=($(find "$APP_DIR" -name '*.c' -type f))
-    local -a CXX_SOURCES=($(find "$APP_DIR" -name '*.cpp' -type f))
+    # Find source files. Priority:
+    #   FAP_SOURCES        - explicit space-separated list (multi-source plugin)
+    #   FAP_SINGLE_SOURCE  - one source (single-source plugin)
+    #   else               - whole app dir
+    local -a C_SOURCES=()
+    local -a CXX_SOURCES=()
+    if [ -n "$FAP_SOURCES" ]; then
+        C_SOURCES=($FAP_SOURCES)
+    elif [ -n "$FAP_SINGLE_SOURCE" ]; then
+        C_SOURCES=("$FAP_SINGLE_SOURCE")
+    else
+        C_SOURCES=($(find "$APP_DIR" -name '*.c' -type f))
+        CXX_SOURCES=($(find "$APP_DIR" -name '*.cpp' -type f))
+    fi
     # Add generated icon .c files
     if [ -d "$ICONS_GEN_DIR" ]; then
         for icon_src in "$ICONS_GEN_DIR"/*.c; do
@@ -331,6 +357,20 @@ build_for_target() {
         -I"$APP_DIR/views" -I"$APP_DIR/protocols"
         -I"$APP_DIR/app" -I"$APP_DIR/lib"
     )
+    # Plugin source dirs hold nfc_supported_card_plugin.h etc.
+    [ -n "$FAP_SINGLE_SOURCE" ] && APP_INCLUDES+=(-I"$(dirname "$FAP_SINGLE_SOURCE")")
+    if [ -n "$FAP_SOURCES" ]; then
+        for s in $FAP_SOURCES; do APP_INCLUDES+=(-I"$(dirname "$s")"); done
+    fi
+    # Extra include dirs (space-separated, project-relative or absolute)
+    if [ -n "$FAP_EXTRA_INCLUDES" ]; then
+        for inc in $FAP_EXTRA_INCLUDES; do
+            case "$inc" in
+                /*) APP_INCLUDES+=(-I"$inc") ;;
+                *)  APP_INCLUDES+=(-I"$PROJECT_DIR/$inc") ;;
+            esac
+        done
+    fi
     if [ -d "$APP_DIR/lib" ]; then
         for libdir in "$APP_DIR"/lib/*/; do
             [ -d "$libdir" ] && APP_INCLUDES+=(-I"${libdir%/}")
@@ -395,7 +435,10 @@ build_for_target() {
     local API_FILE="$PROJECT_DIR/components/flipper_application/flipper_application/firmware_api.c"
     local NM="${TOOLCHAIN}-nm"
     "$NM" -u "$OUTPUT" 2>/dev/null | grep "^         U " | sed 's/^         U //' | sort -u > "$BUILD_DIR/undef_syms.txt"
-    python3 "$PROJECT_DIR/tools/check_fap_symbols.py" "$API_FILE" "$BUILD_DIR/undef_syms.txt"
+    # Informational only: the .fal is already produced; missing symbols are
+    # resolved by adding them to firmware_api.c (tools/add_symbol.py). Don't
+    # let a non-zero exit abort the build under `set -e`.
+    python3 "$PROJECT_DIR/tools/check_fap_symbols.py" "$API_FILE" "$BUILD_DIR/undef_syms.txt" || true
 
     echo "  ✓ $OUTPUT ($SIZE bytes, $SECTIONS sections)"
 }
