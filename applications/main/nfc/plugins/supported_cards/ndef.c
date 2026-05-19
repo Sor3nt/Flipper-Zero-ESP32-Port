@@ -421,12 +421,15 @@ static bool ndef_parse_vcard(Ndef* ndef, size_t pos, size_t len) {
     // so instead we just look for these markers at start/end and shift
     // pos and len then use ndef_dump() to output one char at a time.
     // Results in minimal stack and no heap usage at all.
-    static const char* const begin_tag = "BEGIN:VCARD";
-    static const uint8_t begin_len = strlen(begin_tag);
-    static const char* const version_tag = "VERSION:";
-    static const uint8_t version_len = strlen(version_tag);
-    static const char* const end_tag = "END:VCARD";
-    static const uint8_t end_len = strlen(end_tag);
+    // Arrays (not char*) so the lengths are real constant expressions:
+    // -fno-builtin (FAP build) disables strlen() constant folding, which
+    // makes `static const x = strlen(literal)` a non-constant initializer.
+    static const char begin_tag[] = "BEGIN:VCARD";
+    static const uint8_t begin_len = sizeof(begin_tag) - 1;
+    static const char version_tag[] = "VERSION:";
+    static const uint8_t version_len = sizeof(version_tag) - 1;
+    static const char end_tag[] = "END:VCARD";
+    static const uint8_t end_len = sizeof(end_tag) - 1;
     char tmp[13] = {0}; // Enough for BEGIN:VCARD\r\n
     uint8_t skip = 0;
 
@@ -463,7 +466,7 @@ static bool ndef_parse_vcard(Ndef* ndef, size_t pos, size_t len) {
         // Read more than length of END tag and check multiple offsets, might have some padding after
         // Worst case: there is END:VCARD\r\n\r\n which is same length as tmp buffer (13)
         // Not sure if this is in spec but might aswell check
-        static const uint8_t offsets = sizeof(tmp) - end_len + 1;
+        static const uint8_t offsets = sizeof(tmp) - (sizeof(end_tag) - 1) + 1;
         for(uint8_t offset = 0; offset < offsets; offset++) {
             if(strncmp(end_tag, tmp + offset, end_len) == 0) {
                 skip = sizeof(tmp) - offset;

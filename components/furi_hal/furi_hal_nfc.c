@@ -307,7 +307,12 @@ static FuriHalNfcError pn532_send_command(
     esp_err_t err = i2c_master_write_to_device(
         BOARD_NFC_I2C_PORT, PN532_I2C_ADDR, frame, idx, pdMS_TO_TICKS(1000));
     if(err != ESP_OK) {
-        FURI_LOG_E(TAG, "I2C write failed: %s", esp_err_to_name(err));
+        /* DEBUG: log which PN532 command failed (cmd[0] = opcode, e.g.
+         * 0x8C TgInitAsTarget, 0x86 TgGetData, 0x4A InListPassiveTarget) so
+         * we can tell the poller→listener transition apart from a real bus
+         * lockup. */
+        FURI_LOG_E(TAG, "I2C write failed: %s (cmd=0x%02X len=%u)",
+            esp_err_to_name(err), cmd_len ? cmd[0] : 0xFF, (unsigned)cmd_len);
         return FuriHalNfcErrorCommunication;
     }
 
@@ -603,16 +608,19 @@ static FuriHalNfcEvent pn532_type4_ndef_emulate(void) {
         0xC4, 0xC5, 0xC6, 0xC7, 0xFF, 0xFF, 0xAA, 0x99, 0x88, 0x77, 0x66, 0x55,
         0x44, 0x33, 0x22, 0x11, 0x01, 0x00, 0x0D, 0x52, 0x46, 0x49, 0x44, 0x49,
         0x4F, 0x74, 0x20, 0x50, 0x4E, 0x35, 0x33, 0x32};
-    if(listener_configured) {
-        tg_init[2] = listener_atqa[0];
-        tg_init[3] = listener_atqa[1];
-        if(listener_uid_len >= 1) tg_init[4] = listener_uid[0];
-        if(listener_uid_len >= 2) tg_init[5] = listener_uid[1];
-        if(listener_uid_len >= 3) tg_init[6] = listener_uid[2];
-    }
+    /* Do NOT override SENS_RES / NFCID1 with the scanned tag's ATQA/UID.
+     * The known-working Bruce reference (same PN532 HW, multi-boot/bruce
+     * PN532.cpp tgInitAsTargetIrq) uses these FIXED defaults — overriding
+     * SENS_RES with e.g. NTAG213's ATQA produced an invalid value (00 44)
+     * that the phone never activates. For Type-4 ISO-DEP NDEF the reader
+     * only needs a valid ISO14443-4 PICC (SEL_RES=0x60), not a UID clone. */
 
     enum { FILE_NONE, FILE_CC, FILE_NDEF } cur_file = FILE_NONE;
     bool armed = false;
+    uint32_t tginit_tries = 0; /* throttle the retry log */
+
+    FURI_LOG_I(TAG, "Type-4 NDEF emu: enter (ndef_len=%u, SENS=%02X%02X SEL=%02X)",
+        (unsigned)emu_ndef_len, tg_init[2], tg_init[3], tg_init[7]);
 
     while(true) {
         if(nfc_listener_abort_requested()) {
@@ -622,12 +630,26 @@ static FuriHalNfcEvent pn532_type4_ndef_emulate(void) {
         if(!armed) {
             uint8_t r[16];
             size_t rl = sizeof(r);
+            /* 1500 ms single wait (matches Bruce): each re-issue cancels the
+             * PN532's pending TgInitAsTarget, so a short 300 ms window churned
+             * faster than a phone can detect+activate the emulated PICC. */
             FuriHalNfcError e =
-                pn532_send_command((uint8_t*)tg_init, sizeof(tg_init), r, &rl, 300);
+                pn532_send_command((uint8_t*)tg_init, sizeof(tg_init), r, &rl, 1500);
             if(e == FuriHalNfcErrorNone && rl >= 1) {
                 armed = true;
                 cur_file = FILE_NONE;
+                /* r[0] = TgInitAsTarget "Mode" byte: bits0-1 baud, bit2 PICC
+                 * ISO14443-4, bit3 DEP. 0x04/0x05 = activated as ISO-DEP PICC. */
+                FURI_LOG_I(TAG, "Type-4 emu: target ACTIVATED (mode=%02X, rl=%u) after %lu tries",
+                    r[0], (unsigned)rl, (unsigned long)tginit_tries);
             } else {
+                /* Log first attempt + every ~2s so we can tell "never
+                 * activated" (reader not seeing the tag) from a crash. */
+                if(tginit_tries == 0 || (tginit_tries % 100) == 0) {
+                    FURI_LOG_I(TAG, "Type-4 emu: TgInitAsTarget waiting (err=%d rl=%u try=%lu)",
+                        (int)e, (unsigned)rl, (unsigned long)tginit_tries);
+                }
+                tginit_tries++;
                 furi_delay_ms(20);
                 continue;
             }
@@ -646,11 +668,14 @@ static FuriHalNfcEvent pn532_type4_ndef_emulate(void) {
         uint8_t status = req[0];
         if(status == 0x29 || status == 0x25 || status == 0x0A) {
             /* RF lost / target released — re-arm */
+            FURI_LOG_I(TAG, "Type-4 emu: RF lost (status=%02X) — re-arming", status);
             armed = false;
             furi_delay_ms(10);
             continue;
         }
         if(status != 0x00 || req_len < 5) {
+            FURI_LOG_D(TAG, "Type-4 emu: TgGetData status=%02X len=%u (skip)",
+                status, (unsigned)req_len);
             furi_delay_ms(5);
             continue;
         }
@@ -663,6 +688,9 @@ static FuriHalNfcEvent pn532_type4_ndef_emulate(void) {
         uint8_t p2 = a[3];
         uint8_t lc = a[4];
         uint16_t off = ((uint16_t)p1 << 8) | p2;
+
+        FURI_LOG_I(TAG, "Type-4 emu: APDU CLA=%02X INS=%02X P1P2=%04X Lc=%02X (alen=%u)",
+            a[0], ins, off, lc, (unsigned)alen);
 
         uint8_t resp[260];
         size_t resp_len = 0;
@@ -1734,8 +1762,9 @@ FuriHalNfcError furi_hal_nfc_iso14443a_listener_set_col_res_data(
     listener_activated = false;
     listener_rx_len = 0;
 
-    FURI_LOG_I(TAG, "Listener configured: ATQA=%02X%02X SAK=%02X UID=%dB",
-        atqa[0], atqa[1], sak, uid_len);
+    FURI_LOG_I(TAG, "Listener configured: ATQA=%02X%02X SAK=%02X UID=%dB → emu path: %s",
+        atqa[0], atqa[1], sak, uid_len,
+        (emu_ndef_len > 0) ? "Type-4 ISO-DEP NDEF" : "RAW type-A (PN532 can't emulate NTAG)");
 
     return FuriHalNfcErrorNone;
 }
