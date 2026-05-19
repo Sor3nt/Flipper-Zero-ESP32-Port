@@ -17,6 +17,7 @@
 #include <driver/rmt_encoder.h>
 #include <driver/gptimer.h>
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 
 #include BOARD_INCLUDE
 
@@ -262,12 +263,22 @@ void furi_hal_infrared_async_rx_set_timeout_isr_callback(
  * "IR TX encoder" that pulls data from the callback.
  */
 
-#define IR_TX_BATCH_SIZE 64
+/* A raw signal can hold up to MAX_TIMINGS_AMOUNT (1024) timings = 512 RMT
+ * symbols. The whole packet MUST be sent in a single rmt_transmit() call:
+ * splitting it into several transactions makes the RMT channel go idle
+ * between them, inserting timing gaps mid-frame that corrupt the waveform so
+ * the receiver no longer recognises it (raw/learned signals only — decoded
+ * protocol packets are short). The RMT driver does internal ping-pong refill
+ * from this buffer, so one transaction is gapless even though the buffer is
+ * larger than mem_block_symbols. */
+#define IR_TX_MAX_SYMBOLS 600
 
 static void ir_tx_task(void* arg) {
     (void)arg;
 
-    rmt_symbol_word_t symbols[IR_TX_BATCH_SIZE];
+    rmt_symbol_word_t* symbols =
+        heap_caps_malloc(IR_TX_MAX_SYMBOLS * sizeof(rmt_symbol_word_t), MALLOC_CAP_8BIT);
+    furi_check(symbols);
     rmt_transmit_config_t tx_config = {
         .loop_count = 0, /* no loop, single shot */
         .flags = {
@@ -281,8 +292,8 @@ static void ir_tx_task(void* arg) {
         bool packet_end = false;
         bool last_packet = false;
 
-        /* Fill batch of symbols from callback */
-        while(sym_count < IR_TX_BATCH_SIZE && !packet_end) {
+        /* Accumulate one full packet of symbols from the callback */
+        while(sym_count < IR_TX_MAX_SYMBOLS && !packet_end) {
             uint32_t duration_mark = 0;
             uint32_t duration_space = 0;
             bool level_mark = false;
@@ -330,7 +341,7 @@ static void ir_tx_task(void* arg) {
         }
 
         if(sym_count > 0) {
-            /* Transmit the batch using the copy encoder */
+            /* Transmit the whole packet in a single (gapless) transaction */
             ESP_ERROR_CHECK(rmt_transmit(
                 ir_tx.channel, ir_tx.copy_encoder,
                 symbols, sym_count * sizeof(rmt_symbol_word_t),
@@ -351,6 +362,8 @@ static void ir_tx_task(void* arg) {
             running = false;
         }
     }
+
+    heap_caps_free(symbols);
 
     ir_state = InfraredStateAsyncTxStopped;
     if(ir_tx.done_semaphore) {
