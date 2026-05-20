@@ -717,8 +717,10 @@ static void karma_task(void* param) {
         }
         portEXIT_CRITICAL(&s_karma_mux);
 
-        if(best[0] && strcmp(best, s_karma_current) != 0) {
-            karma_apply_ssid(best);
+        if(best[0]) {
+            if(strcmp(best, s_karma_current) != 0) karma_apply_ssid(best);
+        } else if(s_karma_base_ssid[0] && strcmp(s_karma_base_ssid, s_karma_current) != 0) {
+            karma_apply_ssid(s_karma_base_ssid);
         }
     }
     ESP_LOGI(TAG, "[karma] task stop");
