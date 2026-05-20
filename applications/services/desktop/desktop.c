@@ -13,6 +13,7 @@
 #include "scenes/desktop_scene_locked.h"
 
 #include "furi_hal_power.h"
+#include <momentum/momentum_settings.h>
 
 #define TAG "Desktop"
 
@@ -516,6 +517,13 @@ int32_t desktop_srv(void* p) {
     Desktop* desktop = desktop_alloc();
 
     desktop_init_settings(desktop);
+
+    // Launch startup app if configured
+    if(momentum_settings.startup_app[0] != '\0') {
+        Loader* loader = furi_record_open(RECORD_LOADER);
+        loader_start_with_gui_error(loader, momentum_settings.startup_app, NULL);
+        furi_record_close(RECORD_LOADER);
+    }
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 

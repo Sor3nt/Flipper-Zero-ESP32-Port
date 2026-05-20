@@ -17,53 +17,129 @@ typedef struct {
     void* callback_context;
 } MenuItem;
 
-ARRAY_DEF(MenuItemArray, MenuItem, M_POD_OPLIST); //-V658
+ARRAY_DEF(MenuItemArray, MenuItem, M_POD_OPLIST);
 
 #define M_OPL_MenuItemArray_t() ARRAY_OPLIST(MenuItemArray, M_POD_OPLIST)
 
 typedef struct {
     MenuItemArray_t items;
     size_t position;
+    MenuStyle style;
 } MenuModel;
 
 static void menu_process_up(Menu* menu);
 static void menu_process_down(Menu* menu);
 static void menu_process_ok(Menu* menu);
 
-static void menu_draw_callback(Canvas* canvas, void* _model) {
-    MenuModel* model = _model;
-
-    canvas_clear(canvas);
-
+static void menu_draw_list(Canvas* canvas, MenuModel* model) {
     size_t position = model->position;
     size_t items_count = MenuItemArray_size(model->items);
-    if(items_count) {
-        MenuItem* item;
-        size_t shift_position;
-        // First line
-        canvas_set_font(canvas, FontSecondary);
-        shift_position = (0 + position + items_count - 1) % items_count;
-        item = MenuItemArray_get(model->items, shift_position);
-        canvas_draw_icon_animation(canvas, 4, 3, item->icon);
-        canvas_draw_str(canvas, 22, 14, item->label);
-        // Second line main
-        canvas_set_font(canvas, FontPrimary);
-        shift_position = (1 + position + items_count - 1) % items_count;
-        item = MenuItemArray_get(model->items, shift_position);
-        canvas_draw_icon_animation(canvas, 4, 25, item->icon);
-        canvas_draw_str(canvas, 22, 36, item->label);
-        // Third line
-        canvas_set_font(canvas, FontSecondary);
-        shift_position = (2 + position + items_count - 1) % items_count;
-        item = MenuItemArray_get(model->items, shift_position);
-        canvas_draw_icon_animation(canvas, 4, 47, item->icon);
-        canvas_draw_str(canvas, 22, 58, item->label);
-        // Frame and scrollbar
-        elements_frame(canvas, 0, 21, 128 - 5, 21);
-        elements_scrollbar(canvas, position, items_count);
-    } else {
+    if(!items_count) {
         canvas_draw_str(canvas, 2, 32, "Empty");
         elements_scrollbar(canvas, 0, 0);
+        return;
+    }
+
+    MenuItem* item;
+    size_t shift_position;
+
+    canvas_set_font(canvas, FontSecondary);
+    shift_position = (0 + position + items_count - 1) % items_count;
+    item = MenuItemArray_get(model->items, shift_position);
+    canvas_draw_icon_animation(canvas, 4, 3, item->icon);
+    canvas_draw_str(canvas, 22, 14, item->label);
+
+    canvas_set_font(canvas, FontPrimary);
+    shift_position = (1 + position + items_count - 1) % items_count;
+    item = MenuItemArray_get(model->items, shift_position);
+    canvas_draw_icon_animation(canvas, 4, 25, item->icon);
+    canvas_draw_str(canvas, 22, 36, item->label);
+
+    canvas_set_font(canvas, FontSecondary);
+    shift_position = (2 + position + items_count - 1) % items_count;
+    item = MenuItemArray_get(model->items, shift_position);
+    canvas_draw_icon_animation(canvas, 4, 47, item->icon);
+    canvas_draw_str(canvas, 22, 58, item->label);
+
+    elements_frame(canvas, 0, 21, 128 - 5, 21);
+    elements_scrollbar(canvas, position, items_count);
+}
+
+static void menu_draw_compact(Canvas* canvas, MenuModel* model) {
+    size_t position = model->position;
+    size_t items_count = MenuItemArray_size(model->items);
+    if(!items_count) {
+        canvas_draw_str(canvas, 2, 32, "Empty");
+        elements_scrollbar(canvas, 0, 0);
+        return;
+    }
+
+    size_t visible = 6;
+    size_t start = (position > 2) ? position - 2 : 0;
+    if(start + visible > items_count) start = (items_count > visible) ? items_count - visible : 0;
+
+    canvas_set_font(canvas, FontSecondary);
+    for(size_t i = 0; i < visible && (start + i) < items_count; i++) {
+        MenuItem* item = MenuItemArray_get(model->items, start + i);
+        uint8_t y = i * 10 + 2;
+        if(start + i == position) {
+            canvas_set_color(canvas, ColorBlack);
+            elements_slightly_rounded_box(canvas, 0, y - 1, 123, 10);
+            canvas_set_color(canvas, ColorWhite);
+            canvas_draw_str(canvas, 4, y + 8, item->label);
+            canvas_set_color(canvas, ColorBlack);
+        } else {
+            canvas_draw_str(canvas, 4, y + 8, item->label);
+        }
+    }
+    elements_scrollbar(canvas, position, items_count);
+}
+
+static void menu_draw_vertical(Canvas* canvas, MenuModel* model) {
+    size_t position = model->position;
+    size_t items_count = MenuItemArray_size(model->items);
+    if(!items_count) {
+        canvas_draw_str(canvas, 2, 32, "Empty");
+        elements_scrollbar(canvas, 0, 0);
+        return;
+    }
+
+    size_t visible = 4;
+    size_t start = (position > 1) ? position - 1 : 0;
+    if(start + visible > items_count) start = (items_count > visible) ? items_count - visible : 0;
+
+    canvas_set_font(canvas, FontSecondary);
+    for(size_t i = 0; i < visible && (start + i) < items_count; i++) {
+        MenuItem* item = MenuItemArray_get(model->items, start + i);
+        uint8_t y = i * 14 + 2;
+        canvas_draw_icon_animation(canvas, 4, y + 1, item->icon);
+        if(start + i == position) {
+            canvas_set_color(canvas, ColorBlack);
+            elements_slightly_rounded_box(canvas, 0, y - 1, 123, 14);
+            canvas_set_color(canvas, ColorWhite);
+            canvas_draw_str(canvas, 22, y + 10, item->label);
+            canvas_set_color(canvas, ColorBlack);
+        } else {
+            canvas_draw_str(canvas, 22, y + 10, item->label);
+        }
+    }
+    elements_scrollbar(canvas, position, items_count);
+}
+
+static void menu_draw_callback(Canvas* canvas, void* _model) {
+    MenuModel* model = _model;
+    canvas_clear(canvas);
+
+    switch(model->style) {
+    case MenuStyleCompact:
+        menu_draw_compact(canvas, model);
+        break;
+    case MenuStyleVertical:
+        menu_draw_vertical(canvas, model);
+        break;
+    default:
+        menu_draw_list(canvas, model);
+        break;
     }
 }
 
@@ -139,6 +215,7 @@ Menu* menu_alloc(void) {
         {
             MenuItemArray_init(model->items);
             model->position = 0;
+            model->style = MenuStyleList;
         },
         true);
 
@@ -215,6 +292,15 @@ void menu_set_selected_item(Menu* menu, uint32_t index) {
                 model->position = index;
             }
         },
+        true);
+}
+
+void menu_set_style(Menu* menu, MenuStyle style) {
+    furi_check(menu);
+    with_view_model(
+        menu->view,
+        MenuModel * model,
+        { model->style = style; },
         true);
 }
 

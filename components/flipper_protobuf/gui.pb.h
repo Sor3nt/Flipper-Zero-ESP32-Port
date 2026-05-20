@@ -38,6 +38,8 @@ typedef enum _PB_Gui_ScreenOrientation {
 typedef struct _PB_Gui_ScreenFrame {
     pb_bytes_array_t *data;
     PB_Gui_ScreenOrientation orientation;
+    uint32_t fg_color;
+    uint32_t bg_color;
 } PB_Gui_ScreenFrame;
 
 typedef struct _PB_Gui_StartScreenStreamRequest {
@@ -92,13 +94,13 @@ extern "C" {
 
 
 /* Initializer values for message structs */
-#define PB_Gui_ScreenFrame_init_default          {NULL, _PB_Gui_ScreenOrientation_MIN}
+#define PB_Gui_ScreenFrame_init_default          {NULL, _PB_Gui_ScreenOrientation_MIN, 0, 0}
 #define PB_Gui_StartScreenStreamRequest_init_default {0}
 #define PB_Gui_StopScreenStreamRequest_init_default {0}
 #define PB_Gui_SendInputEventRequest_init_default {_PB_Gui_InputKey_MIN, _PB_Gui_InputType_MIN}
 #define PB_Gui_StartVirtualDisplayRequest_init_default {false, PB_Gui_ScreenFrame_init_default, 0}
 #define PB_Gui_StopVirtualDisplayRequest_init_default {0}
-#define PB_Gui_ScreenFrame_init_zero             {NULL, _PB_Gui_ScreenOrientation_MIN}
+#define PB_Gui_ScreenFrame_init_zero             {NULL, _PB_Gui_ScreenOrientation_MIN, 0, 0}
 #define PB_Gui_StartScreenStreamRequest_init_zero {0}
 #define PB_Gui_StopScreenStreamRequest_init_zero {0}
 #define PB_Gui_SendInputEventRequest_init_zero   {_PB_Gui_InputKey_MIN, _PB_Gui_InputType_MIN}
@@ -108,6 +110,8 @@ extern "C" {
 /* Field tags (for use in manual encoding/decoding) */
 #define PB_Gui_ScreenFrame_data_tag              1
 #define PB_Gui_ScreenFrame_orientation_tag       2
+#define PB_Gui_ScreenFrame_fg_color_tag          3
+#define PB_Gui_ScreenFrame_bg_color_tag          4
 #define PB_Gui_SendInputEventRequest_key_tag     1
 #define PB_Gui_SendInputEventRequest_type_tag    2
 #define PB_Gui_StartVirtualDisplayRequest_first_frame_tag 1
@@ -116,7 +120,9 @@ extern "C" {
 /* Struct field encoding specification for nanopb */
 #define PB_Gui_ScreenFrame_FIELDLIST(X, a) \
 X(a, POINTER,  SINGULAR, BYTES,    data,              1) \
-X(a, STATIC,   SINGULAR, UENUM,    orientation,       2)
+X(a, STATIC,   SINGULAR, UENUM,    orientation,       2) \
+X(a, STATIC,   SINGULAR, UINT32,   fg_color,          3) \
+X(a, STATIC,   SINGULAR, UINT32,   bg_color,          4)
 #define PB_Gui_ScreenFrame_CALLBACK NULL
 #define PB_Gui_ScreenFrame_DEFAULT NULL
 
