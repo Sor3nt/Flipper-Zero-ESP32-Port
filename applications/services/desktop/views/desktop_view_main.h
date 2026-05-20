@@ -2,6 +2,8 @@
 
 #include <gui/view.h>
 #include "desktop_events.h"
+#include <momentum/desktop_keybinds.h>
+#include <loader/loader.h>
 
 typedef struct DesktopMainView DesktopMainView;
 
@@ -14,5 +16,6 @@ void desktop_main_set_callback(
 
 View* desktop_main_get_view(DesktopMainView* main_view);
 void desktop_main_set_dummy_mode_state(DesktopMainView* main_view, bool dummy_mode);
+void desktop_main_set_keybinds(DesktopMainView* main_view, DesktopKeybinds* keybinds);
 DesktopMainView* desktop_main_alloc(void);
 void desktop_main_free(DesktopMainView* main_view);

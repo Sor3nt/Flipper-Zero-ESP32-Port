@@ -31,7 +31,11 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_DEFAULT_LEVEL=3
 
 # Task watchdog
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+
+# Interrupt watchdog: BT/BLE controller init holds spinlocks during HCI
+# commands and can exceed the default 300 ms on ESP32-S3.
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=10000
 
 # System
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

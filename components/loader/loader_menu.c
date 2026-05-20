@@ -6,6 +6,7 @@
 #include <applications.h>
 #include <archive/helpers/archive_favorites.h>
 #include <esp_rom_sys.h>
+#include <momentum/momentum_settings.h>
 
 #include "loader.h"
 #include "loader_menu.h"
@@ -202,6 +203,8 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     app->view_dispatcher = view_dispatcher_alloc();
     app->primary_menu = menu_alloc();
     app->settings_menu = submenu_alloc();
+
+    menu_set_style(app->primary_menu, momentum_settings.menu_style);
 
     loader_menu_build_menu(app, loader_menu);
     loader_menu_build_submenu(app, loader_menu);

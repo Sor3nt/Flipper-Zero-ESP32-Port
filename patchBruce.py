@@ -21,7 +21,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
 BRUCE_DIR = REPO_ROOT / "multi-boot" / "bruce"
-BRUCE_REPO_URL = "https://github.com/BruceDevices/firmware.git"
+BRUCE_REPO_URL = "https://github.com/m0lomalteser/firmware.git"
 PATCH_FILE = REPO_ROOT / "tools" / "bruce_multiboot.patch"
 PARTITIONS_SRC = REPO_ROOT / "partitions_multiboot.csv"
 PARTITIONS_DST_NAME = "custom_16Mb.csv"
