@@ -5,23 +5,30 @@
 #include <assert.h>
 #include <string.h>
 
-uint8_t nrf24_spi_users_count = 0;  
+uint8_t nrf24_spi_users_count = 0;
+
+#define TAG "nrf24jam"
 
 void nrf24_init(nrf24_device_t* device) {
     if(device->initialized) return;
 
-    furi_hal_gpio_init(device->cs_pin, GpioModeOutputPushPull, GpioPullUp, GpioSpeedVeryHigh);
-    furi_hal_gpio_write(device->cs_pin, true);
+    FURI_LOG_I(TAG, "nrf24_init: CE pin %u, handle %p", device->ce_pin->pin, (void*)device->spi_handle);
 
+    /* ESP32-Port (T-Embed): CS (GPIO44) wird vom HW-SPI-Treiber via spics_io_num
+     * gemanagt -> hier NICHT als GPIO initialisieren/toggeln, sonst kollidiert es
+     * mit der HW-CS-Steuerung und das Modul antwortet nicht. Nur CE bleibt manuell. */
     furi_hal_gpio_init(device->ce_pin, GpioModeOutputPushPull, GpioPullUp, GpioSpeedVeryHigh);
     furi_hal_gpio_write(device->ce_pin, false);
 
+    /* ESP32-Port (T-Embed): Den geteilten SPI2-Bus (LCD/SD/SubGhz) NICHT dauerhaft
+     * halten -- nur das Device registrieren. acquire/release erfolgt pro Transaktion
+     * in nrf24_spi_trx, sonst blockiert das Display-Rendering und das System haengt. */
     if(nrf24_spi_users_count == 0) {
         furi_hal_spi_bus_handle_init(device->spi_handle);
-        furi_hal_spi_acquire(device->spi_handle);
     }
     nrf24_spi_users_count++;
-    
+
+    FURI_LOG_I(TAG, "nrf24_init done (users=%u)", nrf24_spi_users_count);
     device->initialized = true;
 }
 
@@ -32,13 +39,11 @@ void nrf24_deinit(nrf24_device_t* device) {
 
     nrf24_spi_users_count--;
     if(nrf24_spi_users_count == 0) {
-        furi_hal_spi_release(device->spi_handle);
         furi_hal_spi_bus_handle_deinit(device->spi_handle);
     }
 
     furi_hal_gpio_init(device->ce_pin, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
-    furi_hal_gpio_init(device->cs_pin, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
-    
+
     device->initialized = false;
 }
 
@@ -49,9 +54,10 @@ void nrf24_spi_trx(
     uint8_t size,
     uint32_t timeout) {
     UNUSED(timeout);
-    furi_hal_gpio_write(device->cs_pin, false);
+    /* CS wird vom HW-Treiber gemanagt; Bus pro Transaktion holen/freigeben. */
+    furi_hal_spi_acquire(device->spi_handle);
     furi_hal_spi_bus_trx(device->spi_handle, tx, rx, size, nrf24_TIMEOUT);
-    furi_hal_gpio_write(device->cs_pin, true);
+    furi_hal_spi_release(device->spi_handle);
 }
 
 uint8_t nrf24_write_reg(nrf24_device_t* device, uint8_t reg, uint8_t data) {

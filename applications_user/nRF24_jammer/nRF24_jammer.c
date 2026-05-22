@@ -1044,36 +1044,21 @@ int32_t nRF24_jammer_app(void* p) {
     
     state->thread = furi_thread_alloc_ex("nRFJammer", 1024, jam_thread, state);
 
-    if(state->spi_mode == SPI_MODE_EXTRA) {
-        // 2-in-1 NRF24+CC1101 module: only 1 NRF24, CS on PC3, CE on PB2
-        nrf24_dev[0].spi_handle = (FuriHalSpiBusHandle*) &furi_hal_spi_bus_handle_external;
+    /* ESP32-Port (T-Embed): Der nRF24 hängt fest verlötet am geteilten SPI2-Bus
+     * (HW-Handle furi_hal_spi_bus_handle_nrf24, CS-gemuxt, läuft über den globalen
+     * Bus-Lock) mit CS=GPIO44 (gpio_nrf24_cs) und CE=GPIO43. Der Original-Flipper-Pfad
+     * über furi_hal_spi_bus_handle_external (Bitbang auf GPIO 9/10/11) kollidiert mit
+     * der SD-Karte/LCD und wird daher nicht benutzt. Es gibt nur ein Modul -> alle
+     * Multi-Modul-/EXTRA-Varianten kollabieren auf Single-Modul. */
+    static const GpioPin nrf24_ce_pin = {.port = NULL, .pin = 43}; /* T-Embed: GPIO43 */
+    if(true) {
+        nrf24_dev[0].spi_handle = (FuriHalSpiBusHandle*) &furi_hal_spi_bus_handle_nrf24;
         nrf24_dev[0].initialized = false;
-        nrf24_dev[0].ce_pin = &gpio_ext_pb2;
-        nrf24_dev[0].cs_pin = &gpio_ext_pc3;
+        nrf24_dev[0].ce_pin = &nrf24_ce_pin;
+        nrf24_dev[0].cs_pin = &gpio_nrf24_cs;
         nrf24_init(&nrf24_dev[0]);
         for(uint8_t i = 1; i < MAX_NRF24; i++) {
             nrf24_dev[i].initialized = false;
-        }
-    } else {
-        for(uint8_t i = 0; i < MAX_NRF24; i++) {
-            nrf24_dev[i].spi_handle = (FuriHalSpiBusHandle*) &furi_hal_spi_bus_handle_external;
-            nrf24_dev[i].initialized = false;
-            if(i == 0) {
-                nrf24_dev[i].ce_pin = &gpio_ext_pb2;
-                nrf24_dev[i].cs_pin = &gpio_ext_pa4;
-            } else if(i == 1) {
-                /* ESP32-Port: kein gpio_swclk -> Stub-Pin (Multi-Modul-Modus hier ungenutzt) */
-                nrf24_dev[i].ce_pin = &gpio_ext_pb3;
-                nrf24_dev[i].cs_pin = &gpio_ext_pc3;
-            } else if(i == 2) {
-                nrf24_dev[i].ce_pin = &gpio_ext_pc1;
-                /* ESP32-Port: kein gpio_swdio -> Stub-Pin */
-                nrf24_dev[i].cs_pin = &gpio_ext_pa6;
-            } else if(i == 3) {
-                nrf24_dev[i].ce_pin = &gpio_ibutton;
-                nrf24_dev[i].cs_pin = &gpio_ext_pc0;
-            }
-            nrf24_init(&nrf24_dev[i]);
         }
     }
 
@@ -1086,7 +1071,9 @@ int32_t nRF24_jammer_app(void* p) {
         uint32_t current_tick = furi_get_tick();
         
         if(!state->is_modules_connected) {
-            uint8_t max_check = (state->spi_mode == SPI_MODE_EXTRA) ? 1 : MAX_NRF24;
+            /* ESP32-Port (T-Embed): nur Modul 0 ist initialisiert (ein nRF24);
+             * Module 1-3 haben handle/cs_pin = NULL -> nicht scannen. */
+            uint8_t max_check = 1;
             for(uint8_t i = 0; i < max_check; i++) {
                 if(nrf24_check_connected(&nrf24_dev[i])) state->len_modules++;
             }
