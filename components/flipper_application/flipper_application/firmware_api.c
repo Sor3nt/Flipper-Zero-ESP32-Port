@@ -398,7 +398,7 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0x52758c6a, .address = (uint32_t)bit_lib_get_bits }, /* bit_lib_get_bits */
     { .hash = 0x52f1560e, .address = (uint32_t)furi_hal_random_get }, /* furi_hal_random_get */
     { .hash = 0x52f3adea, .address = (uint32_t)locale_get_time_format }, /* locale_get_time_format */
-    { .hash = 0x535df0f0, .address = (uint32_t)furi_hal_spi_bus_handle_external }, /* furi_hal_spi_bus_handle_external */
+    { .hash = 0x535df0f0, .address = (uint32_t)&furi_hal_spi_bus_handle_external }, /* furi_hal_spi_bus_handle_external */
     { .hash = 0x538016fe, .address = (uint32_t)&message_delay_25 }, /* message_delay_25 */
     { .hash = 0x5380175c, .address = (uint32_t)&message_delay_50 }, /* message_delay_50 */
     { .hash = 0x54803eb8, .address = (uint32_t)view_commit_model }, /* view_commit_model */
@@ -639,16 +639,16 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0xb7a22125, .address = (uint32_t)subghz_setting_get_frequency }, /* subghz_setting_get_frequency */
     { .hash = 0xb7cf09de, .address = (uint32_t)variable_item_list_alloc }, /* variable_item_list_alloc */
     { .hash = 0xb81a5bb3, .address = (uint32_t)&message_red_0 }, /* message_red_0 */
-    { .hash = 0xb8e347a8, .address = (uint32_t)gpio_ext_pa4 }, /* gpio_ext_pa4 */
-    { .hash = 0xb8e347aa, .address = (uint32_t)gpio_ext_pa6 }, /* gpio_ext_pa6 */
-    { .hash = 0xb8e347c7, .address = (uint32_t)gpio_ext_pb2 }, /* gpio_ext_pb2 */
-    { .hash = 0xb8e347c8, .address = (uint32_t)gpio_ext_pb3 }, /* gpio_ext_pb3 */
-    { .hash = 0xb8e347e6, .address = (uint32_t)gpio_ext_pc0 }, /* gpio_ext_pc0 */
-    { .hash = 0xb8e347e7, .address = (uint32_t)gpio_ext_pc1 }, /* gpio_ext_pc1 */
-    { .hash = 0xb8e347e9, .address = (uint32_t)gpio_ext_pc3 }, /* gpio_ext_pc3 */
+    { .hash = 0xb8e347a8, .address = (uint32_t)&gpio_ext_pa4 }, /* gpio_ext_pa4 */
+    { .hash = 0xb8e347aa, .address = (uint32_t)&gpio_ext_pa6 }, /* gpio_ext_pa6 */
+    { .hash = 0xb8e347c7, .address = (uint32_t)&gpio_ext_pb2 }, /* gpio_ext_pb2 */
+    { .hash = 0xb8e347c8, .address = (uint32_t)&gpio_ext_pb3 }, /* gpio_ext_pb3 */
+    { .hash = 0xb8e347e6, .address = (uint32_t)&gpio_ext_pc0 }, /* gpio_ext_pc0 */
+    { .hash = 0xb8e347e7, .address = (uint32_t)&gpio_ext_pc1 }, /* gpio_ext_pc1 */
+    { .hash = 0xb8e347e9, .address = (uint32_t)&gpio_ext_pc3 }, /* gpio_ext_pc3 */
     { .hash = 0xb8ea6245, .address = (uint32_t)furi_hal_nfc_field_detect_stop }, /* furi_hal_nfc_field_detect_stop */
     { .hash = 0xb8fef056, .address = (uint32_t)variable_item_list_reset }, /* variable_item_list_reset */
-    { .hash = 0xb9986c58, .address = (uint32_t)gpio_ibutton }, /* gpio_ibutton */
+    { .hash = 0xb9986c58, .address = (uint32_t)&gpio_ibutton }, /* gpio_ibutton */
     { .hash = 0xba9af481, .address = (uint32_t)byte_input_get_view }, /* byte_input_get_view */
     { .hash = 0xbab9e6e0, .address = (uint32_t)furi_hal_spi_bus_trx }, /* furi_hal_spi_bus_trx */
     { .hash = 0xbb9ec365, .address = (uint32_t)&I_Quest_7x8 }, /* I_Quest_7x8 */
