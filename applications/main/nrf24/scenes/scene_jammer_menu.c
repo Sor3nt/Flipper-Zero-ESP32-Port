@@ -4,6 +4,7 @@ enum {
     JammerMenuIndexWifi = 1,
     JammerMenuIndexChannel,
     JammerMenuIndexSmart,
+    JammerMenuIndexPresets,
 };
 
 static void jammer_menu_callback(void* context, uint32_t index) {
@@ -19,6 +20,8 @@ void nrf24_app_scene_jammer_menu_on_enter(void* context) {
     submenu_add_item(
         app->submenu, "by Channel", JammerMenuIndexChannel, jammer_menu_callback, app);
     submenu_add_item(app->submenu, "Smart", JammerMenuIndexSmart, jammer_menu_callback, app);
+    submenu_add_item(
+        app->submenu, "Presets", JammerMenuIndexPresets, jammer_menu_callback, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, Nrf24ViewSubmenu);
 }
@@ -36,6 +39,9 @@ bool nrf24_app_scene_jammer_menu_on_event(void* context, SceneManagerEvent event
         return true;
     case JammerMenuIndexSmart:
         scene_manager_next_scene(app->scene_manager, Nrf24AppSceneSmartJam);
+        return true;
+    case JammerMenuIndexPresets:
+        scene_manager_next_scene(app->scene_manager, Nrf24AppScenePresetMenu);
         return true;
     default:
         return false;

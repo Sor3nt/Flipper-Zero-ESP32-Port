@@ -59,6 +59,10 @@ static Nrf24App* nrf24_app_alloc(void) {
     view_set_context(app->smart_jam_view, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewSmartJam, app->smart_jam_view);
 
+    app->preset_jam_view = nrf24_preset_jam_view_alloc();
+    view_set_context(app->preset_jam_view, app->view_dispatcher);
+    view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewPresetJam, app->preset_jam_view);
+
     app->mj_scan_view = nrf24_mj_scan_view_alloc();
     view_set_context(app->mj_scan_view, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewMjScan, app->mj_scan_view);
@@ -71,6 +75,7 @@ static Nrf24App* nrf24_app_alloc(void) {
     app->wifi_ap_count = 0;
     app->selected_wifi_ssid[0] = '\0';
     app->selected_wifi_channel = 0;
+    app->selected_jam_preset = 0;
 
     app->mj_target_count = 0;
     app->mj_selected_target = -1;
@@ -87,6 +92,7 @@ static void nrf24_app_free(Nrf24App* app) {
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewChJammer);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewWifiJam);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewSmartJam);
+    view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewPresetJam);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewMjScan);
     view_dispatcher_remove_view(app->view_dispatcher, Nrf24ViewMjAttack);
 
@@ -96,6 +102,7 @@ static void nrf24_app_free(Nrf24App* app) {
     nrf24_ch_jammer_view_free(app->ch_jammer_view);
     nrf24_wifi_jam_view_free(app->wifi_jam_view);
     nrf24_smart_jam_view_free(app->smart_jam_view);
+    nrf24_preset_jam_view_free(app->preset_jam_view);
     nrf24_mj_scan_view_free(app->mj_scan_view);
     nrf24_mj_attack_view_free(app->mj_attack_view);
 
