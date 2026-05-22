@@ -35,6 +35,7 @@ void* rpc_system_app_alloc(RpcSession* session);
 void rpc_system_app_free(void* ctx);
 void* rpc_system_gui_alloc(RpcSession* session);
 void rpc_system_gui_free(void* ctx);
+void* rpc_system_property_alloc(RpcSession* session);
 
 PB_CommandStatus rpc_system_storage_get_error(FS_Error fs_error);
 
