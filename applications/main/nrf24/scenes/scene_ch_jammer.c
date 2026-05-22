@@ -2,6 +2,8 @@
 #include "../nrf24_hw.h"
 
 #include <furi.h>
+#include <esp_rom_sys.h>
+#include <freertos/FreeRTOS.h>
 
 #define TAG "Nrf24ChJammer"
 
@@ -16,11 +18,33 @@ typedef struct {
     volatile bool stop;
     volatile bool channel_dirty;
     volatile bool desired_running;
+    volatile bool desired_flooding;
     volatile uint8_t desired_channel;
     bool active;
+    bool active_flooding;
 } Nrf24ChJammerCtx;
 
 static Nrf24ChJammerCtx* g_ctx = NULL;
+
+static void ch_jammer_setup(bool flooding, uint8_t channel) {
+    nrf24_hw_acquire();
+    if(flooding) {
+        nrf24_hw_flood_start(channel, false); /* single channel → 2 Mbps, max throughput */
+    } else {
+        nrf24_hw_jammer_start(channel);
+    }
+    nrf24_hw_release();
+}
+
+static void ch_jammer_teardown(bool flooding) {
+    nrf24_hw_acquire();
+    if(flooding) {
+        nrf24_hw_flood_stop();
+    } else {
+        nrf24_hw_jammer_stop();
+    }
+    nrf24_hw_release();
+}
 
 static int32_t nrf24_ch_jammer_worker(void* context) {
     Nrf24ChJammerCtx* ctx = context;
@@ -43,33 +67,49 @@ static int32_t nrf24_ch_jammer_worker(void* context) {
 
     while(!ctx->stop) {
         bool want_run = ctx->desired_running;
+        bool flood = ctx->desired_flooding;
         uint8_t want_ch = ctx->desired_channel;
         bool ch_dirty = ctx->channel_dirty;
-        ctx->channel_dirty = false;
 
-        if(want_run && !ctx->active) {
-            nrf24_hw_acquire();
-            nrf24_hw_jammer_start(want_ch);
-            nrf24_hw_release();
+        if(want_run && (!ctx->active || flood != ctx->active_flooding)) {
+            if(ctx->active) ch_jammer_teardown(ctx->active_flooding);
+            ch_jammer_setup(flood, want_ch);
             ctx->active = true;
+            ctx->active_flooding = flood;
+            ctx->channel_dirty = false;
         } else if(!want_run && ctx->active) {
-            nrf24_hw_acquire();
-            nrf24_hw_jammer_stop();
-            nrf24_hw_release();
+            ch_jammer_teardown(ctx->active_flooding);
             ctx->active = false;
-        } else if(want_run && ch_dirty) {
+        } else if(want_run && ctx->active && ch_dirty) {
+            ctx->channel_dirty = false;
             nrf24_hw_acquire();
-            nrf24_hw_jammer_set_channel(want_ch);
+            if(ctx->active_flooding) {
+                nrf24_hw_flood_start(want_ch, false); /* retune (full re-setup) */
+            } else {
+                nrf24_hw_jammer_set_channel(want_ch);
+            }
             nrf24_hw_release();
         }
 
-        furi_delay_ms(20);
+        if(ctx->active && ctx->active_flooding) {
+            /* Continuous flood: keep the TX FIFO topped up for ~100% duty,
+             * in ~30 ms batches so the shared SPI bus stays usable. */
+            nrf24_hw_acquire();
+            uint32_t batch_end = furi_get_tick() + pdMS_TO_TICKS(30);
+            while(!ctx->stop && ctx->desired_running && ctx->desired_flooding &&
+                  !ctx->channel_dirty && furi_get_tick() < batch_end) {
+                nrf24_hw_flood_pump();
+                esp_rom_delay_us(150); /* let a packet or two drain → FIFO has room */
+            }
+            nrf24_hw_release();
+            furi_delay_ms(2);
+        } else {
+            furi_delay_ms(20);
+        }
     }
 
     if(ctx->active) {
-        nrf24_hw_acquire();
-        nrf24_hw_jammer_stop();
-        nrf24_hw_release();
+        ch_jammer_teardown(ctx->active_flooding);
         ctx->active = false;
     }
 
@@ -84,9 +124,11 @@ void nrf24_app_scene_ch_jammer_on_enter(void* context) {
     ctx->app = app;
     ctx->stop = false;
     ctx->desired_running = false;
+    ctx->desired_flooding = false;
     ctx->desired_channel = CH_JAMMER_DEFAULT;
     ctx->channel_dirty = false;
     ctx->active = false;
+    ctx->active_flooding = false;
     g_ctx = ctx;
 
     with_view_model(
@@ -96,6 +138,7 @@ void nrf24_app_scene_ch_jammer_on_enter(void* context) {
             model->channel = CH_JAMMER_DEFAULT;
             model->min_channel = CH_JAMMER_MIN;
             model->max_channel = CH_JAMMER_MAX;
+            model->flooding = false;
             model->running = false;
             model->hardware_ok = true;
         },
@@ -119,6 +162,16 @@ bool nrf24_app_scene_ch_jammer_on_event(void* context, SceneManagerEvent event) 
             app->ch_jammer_view,
             Nrf24ChJammerModel * model,
             { model->running = new_running; },
+            true);
+        return true;
+    }
+    case Nrf24ChJammerEventToggleStrategy: {
+        bool new_flood = !g_ctx->desired_flooding;
+        g_ctx->desired_flooding = new_flood;
+        with_view_model(
+            app->ch_jammer_view,
+            Nrf24ChJammerModel * model,
+            { model->flooding = new_flood; },
             true);
         return true;
     }
