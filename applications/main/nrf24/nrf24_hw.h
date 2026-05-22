@@ -54,6 +54,34 @@ void nrf24_hw_jammer_set_channel(uint8_t channel);
  * Must be wrapped in acquire/release. */
 void nrf24_hw_jammer_stop(void);
 
+/* ---- Data-flooding jammer ----
+ * Alternative strategy to the constant carrier: instead of an unmodulated
+ * tone this floods the channel with full 32-byte ESB packets (AutoAck off,
+ * CRC off, fixed address 0xE7E7E7) to cause packet collisions / CRC
+ * corruption on the victim. Best for channel-specific protocols
+ * (WiFi, BLE, Zigbee). Mirrors Bruce's writeFast() flooding mode. */
+
+/* Configure the chip for TX flooding on the given channel.
+ * low_rate selects 250 kbps (longer packets → block bigger time slices,
+ * better against slow protocols) instead of the default 2 Mbps.
+ * Must be wrapped in acquire/release. CE is left LOW. */
+void nrf24_hw_flood_start(uint8_t channel, bool low_rate);
+
+/* Retune to a channel and fire one burst of random garbage packets (fills the
+ * 3-deep TX FIFO and pulses CE). Used for channel-hopping flooding.
+ * Must be wrapped in acquire/release. */
+void nrf24_hw_flood_channel(uint8_t channel);
+
+/* Continuous single-channel flooding: top up the TX FIFO with random garbage
+ * while it has room and hold CE HIGH, so the radio transmits back-to-back for
+ * ~100% duty cycle. Call repeatedly in a tight loop (no channel change).
+ * Must be wrapped in acquire/release. */
+void nrf24_hw_flood_pump(void);
+
+/* Stop flooding: power down, drop CE, flush TX FIFO.
+ * Must be wrapped in acquire/release. */
+void nrf24_hw_flood_stop(void);
+
 /* ---- MouseJack: Promiscuous RX ---- */
 
 /* Configure the chip for promiscuous reception:

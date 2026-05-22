@@ -37,6 +37,7 @@ APPS = [
     "clock",
     "other_os",
     "usb_storage",
+    "qflipper",
     "bad_usb",
     "subghz",
     "cli_subghz",
@@ -110,15 +111,16 @@ _boards_without_multiboot = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 if _board in _boards_without_multiboot:
     APPS = [a for a in APPS if a != "other_os"]
 
-# USB-Storage requires USB-OTG (ESP32-S3/S2 only); the Waveshare C6 has no
-# USB-OTG peripheral and the TinyUSB composite descriptor would not enumerate.
-# Note: we deliberately do NOT auto-start usb_rpc (which would install the
-# TinyUSB composite at boot) — that would kill the USB-Serial-JTAG bridge used
-# by esptool, breaking the next `./buildAndFlash_T-Embed.sh` cycle. The
-# composite is installed lazily when the user enters the USB-Storage app.
+# USB-Storage and qFlipper require USB-OTG (ESP32-S3/S2 only); the Waveshare C6
+# has no USB-OTG peripheral and the TinyUSB composite descriptor would not
+# enumerate.
+# Note: nothing installs the TinyUSB composite at boot — doing so would switch
+# the internal USB PHY to OTG and kill the USB-Serial-JTAG bridge that esptool
+# uses, breaking the next `./buildAndFlash_T-Embed.sh` cycle. The composite is
+# installed lazily, only when the user opens the USB-Storage or qFlipper app.
 _boards_without_usb_otg = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 if _board in _boards_without_usb_otg:
-    APPS = [a for a in APPS if a != "usb_storage"]
+    APPS = [a for a in APPS if a not in ("usb_storage", "qflipper")]
 
 if _board in _boards_without_wolf3d:
     APPS = [a for a in APPS if a != "wolf3d"]
