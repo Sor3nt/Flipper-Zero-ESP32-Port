@@ -26,6 +26,17 @@ bool furi_hal_usb_composite_install(
 
 bool furi_hal_usb_composite_is_installed(void);
 
+/**
+ * Tear down the Composite and route the internal USB FSLS PHY back to the
+ * USB-Serial-JTAG controller, restoring the flash/console port without a
+ * reboot. ESP32-S3/S2 only; returns false on boards without USB-OTG.
+ *
+ * NOTE: experimental. esp_tinyusb's tusb_teardown() is a no-op in this build,
+ * so re-installing the Composite afterwards (without a reboot) is not
+ * guaranteed to work. Intended for "leave qFlipper mode -> flash" flows.
+ */
+bool furi_hal_usb_composite_uninstall(void);
+
 #ifdef __cplusplus
 }
 #endif

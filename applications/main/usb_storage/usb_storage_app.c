@@ -114,8 +114,8 @@ static bool usb_storage_enter(UsbStorageCtx* ctx, Storage* storage, bool* sd_was
         return false;
     }
 
-    /* 3) Ensure the composite (HID + CDC + MSC) is installed. usb_rpc service
-     *    normally does this at boot; this call is a no-op if so. */
+    /* 3) Ensure the composite (HID + CDC + MSC) is installed. The qFlipper app
+     *    may already have installed it; this call is a no-op if so. */
     if(!furi_hal_usb_composite_install(0, 0, NULL, NULL)) {
         ctx->error_msg = "USB composite install failed";
         return false;
