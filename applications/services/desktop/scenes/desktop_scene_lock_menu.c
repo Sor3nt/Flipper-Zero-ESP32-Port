@@ -1,35 +1,68 @@
+#include <furi.h>
 #include <gui/scene_manager.h>
-#include <loader/loader.h>
-#include <esp_netif.h>
-#include <esp_wifi.h>
+
+#include <btshim.h>
+
+#include <esp_partition.h>
 
 #include "../desktop_i.h"
 #include "../views/desktop_view_lock_menu.h"
+#include "../helpers/qflipper_bridge.h"
 #include "desktop_scene.h"
+
+#include "sdkconfig.h"
+
+/* qFlipper / USB-Storage need USB-OTG (ESP32-S3 / S2 only). */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
+#define LOCK_MENU_USB_AVAILABLE true
+#else
+#define LOCK_MENU_USB_AVAILABLE false
+#endif
 
 void desktop_scene_lock_menu_callback(DesktopEvent event, void* context) {
     Desktop* desktop = (Desktop*)context;
     view_dispatcher_send_custom_event(desktop->view_dispatcher, event);
 }
 
+/* "Switch to Bruce" only makes sense when a second OTA firmware is flashed. */
+static bool desktop_lock_menu_bruce_available(void) {
+    return esp_partition_find_first(
+               ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL) != NULL;
+}
+
+static bool desktop_lock_menu_bt_enabled(void) {
+    Bt* bt = furi_record_open(RECORD_BT);
+    BtSettings settings;
+    bt_get_settings(bt, &settings);
+    furi_record_close(RECORD_BT);
+    return settings.enabled;
+}
+
+static void desktop_lock_menu_set_bt_enabled(bool enabled) {
+    Bt* bt = furi_record_open(RECORD_BT);
+    BtSettings settings;
+    bt_get_settings(bt, &settings);
+    settings.enabled = enabled;
+    bt_set_settings(bt, &settings);
+    furi_record_close(RECORD_BT);
+}
+
+/* Rebuild the menu from the live toggle states (used on enter and after a
+ * toggle, so the Enable/Disable labels track reality). */
+static void desktop_scene_lock_menu_refresh(Desktop* desktop) {
+    desktop_lock_menu_set_states(
+        desktop->lock_menu,
+        LOCK_MENU_USB_AVAILABLE,
+        qflipper_bridge_is_active(),
+        desktop_lock_menu_bt_enabled(),
+        desktop_lock_menu_bruce_available());
+}
+
 void desktop_scene_lock_menu_on_enter(void* context) {
     Desktop* desktop = (Desktop*)context;
 
-    // Check WiFi connection state
-    bool connected = false;
-    char ip_str[16] = {0};
-
-    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if(netif) {
-        esp_netif_ip_info_t ip_info = {0};
-        if(esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
-            connected = true;
-            snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
-        }
-    }
-
     desktop_lock_menu_set_callback(desktop->lock_menu, desktop_scene_lock_menu_callback, desktop);
-    desktop_lock_menu_set_wifi_state(desktop->lock_menu, connected, ip_str);
+    desktop_scene_lock_menu_refresh(desktop);
 
     view_dispatcher_switch_to_view(desktop->view_dispatcher, DesktopViewIdLockMenu);
 }
@@ -40,30 +73,35 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
-        case DesktopLockMenuEventSubGhz:
-            loader_start_detached_with_gui_error(desktop->loader, "subghz", NULL);
+        case DesktopLockMenuEventQflipperToggle:
+            if(qflipper_bridge_is_active()) {
+                qflipper_bridge_stop();
+            } else {
+                qflipper_bridge_start();
+            }
+            /* Stay in the menu; refresh so the label flips. */
+            desktop_scene_lock_menu_refresh(desktop);
             consumed = true;
             break;
-        case DesktopLockMenuEventConnectWifi:
-            loader_start_detached_with_gui_error(desktop->loader, "wifi", NULL);
+
+        case DesktopLockMenuEventUsbStorage:
+            /* The USB-Storage scene stops the qFlipper bridge itself (shared
+             * composite / mutual exclusion). */
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneUsbStorage);
             consumed = true;
             break;
-        case DesktopLockMenuEventDisconnectWifi:
-            esp_wifi_disconnect();
-            esp_wifi_stop();
-            // Return to desktop
-            scene_manager_search_and_switch_to_previous_scene(
-                desktop->scene_manager, DesktopSceneMain);
+
+        case DesktopLockMenuEventBluetoothToggle:
+            desktop_lock_menu_set_bt_enabled(!desktop_lock_menu_bt_enabled());
+            desktop_scene_lock_menu_refresh(desktop);
             consumed = true;
             break;
-        case DesktopLockMenuEventHandshake:
-            loader_start_detached_with_gui_error(desktop->loader, "wifi", "handshake_channel");
+
+        case DesktopLockMenuEventBruce:
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneBruceConfirm);
             consumed = true;
             break;
-        case DesktopLockMenuEventDeauth:
-            loader_start_detached_with_gui_error(desktop->loader, "wifi", "channel_deauth");
-            consumed = true;
-            break;
+
         default:
             break;
         }

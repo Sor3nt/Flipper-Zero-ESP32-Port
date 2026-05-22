@@ -35,9 +35,6 @@ APPS = [
     "example_apps_assets",
     "example_number_input",
     "clock",
-    "other_os",
-    "usb_storage",
-    "qflipper",
     "bad_usb",
     "subghz",
     "cli_subghz",
@@ -105,22 +102,15 @@ if _board in _boards_without_subghz:
 if _board in _boards_without_nrf24:
     APPS = [a for a in APPS if a != "nrf24"]
 
-# Multi-boot ("Other OS" -> Bruce) only makes sense on the 16 MB T-Embed.
-# The 4 MB Waveshare boards can't host a second firmware.
-_boards_without_multiboot = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
-if _board in _boards_without_multiboot:
-    APPS = [a for a in APPS if a != "other_os"]
-
-# USB-Storage and qFlipper require USB-OTG (ESP32-S3/S2 only); the Waveshare C6
-# has no USB-OTG peripheral and the TinyUSB composite descriptor would not
-# enumerate.
+# qFlipper, USB-Storage and "Switch to Bruce" are no longer standalone apps —
+# they live in the desktop lock menu (applications/services/desktop). The menu
+# gates them itself: qFlipper / USB-Storage behind a compile-time USB-OTG check
+# (ESP32-S3/S2 only), Bruce behind a runtime ota_1-partition check. So there is
+# nothing to exclude here per board anymore.
 # Note: nothing installs the TinyUSB composite at boot — doing so would switch
 # the internal USB PHY to OTG and kill the USB-Serial-JTAG bridge that esptool
 # uses, breaking the next `./buildAndFlash_T-Embed.sh` cycle. The composite is
-# installed lazily, only when the user opens the USB-Storage or qFlipper app.
-_boards_without_usb_otg = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
-if _board in _boards_without_usb_otg:
-    APPS = [a for a in APPS if a not in ("usb_storage", "qflipper")]
+# installed lazily, only when the user enables qFlipper / opens USB-Storage.
 
 if _board in _boards_without_wolf3d:
     APPS = [a for a in APPS if a != "wolf3d"]

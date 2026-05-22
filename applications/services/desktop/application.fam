@@ -9,6 +9,7 @@ App(
         "dolphin",
         "storage",
         "input",
+        "bt",
     ],
     provides=[],
     conflicts=["updater"],

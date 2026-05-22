@@ -1,5 +1,7 @@
 ADD_SCENE(desktop, main, Main)
 ADD_SCENE(desktop, lock_menu, LockMenu)
+ADD_SCENE(desktop, usb_storage, UsbStorage)
+ADD_SCENE(desktop, bruce_confirm, BruceConfirm)
 ADD_SCENE(desktop, debug, Debug)
 ADD_SCENE(desktop, hw_mismatch, HwMismatch)
 ADD_SCENE(desktop, fault, Fault)
