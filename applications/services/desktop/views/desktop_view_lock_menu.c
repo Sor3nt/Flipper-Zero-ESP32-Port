@@ -1,16 +1,17 @@
 #include <furi.h>
 #include <gui/elements.h>
 #include <assets_icons.h>
-#include <string.h>
 
 #include "../desktop_i.h"
 #include "desktop_view_lock_menu.h"
 
 #define LOCK_MENU_MAX_ITEMS 4
 
-// Menu items and events are built dynamically based on wifi state.
-// Not connected: Connect Wifi, Sub-GHz
-// Connected:     Disconnect Wifi, Sub-GHz, Handshake, Deauth
+// Menu items and events are built dynamically from the current toggle states:
+//   qFlipper       Enable/Disable (background RPC bridge)   [USB-OTG only]
+//   USB-Storage    open the full-screen mass-storage scene  [USB-OTG only]
+//   Bluetooth      Enable/Disable
+//   Switch to Bruce  reboot into the Bruce firmware         [multi-boot only]
 
 typedef struct {
     const char* label;
@@ -20,17 +21,25 @@ typedef struct {
 static LockMenuItem s_items[LOCK_MENU_MAX_ITEMS];
 static uint8_t s_item_count = 0;
 
-static void lock_menu_build_items(bool wifi_connected) {
+static void lock_menu_build_items(
+    bool usb_available,
+    bool qflipper_on,
+    bool bt_on,
+    bool bruce_available) {
     s_item_count = 0;
 
-    if(wifi_connected) {
-        s_items[s_item_count++] = (LockMenuItem){"Disconnect WiFi", DesktopLockMenuEventDisconnectWifi};
-        s_items[s_item_count++] = (LockMenuItem){"Sub-GHz", DesktopLockMenuEventSubGhz};
-        s_items[s_item_count++] = (LockMenuItem){"Handshake", DesktopLockMenuEventHandshake};
-        s_items[s_item_count++] = (LockMenuItem){"Deauth", DesktopLockMenuEventDeauth};
-    } else {
-        s_items[s_item_count++] = (LockMenuItem){"Connect WiFi", DesktopLockMenuEventConnectWifi};
-        s_items[s_item_count++] = (LockMenuItem){"Sub-GHz", DesktopLockMenuEventSubGhz};
+    if(usb_available) {
+        s_items[s_item_count++] = (LockMenuItem){
+            qflipper_on ? "Disable qFlipper" : "Enable qFlipper",
+            DesktopLockMenuEventQflipperToggle};
+        s_items[s_item_count++] = (LockMenuItem){"USB-Storage", DesktopLockMenuEventUsbStorage};
+    }
+
+    s_items[s_item_count++] = (LockMenuItem){
+        bt_on ? "Disable Bluetooth" : "Enable Bluetooth", DesktopLockMenuEventBluetoothToggle};
+
+    if(bruce_available) {
+        s_items[s_item_count++] = (LockMenuItem){"Switch to Bruce", DesktopLockMenuEventBruce};
     }
 }
 
@@ -50,25 +59,15 @@ void desktop_lock_menu_set_idx(DesktopLockMenuView* lock_menu, uint8_t idx) {
         lock_menu->view, DesktopLockMenuViewModel * model, { model->idx = idx; }, true);
 }
 
-void desktop_lock_menu_set_wifi_state(
+void desktop_lock_menu_set_states(
     DesktopLockMenuView* lock_menu,
-    bool connected,
-    const char* ip) {
-    lock_menu_build_items(connected);
+    bool usb_available,
+    bool qflipper_on,
+    bool bt_on,
+    bool bruce_available) {
+    lock_menu_build_items(usb_available, qflipper_on, bt_on, bruce_available);
     with_view_model(
-        lock_menu->view,
-        DesktopLockMenuViewModel * model,
-        {
-            model->wifi_connected = connected;
-            model->idx = 0;
-            if(ip) {
-                strncpy(model->ip_str, ip, sizeof(model->ip_str) - 1);
-                model->ip_str[sizeof(model->ip_str) - 1] = '\0';
-            } else {
-                model->ip_str[0] = '\0';
-            }
-        },
-        true);
+        lock_menu->view, DesktopLockMenuViewModel * model, { model->idx = 0; }, true);
 }
 
 void desktop_lock_menu_draw_callback(Canvas* canvas, void* model) {
@@ -78,37 +77,18 @@ void desktop_lock_menu_draw_callback(Canvas* canvas, void* model) {
     canvas_draw_icon(canvas, -57, 0 + STATUS_BAR_Y_SHIFT, &I_DoorLeft_70x55);
     canvas_draw_icon(canvas, 116, 0 + STATUS_BAR_Y_SHIFT, &I_DoorRight_70x55);
 
-    uint8_t y_offset = 0;
-
-    // Show IP with frame when connected
-    if(m->wifi_connected && m->ip_str[0]) {
-        canvas_set_font(canvas, FontSecondary);
-        uint16_t ip_width = canvas_string_width(canvas, m->ip_str);
-        int16_t ip_x = (128 - ip_width) / 2 - 2;
-        if(ip_x < 2) ip_x = 2;
-        elements_frame(canvas, ip_x, STATUS_BAR_Y_SHIFT, ip_width + 4, 12);
-        canvas_draw_str_aligned(
-            canvas, 64, 6 + STATUS_BAR_Y_SHIFT, AlignCenter, AlignCenter, m->ip_str);
-        y_offset = 14;
-    }
-
     canvas_set_font(canvas, FontSecondary);
     for(size_t i = 0; i < s_item_count; ++i) {
         canvas_draw_str_aligned(
             canvas,
             64,
-            9 + (i * 17) + STATUS_BAR_Y_SHIFT + y_offset,
+            9 + (i * 17) + STATUS_BAR_Y_SHIFT,
             AlignCenter,
             AlignCenter,
             s_items[i].label);
 
         if(m->idx == i) {
-            elements_frame(
-                canvas,
-                15,
-                1 + (i * 17) + STATUS_BAR_Y_SHIFT + y_offset,
-                98,
-                15);
+            elements_frame(canvas, 15, 1 + (i * 17) + STATUS_BAR_Y_SHIFT, 98, 15);
         }
     }
 }
@@ -172,8 +152,8 @@ DesktopLockMenuView* desktop_lock_menu_alloc(void) {
     view_set_draw_callback(lock_menu->view, (ViewDrawCallback)desktop_lock_menu_draw_callback);
     view_set_input_callback(lock_menu->view, desktop_lock_menu_input_callback);
 
-    // Default: not connected
-    lock_menu_build_items(false);
+    // Default until the scene fills in real states on enter.
+    lock_menu_build_items(false, false, false, false);
 
     return lock_menu;
 }

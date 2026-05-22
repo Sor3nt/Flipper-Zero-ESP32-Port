@@ -37,11 +37,15 @@ typedef enum {
     DesktopDebugEventToggleDebugMode,
     DesktopDebugEventExit,
 
-    DesktopLockMenuEventSubGhz,
-    DesktopLockMenuEventConnectWifi,
-    DesktopLockMenuEventDisconnectWifi,
-    DesktopLockMenuEventHandshake,
-    DesktopLockMenuEventDeauth,
+    DesktopLockMenuEventQflipperToggle,
+    DesktopLockMenuEventUsbStorage,
+    DesktopLockMenuEventBluetoothToggle,
+    DesktopLockMenuEventBruce,
+
+    DesktopUsbStorageEventExit,
+
+    DesktopBruceEventLoad,
+    DesktopBruceEventCancel,
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
