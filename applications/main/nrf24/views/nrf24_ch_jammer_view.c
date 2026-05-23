@@ -40,15 +40,15 @@ static void nrf24_ch_jammer_draw_callback(Canvas* canvas, void* _model) {
 
     canvas_set_color(canvas, ColorBlack);
 
-    /* Channel + status row */
-    char chbuf[16];
-    snprintf(chbuf, sizeof(chbuf), "Channel %u", model->channel);
+    /* Channel + strategy row */
+    char chbuf[24];
+    snprintf(chbuf, sizeof(chbuf), "Channel %u  %s", model->channel, model->flooding ? "FLOOD" : "CW");
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 64, 35, AlignCenter, AlignTop, chbuf);
 
-//    canvas_set_font(canvas, FontPrimary);
-//    canvas_draw_str_aligned(
-//        canvas, 64, 50, AlignCenter, AlignTop, model->running ? "JAMMING" : "Standby");
+    /* Hint that a long OK press switches strategy */
+    canvas_draw_str_aligned(
+        canvas, 64, 46, AlignCenter, AlignTop, "hold OK: CW/Flood");
 
     /* Bottom button hints */
     canvas_set_font(canvas, FontSecondary);
@@ -59,6 +59,13 @@ static void nrf24_ch_jammer_draw_callback(Canvas* canvas, void* _model) {
 
 static bool nrf24_ch_jammer_input_callback(InputEvent* event, void* context) {
     ViewDispatcher* vd = context;
+
+    /* Long OK switches strategy (CW <-> Flood) regardless of run state. */
+    if(event->key == InputKeyOk && event->type == InputTypeLong) {
+        view_dispatcher_send_custom_event(vd, Nrf24ChJammerEventToggleStrategy);
+        return true;
+    }
+
     if(event->type != InputTypeShort && event->type != InputTypeRepeat) return false;
 
     switch(event->key) {
