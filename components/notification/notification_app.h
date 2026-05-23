@@ -92,6 +92,11 @@ struct NotificationApp {
 
     NotificationDisplayLayer display;
     bool display_led_lock;
+    /* True while the WS2812 ring is darkened by the idle-off timer. Lets the
+     * input callback decide between a full re-light (reset phase + restart
+     * effect) and a cheap idle-timer re-arm that leaves a running animation
+     * untouched. */
+    bool led_idle_off;
 
     NotificationSettings settings;
     float current_night_shift;
