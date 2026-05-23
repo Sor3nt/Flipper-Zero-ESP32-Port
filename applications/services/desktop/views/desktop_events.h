@@ -44,9 +44,6 @@ typedef enum {
 
     DesktopUsbStorageEventExit,
 
-    DesktopBruceEventLoad,
-    DesktopBruceEventCancel,
-
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
     DesktopAnimationEventInteractAnimation,
