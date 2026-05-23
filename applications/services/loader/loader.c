@@ -877,11 +877,6 @@ int32_t loader_srv(void* p) {
     Loader* loader = loader_alloc();
     furi_record_create(RECORD_LOADER, loader);
 
-    FURI_LOG_I(TAG, "Executing system start hooks");
-    for(size_t i = 0; i < FLIPPER_ON_SYSTEM_START_COUNT; i++) {
-        FLIPPER_ON_SYSTEM_START[i]();
-    }
-
     if((furi_hal_rtc_get_boot_mode() == FuriHalRtcBootModeNormal) && FLIPPER_AUTORUN_APP_NAME &&
        strlen(FLIPPER_AUTORUN_APP_NAME)) {
         FURI_LOG_I(TAG, "Starting autorun app: %s", FLIPPER_AUTORUN_APP_NAME);

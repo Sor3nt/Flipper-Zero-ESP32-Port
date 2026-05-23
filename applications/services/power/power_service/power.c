@@ -3,6 +3,7 @@
 
 #include <furi.h>
 #include <furi_hal.h>
+#include <momentum/momentum_settings.h>
 
 #include <update_util/update_operation.h>
 #include <notification/notification_messages.h>
@@ -356,6 +357,13 @@ void power_trigger_ui_update(Power* power) {
     desktop_settings_load(settings);
     power->displayBatteryPercentage = settings->displayBatteryPercentage;
     free(settings);
+
+    if(momentum_settings.battery_icon > BatteryIconOff) {
+        power->displayBatteryPercentage = momentum_settings.battery_icon - 1;
+    }
+
+    bool hidden = (momentum_settings.battery_icon == BatteryIconOff);
+    view_port_enabled_set(power->battery_view_port, !hidden);
     view_port_update(power->battery_view_port);
 }
 
@@ -669,6 +677,10 @@ static Power* power_alloc(void) {
     desktop_settings_load(settings);
     power->displayBatteryPercentage = settings->displayBatteryPercentage;
     free(settings);
+
+    if(momentum_settings.battery_icon > BatteryIconOff) {
+        power->displayBatteryPercentage = momentum_settings.battery_icon - 1;
+    }
 
     // auto_poweroff
     //---define subscription to loader events message (info about started apps) and define callback for this

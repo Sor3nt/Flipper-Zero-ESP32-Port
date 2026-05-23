@@ -104,6 +104,8 @@ static void rpc_system_gui_screen_stream_frame_callback(
     memcpy(buffer, data, size);
     rpc_gui->transmit_frame->content.gui_screen_frame.orientation =
         rpc_system_gui_screen_orientation_map[orientation];
+    rpc_gui->transmit_frame->content.gui_screen_frame.fg_color = 0xFFFFFF;
+    rpc_gui->transmit_frame->content.gui_screen_frame.bg_color = 0x000000;
 
     furi_thread_flags_set(furi_thread_get_id(rpc_gui->transmit_thread), RpcGuiWorkerFlagTransmit);
 }

@@ -5,6 +5,7 @@
 #include <furi_hal.h>
 #include <stdint.h>
 #include <u8g2_glue.h>
+#include <momentum/asset_packs.h>
 
 const CanvasFontParameters canvas_font_params[FontTotalNumber] = {
     [FontPrimary] = {.leading_default = 12, .leading_min = 11, .height = 8, .descender = 2},
@@ -142,6 +143,12 @@ size_t canvas_current_font_width(const Canvas* canvas) {
 const CanvasFontParameters* canvas_get_font_params(const Canvas* canvas, Font font) {
     furi_check(canvas);
     furi_check(font < FontTotalNumber);
+
+    CanvasFontParameters* fp = asset_packs_get_font_params(asset_packs_get(), font);
+    if(fp) {
+        return fp;
+    }
+
     return &canvas_font_params[font];
 }
 
@@ -167,6 +174,13 @@ void canvas_invert_color(Canvas* canvas) {
 void canvas_set_font(Canvas* canvas, Font font) {
     furi_check(canvas);
     u8g2_SetFontMode(&canvas->fb, 1);
+
+    uint8_t* pack_font = asset_packs_get_font(asset_packs_get(), font);
+    if(pack_font) {
+        u8g2_SetFont(&canvas->fb, pack_font);
+        return;
+    }
+
     if(font == FontPrimary) {
         u8g2_SetFont(&canvas->fb, u8g2_font_helvB08_tr);
     } else if(font == FontSecondary) {
@@ -176,7 +190,7 @@ void canvas_set_font(Canvas* canvas, Font font) {
     } else if(font == FontBigNumbers) {
         u8g2_SetFont(&canvas->fb, u8g2_font_profont22_tn);
     } else if(font == FontBatteryPercent) {
-        u8g2_SetFont(&canvas->fb, u8g2_font_5x7_tr); //u8g2_font_micro_tr);
+        u8g2_SetFont(&canvas->fb, u8g2_font_5x7_tr);
     } else {
         furi_crash();
     }
@@ -401,6 +415,8 @@ void canvas_draw_icon_ex(
     furi_check(canvas);
     furi_check(icon);
 
+    icon = asset_packs_swap_icon(icon);
+
     x += canvas->offset_x;
     y += canvas->offset_y;
     uint8_t* icon_data = NULL;
@@ -412,6 +428,8 @@ void canvas_draw_icon_ex(
 void canvas_draw_icon(Canvas* canvas, int32_t x, int32_t y, const Icon* icon) {
     furi_check(canvas);
     furi_check(icon);
+
+    icon = asset_packs_swap_icon(icon);
 
     x += canvas->offset_x;
     y += canvas->offset_y;
@@ -559,6 +577,8 @@ void canvas_draw_icon_bitmap(
     const Icon* icon) {
     furi_assert(canvas);
     furi_assert(icon);
+
+    icon = asset_packs_swap_icon(icon);
 
     x += canvas->offset_x;
     y += canvas->offset_y;

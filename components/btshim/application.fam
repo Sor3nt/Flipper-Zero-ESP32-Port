@@ -4,7 +4,7 @@ App(
     apptype=FlipperAppType.SERVICE,
     entry_point="bt_srv",
     requires=["storage"],
-    stack_size=4 * 1024,
+    stack_size=8 * 1024,
     order=45,
 )
 

@@ -390,3 +390,5 @@ bool furi_hal_hid_consumer_key_release_all(void) {
     hid_state_unlock();
     return result;
 }
+
+/* MSC callbacks are provided by furi_hal_usb_msc.c */

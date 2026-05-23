@@ -421,15 +421,7 @@ static esp_err_t ble_hid_stack_init_once(void) {
 
     ble_hid_unlock_global();
 
-    err = nvs_flash_init();
-    if((err == ESP_ERR_NVS_NO_FREE_PAGES) || (err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    if(err != ESP_OK) {
-        return err;
-    }
-
+    /* NVS already initialized in furi_hal_init() */
     err = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
         return err;

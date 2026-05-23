@@ -7,38 +7,71 @@
 #include <esp_mac.h>
 
 /* -------------------------------------------------------------------------
- * eFuse-derived device identity
+ * Deterministic device name from MAC address
  *
- * Rather than a static "ESP32" name, derive a stable, human-readable name
- * from the factory-burned eFuse MAC — the same approach the original
- * Flipper Zero firmware uses with its OTP memory.
+ * Generates a unique, pronounceable 5-7 character name using a Linear
+ * Congruential Generator (LCG) seeded from the last 4 bytes of the
+ * factory MAC (esp_read_mac with ESP_MAC_WIFI_STA).  Every device gets
+ * a stable name at first boot without any user interaction, matching
+ * the original Flipper Zero behaviour.
  *
- * The name is selected from the table below using a mixing hash of all 6
- * MAC bytes.  Every device gets a consistent, unique-ish name at first boot
- * without any user interaction.  The user can still override it through the
- * Settings → Desktop → Name screen (stored in /dolphin/name.settings).
+ * The user can still override it through Settings → Desktop → Name
+ * (stored in /dolphin/name.settings).
  * -------------------------------------------------------------------------*/
 
-static const char* const s_device_name_pool[] = {
-    "Axiom",  "Blip",   "Byte",   "Chirp",  "Cipher",
-    "Core",   "Data",   "Drift",  "Echo",   "Edge",
-    "Flux",   "Frame",  "Glint",  "Hover",  "Ion",
-    "Jazz",   "Krypto", "Lumen",  "Motif",  "Nexus",
-    "Orbit",  "Pixel",  "Pulse",  "Quark",  "Relic",
-    "Ripple", "Spark",  "Trace",  "Vortex", "Warp",
-    "Xenon",  "Zap",
-};
-#define DEVICE_NAME_POOL_SIZE \
-    ((uint8_t)(sizeof(s_device_name_pool) / sizeof(s_device_name_pool[0])))
+static const char s_consonants[] = "bcdfghjklmnpqrstvwxz";
+static const char s_vowels[]     = "aeiou";
+#define N_CONS  (sizeof(s_consonants) - 1)
+#define N_VOW   (sizeof(s_vowels) - 1)
 
-/* Mix 6 MAC bytes into a single byte index using FNV-like accumulation. */
-static uint8_t derive_name_index(const uint8_t* mac) {
-    uint8_t h = 0x5A; /* non-zero seed */
-    for(int i = 0; i < 6; i++) {
-        h = (uint8_t)(h * 31u + mac[i]);
+/* standard glibc LCG constants */
+#define LCG_MUL  1103515245u
+#define LCG_INC  12345u
+#define LCG_MASK 0x7fffffffu
+#define LCG_NEXT(s)  ((s) = ((s) * LCG_MUL + LCG_INC) & LCG_MASK)
+
+/* Generate a pronounceable name by alternating consonant/vowel using an
+ * LCG seeded from the MAC.  Written once – subsequent calls return the
+ * cached result. */
+static const char* generate_deterministic_name(void) {
+    static char cached[FURI_HAL_VERSION_ARRAY_NAME_LENGTH];
+    static bool done = false;
+    if(done) return cached;
+
+    uint8_t mac[6] = {0};
+    if(esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+        /* If MAC read fails, fall back to eFuse default */
+        esp_efuse_mac_get_default(mac);
     }
-    return h % DEVICE_NAME_POOL_SIZE;
+
+    /* Seed: last 4 bytes of the MAC => 32-bit */
+    uint32_t seed = ((uint32_t)mac[2] << 24) | ((uint32_t)mac[3] << 16) |
+                    ((uint32_t)mac[4] <<  8) |  (uint32_t)mac[5];
+    if(seed == 0) seed = 0xDEADBEEF;  /* guard against all-zero MAC */
+
+    uint32_t lcg = seed;
+    int len = 5 + (int)(seed % 3);            /* 5, 6, or 7 */
+    if(len >= (int)sizeof(cached)) len = (int)sizeof(cached) - 1;
+
+    int pos = 0;
+    for(int i = 0; i < len; i++) {
+        LCG_NEXT(lcg);
+        if(i % 2 == 0) {
+            cached[pos++] = s_consonants[lcg % N_CONS];
+        } else {
+            cached[pos++] = s_vowels[lcg % N_VOW];
+        }
+    }
+    cached[0] = (char)(cached[0] - 0x20);     /* capitalise */
+    cached[pos] = '\0';
+    done = true;
+    return cached;
 }
+
+#undef LCG_NEXT
+#undef LCG_MASK
+#undef LCG_INC
+#undef LCG_MUL
 
 typedef struct {
     char name[FURI_HAL_VERSION_ARRAY_NAME_LENGTH];
@@ -79,13 +112,13 @@ void furi_hal_version_init(void) {
 
     /* Determine effective name:
      *   1. If a custom name was already loaded (e.g., from namechanger), use it.
-     *   2. Otherwise derive a stable name from the eFuse MAC. */
+     *   2. Otherwise generate a deterministic name from the MAC address. */
     const char* custom = version_get_custom_name(NULL);
     const char* effective;
     if(custom && custom[0]) {
         effective = custom;
     } else {
-        effective = s_device_name_pool[derive_name_index(furi_hal_version.uid)];
+        effective = generate_deterministic_name();
     }
     furi_hal_version_refresh_names(effective);
 }
@@ -191,12 +224,11 @@ const char* furi_hal_version_get_ble_local_device_name_ptr(void) {
 }
 
 void furi_hal_version_set_name(const char* name) {
-    /* Accept NULL or empty string — fall back to the eFuse-derived name. */
+    /* Accept NULL or empty string — fall back to the MAC-derived name. */
     if(name && name[0]) {
         furi_hal_version_refresh_names(name);
     } else {
-        const char* derived = s_device_name_pool[derive_name_index(furi_hal_version.uid)];
-        furi_hal_version_refresh_names(derived);
+        furi_hal_version_refresh_names(generate_deterministic_name());
     }
 }
 

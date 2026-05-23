@@ -140,6 +140,13 @@ size_t rpc_session_get_available_size(RpcSession* session);
  *  Must be called once before any rpc_session_open(). */
 void rpc_init(void);
 
+/** Get number of active RPC sessions
+ *
+ * @param   rpc     RPC instance
+ * @return          number of active sessions
+ */
+size_t rpc_get_sessions_count(Rpc* rpc);
+
 #ifdef __cplusplus
 }
 #endif

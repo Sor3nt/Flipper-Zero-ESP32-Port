@@ -12,6 +12,7 @@
 #include <core/common_defines.h>
 #include <core/log.h>
 #include <esp_rom_sys.h>
+#include <momentum/momentum_settings.h>
 #include "m-algo.h"
 #include <m-array.h>
 
@@ -236,6 +237,11 @@ void file_browser_free(FileBrowser* browser) {
 View* file_browser_get_view(FileBrowser* browser) {
     furi_check(browser);
     return browser->view;
+}
+
+void file_browser_apply_momentum_settings(FileBrowser* browser) {
+    furi_check(browser);
+    browser->hide_dot_files = !momentum_settings.show_hidden_files;
 }
 
 void file_browser_configure(

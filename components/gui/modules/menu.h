@@ -6,6 +6,7 @@
 #pragma once
 
 #include "../view.h"
+#include <momentum/momentum_settings.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +68,13 @@ void menu_reset(Menu* menu);
  * @param      index  The index
  */
 void menu_set_selected_item(Menu* menu, uint32_t index);
+
+/** Set menu style
+ *
+ * @param      menu   Menu instance
+ * @param      style  MenuStyle value
+ */
+void menu_set_style(Menu* menu, MenuStyle style);
 
 #ifdef __cplusplus
 }

@@ -47,6 +47,8 @@ void file_browser_set_item_callback(
     FileBrowserLoadItemCallback callback,
     void* context);
 
+void file_browser_apply_momentum_settings(FileBrowser* browser);
+
 #ifdef __cplusplus
 }
 #endif
