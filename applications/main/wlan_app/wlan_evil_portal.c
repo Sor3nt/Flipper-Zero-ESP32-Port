@@ -11,6 +11,7 @@
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
 #include <lwip/sockets.h>
 #include <lwip/inet.h>
 #include <esp_timer.h>
@@ -622,7 +623,7 @@ static void dns_task(void* arg) {
     if(s_dns_socket < 0) {
         ESP_LOGE(TAG, "DNS socket failed");
         s_dns_task = NULL;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -636,7 +637,7 @@ static void dns_task(void* arg) {
         close(s_dns_socket);
         s_dns_socket = -1;
         s_dns_task = NULL;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -835,7 +836,7 @@ static void dns_task(void* arg) {
     close(s_dns_socket);
     s_dns_socket = -1;
     s_dns_task = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,7 +1193,12 @@ static void evil_portal_start_worker(void* arg) {
 
     ESP_LOGI(TAG, "[worker] starting DNS task");
     s_dns_run = true;
-    if(xTaskCreate(dns_task, "EpDns", DNS_TASK_STACK, NULL, 4, &s_dns_task) != pdPASS) {
+    // Task-Stack ins PSRAM legen (CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y):
+    // der interne Heap ist nach esp_wifi_init + httpd (13 Sockets) zu knapp fuer
+    // 6 KB Stack. Erfordert vTaskDeleteWithCaps() beim Self-Delete (siehe dns_task).
+    if(xTaskCreateWithCaps(
+           dns_task, "EpDns", DNS_TASK_STACK, NULL, 4, &s_dns_task, MALLOC_CAP_SPIRAM) !=
+       pdPASS) {
         ESP_LOGE(TAG, "  DNS task create FAILED");
         s_dns_run = false;
         stop_http();
