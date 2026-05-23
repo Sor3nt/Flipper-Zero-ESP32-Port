@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gui/view.h>
+#include <lib/subghz/subghz_setting.h>
 #include "../helpers/subghz_types.h"
 #include "../helpers/subghz_custom_event.h"
 
@@ -12,6 +13,8 @@ void subghz_jammer_set_callback(
     SubGhzJammer* instance,
     SubGhzJammerCallback callback,
     void* context);
+
+void subghz_jammer_set_setting(SubGhzJammer* instance, SubGhzSetting* setting);
 
 SubGhzJammer* subghz_jammer_alloc(void);
 void subghz_jammer_free(SubGhzJammer* instance);
