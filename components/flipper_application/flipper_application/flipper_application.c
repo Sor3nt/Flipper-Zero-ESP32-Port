@@ -236,7 +236,6 @@ static int32_t flipper_application_thread(void* context) {
     /* The literal pool is at the START of .text, before the entry point */
     /* Find .text base by going back from entry point */
     /* For now, just dump what's around the entry point's data bus mirror */
-    uint32_t text_data_base = data_base & ~0xFFF; /* align to page for safety */
     /* Actually, we know the text section start from relocation */
     /* Let's just look at the first 64 bytes of the loaded .text */
     FURI_LOG_I(TAG, "=== Literal pool dump (data bus, first 16 words) ===");

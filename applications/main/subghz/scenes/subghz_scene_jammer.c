@@ -10,6 +10,7 @@ void subghz_scene_jammer_on_enter(void* context) {
     SubGhz* subghz = context;
 
     subghz_jammer_set_callback(subghz->subghz_jammer, subghz_scene_jammer_callback, subghz);
+    subghz_jammer_set_setting(subghz->subghz_jammer, subghz_txrx_get_setting(subghz->txrx));
     subghz_jammer_start(subghz->subghz_jammer);
 
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdJammer);
