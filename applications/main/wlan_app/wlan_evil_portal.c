@@ -744,13 +744,13 @@ static void dns_task(void* arg) {
                 struct timeval tv2 = {.tv_sec = 3, .tv_usec = 0};
                 setsockopt(fwd, SOL_SOCKET, SO_RCVTIMEO, &tv2, sizeof(tv2));
                 setsockopt(fwd, SOL_SOCKET, SO_SNDTIMEO, &tv2, sizeof(tv2));
-                int bind_rc = -1;
                 if(sta_ip_be != 0) {
                     struct sockaddr_in bind_addr = {0};
                     bind_addr.sin_family = AF_INET;
                     bind_addr.sin_addr.s_addr = sta_ip_be;
                     bind_addr.sin_port = 0;
-                    bind_rc = bind(fwd, (struct sockaddr*)&bind_addr, sizeof(bind_addr));
+                    // best-effort: an STA-IP binden; Fehler ist unkritisch (Forwarder laeuft trotzdem)
+                    bind(fwd, (struct sockaddr*)&bind_addr, sizeof(bind_addr));
                 }
                 struct sockaddr_in dns_dst = {0};
                 dns_dst.sin_family = AF_INET;

@@ -4,8 +4,9 @@
 #include <dolphin/dolphin.h>
 #include <toolbox/stream/buffered_file_stream.h>
 
-#define TAG       "NfcMfClassicDictAttack"
-#define BIT(x, n) ((x) >> (n) & 1)
+#define TAG            "NfcMfClassicDictAttack"
+// Eigener Bit-Extraktor; nicht "BIT" nennen -> kollidiert mit xtensa <xt_utils.h> BIT(n)=(1<<n)
+#define DICT_BIT(x, n) ((x) >> (n) & 1)
 
 // TODO FL-3926: Fix lag when leaving the dictionary attack view after Hardnested
 // TODO FL-3926: Re-enters backdoor detection between user and system dictionary if no backdoor is found
@@ -80,8 +81,8 @@ NfcCommand nfc_dict_attack_worker_callback(NfcGenericEvent event, void* context)
 
             // Check if this key index exists in the bitmap (only valid for 0-255)
             if(target_key_idx < 256 &&
-               BIT(instance->nfc_dict_context.cuid_key_indices_bitmap[target_key_idx / 8],
-                   target_key_idx % 8)) {
+               DICT_BIT(instance->nfc_dict_context.cuid_key_indices_bitmap[target_key_idx / 8],
+                        target_key_idx % 8)) {
                 uint8_t key_with_idx[sizeof(MfClassicKey) + 1];
 
                 while(keys_dict_get_next_key(

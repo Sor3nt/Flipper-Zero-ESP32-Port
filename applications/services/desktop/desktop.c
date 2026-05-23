@@ -50,7 +50,9 @@ static void desktop_lock_icon_draw_callback(Canvas* canvas, void* context) {
     canvas_draw_icon(canvas, 0, 0, &I_Lock_7x8);
 }
 
-static void desktop_dummy_mode_icon_draw_callback(Canvas* canvas, void* context) {
+// Dummy-/Game-Mode-Icon: im Port noch nicht verdrahtet (vgl. stm32/-Referenz) -> bewusst ungenutzt
+__attribute__((unused)) static void
+    desktop_dummy_mode_icon_draw_callback(Canvas* canvas, void* context) {
     UNUSED(context);
     furi_assert(canvas);
     canvas_draw_icon(canvas, 0, 0, &I_GameMode_11x8);
