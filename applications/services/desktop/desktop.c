@@ -286,7 +286,6 @@ static Desktop* desktop_alloc(void) {
 
     desktop->lock_menu = desktop_lock_menu_alloc();
     desktop->usb_storage_view = desktop_usb_storage_alloc();
-    desktop->bruce_confirm_view = desktop_bruce_confirm_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
     desktop->locked_view = desktop_view_locked_alloc();
@@ -325,10 +324,6 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdUsbStorage,
         desktop_usb_storage_get_view(desktop->usb_storage_view));
-    view_dispatcher_add_view(
-        desktop->view_dispatcher,
-        DesktopViewIdBruceConfirm,
-        desktop_bruce_confirm_get_view(desktop->bruce_confirm_view));
     view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdDebug, desktop_debug_get_view(desktop->debug_view));
     view_dispatcher_add_view(

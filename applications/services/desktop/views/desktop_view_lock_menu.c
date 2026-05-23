@@ -21,6 +21,19 @@ typedef struct {
 static LockMenuItem s_items[LOCK_MENU_MAX_ITEMS];
 static uint8_t s_item_count = 0;
 
+// Rows that fit on screen below the status bar (each item is 17px tall).
+#define LOCK_MENU_VISIBLE 3
+static uint8_t s_top = 0; // index of the first visible item
+
+// Keep the selected item inside the visible window.
+static void lock_menu_scroll_to(uint8_t idx) {
+    if(idx < s_top) {
+        s_top = idx;
+    } else if(idx >= s_top + LOCK_MENU_VISIBLE) {
+        s_top = idx - LOCK_MENU_VISIBLE + 1;
+    }
+}
+
 static void lock_menu_build_items(
     bool usb_available,
     bool qflipper_on,
@@ -66,6 +79,7 @@ void desktop_lock_menu_set_states(
     bool bt_on,
     bool bruce_available) {
     lock_menu_build_items(usb_available, qflipper_on, bt_on, bruce_available);
+    s_top = 0;
     with_view_model(
         lock_menu->view, DesktopLockMenuViewModel * model, { model->idx = 0; }, true);
 }
@@ -78,17 +92,20 @@ void desktop_lock_menu_draw_callback(Canvas* canvas, void* model) {
     canvas_draw_icon(canvas, 116, 0 + STATUS_BAR_Y_SHIFT, &I_DoorRight_70x55);
 
     canvas_set_font(canvas, FontSecondary);
-    for(size_t i = 0; i < s_item_count; ++i) {
+    for(uint8_t row = 0; row < LOCK_MENU_VISIBLE; ++row) {
+        uint8_t i = s_top + row;
+        if(i >= s_item_count) break;
+
         canvas_draw_str_aligned(
             canvas,
             64,
-            9 + (i * 17) + STATUS_BAR_Y_SHIFT,
+            9 + (row * 17) + STATUS_BAR_Y_SHIFT,
             AlignCenter,
             AlignCenter,
             s_items[i].label);
 
         if(m->idx == i) {
-            elements_frame(canvas, 15, 1 + (i * 17) + STATUS_BAR_Y_SHIFT, 98, 15);
+            elements_frame(canvas, 15, 1 + (row * 17) + STATUS_BAR_Y_SHIFT, 98, 15);
         }
     }
 }
@@ -129,6 +146,7 @@ bool desktop_lock_menu_input_callback(InputEvent* event, void* context) {
                     update = true;
                     consumed = true;
                 }
+                if(update) lock_menu_scroll_to(model->idx);
             }
             idx = model->idx;
         },
