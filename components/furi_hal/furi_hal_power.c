@@ -1,6 +1,7 @@
 #include "furi_hal_power.h"
 #include "furi_hal_bq27220.h"
 #include "furi_hal_bq25896.h"
+#include "furi_hal_display.h"
 #include "boards/board.h"
 
 #include <math.h>
@@ -405,10 +406,27 @@ void furi_hal_power_shutdown(void) {
     }
     vTaskDelay(pdMS_TO_TICKS(200)); /* debounce */
 
+    /* Cut the backlight: the LEDC PWM duty is irrelevant once the peripheral
+     * powers down in deep sleep, so drive the pin to its OFF level and latch it
+     * with gpio_hold so it does not float back ON (the backlight LED is the
+     * single biggest idle drain at ~20-60 mA). */
+#ifdef BOARD_PIN_LCD_BL
+    furi_hal_display_set_backlight(0);
+    gpio_set_direction((gpio_num_t)BOARD_PIN_LCD_BL, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)BOARD_PIN_LCD_BL, BOARD_LCD_BL_ACTIVE_LOW ? 1 : 0);
+    gpio_hold_en((gpio_num_t)BOARD_PIN_LCD_BL);
+#endif
+
+    /* Put the ST7789 panel to sleep (SLPIN) — saves another ~10-15 mA. */
+    furi_hal_display_sleep();
+
     /* Power down peripherals (CC1101 + WS2812) */
 #ifdef BOARD_PIN_PWR_EN
     gpio_set_level((gpio_num_t)BOARD_PIN_PWR_EN, 0);
 #endif
+
+    /* Keep the held GPIO levels latched across deep sleep. */
+    gpio_deep_sleep_hold_en();
 
     /* Configure BOOT/encoder button (GPIO0) as wake-up source (active low) */
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
