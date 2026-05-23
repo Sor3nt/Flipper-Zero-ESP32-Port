@@ -34,6 +34,14 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size);
  */
 void furi_hal_display_set_backlight(uint8_t brightness);
 
+/** Put the display panel into sleep mode (ST7789 SLPIN + display off).
+ *
+ * Intended for the power-off / deep-sleep path: the panel keeps drawing
+ * ~10-15 mA while idle otherwise. Safe to call without holding the SPI bus
+ * lock — it grabs the lock internally.
+ */
+void furi_hal_display_sleep(void);
+
 /** Set the UI foreground color (the tint that fills the "ink" of every
  * monochrome u8g2 frame on this color port). Stored as RGB565, byte-swapped
  * for the ST7789 SPI byte order.
