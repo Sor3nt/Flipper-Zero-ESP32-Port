@@ -11,3 +11,11 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES furi furi_hal storage toolbox gui notification dialogs flipper_format subghz assets mjs nfc bit_lib datetime mbedtls locale
 )
+
+# firmware_api.c ist die FAP-ABI-Symboltabelle und exportiert bewusst auch deprecated APIs
+# (z.B. view_dispatcher_enable_queue) -> deprecated-Warnung hier gezielt unterdruecken.
+# Ein #pragma scheidet aus: die Tabelle ist ein Array-Initializer, dort sind keine Statements erlaubt.
+set_source_files_properties(
+    "flipper_application/firmware_api.c"
+    PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations"
+)

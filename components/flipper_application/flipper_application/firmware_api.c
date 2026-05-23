@@ -96,7 +96,7 @@ extern double floor(double);
 #include "subghz_worker.h"
 #include "subghz_keystore.h"
 #include "base.h"
-#include "generic.h"
+#include "blocks/generic.h"
 #include "protocol_items.h"
 #include "subghz_protocol_registry.h"
 #include "blocks/math.h"
