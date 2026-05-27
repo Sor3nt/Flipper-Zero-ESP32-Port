@@ -1,4 +1,4 @@
-/**
+    /**
  * @brief Firmware API interface for ESP32 port.
  * Exposes firmware functions to dynamically loaded FAP applications.
  *
