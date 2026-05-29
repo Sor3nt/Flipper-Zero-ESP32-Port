@@ -12,6 +12,7 @@
 #include "views/subghz_playlist.h"
 #include "views/subbrute_main_view.h"
 #include "views/subbrute_attack_view.h"
+#include "views/subghz_view_tpms_info.h"
 #include "helpers/subbrute_device.h"
 #include "helpers/subbrute_worker.h"
 #include "helpers/subbrute_settings.h"
@@ -27,6 +28,7 @@
 #include <gui/modules/popup.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/byte_input.h>
+#include <gui/modules/number_input.h>
 #include <gui/modules/widget.h>
 
 #include <subghz/scenes/subghz_scene.h>
@@ -67,6 +69,7 @@ struct SubGhz {
     TextInput* text_input;
     ByteInput* byte_input;
     Widget* widget;
+    NumberInput* number_input;
     DialogsApp* dialogs;
     FuriString* file_path;
     FuriString* file_path_tmp;
@@ -81,6 +84,12 @@ struct SubGhz {
     SubGhzReadRAW* subghz_read_raw;
     SubGhzJammer* subghz_jammer;
     SubGhzPlaylist* subghz_playlist;
+    SubGhzViewTpmsInfo* subghz_tpms_info;
+    // TPMS edit-scene state (which field is being edited and the result buffers
+    // the NumberInput / ByteInput callbacks write into).
+    SubGhzViewTpmsField tpms_edit_field;
+    int32_t tpms_edit_number_value;
+    uint8_t tpms_edit_id_bytes[4];
 
     // SubBrute Bruteforcer
     SubBruteMainView* subbrute_main_view;

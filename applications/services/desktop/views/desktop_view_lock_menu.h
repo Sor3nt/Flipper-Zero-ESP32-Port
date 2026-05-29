@@ -2,6 +2,7 @@
 
 #include <gui/view.h>
 #include "desktop_events.h"
+#include "../helpers/mesh_config.h" /* MeshMode */
 
 #define HINT_TIMEOUT 2
 
@@ -29,13 +30,16 @@ void desktop_lock_menu_set_idx(DesktopLockMenuView* lock_menu, uint8_t idx);
 
 /** Rebuild the menu items from the current toggle states and reset the
  *  selection. `usb_available` gates the qFlipper / USB-Storage entries (USB-OTG
- *  is ESP32-S3/S2 only); `bruce_available` gates the multi-boot entry. */
+ *  is ESP32-S3/S2 only); `bruce_available` gates the multi-boot entry;
+ *  `mesh_mode` controls both the "Mesh: ..." label and whether "Mesh Clients"
+ *  is shown (only in Master mode). */
 void desktop_lock_menu_set_states(
     DesktopLockMenuView* lock_menu,
     bool usb_available,
     bool qflipper_on,
     bool bt_on,
-    bool bruce_available);
+    bool bruce_available,
+    MeshMode mesh_mode);
 
 DesktopLockMenuView* desktop_lock_menu_alloc(void);
 void desktop_lock_menu_free(DesktopLockMenuView* lock_menu);

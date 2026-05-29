@@ -41,8 +41,23 @@ typedef enum {
     DesktopLockMenuEventUsbStorage,
     DesktopLockMenuEventBluetoothToggle,
     DesktopLockMenuEventBruce,
+    DesktopLockMenuEventMeshModeToggle,
+    DesktopLockMenuEventMeshClients,
+
+    DesktopMeshClientsEventPair,
+    DesktopMeshClientsEventRemove,
+    DesktopMeshClientsEventBack,
 
     DesktopUsbStorageEventExit,
+
+    /* Phase-1 Mesh-Events: gefeuert vom Mesh-Service (sowohl Master- als auch
+     * Client-Service) und im jeweils zuständigen Scene-Handler verarbeitet.
+     * Der Service legt die zugehörigen Daten vorher in desktop->mesh_pending
+     * ab. */
+    DesktopMeshEventClientPairRequest,    /* Main-Scene  (Client) */
+    DesktopMeshEventClientDisconnect,     /* Main-Scene  (Client) */
+    DesktopMeshEventMasterDiscoverRsp,    /* Mesh-Clients-Scene (Master) */
+    DesktopMeshEventMasterPairRsp,        /* Mesh-Clients-Scene (Master) */
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
