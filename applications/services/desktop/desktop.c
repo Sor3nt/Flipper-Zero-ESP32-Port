@@ -12,9 +12,53 @@
 #include "scenes/desktop_scene.h"
 #include "scenes/desktop_scene_locked.h"
 
+#include "helpers/mesh_config.h"
+#include "helpers/mesh_service.h"
+
 #include "furi_hal_power.h"
 
 #define TAG "Desktop"
+
+/* ─── Mesh helpers (Phase 1) ─────────────────────────────────────────────
+ * desktop_mesh_event_cb wird vom Mesh-Service-Worker-Task aufgerufen. Wir
+ * legen die Daten in desktop->mesh_pending ab und feuern ein Custom-Event an
+ * den view_dispatcher (intern thread-safe). Das Custom-Event wird in
+ * desktop_custom_event_callback global verarbeitet — damit erscheinen
+ * Pair/Disconnect-Reaktionen unabhängig von der aktuellen Scene. */
+
+void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx) {
+    Desktop* desktop = ctx;
+    if(!desktop) return;
+    desktop->mesh_pending = *ev;
+
+    uint32_t custom;
+    switch(ev->type) {
+    case MeshEventDiscoverResponse:  custom = DesktopMeshEventMasterDiscoverRsp; break;
+    case MeshEventPairResponse:      custom = DesktopMeshEventMasterPairRsp; break;
+    case MeshEventPairRequest:       custom = DesktopMeshEventClientPairRequest; break;
+    case MeshEventDisconnect:        custom = DesktopMeshEventClientDisconnect; break;
+    default:                         return;
+    }
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, custom);
+}
+
+/* Startet den Client-Mesh-Service wenn (mesh_mode==Client) UND keine App
+ * vordergrundläuft. Idempotent. */
+static void desktop_mesh_client_start_if_needed(Desktop* desktop) {
+    if(desktop->mesh_mode != MeshModeClient) return;
+    if(desktop->app_running) return;
+    if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleClient) return;
+    mesh_service_start(MeshRoleClient, desktop_mesh_event_cb, desktop);
+}
+
+/* Stoppt den Client-Mesh-Service (z.B. bevor eine App startet, die WiFi
+ * braucht). Lässt einen aktiven Master-Service unangetastet — der existiert
+ * sowieso nur in der Mesh-Clients-Scene, von der aus keine App startet. */
+static void desktop_mesh_client_stop_if_running(void) {
+    if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleClient) {
+        mesh_service_stop();
+    }
+}
 
 static void desktop_auto_lock_arm(Desktop*);
 static void desktop_auto_lock_inhibit(Desktop*);
@@ -139,12 +183,17 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
 
         desktop->app_running = true;
 
+        /* WiFi/ESP-NOW abschalten, damit Apps wie wlan_app/esp_now/nrf24 ihren
+         * eigenen WiFi-Stack initialisieren können. */
+        desktop_mesh_client_stop_if_running();
+
         furi_semaphore_release(desktop->animation_semaphore);
 
     } else if(event == DesktopGlobalAfterAppFinished) {
         animation_manager_load_and_continue_animation(desktop->animation_manager);
         desktop_auto_lock_arm(desktop);
         desktop->app_running = false;
+        desktop_mesh_client_start_if_needed(desktop);
 
     } else if(event == DesktopGlobalAutoLock) {
         if(!desktop->app_running && !desktop->locked) {
@@ -162,6 +211,16 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
     } else if(event == DesktopGlobalReloadSettings) {
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
+
+    } else if(event == DesktopMeshEventClientPairRequest) {
+        /* Auch im Lock-Menü/anderen Scenes Pair-Confirm zeigen. Push eine neue
+         * Scene; bei Yes/No navigiert die zurück zur Main-Scene (search). */
+        scene_manager_next_scene(desktop->scene_manager, DesktopSceneMeshPair);
+
+    } else if(event == DesktopMeshEventClientDisconnect) {
+        /* Silent: Master hat das Pairing beendet. master.txt entfernen, keine
+         * UI. (Service hat schon ACK gesendet.) */
+        mesh_config_clear_master();
 
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
@@ -288,6 +347,8 @@ static Desktop* desktop_alloc(void) {
 
     desktop->lock_menu = desktop_lock_menu_alloc();
     desktop->usb_storage_view = desktop_usb_storage_alloc();
+    desktop->mesh_clients_view = desktop_mesh_clients_alloc();
+    desktop->mesh_pair_dialog = dialog_ex_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
     desktop->locked_view = desktop_view_locked_alloc();
@@ -326,6 +387,14 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdUsbStorage,
         desktop_usb_storage_get_view(desktop->usb_storage_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshClients,
+        desktop_mesh_clients_get_view(desktop->mesh_clients_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshPair,
+        dialog_ex_get_view(desktop->mesh_pair_dialog));
     view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdDebug, desktop_debug_get_view(desktop->debug_view));
     view_dispatcher_add_view(
@@ -523,6 +592,11 @@ int32_t desktop_srv(void* p) {
     Desktop* desktop = desktop_alloc();
 
     desktop_init_settings(desktop);
+
+    /* Mesh-State aus /ext/mesh/mode.txt laden und Client-Service auto-starten
+     * (Master-Service läuft nur on-demand in der Mesh-Clients-Scene). */
+    desktop->mesh_mode = mesh_config_load_mode();
+    desktop_mesh_client_start_if_needed(desktop);
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 

@@ -5,13 +5,15 @@
 #include "../desktop_i.h"
 #include "desktop_view_lock_menu.h"
 
-#define LOCK_MENU_MAX_ITEMS 4
+#define LOCK_MENU_MAX_ITEMS 6
 
 // Menu items and events are built dynamically from the current toggle states:
 //   qFlipper       Enable/Disable (background RPC bridge)   [USB-OTG only]
 //   USB-Storage    open the full-screen mass-storage scene  [USB-OTG only]
 //   Bluetooth      Enable/Disable
 //   Switch to Bruce  reboot into the Bruce firmware         [multi-boot only]
+//   Mesh: Off/Master/Client    cycle the mesh role
+//   Mesh Clients   open the discovery/pairing scene          [Master only]
 
 typedef struct {
     const char* label;
@@ -38,7 +40,8 @@ static void lock_menu_build_items(
     bool usb_available,
     bool qflipper_on,
     bool bt_on,
-    bool bruce_available) {
+    bool bruce_available,
+    MeshMode mesh_mode) {
     s_item_count = 0;
 
     if(usb_available) {
@@ -53,6 +56,15 @@ static void lock_menu_build_items(
 
     if(bruce_available) {
         s_items[s_item_count++] = (LockMenuItem){"Switch to Bruce", DesktopLockMenuEventBruce};
+    }
+
+    const char* mesh_label = (mesh_mode == MeshModeMaster) ? "Mesh: Master" :
+                             (mesh_mode == MeshModeClient) ? "Mesh: Client" :
+                                                             "Mesh: Off";
+    s_items[s_item_count++] = (LockMenuItem){mesh_label, DesktopLockMenuEventMeshModeToggle};
+
+    if(mesh_mode == MeshModeMaster) {
+        s_items[s_item_count++] = (LockMenuItem){"Mesh Clients", DesktopLockMenuEventMeshClients};
     }
 }
 
@@ -77,11 +89,21 @@ void desktop_lock_menu_set_states(
     bool usb_available,
     bool qflipper_on,
     bool bt_on,
-    bool bruce_available) {
-    lock_menu_build_items(usb_available, qflipper_on, bt_on, bruce_available);
-    s_top = 0;
+    bool bruce_available,
+    MeshMode mesh_mode) {
+    lock_menu_build_items(usb_available, qflipper_on, bt_on, bruce_available, mesh_mode);
+    /* Index nicht resetten — Caller (refresh nach Toggle) erwartet, dass die
+     * Selektion stehen bleibt; bei out-of-range clampen wir, damit der Wechsel
+     * vom Master- in den Off-Modus (verliert "Mesh Clients") nicht ins Leere
+     * zeigt. */
     with_view_model(
-        lock_menu->view, DesktopLockMenuViewModel * model, { model->idx = 0; }, true);
+        lock_menu->view,
+        DesktopLockMenuViewModel * model,
+        {
+            if(model->idx >= s_item_count) model->idx = s_item_count - 1;
+            lock_menu_scroll_to(model->idx);
+        },
+        true);
 }
 
 void desktop_lock_menu_draw_callback(Canvas* canvas, void* model) {
@@ -171,7 +193,7 @@ DesktopLockMenuView* desktop_lock_menu_alloc(void) {
     view_set_input_callback(lock_menu->view, desktop_lock_menu_input_callback);
 
     // Default until the scene fills in real states on enter.
-    lock_menu_build_items(false, false, false, false);
+    lock_menu_build_items(false, false, false, false, MeshModeDisabled);
 
     return lock_menu;
 }

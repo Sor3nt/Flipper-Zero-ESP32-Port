@@ -58,4 +58,9 @@
 #include "jarolift.h"
 #include "ditec_gol4.h"
 #include "keyfinder.h"
+#include "schrader_gg4.h"
+#include "tpms_ford.h"
+#include "tpms_renault.h"
+#include "tpms_citroen.h"
+#include "tpms_pmv107j.h"
 

@@ -6,6 +6,8 @@
 #include <furi_hal.h>
 #include <lib/flipper_format/flipper_format.h>
 #include <lib/subghz/types.h>
+#include <lib/subghz/protocols/base.h>
+#include <lib/subghz/protocols/tpms_generic.h>
 
 typedef struct SubGhzHistory SubGhzHistory;
 
@@ -128,3 +130,20 @@ bool subghz_history_add_to_history(
  * @return SubGhzProtocolCommonLoad*
  */
 FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx);
+
+/** Replace the FlipperFormat payload of a TPMS history entry from a modified
+ * TPMSBlockGeneric, and refresh the list label.
+ *
+ * Used after the user edits TPMS fields (pressure/temperature/id/battery)
+ * so that subsequent Send/Save uses the modified values.
+ *
+ * @param instance     SubGhzHistory instance
+ * @param idx          record index
+ * @param generic      TPMSBlockGeneric with the updated values
+ *                     (data + CRC must already be re-packed)
+ * @return true on success
+ */
+bool subghz_history_replace_tpms_payload(
+    SubGhzHistory* instance,
+    uint16_t idx,
+    TPMSBlockGeneric* generic);

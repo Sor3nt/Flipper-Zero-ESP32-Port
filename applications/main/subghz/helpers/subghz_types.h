@@ -81,6 +81,8 @@ typedef enum {
     SubGhzViewIdPlaylist,
     SubGhzViewIdBfMain,
     SubGhzViewIdBfAttack,
+    SubGhzViewIdTpmsInfo,
+    SubGhzViewIdNumberInput,
 
 } SubGhzViewId;
 

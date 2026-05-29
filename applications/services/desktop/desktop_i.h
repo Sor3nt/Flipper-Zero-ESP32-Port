@@ -10,14 +10,18 @@
 #include "views/desktop_view_main.h"
 #include "views/desktop_view_lock_menu.h"
 #include "views/desktop_view_usb_storage.h"
+#include "views/desktop_view_mesh_clients.h"
 #include "views/desktop_view_debug.h"
 #include "views/desktop_view_slideshow.h"
+#include "helpers/mesh_config.h"
+#include "helpers/mesh_service.h"
 
 #include <furi_hal.h>
 #include <gui/gui.h>
 #include <gui/view_stack.h>
 #include <gui/view_dispatcher.h>
 #include <gui/modules/popup.h>
+#include <gui/modules/dialog_ex.h>
 #include <gui/scene_manager.h>
 
 #include <loader/loader.h>
@@ -30,6 +34,8 @@ typedef enum {
     DesktopViewIdMain,
     DesktopViewIdLockMenu,
     DesktopViewIdUsbStorage,
+    DesktopViewIdMeshClients,
+    DesktopViewIdMeshPair,
     DesktopViewIdLocked,
     DesktopViewIdDebug,
     DesktopViewIdPopup,
@@ -53,8 +59,10 @@ struct Desktop {
     SceneManager* scene_manager;
 
     Popup* popup;
+    DialogEx* mesh_pair_dialog;
     DesktopLockMenuView* lock_menu;
     DesktopUsbStorageView* usb_storage_view;
+    DesktopMeshClientsView* mesh_clients_view;
     DesktopDebugView* debug_view;
     DesktopViewLocked* locked_view;
     DesktopMainView* main_view;
@@ -90,9 +98,23 @@ struct Desktop {
     bool in_transition;
     bool app_running;
     bool locked;
+
+    /* Phase-1 Mesh-State. mesh_mode wird beim Boot aus /ext/mesh/mode.txt
+     * geladen und vom Lock-Menü-Toggle aktualisiert. mesh_pending hält die
+     * Daten zum letzten Pair/Disconnect-Event, das der Background-Service ans
+     * Main-Scene-Custom-Event-Handling reicht (single-shot — der Handler
+     * verarbeitet und ignoriert weitere Requests bis er fertig ist). */
+    MeshMode mesh_mode;
+    MeshEventData mesh_pending;
 };
 
 void desktop_lock(Desktop* desktop);
 void desktop_unlock(Desktop* desktop);
 void desktop_set_dummy_mode_state(Desktop* desktop, bool enabled);
 void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);
+
+/* Mesh-Callback (impl in desktop.c): packt das Event in desktop->mesh_pending
+ * und feuert DesktopMeshEventClient{PairRequest,Disconnect} via
+ * view_dispatcher_send_custom_event. Aus dem Mesh-Service-Worker-Task sicher
+ * aufrufbar (view_dispatcher hat eigene message queue). */
+void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx);

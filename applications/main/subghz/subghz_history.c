@@ -239,6 +239,21 @@ bool subghz_history_add_to_history(
             FURI_LOG_E(TAG, "Missing Protocol");
             break;
         }
+        if(item->type == SubGhzProtocolTypeTpms) {
+            // TPMS protocols carry an "Id" (uint32) instead of a "Key" (uint64 hex).
+            // Format as "<Protocol> <hex-id>" and skip the generic Key path below.
+            uint32_t id = 0;
+            if(flipper_format_read_uint32(item->flipper_string, "Id", &id, 1)) {
+                furi_string_printf(
+                    item->item_str,
+                    "%s %08lX",
+                    furi_string_get_cstr(instance->tmp_string),
+                    (unsigned long)id);
+            } else {
+                furi_string_set(item->item_str, instance->tmp_string);
+            }
+            break;
+        }
         if(!strcmp(furi_string_get_cstr(instance->tmp_string), "KeeLoq")) {
             furi_string_set(instance->tmp_string, "KL ");
             if(!flipper_format_read_string(item->flipper_string, "Manufacture", text)) {
@@ -289,5 +304,40 @@ bool subghz_history_add_to_history(
 
     furi_string_free(text);
     instance->last_index_write++;
+    return true;
+}
+
+bool subghz_history_replace_tpms_payload(
+    SubGhzHistory* instance,
+    uint16_t idx,
+    TPMSBlockGeneric* generic) {
+    furi_assert(instance);
+    furi_assert(generic);
+
+    SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
+    if(!item || !item->flipper_string) {
+        FURI_LOG_E(TAG, "replace: missing item %u", idx);
+        return false;
+    }
+
+    FlipperFormat* fresh = flipper_format_string_alloc();
+    SubGhzProtocolStatus s = tpms_block_generic_serialize(generic, fresh, item->preset);
+    if(s != SubGhzProtocolStatusOk) {
+        FURI_LOG_E(TAG, "replace: serialize failed (%d)", (int)s);
+        flipper_format_free(fresh);
+        return false;
+    }
+
+    flipper_format_free(item->flipper_string);
+    item->flipper_string = fresh;
+
+    // Refresh the list label as "<Protocol> <id>" (matches the TPMS branch in
+    // subghz_history_add_to_history).
+    furi_string_printf(
+        item->item_str,
+        "%s %08lX",
+        generic->protocol_name ? generic->protocol_name : "TPMS",
+        (unsigned long)generic->id);
+
     return true;
 }
