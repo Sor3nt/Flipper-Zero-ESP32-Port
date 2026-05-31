@@ -1,7 +1,9 @@
 #include <furi.h>
 #include <furi_hal.h>
+#include <furi_hal_encoder.h>
 #include <flipper.h>
 #include <applications.h>
+#include <momentum/momentum.h>
 
 #include <esp_log.h>
 #include <esp_rom_uart.h>
@@ -146,6 +148,13 @@ void app_main(void) {
     for(size_t i = 0; i < FLIPPER_ON_SYSTEM_START_COUNT; i++) {
         FLIPPER_ON_SYSTEM_START[i]();
     }
+
+#ifdef BOARD_HAS_ENCODER
+    furi_hal_encoder_init();
+#endif
+
+    momentum_settings_load();
+    asset_packs_init();
 
     ESP_LOGI(TAG, "All services started, entering background...");
 

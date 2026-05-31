@@ -1,5 +1,8 @@
 #pragma once
 #include <furi.h>
+#include <storage/storage.h>
+
+#define MAINMENU_APPS_PATH INT_PATH(".mainmenu_apps.txt")
 
 #ifdef __cplusplus
 extern "C" {

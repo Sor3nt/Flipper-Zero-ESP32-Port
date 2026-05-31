@@ -17,6 +17,11 @@
 #define BUTTHURT_MAX                 14
 #define BUTTHURT_MIN                 0
 
+const uint32_t DOLPHIN_LEVELS[] = {100,  200,  300,  450,  600,  750,  950,  1150, 1350, 1600,
+                                   1850, 2100, 2400, 2700, 3000, 3350, 3700, 4050, 4450, 4850,
+                                   5250, 5700, 6150, 6600, 7100, 7600, 8100, 8650, 9999};
+const size_t DOLPHIN_LEVEL_COUNT = COUNT_OF(DOLPHIN_LEVELS);
+
 DolphinState* dolphin_state_alloc(void) {
     return malloc(sizeof(DolphinState));
 }
@@ -77,17 +82,17 @@ uint64_t dolphin_state_timestamp(void) {
 }
 
 bool dolphin_state_is_levelup(uint32_t icounter) {
-    return (icounter == LEVEL2_THRESHOLD) || (icounter == LEVEL3_THRESHOLD);
+    for(size_t i = 0; i < DOLPHIN_LEVEL_COUNT; i++) {
+        if(icounter == DOLPHIN_LEVELS[i]) return true;
+    }
+    return false;
 }
 
 uint8_t dolphin_get_level(uint32_t icounter) {
-    if(icounter <= LEVEL2_THRESHOLD) {
-        return 1;
-    } else if(icounter <= LEVEL3_THRESHOLD) {
-        return 2;
-    } else {
-        return 3;
+    for(size_t i = 0; i < DOLPHIN_LEVEL_COUNT; i++) {
+        if(icounter <= DOLPHIN_LEVELS[i]) return i + 1;
     }
+    return DOLPHIN_LEVEL_COUNT;
 }
 
 uint32_t dolphin_state_xp_above_last_levelup(uint32_t icounter) {

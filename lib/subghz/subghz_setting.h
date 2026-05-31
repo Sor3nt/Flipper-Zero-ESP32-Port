@@ -11,6 +11,13 @@ extern "C" {
 #endif
 
 #define SUBGHZ_SETTING_DEFAULT_PRESET_COUNT 4
+#define SUBGHZ_SETTING_FILE_TYPE    "Flipper SubGhz Setting File"
+#define SUBGHZ_SETTING_FILE_VERSION 1
+
+/* FrequencyList — list of uint32_t frequencies, used by momentum_app and subghz_setting */
+#include <m-list.h>
+LIST_DEF(FrequencyList, uint32_t)
+#define M_OPL_FrequencyList_t() LIST_OPLIST(FrequencyList)
 
 typedef struct SubGhzSetting SubGhzSetting;
 

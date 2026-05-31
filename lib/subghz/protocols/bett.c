@@ -4,7 +4,7 @@
 #include "../blocks/decoder.h"
 #include "../blocks/encoder.h"
 #include "../blocks/generic.h"
-#include "../blocks/math.h"
+#include "../blocks/subghz_math.h"
 
 // protocol BERNER / ELKA / TEDSEN / TELETASTER
 #define TAG "SubGhzProtocolBett"

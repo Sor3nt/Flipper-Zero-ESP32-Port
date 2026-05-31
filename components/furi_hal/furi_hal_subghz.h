@@ -69,6 +69,9 @@ void furi_hal_subghz_stop_async_tx(void);
 void furi_hal_subghz_set_ext_leds_and_amp(bool enabled);
 bool furi_hal_subghz_get_ext_leds_and_amp(void);
 
+void furi_hal_subghz_set_extended_range(bool enabled);
+void furi_hal_subghz_set_bypass_region(bool enabled);
+
 #ifdef __cplusplus
 }
 #endif

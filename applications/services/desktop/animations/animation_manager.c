@@ -6,6 +6,7 @@
 #include <power/power_service/power.h>
 #include <storage/storage.h>
 #include <assets_icons.h>
+#include <momentum/momentum.h>
 
 #include "views/bubble_animation_view.h"
 #include "views/one_shot_animation_view.h"
@@ -224,7 +225,11 @@ static void animation_manager_start_new_idle(AnimationManager* animation_manager
     const BubbleAnimation* bubble_animation =
         animation_storage_get_bubble_animation(animation_manager->current_animation);
     animation_manager->state = AnimationManagerStateIdle;
-    furi_timer_start(animation_manager->idle_animation_timer, bubble_animation->duration * 1000);
+    int32_t duration = (momentum_settings.cycle_anims == 0) ?
+                           (int32_t)(bubble_animation->duration) :
+                           (int32_t)(momentum_settings.cycle_anims);
+    furi_timer_start(
+        animation_manager->idle_animation_timer, (duration > 0) ? (duration * 1000) : 0);
 }
 
 static bool animation_manager_check_blocking(AnimationManager* animation_manager) {
@@ -539,8 +544,12 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
                     } else {
                         const BubbleAnimation* animation = animation_storage_get_bubble_animation(
                             animation_manager->current_animation);
+                        int32_t duration = (momentum_settings.cycle_anims == 0) ?
+                                               (int32_t)(animation->duration) :
+                                               (int32_t)(momentum_settings.cycle_anims);
                         furi_timer_start(
-                            animation_manager->idle_animation_timer, animation->duration * 1000);
+                            animation_manager->idle_animation_timer,
+                            (duration > 0) ? (duration * 1000) : 0);
                     }
                 }
             } else {

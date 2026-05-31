@@ -13,11 +13,18 @@
 #include "class/hid/hid_device.h"
 #include "class/msc/msc_device.h"
 
+/* Low-level access to switch the internal USB FSLS PHY mux between the OTG
+ * controller and the USB-Serial-JTAG controller (see composite_uninstall). */
+#include "hal/usb_serial_jtag_ll.h"
+
 #define TAG "FuriHalUsbComp"
 
 /* Default identity if backend doesn't supply one. */
-#define COMP_VID_DEFAULT 0x303A /* Espressif */
-#define COMP_PID_DEFAULT 0x4001 /* Flipper-ESP32 (composite) */
+/* Masquerade as a real Flipper Zero so qFlipper (and other host tools that
+ * filter strictly on VID/PID) detect the device. ESP32-S3 native USB-OTG lets
+ * us choose any descriptor identity. */
+#define COMP_VID_DEFAULT 0x0483 /* STMicroelectronics (real Flipper Zero) */
+#define COMP_PID_DEFAULT 0x5740 /* CDC / Virtual ComPort */
 
 /* HID Report IDs - shared with furi_hal_usb_hid_tinyusb.c via convention */
 #define REPORT_ID_KEYBOARD 1
@@ -219,6 +226,38 @@ bool furi_hal_usb_composite_install(
     return true;
 }
 
+bool furi_hal_usb_composite_uninstall(void) {
+    if(!s_installed) return true;
+
+    /* 1) Tear down the TinyUSB stack: stops the device task, runs tusb_teardown
+     *    (a no-op in this esp_tinyusb build) and deletes the OTG PHY, which
+     *    disables the USB WRAP and drops the D+ pull-up — the host sees the
+     *    composite disconnect. */
+    esp_err_t err = tinyusb_driver_uninstall();
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);
+        /* Fall through and try the PHY switch anyway — partial teardown still
+         * left the OTG controller idle. */
+    }
+
+    /* 2) Re-route the shared internal FSLS PHY from the OTG controller back to
+     *    the USB-Serial-JTAG controller and re-enable its pads. The USJ bus
+     *    clock has been running since boot (it was the console/flash port);
+     *    OTG install never touched it. Re-applying the USJ pull-up makes the
+     *    host re-enumerate the JTAG/serial device, so esptool can flash again.
+     *
+     *    usb_serial_jtag_ll_phy_enable_external(false) sets:
+     *      USB_SERIAL_JTAG.conf0.phy_sel = 0
+     *      RTCCNTL.usb_conf.sw_hw_usb_phy_sel = 1   (software mux control)
+     *      RTCCNTL.usb_conf.sw_usb_phy_sel   = 0   (internal PHY -> USJ) */
+    usb_serial_jtag_ll_phy_enable_external(false);
+    usb_serial_jtag_ll_phy_enable_pad(true);
+
+    s_installed = false;
+    FURI_LOG_I(TAG, "Composite uninstalled, USB-Serial-JTAG restored");
+    return true;
+}
+
 #else /* !ESP32-S3 / S2 */
 
 bool furi_hal_usb_composite_install(
@@ -234,6 +273,10 @@ bool furi_hal_usb_composite_install(
 }
 
 bool furi_hal_usb_composite_is_installed(void) {
+    return false;
+}
+
+bool furi_hal_usb_composite_uninstall(void) {
     return false;
 }
 

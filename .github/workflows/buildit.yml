@@ -1,0 +1,101 @@
+name: Build Flipper & Bruce ESP32
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # Erlaubt den manuellen Start in GitHub
+
+jobs:
+  build_t_embed:
+    name: Build LilyGo T-Embed CC1101
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Clean stale sdkconfig
+        run: |
+          rm -f sdkconfig
+          rm -f build_t_embed/sdkconfig
+
+      - name: Install ESP-IDF system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util \
+            libusb-1.0-0 libglib2.0-dev pipx
+
+      - name: Install PlatformIO via pipx
+        run: |
+          pipx install platformio
+          # Fügt PlatformIO temporär zum Systempfad des GitHub-Runners hinzu
+          echo "/home/runner/.local/bin" >> $GITHUB_PATH
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        id: idf-cache
+        with:
+          path: ~/esp/esp-idf
+          key: esp-idf-v5.4.1
+          restore-keys: esp-idf-v5.4.1
+
+      - name: Clone ESP-IDF v5.4.1
+        if: steps.idf-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/esp
+          git clone --branch v5.4.1 --depth 1 \
+            https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+
+      - name: Cache ESP-IDF tools
+        uses: actions/cache@v4
+        id: idf-tools-cache
+        with:
+          path: ~/.espressif
+          key: esp-idf-tools-v5.4.1
+
+      - name: Install ESP-IDF tools
+        if: steps.idf-tools-cache.outputs.cache-hit != 'true'
+        run: |
+          ~/esp/esp-idf/install.sh all
+
+      - name: Build Both Firmwares (Build-Only)
+        run: |
+          source ~/esp/esp-idf/export.sh
+          chmod +x ./buildAndFlash_T-Embed.sh
+          ./buildAndFlash_T-Embed.sh --build-only
+
+      - name: Package Flash Files
+        run: |
+          # Erstellt eine saubere Ordnerstruktur für das finale ZIP-Paket
+          mkdir -p flash_files/bootloader
+          mkdir -p flash_files/partition_table
+          
+          # 1. Flipper Zero Port Binaries kopieren
+          cp build_t_embed/furi_esp32.bin flash_files/
+          cp build_t_embed/bootloader/bootloader.bin flash_files/bootloader/
+          cp build_t_embed/partition_table/partition-table.bin flash_files/partition_table/
+          
+          # 2. Bruce Firmware (OTA_1 Slot Binary) kopieren
+          if [ -f multi-boot/bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin ]; then
+            cp multi-boot/bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin flash_files/bruce_firmware.bin
+          fi
+          
+          # 3. Das originale Linux-Flashskript aus dem Repo als Beilage dazupacken
+          if [ -f tools/flash_linux.sh ]; then
+            cp tools/flash_linux.sh flash_files/
+            chmod +x flash_files/flash_linux.sh
+          fi
+
+      - name: Upload Flash Artifacts (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: flipper-and-bruce-t-embed-binaries # Der Name deines Downloads
+          path: flash_files/
+          retention-days: 7

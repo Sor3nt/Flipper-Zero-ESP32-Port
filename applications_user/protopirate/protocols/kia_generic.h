@@ -7,5 +7,5 @@
 #include <lib/subghz/blocks/decoder.h>
 #include <lib/subghz/blocks/encoder.h>
 #include <lib/subghz/blocks/generic.h>
-#include <lib/subghz/blocks/math.h>
+#include <lib/subghz/blocks/subghz_math.h>
 #include <flipper_format/flipper_format.h>

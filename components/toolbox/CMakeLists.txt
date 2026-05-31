@@ -11,6 +11,7 @@ idf_component_register(
         "value_index.c"
         "path.c"
         "name_generator.c"
+        "run_parallel.c"
         "strint.c"
         "property.c"
         "saved_struct.c"

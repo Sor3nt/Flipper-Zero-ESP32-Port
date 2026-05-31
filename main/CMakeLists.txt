@@ -32,7 +32,7 @@ endif()
 idf_component_register(
     SRCS "app_main.c" "${ESP32_FAM_REGISTRY_C}"
     INCLUDE_DIRS "."
-    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim app_update
+    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim app_update momentum
     LDFRAGMENTS "main.lf"
 )
 
