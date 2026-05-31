@@ -142,6 +142,10 @@
 #define BOARD_PIN_RFID_RX       44      /* GROVE / SERIAL_RX */
 #define BOARD_PIN_RFID_TX       43      /* GROVE / SERIAL_TX */
 #define BOARD_RFID_UART_NUM     1       /* UART1 */
+
+/* ---- UART pins (Grove connector) ---- */
+#define BOARD_PIN_UART1_TX      43
+#define BOARD_PIN_UART1_RX      44
 #define BOARD_HAS_NFC           1
 #define BOARD_HAS_SUBGHZ        1       /* Built-in CC1101 */
 #define BOARD_HAS_MIC           1

@@ -39,6 +39,8 @@ set(FURI_HAL_SRCS
     "furi_hal_touch.c"
     "furi_hal_infrared.c"
     "furi_hal_rfid.c"
+    "furi_hal_serial.c"
+    "furi_hal_serial_control.c"
     "furi_hal_bq27220.c"
     "furi_hal_bq25896.c"
     "fatfs_compat.c"
@@ -62,10 +64,15 @@ else()
     list(APPEND FURI_HAL_SRCS "furi_hal_usb_hid_stub.c")
 endif()
 
+# Add encoder driver for boards with rotary encoder
+if(FLIPPER_BOARD STREQUAL "lilygo_t_embed_cc1101")
+    list(APPEND FURI_HAL_SRCS "furi_hal_encoder.c")
+endif()
+
 idf_component_register(
     SRCS ${FURI_HAL_SRCS}
-    INCLUDE_DIRS "." ".." "../.." "boards"
-    REQUIRES ${FURI_HAL_REQUIRES}
+    INCLUDE_DIRS "." "boards"
+    REQUIRES ${FURI_HAL_REQUIRES} notification assets u8g2 gui
 )
 
 # Set board include path as compile definition

@@ -755,6 +755,89 @@ void elements_scrollable_text_line(
     furi_string_free(line);
 }
 
+void elements_scrollable_text_line_centered(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    size_t width,
+    FuriString* string,
+    size_t scroll,
+    bool ellipsis,
+    bool centered) {
+    furi_check(canvas);
+    furi_check(string);
+
+    FuriString* line = furi_string_alloc_set(string);
+
+    size_t len_px = canvas_string_width(canvas, furi_string_get_cstr(line));
+    if(len_px > width) {
+        if(centered) {
+            centered = false;
+            x -= width / 2;
+        }
+
+        if(ellipsis) {
+            width -= canvas_string_width(canvas, "...");
+        }
+
+        size_t scroll_size = furi_string_size(line);
+        size_t right_width = 0;
+        for(size_t i = scroll_size - 1; i > 0; i--) {
+            right_width += canvas_glyph_width(canvas, furi_string_get_char(line, i));
+            if(right_width > width) break;
+            scroll_size--;
+            if(!scroll_size) break;
+        }
+
+        if(scroll_size) {
+            scroll_size += 3;
+            scroll = scroll % scroll_size;
+            furi_string_right(line, scroll);
+        }
+
+        len_px = canvas_string_width(canvas, furi_string_get_cstr(line));
+        while(len_px > width) {
+            furi_string_left(line, furi_string_size(line) - 1);
+            len_px = canvas_string_width(canvas, furi_string_get_cstr(line));
+        }
+
+        if(ellipsis) {
+            furi_string_cat(line, "...");
+        }
+    }
+
+    if(centered) {
+        canvas_draw_str_aligned(
+            canvas, x, y, AlignCenter, AlignBottom, furi_string_get_cstr(line));
+    } else {
+        canvas_draw_str(canvas, x, y, furi_string_get_cstr(line));
+    }
+    furi_string_free(line);
+}
+
+void elements_scrollbar_horizontal(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    size_t width,
+    size_t pos,
+    size_t total) {
+    furi_check(canvas);
+
+    canvas_set_color(canvas, ColorWhite);
+    canvas_draw_box(canvas, x, y - 3, width, 3);
+
+    canvas_set_color(canvas, ColorBlack);
+    for(size_t i = x; i < width + x; i += 2) {
+        canvas_draw_dot(canvas, i, y - 2);
+    }
+
+    if(total) {
+        float block_w = ((float)width) / total;
+        canvas_draw_box(canvas, x + (block_w * pos), y - 3, MAX(block_w, 1), 3);
+    }
+}
+
 void elements_text_box(
     Canvas* canvas,
     int32_t x,

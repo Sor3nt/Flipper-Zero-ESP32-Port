@@ -3,6 +3,7 @@
 #include <gui/scene_manager.h>
 #include <gui/view_stack.h>
 #include <stdint.h>
+#include <notification/notification_messages.h>
 
 #include "../desktop.h"
 #include "../desktop_i.h"

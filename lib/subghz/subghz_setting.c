@@ -106,10 +106,6 @@ ARRAY_DEF(SubGhzSettingCustomPresetItemArray, SubGhzSettingCustomPresetItem, M_P
 #define M_OPL_SubGhzSettingCustomPresetItemArray_t() \
     ARRAY_OPLIST(SubGhzSettingCustomPresetItemArray, M_POD_OPLIST)
 
-LIST_DEF(FrequencyList, uint32_t)
-
-#define M_OPL_FrequencyList_t() LIST_OPLIST(FrequencyList)
-
 typedef struct {
     SubGhzSettingCustomPresetItemArray_t data;
 } SubGhzSettingCustomPresetStruct;

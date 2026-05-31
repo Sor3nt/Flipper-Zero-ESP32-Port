@@ -63,3 +63,19 @@ CONFIG_HTTPD_MAX_URI_LEN=2048
 
 # Live-Credential-Dissektor parst im tcpip_thread → etwas mehr Stack-Reserve.
 CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
+
+# lwIP: bump max sockets from default 10 → 16 so evil_portal httpd can use
+# max_open_sockets=13 (10 was leaving only 7 for the HTTP server, which Windows
+# clients exhaust instantly with background traffic — Steam, Discord, NCSI,
+# WPAD all phone home in parallel and cause ERR_CONNECTION_RESET in browser
+# captive-portal probes).
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# lwIP: enable IP forwarding + IPv4 NAPT so esp_netif_napt_enable() actually
+# routes packets between the rogue AP and the upstream STA after Evil Portal
+# Bridge activates. Without these flags napt_enable() returns OK but no packets
+# are forwarded — clients on the AP get DHCP+DNS but cannot reach the internet.
+# L2_TO_L3_COPY is required by NAPT for the inter-interface packet copy.
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+CONFIG_LWIP_L2_TO_L3_COPY=y

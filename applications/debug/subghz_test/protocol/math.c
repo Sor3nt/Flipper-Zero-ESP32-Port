@@ -1,4 +1,4 @@
-#include "math.h"
+#include "subghz_math.h"
 
 uint64_t subghz_protocol_blocks_reverse_key(uint64_t key, uint8_t bit_count) {
     uint64_t reverse_key = 0;

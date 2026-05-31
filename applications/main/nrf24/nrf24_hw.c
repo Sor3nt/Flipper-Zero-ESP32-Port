@@ -6,6 +6,7 @@
 #include <furi_hal_spi_bus.h>
 #include <esp_rom_sys.h>
 #include <string.h>
+#include <stdlib.h>
 #include "boards/board.h"
 
 #define NRF_CMD_R_REGISTER  0x00
@@ -14,6 +15,7 @@
 #define NRF_CMD_W_TX_PAYLOAD 0xA0
 #define NRF_CMD_FLUSH_TX     0xE1
 #define NRF_CMD_FLUSH_RX     0xE2
+#define NRF_CMD_REUSE_TX_PL  0xE3
 #define NRF_CMD_NOP          0xFF
 
 #define NRF_REG_CONFIG     0x00
@@ -47,6 +49,7 @@
 #define NRF_STATUS_MAX_RT   0x10
 
 #define NRF_FIFO_RX_EMPTY   0x01
+#define NRF_FIFO_TX_FULL    0x20
 
 /* RF_SETUP for constant-carrier jammer:
  *   bit7 CONT_WAVE | bit4 PLL_LOCK | bit3 RF_DR_HIGH (2 Mbps) | bits2-1 RF_PWR=3 (max)
@@ -132,28 +135,151 @@ uint8_t nrf24_hw_listen_rpd(uint8_t channel) {
 }
 
 void nrf24_hw_jammer_start(uint8_t channel) {
-    /* Standby */
+    /* Standby / CE low */
     furi_hal_gpio_write(&nrf24_ce, false);
-    /* Power up in TX mode */
+
+    /* Power up. Tpd2stby (~1.5 ms) must elapse before the oscillator/PLL is
+     * stable on a cold start; wait 5 ms like the RF24 library to be safe. */
     nrf24_hw_write_reg(NRF_REG_CONFIG, NRF_CONFIG_PWR_UP);
+    esp_rom_delay_us(5000);
+
     /* Continuous carrier @ 2 Mbps, PA max, PLL locked */
     nrf24_hw_write_reg(NRF_REG_RF_SETUP, NRF_RF_SETUP_JAMMER);
+
+    /* The nRF24L01+ (P variant) only radiates the CONT_WAVE carrier while it is
+     * actually transmitting, so we load a dummy payload and keep re-sending it
+     * via REUSE_TX_PL. Without this the carrier is weak/absent on real +
+     * modules. Mirrors RF24::startConstCarrier(). */
+    nrf24_hw_write_reg(NRF_REG_EN_AA, 0x00);
+    nrf24_hw_write_reg(NRF_REG_SETUP_RETR, 0x00);
+    nrf24_hw_write_reg(NRF_REG_SETUP_AW, 0x03); /* 5-byte address */
+
+    uint8_t dummy[32];
+    memset(dummy, 0xFF, sizeof(dummy));
+    nrf24_hw_write_buf(NRF_REG_TX_ADDR, dummy, 5);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
+
+    uint8_t tx[1 + 32];
+    tx[0] = NRF_CMD_W_TX_PAYLOAD;
+    memcpy(&tx[1], dummy, 32);
+    furi_hal_spi_bus_tx(&furi_hal_spi_bus_handle_nrf24, tx, sizeof(tx), 100);
+
     nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
-    /* Settle PLL */
+
+    /* Settle PLL, transmit once, then enable payload reuse. */
     esp_rom_delay_us(150);
+    furi_hal_gpio_write(&nrf24_ce, true);
+    esp_rom_delay_us(1000); /* let the first frame go out (datasheet: 1 ms) */
+
+    /* REUSE_TX_PL — toggle CE per RF24::reUseTX so the chip keeps re-sending. */
+    furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_MAX_RT);
+    nrf24_hw_cmd(NRF_CMD_REUSE_TX_PL);
     furi_hal_gpio_write(&nrf24_ce, true);
 }
 
 void nrf24_hw_jammer_set_channel(uint8_t channel) {
+    /* Carrier stays on; just retune. PLL re-locks in ~130 µs. */
     nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
 }
 
 void nrf24_hw_jammer_stop(void) {
-    furi_hal_gpio_write(&nrf24_ce, false);
-    /* Restore default RF_SETUP (2 Mbps, max power, no CW) */
-    nrf24_hw_write_reg(NRF_REG_RF_SETUP, NRF_RF_SETUP_2M_MAX);
-    /* Power down */
+    /* Datasheet: with CONT_WAVE + REUSE_TX_PL the chip ignores CE low — only
+     * PWR_UP=0 turns TX off. Power down first, then clear the CW bits. */
     nrf24_hw_write_reg(NRF_REG_CONFIG, 0x00);
+    nrf24_hw_write_reg(NRF_REG_RF_SETUP, NRF_RF_SETUP_2M_MAX);
+    furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
+}
+
+/* ===== Data-flooding jammer ===== */
+
+/* RF_SETUP for 250 kbps, PA max: RF_DR_LOW(bit5) | RF_PWR=3.
+ * Longer on-air time per packet → blocks bigger time slices. */
+#define NRF_RF_SETUP_250K_MAX 0x26
+
+/* Fill a 32-byte payload with pseudo-random bytes. Random garbage spreads the
+ * modulation energy across the channel far better than a fixed periodic
+ * pattern (which produces narrow spectral lines). */
+static void nrf24_flood_fill_random(uint8_t* buf) {
+    for(uint8_t i = 0; i < 32; i += 4) {
+        uint32_t r = (uint32_t)rand();
+        buf[i + 0] = (uint8_t)(r);
+        buf[i + 1] = (uint8_t)(r >> 8);
+        buf[i + 2] = (uint8_t)(r >> 16);
+        buf[i + 3] = (uint8_t)(r >> 24);
+    }
+}
+
+static void nrf24_flood_write_payload(void) {
+    uint8_t tx[1 + 32];
+    tx[0] = NRF_CMD_W_TX_PAYLOAD;
+    nrf24_flood_fill_random(&tx[1]);
+    furi_hal_spi_bus_tx(&furi_hal_spi_bus_handle_nrf24, tx, sizeof(tx), 100);
+}
+
+void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
+    furi_hal_gpio_write(&nrf24_ce, false);
+
+    /* TX mode (PRIM_RX=0), CRC off. Wait Tpd2stby on this cold start. */
+    nrf24_hw_write_reg(NRF_REG_CONFIG, NRF_CONFIG_PWR_UP);
+    esp_rom_delay_us(5000);
+
+    nrf24_hw_write_reg(NRF_REG_EN_AA, 0x00);
+    nrf24_hw_write_reg(NRF_REG_SETUP_RETR, 0x00);
+    nrf24_hw_write_reg(NRF_REG_SETUP_AW, 0x01); /* 3-byte address */
+    nrf24_hw_write_reg(NRF_REG_EN_RXADDR, 0x01);
+    nrf24_hw_write_reg(
+        NRF_REG_RF_SETUP, low_rate ? NRF_RF_SETUP_250K_MAX : NRF_RF_SETUP_2M_MAX);
+    nrf24_hw_write_reg(NRF_REG_DYNPD, 0x00);
+    nrf24_hw_write_reg(NRF_REG_FEATURE, 0x00);
+
+    const uint8_t addr[3] = {0xE7, 0xE7, 0xE7};
+    nrf24_hw_write_buf(NRF_REG_TX_ADDR, addr, 3);
+    nrf24_hw_write_buf(NRF_REG_RX_ADDR_P0, addr, 3);
+    nrf24_hw_write_reg(NRF_REG_RX_PW_P0, 32);
+
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_RX_DR | NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
+    nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
+}
+
+void nrf24_hw_flood_channel(uint8_t channel) {
+    /* CE low so we can safely retune and refill the FIFO. */
+    furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
+    nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT);
+
+    /* Fill the 3-deep TX FIFO with random garbage packets. */
+    for(uint8_t i = 0; i < 3; i++) {
+        nrf24_flood_write_payload();
+    }
+
+    /* Pulse CE high long enough for all three frames to go out
+     * (~144 µs each at 2 Mbps for a 32-byte payload). */
+    furi_hal_gpio_write(&nrf24_ce, true);
+    esp_rom_delay_us(500);
+    furi_hal_gpio_write(&nrf24_ce, false);
+}
+
+void nrf24_hw_flood_pump(void) {
+    /* Refill any free FIFO slots, then keep CE high so the radio transmits the
+     * queued packets back-to-back. With AutoAck off each sent packet is dropped
+     * from the FIFO, so calling this in a tight loop keeps the FIFO ~full and
+     * the carrier busy ~continuously on one channel. */
+    for(uint8_t i = 0; i < 3; i++) {
+        if(nrf24_hw_read_reg(NRF_REG_FIFO_STATUS) & NRF_FIFO_TX_FULL) break;
+        nrf24_flood_write_payload();
+    }
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT);
+    furi_hal_gpio_write(&nrf24_ce, true);
+}
+
+void nrf24_hw_flood_stop(void) {
+    furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_write_reg(NRF_REG_CONFIG, 0x00);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
 }
 
 /* ===== Promiscuous RX ===== */

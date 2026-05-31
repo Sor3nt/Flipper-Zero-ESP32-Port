@@ -2,6 +2,7 @@
 
 #include "desktop.h"
 #include "desktop_settings.h"
+#include "desktop_keybinds.h"
 
 #include "animations/animation_manager.h"
 #include "views/desktop_view_pin_timeout.h"
@@ -11,6 +12,7 @@
 #include "views/desktop_view_lock_menu.h"
 #include "views/desktop_view_debug.h"
 #include "views/desktop_view_slideshow.h"
+#include "views/desktop_view_usb_storage.h"
 
 #include <furi_hal.h>
 #include <gui/gui.h>
@@ -34,6 +36,7 @@ typedef enum {
     DesktopViewIdPinInput,
     DesktopViewIdPinTimeout,
     DesktopViewIdSlideshow,
+    DesktopViewIdUsbStorage,
     DesktopViewIdTotal,
 } DesktopViewId;
 
@@ -58,6 +61,7 @@ struct Desktop {
     DesktopViewPinTimeout* pin_timeout_view;
     DesktopSlideshowView* slideshow_view;
     DesktopViewPinInput* pin_input_view;
+    DesktopUsbStorageView* usb_storage_view;
 
     ViewStack* main_view_stack;
     ViewStack* locked_view_stack;
@@ -87,9 +91,16 @@ struct Desktop {
     bool in_transition;
     bool app_running;
     bool locked;
+
+    FuriPubSub* ascii_events_pubsub;
+    FuriPubSubSubscription* ascii_events_subscription;
+
+    FuriString* archive_dir;
 };
 
-void desktop_lock(Desktop* desktop);
+void desktop_lock(Desktop* desktop, bool with_pin);
 void desktop_unlock(Desktop* desktop);
 void desktop_set_dummy_mode_state(Desktop* desktop, bool enabled);
 void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);
+void desktop_launch_archive(Desktop* desktop, const char* open_dir);
+int32_t desktop_shutdown(void* context);

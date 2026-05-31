@@ -4,7 +4,7 @@
 #include "../blocks/decoder.h"
 #include "../blocks/encoder.h"
 #include "../blocks/generic.h"
-#include "../blocks/math.h"
+#include "../blocks/subghz_math.h"
 #include <lib/toolbox/float_tools.h>
 #include <lib/toolbox/stream/stream.h>
 #include <lib/flipper_format/flipper_format_i.h>

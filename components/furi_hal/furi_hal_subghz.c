@@ -453,6 +453,14 @@ bool furi_hal_subghz_get_ext_leds_and_amp(void) {
     return furi_hal_subghz.ext_leds_and_amp;
 }
 
+void furi_hal_subghz_set_extended_range(bool enabled) {
+    (void)enabled;
+}
+
+void furi_hal_subghz_set_bypass_region(bool enabled) {
+    (void)enabled;
+}
+
 const GpioPin* furi_hal_subghz_get_data_gpio(void) {
     return &gpio_cc1101_g0;
 }

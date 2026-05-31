@@ -332,3 +332,12 @@ int32_t dolphin_srv(void* p) {
 
     return 0;
 }
+
+void dolphin_reload_state(Dolphin* dolphin) {
+    furi_check(dolphin);
+
+    DolphinEvent event;
+    event.type = DolphinEventTypeReloadState;
+
+    dolphin_event_send_wait(dolphin, &event);
+}

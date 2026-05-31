@@ -6,7 +6,7 @@
 #include "../blocks/decoder.h"
 #include "../blocks/encoder.h"
 #include "../blocks/generic.h"
-#include "../blocks/math.h"
+#include "../blocks/subghz_math.h"
 
 // Created by HTotoo 2023-10-30
 // Got a lot of help from LiQuiDz.
