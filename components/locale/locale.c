@@ -1,5 +1,7 @@
 #include "locale.h"
 
+#define TAG "LocaleSrv"
+
 LocaleMeasurementUnits locale_get_measurement_unit(void) {
     return (LocaleMeasurementUnits)furi_hal_rtc_get_locale_units();
 }
@@ -25,11 +27,11 @@ void locale_set_date_format(LocaleDateFormat format) {
 }
 
 float locale_fahrenheit_to_celsius(float temp_f) {
-    return (temp_f - 32.0f) / 1.8f;
+    return (temp_f - 32.f) / 1.8f;
 }
 
 float locale_celsius_to_fahrenheit(float temp_c) {
-    return temp_c * 1.8f + 32.0f;
+    return temp_c * 1.8f + 32.f;
 }
 
 void locale_format_time(
@@ -61,7 +63,7 @@ void locale_format_time(
     }
 
     if(am_pm > 0) {
-        furi_string_cat_printf(out_str, " %s", (am_pm == 1) ? "AM" : "PM");
+        furi_string_cat_printf(out_str, " %s", (am_pm == 1) ? ("AM") : ("PM"));
     }
 }
 
@@ -104,5 +106,7 @@ void locale_format_date(
     }
 }
 
-void locale_on_system_start(void) {
+int32_t locale_on_system_start(void* p) {
+    UNUSED(p);
+    return 0;
 }

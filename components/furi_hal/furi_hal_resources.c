@@ -6,12 +6,24 @@
 #include "furi_hal_resources.h"
 #include "boards/board.h"
 
-const InputPin input_pins[] = {};
-const size_t input_pins_count = 0;
-
 /* Hardware Button Pins */
 const GpioPin gpio_button_boot  = {.port = NULL, .pin = BOARD_PIN_BUTTON_BOOT};
 const GpioPin gpio_battery_sense = {.port = NULL, .pin = BOARD_PIN_BATTERY_ADC};
+
+#ifdef BOARD_HAS_ENCODER
+/* Rotary Encoder Pins */
+const GpioPin gpio_encoder_a = {.port = NULL, .pin = BOARD_PIN_ENCODER_A};
+const GpioPin gpio_encoder_b = {.port = NULL, .pin = BOARD_PIN_ENCODER_B};
+
+/* T-Embed: BOOT button (GPIO0) = encoder press = InputKeyOk */
+const InputPin input_pins[] = {
+    {.gpio = &gpio_button_boot, .key = InputKeyOk, .inverted = true, .name = "Encoder Button"},
+};
+const size_t input_pins_count = sizeof(input_pins) / sizeof(input_pins[0]);
+#else
+const InputPin input_pins[] = {};
+const size_t input_pins_count = 0;
+#endif
 
 /* LCD Pins */
 const GpioPin gpio_lcd_din = {.port = NULL, .pin = BOARD_PIN_LCD_MOSI};

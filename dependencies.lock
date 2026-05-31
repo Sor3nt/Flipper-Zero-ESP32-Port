@@ -42,7 +42,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.4.1
+    version: 5.4.4
 direct_dependencies:
 - espressif/esp_tinyusb
 - espressif/led_strip

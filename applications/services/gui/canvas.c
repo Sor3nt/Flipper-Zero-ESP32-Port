@@ -5,6 +5,7 @@
 #include <furi_hal.h>
 #include <stdint.h>
 #include <u8g2_glue.h>
+#include <components/momentum/settings.h>
 
 const CanvasFontParameters canvas_font_params[FontTotalNumber] = {
     [FontPrimary] = {.leading_default = 12, .leading_min = 11, .height = 8, .descender = 2},
@@ -142,10 +143,25 @@ const CanvasFontParameters* canvas_get_font_params(const Canvas* canvas, Font fo
 void canvas_clear(Canvas* canvas) {
     furi_check(canvas);
     u8g2_ClearBuffer(&canvas->fb);
+    // Dark mode: fill the buffer so background is "lit" (inverted)
+    if(momentum_settings.dark_mode) {
+        uint8_t* buf = u8g2_GetBufferPtr(&canvas->fb);
+        size_t buf_size = 8 * u8g2_GetBufferTileHeight(&canvas->fb) *
+                          u8g2_GetBufferTileWidth(&canvas->fb);
+        memset(buf, 0xFF, buf_size);
+    }
 }
 
 void canvas_set_color(Canvas* canvas, Color color) {
     furi_check(canvas);
+    // Dark mode: swap Black and White, leave XOR alone
+    if(momentum_settings.dark_mode) {
+        if(color == ColorBlack) {
+            color = ColorWhite;
+        } else if(color == ColorWhite) {
+            color = ColorBlack;
+        }
+    }
     u8g2_SetDrawColor(&canvas->fb, color);
 }
 
@@ -155,6 +171,7 @@ void canvas_set_font_direction(Canvas* canvas, CanvasDirection dir) {
 }
 
 void canvas_invert_color(Canvas* canvas) {
+    // In dark mode, colors are already swapped, so XOR still works correctly
     canvas->fb.draw_color = !canvas->fb.draw_color;
 }
 

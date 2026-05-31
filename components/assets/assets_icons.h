@@ -1,9 +1,19 @@
 #pragma once
 
+#include <stddef.h>
 #include <icon.h>
+
+typedef struct {
+    const Icon* icon;
+    const char* path;
+} IconPath;
+
+extern const IconPath ICON_PATHS[];
+extern const size_t ICON_PATHS_COUNT;
 
 extern const Icon A_Levelup1_128x64;
 extern const Icon A_Levelup2_128x64;
+extern const Icon A_Momentum_14;
 extern const Icon I_125_10px;
 extern const Icon I_Apps_10px;
 extern const Icon I_Nfc_10px;

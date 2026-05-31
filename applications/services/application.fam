@@ -12,5 +12,6 @@ App(
         "loader",
         "power",
         "namechanger_srv",
+        "region",
     ],
 )

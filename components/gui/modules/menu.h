@@ -68,6 +68,14 @@ void menu_reset(Menu* menu);
  */
 void menu_set_selected_item(Menu* menu, uint32_t index);
 
+/** Get current menu item
+ *
+ * @param      menu   Menu instance
+ *
+ * @return     Index of the selected item
+ */
+uint32_t menu_get_selected_item(Menu* menu);
+
 #ifdef __cplusplus
 }
 #endif

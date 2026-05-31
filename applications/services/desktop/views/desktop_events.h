@@ -1,17 +1,18 @@
 #pragma once
 
 typedef enum {
-    DesktopMainEventLock,
+    // Events with _ are unused in firmware, kept for compatibility
+    DesktopMainEventLockWithPin,
     DesktopMainEventOpenLockMenu,
     DesktopMainEventOpenArchive,
     DesktopMainEventOpenFavoriteLeftShort,
     DesktopMainEventOpenFavoriteLeftLong,
     DesktopMainEventOpenFavoriteRightShort,
     DesktopMainEventOpenFavoriteRightLong,
-    DesktopMainEventOpenFavoriteOkLong,
     DesktopMainEventOpenMenu,
     DesktopMainEventOpenDebug,
     DesktopMainEventOpenPowerOff,
+    DesktopMainEventOpenFavoriteOkLong,
 
     DesktopDummyEventOpenLeft,
     DesktopDummyEventOpenDown,
@@ -25,7 +26,8 @@ typedef enum {
     DesktopLockedEventUnlocked,
     DesktopLockedEventUpdate,
     DesktopLockedEventShowPinInput,
-    DesktopLockedEventDoorsClosed,
+    DesktopLockedEventCoversClosed,
+    DesktopLockedEventDoorsClosed = DesktopLockedEventCoversClosed,
 
     DesktopPinInputEventResetWrongPinLabel,
     DesktopPinInputEventUnlocked,
@@ -34,14 +36,21 @@ typedef enum {
 
     DesktopPinTimeoutExit,
 
-    DesktopDebugEventToggleDebugMode,
+    DesktopDebugEventDeed,
+    DesktopDebugEventWrongDeed,
+    DesktopDebugEventSaveState,
     DesktopDebugEventExit,
+    DesktopDebugEventToggleDebugMode,
 
-    DesktopLockMenuEventSubGhz,
-    DesktopLockMenuEventConnectWifi,
-    DesktopLockMenuEventDisconnectWifi,
-    DesktopLockMenuEventHandshake,
-    DesktopLockMenuEventDeauth,
+    DesktopLockMenuEventLockPinCode,
+    _DesktopLockMenuEventDummyModeOn,
+    _DesktopLockMenuEventDummyModeOff,
+    DesktopLockMenuEventStealthModeOn,
+    DesktopLockMenuEventStealthModeOff,
+    DesktopLockMenuEventQflipperToggle,
+    DesktopLockMenuEventUsbStorage,
+    DesktopLockMenuEventBluetoothToggle,
+    DesktopLockMenuEventBruce,
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
@@ -61,4 +70,14 @@ typedef enum {
     DesktopGlobalApiUnlock,
     DesktopGlobalSaveSettings,
     DesktopGlobalReloadSettings,
+
+    DesktopMainEventLockKeypad,
+    DesktopLockedEventOpenPowerOff,
+    DesktopLockMenuEventSettings,
+    DesktopLockMenuEventLockKeypad,
+    DesktopLockMenuEventLockPinOff,
+    DesktopLockMenuEventMomentum,
+    DesktopLockMenuEventScreenSettings,
+
+    DesktopUsbStorageEventExit,
 } DesktopEvent;

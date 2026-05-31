@@ -1,32 +1,69 @@
 #pragma once
 
 typedef enum {
-    DesktopMainEventLock,
+    // Events with _ are unused, kept for compatibility
+    DesktopMainEventLockWithPin,
     DesktopMainEventOpenLockMenu,
     DesktopMainEventOpenArchive,
-    DesktopMainEventOpenFavoriteLeftShort,
-    DesktopMainEventOpenFavoriteLeftLong,
-    DesktopMainEventOpenFavoriteRightShort,
-    DesktopMainEventOpenFavoriteRightLong,
-    DesktopMainEventOpenFavoriteOkLong,
+    _DesktopMainEventOpenFavoriteLeftShort,
+    _DesktopMainEventOpenFavoriteLeftLong,
+    _DesktopMainEventOpenFavoriteRightShort,
+    _DesktopMainEventOpenFavoriteRightLong,
     DesktopMainEventOpenMenu,
-    DesktopMainEventOpenDebug,
+    _DesktopMainEventOpenDebug,
     DesktopMainEventOpenPowerOff,
 
-    DesktopDummyEventOpenLeft,
-    DesktopDummyEventOpenDown,
-    DesktopDummyEventOpenOk,
-    DesktopDummyEventOpenUpLong,
-    DesktopDummyEventOpenDownLong,
-    DesktopDummyEventOpenLeftLong,
-    DesktopDummyEventOpenRightLong,
-    DesktopDummyEventOpenOkLong,
+    _DesktopDummyEventOpenLeft,
+    _DesktopDummyEventOpenDown,
+    _DesktopDummyEventOpenOk,
+
+    DesktopLockedEventUnlocked,
+    DesktopLockedEventUpdate,
+    DesktopLockedEventShowPinInput,
+    DesktopLockedEventCoversClosed,
+
+    DesktopPinInputEventResetWrongPinLabel,
+    DesktopPinInputEventUnlocked,
+    DesktopPinInputEventUnlockFailed,
+    DesktopPinInputEventBack,
+
+    DesktopPinTimeoutExit,
+
+    _DesktopDebugEventDeed,
+    _DesktopDebugEventWrongDeed,
+    _DesktopDebugEventSaveState,
+    _DesktopDebugEventExit,
+
+    DesktopLockMenuEventLockPinCode,
+    _DesktopLockMenuEventDummyModeOn,
+    _DesktopLockMenuEventDummyModeOff,
+    DesktopLockMenuEventStealthModeOn,
+    DesktopLockMenuEventStealthModeOff,
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
     DesktopAnimationEventInteractAnimation,
 
+    DesktopSlideshowCompleted,
+    DesktopSlideshowPoweroff,
+
+    DesktopHwMismatchExit,
+
+    DesktopEnclaveExit,
+
     // Global events
     DesktopGlobalBeforeAppStarted,
     DesktopGlobalAfterAppFinished,
+    DesktopGlobalAutoLock,
+    DesktopGlobalApiUnlock,
+    DesktopGlobalSaveSettings,
+    DesktopGlobalReloadSettings,
+
+    DesktopMainEventLockKeypad,
+    DesktopLockedEventOpenPowerOff,
+    DesktopLockMenuEventSettings,
+    DesktopLockMenuEventLockKeypad,
+    DesktopLockMenuEventLockPinOff,
+    DesktopLockMenuEventMomentum,
+    DesktopLockMenuEventScreenSettings,
 } DesktopEvent;

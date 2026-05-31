@@ -41,6 +41,10 @@ void furi_hal_init_early(void) {
 void furi_hal_deinit_early(void) {
 }
 
+bool furi_hal_is_normal_boot(void) {
+    return true;
+}
+
 void furi_hal_init(void) {
     /* NVS is required by WiFi and BLE — init once at boot */
     esp_err_t nvs_err = nvs_flash_init();

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <furi.h>
 #include <furi_hal.h>
+#include <momentum/momentum.h>
 
 #include "views/bubble_animation_view.h"
 #include "views/one_shot_animation_view.h"
@@ -128,7 +129,11 @@ static void animation_manager_start_new_idle(AnimationManager* animation_manager
         bubble_animation->icon_animation.width,
         bubble_animation->icon_animation.height);
     animation_manager->state = AnimationManagerStateIdle;
-    furi_timer_start(animation_manager->idle_animation_timer, bubble_animation->duration * 1000);
+    int32_t duration = (momentum_settings.cycle_anims == 0) ?
+                           (int32_t)(bubble_animation->duration) :
+                           (int32_t)(momentum_settings.cycle_anims);
+    furi_timer_start(
+        animation_manager->idle_animation_timer, (duration > 0) ? (duration * 1000) : 0);
 }
 
 static void animation_manager_replace_current_animation(
@@ -202,6 +207,10 @@ static bool animation_manager_is_valid_idle_animation(const StorageAnimation* an
 
     /* BadBattery — skip on ESP32, no battery monitoring */
     if(strcmp(name, "L1_BadBattery_128x47") == 0) return false;
+
+    /* ESP32: dolphin butthurt/level filtering not available,
+     * but respect unlock_anims setting as a no-op for now */
+    UNUSED(momentum_settings.unlock_anims);
 
     return true;
 }
@@ -300,8 +309,12 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
         } else {
             const BubbleAnimation* animation =
                 animation_storage_get_bubble_animation(animation_manager->current_animation);
+            int32_t duration = (momentum_settings.cycle_anims == 0) ?
+                                   (int32_t)(animation->duration) :
+                                   (int32_t)(momentum_settings.cycle_anims);
             furi_timer_start(
-                animation_manager->idle_animation_timer, animation->duration * 1000);
+                animation_manager->idle_animation_timer,
+                (duration > 0) ? (duration * 1000) : 0);
         }
     }
 

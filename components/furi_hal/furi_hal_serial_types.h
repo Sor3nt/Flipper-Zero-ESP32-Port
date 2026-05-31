@@ -54,4 +54,5 @@ typedef enum {
     FuriHalSerialRxEventFrameError = (1 << 2),
     FuriHalSerialRxEventNoiseError = (1 << 3),
     FuriHalSerialRxEventOverrunError = (1 << 4),
+    FuriHalSerialRxEventParityError = (1 << 5),
 } FuriHalSerialRxEvent;

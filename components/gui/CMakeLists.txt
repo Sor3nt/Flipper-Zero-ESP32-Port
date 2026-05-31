@@ -39,7 +39,9 @@ idf_component_register(
         "modules/widget_elements/widget_element_text_box.c"
         "modules/widget_elements/widget_element_text_scroll.c"
     INCLUDE_DIRS "." "modules" "modules/widget_elements"
-    REQUIRES furi furi_hal u8g2 toolbox input notification assets mlib datetime storage
+    REQUIRES furi furi_hal u8g2 toolbox input notification assets mlib datetime storage locale
 )
+
+target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE ESP32_HAS_STORAGE=1)

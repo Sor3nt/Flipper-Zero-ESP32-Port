@@ -6,6 +6,7 @@
 
 #include <locale/locale.h>
 #include <storage/storage.h>
+#include <momentum/settings.h>
 
 #include <assets_icons.h>
 
@@ -13,6 +14,7 @@
 #include "scenes/desktop_scene_locked.h"
 
 #include "furi_hal_power.h"
+#include <power/power_service/power.h>
 
 #define TAG "Desktop"
 
@@ -100,7 +102,7 @@ static void desktop_clock_draw_callback(Canvas* canvas, void* context) {
             hour -= 12;
         }
         if(hour == 0) {
-            hour = 12;
+            hour = momentum_settings.midnight_format_00 ? 0 : 12;
         }
     }
 
@@ -151,7 +153,7 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
                 return (0);
             }
 
-            desktop_lock(desktop);
+            desktop_lock(desktop, desktop->settings.auto_lock_with_pin);
         }
     } else if(event == DesktopGlobalSaveSettings) {
         desktop_settings_save(&desktop->settings);
@@ -260,6 +262,7 @@ static void desktop_init_settings(Desktop* desktop) {
     }
 
     desktop_settings_load(&desktop->settings);
+    desktop_keybinds_migrate(desktop);
     desktop_apply_settings(desktop);
 }
 
@@ -386,6 +389,8 @@ static Desktop* desktop_alloc(void) {
 
     furi_record_create(RECORD_DESKTOP, desktop);
 
+    desktop->archive_dir = furi_string_alloc();
+
     return desktop;
 }
 
@@ -393,10 +398,16 @@ static Desktop* desktop_alloc(void) {
  * Private API
  */
 
-void desktop_lock(Desktop* desktop) {
+void desktop_lock(Desktop* desktop, bool with_pin) {
     furi_assert(!desktop->locked);
 
-    furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    with_pin = with_pin && desktop_pin_code_is_set();
+    if(with_pin) {
+        furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    } else {
+        furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+        furi_hal_rtc_set_pin_fails(0);
+    }
 
     if(desktop_pin_code_is_set()) {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
@@ -460,6 +471,23 @@ void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled) {
     desktop->in_transition = false;
 }
 
+int32_t desktop_shutdown(void* context) {
+    UNUSED(context);
+    Power* power = furi_record_open(RECORD_POWER);
+    power_off(power);
+    furi_record_close(RECORD_POWER);
+    return 0;
+}
+
+void desktop_launch_archive(Desktop* desktop, const char* open_dir) {
+    if(open_dir) {
+        furi_string_set(desktop->archive_dir, open_dir);
+    } else {
+        furi_string_reset(desktop->archive_dir);
+    }
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopMainEventOpenArchive);
+}
+
 /*
  *  Public API
  */
@@ -520,7 +548,7 @@ int32_t desktop_srv(void* p) {
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 
     if(desktop_pin_code_is_set()) {
-        desktop_lock(desktop);
+        desktop_lock(desktop, true);
     } else {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_enable(cli_vcp);

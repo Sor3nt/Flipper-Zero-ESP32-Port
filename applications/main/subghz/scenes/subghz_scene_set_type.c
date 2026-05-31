@@ -2,7 +2,7 @@
 #include "../helpers/subghz_txrx_create_protocol_key.h"
 #include "../helpers/subghz_gen_info.h"
 #include "subghz_scene_start.h"
-#include <lib/subghz/blocks/math.h>
+#include <lib/subghz/blocks/subghz_math.h>
 
 #define TAG "SubGhzSetType"
 

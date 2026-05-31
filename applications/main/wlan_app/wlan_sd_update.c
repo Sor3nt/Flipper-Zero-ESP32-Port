@@ -20,6 +20,9 @@
 #define SD_UPDATE_MAX_MANIFEST (4u * 1024u * 1024u)
 #define SD_UPDATE_CHUNK 8192
 #define SD_UPDATE_LOCAL_MANIFEST "/ext/files.txt"
+// Anzahl Versuche pro Datei bei Read-Timeout/Verbindungsabbruch. Jeder Retry
+// setzt per HTTP-Range an der bereits geschriebenen Byte-Position fort.
+#define SD_UPDATE_MAX_RETRY 4
 
 static void* sd_malloc(size_t n) {
     void* p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
@@ -69,7 +72,7 @@ static void sd_update_trim(char* s) {
 static void sd_update_http_cfg(esp_http_client_config_t* cfg, const char* url) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->url = url;
-    cfg->timeout_ms = 20000;
+    cfg->timeout_ms = 40000;
     cfg->transport_type = HTTP_TRANSPORT_OVER_SSL;
     // SSL-Verifikation deaktiviert (kein CA gesetzt; benötigt
     // CONFIG_ESP_TLS_INSECURE / SKIP_SERVER_CERT_VERIFY).
@@ -209,14 +212,32 @@ static void sd_update_mkdirs(Storage* storage, const char* path) {
     }
 }
 
-// Lädt eine Einzeldatei über den (wiederverwendeten) Client nach dest.
-static bool sd_update_download_file(
+// Ein einzelner Download-Versuch über den (wiederverwendeten) Client.
+//   *resume_from: bereits lokal vorhandene Bytes; wird per HTTP-Range
+//                 fortgesetzt und auf den neuen Stand mitgeführt.
+//   *complete:    true, wenn der Stream vollständig bis zum Ende gelesen wurde.
+// Rückgabe true nur bei vollständigem Empfang; bei Read-Timeout/Abbruch false,
+// wobei *resume_from den letzten geschriebenen Stand behält (für den Retry).
+static bool sd_update_download_attempt(
     WlanSdUpdate* u,
     esp_http_client_handle_t client,
     Storage* storage,
     const char* url,
-    const char* dest) {
+    const char* dest,
+    uint32_t* resume_from,
+    bool* complete) {
+    *complete = false;
     if(esp_http_client_set_url(client, url) != ESP_OK) return false;
+
+    if(*resume_from > 0) {
+        char range[48];
+        snprintf(range, sizeof(range), "bytes=%lu-", (unsigned long)*resume_from);
+        esp_http_client_set_header(client, "Range", range);
+    } else {
+        // Stale Range-Header vom vorherigen Versuch am Reuse-Client entfernen.
+        esp_http_client_delete_header(client, "Range");
+    }
+
     if(esp_http_client_open(client, 0) != ESP_OK) return false;
 
     bool ok = false;
@@ -225,33 +246,48 @@ static bool sd_update_download_file(
 
     do {
         esp_http_client_fetch_headers(client);
-        if(esp_http_client_get_status_code(client) != 200) break;
+        int status = esp_http_client_get_status_code(client);
+        // 206 = Server akzeptiert Range (Resume). 200 = voller Inhalt — auch
+        // wenn wir Range gefordert haben (Server ignoriert es) → von vorn.
+        bool resumed = (status == 206);
+        if(status != 200 && status != 206) break;
+        if(*resume_from > 0 && !resumed) *resume_from = 0;
 
-        sd_update_mkdirs(storage, dest);
         f = storage_file_alloc(storage);
-        if(!storage_file_open(f, dest, FSAM_WRITE, FSOM_CREATE_ALWAYS)) break;
+        if(resumed && *resume_from > 0) {
+            if(!storage_file_open(f, dest, FSAM_WRITE, FSOM_OPEN_EXISTING)) break;
+            if(!storage_file_seek(f, *resume_from, true)) break;
+        } else {
+            if(!storage_file_open(f, dest, FSAM_WRITE, FSOM_CREATE_ALWAYS)) break;
+        }
 
         chunk = malloc(SD_UPDATE_CHUNK);
         if(!chunk) break;
 
         ok = true;
         uint32_t t0 = furi_get_tick();
-        uint32_t total = 0;
+        uint32_t total = *resume_from; // gesamt (für Resume-Offset)
+        uint32_t session = 0;          // nur dieser Versuch (für Speed)
         while(!u->cancel) {
             int r = esp_http_client_read(client, (char*)chunk, SD_UPDATE_CHUNK);
             if(r < 0) {
-                ok = false;
+                ok = false; // Timeout/Reset → Versuch gescheitert, Retry folgt
                 break;
             }
-            if(r == 0) break;
+            if(r == 0) {
+                *complete = esp_http_client_is_complete_data_received(client);
+                break;
+            }
             if(storage_file_write(f, chunk, (size_t)r) != (size_t)r) {
                 ok = false;
                 break;
             }
             total += (uint32_t)r;
+            session += (uint32_t)r;
+            *resume_from = total;
             uint32_t dt = furi_get_tick() - t0;
             if(dt >= 200) {
-                u->speed_kbps = (uint32_t)((uint64_t)total * 1000u / 1024u / dt);
+                u->speed_kbps = (uint32_t)((uint64_t)session * 1000u / 1024u / dt);
             }
         }
         if(u->cancel) ok = false;
@@ -263,7 +299,42 @@ static bool sd_update_download_file(
         storage_file_free(f);
     }
     esp_http_client_close(client);
-    return ok;
+
+    return ok && *complete;
+}
+
+// Lädt eine Einzeldatei nach dest, mit bis zu SD_UPDATE_MAX_RETRY Versuchen.
+// Bei Read-Timeout/Verbindungsabbruch wird per HTTP-Range an der bereits
+// geschriebenen Position fortgesetzt (kein kompletter Neu-Download).
+static bool sd_update_download_file(
+    WlanSdUpdate* u,
+    esp_http_client_handle_t client,
+    Storage* storage,
+    const char* url,
+    const char* dest) {
+    sd_update_mkdirs(storage, dest);
+
+    uint32_t resume_from = 0;
+    bool complete = false;
+
+    for(int attempt = 0; attempt < SD_UPDATE_MAX_RETRY && !u->cancel; attempt++) {
+        if(attempt > 0) {
+            FURI_LOG_W(
+                SD_UPDATE_TAG,
+                "retry %d/%d %s @ %lu",
+                attempt,
+                SD_UPDATE_MAX_RETRY - 1,
+                dest,
+                (unsigned long)resume_from);
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        if(sd_update_download_attempt(
+               u, client, storage, url, dest, &resume_from, &complete)) {
+            return true;
+        }
+        if(u->cancel) return false;
+    }
+    return false;
 }
 
 // Path-Traversal-Schutz; baut /ext/<rel>.
