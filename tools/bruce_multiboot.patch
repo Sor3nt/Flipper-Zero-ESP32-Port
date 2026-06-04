@@ -1,34 +1,33 @@
 diff --git a/src/core/main_menu.cpp b/src/core/main_menu.cpp
-index 4dcbbda..faa88a2 100644
+index 0608542e..37099e0e 100644
 --- a/src/core/main_menu.cpp
 +++ b/src/core/main_menu.cpp
-@@ -32,6 +32,7 @@ MainMenu::MainMenu() {
-         &connectMenu,
- #endif
+@@ -28,6 +28,7 @@ MainMenu::MainMenu() {
+         &clockMenu,
+         &othersMenu,
          &configMenu,
 +        &flipperOsMenu, // multi-boot add-on (patchBruce.py)
      };
  
      _totalItems = _menuItems.size();
 diff --git a/src/core/main_menu.h b/src/core/main_menu.h
-index ce28f98..7a5d66e 100644
+index 705e967c..7d3d84eb 100644
 --- a/src/core/main_menu.h
 +++ b/src/core/main_menu.h
-@@ -20,9 +20,11 @@
+@@ -19,8 +19,10 @@
+ #include "menu_items/RFMenu.h"
  #include "menu_items/ScriptsMenu.h"
  #include "menu_items/WifiMenu.h"
- #include "menu_items/AppsMenu.h"
 +#include "menu_items/FlipperOsMenu.h" // multi-boot add-on (patchBruce.py)
  class MainMenu {
  public:
-     AppsMenu appsMenu;
 +    FlipperOsMenu flipperOsMenu; // multi-boot add-on (patchBruce.py)
      FileMenu fileMenu;
      BleMenu bleMenu;
      ClockMenu clockMenu;
 diff --git a/src/core/menu_items/FlipperOsMenu.cpp b/src/core/menu_items/FlipperOsMenu.cpp
 new file mode 100644
-index 0000000..8ac06cf
+index 00000000..8ac06cfd
 --- /dev/null
 +++ b/src/core/menu_items/FlipperOsMenu.cpp
 @@ -0,0 +1,53 @@
@@ -87,7 +86,7 @@ index 0000000..8ac06cf
 +}
 diff --git a/src/core/menu_items/FlipperOsMenu.h b/src/core/menu_items/FlipperOsMenu.h
 new file mode 100644
-index 0000000..f98b543
+index 00000000..f98b5430
 --- /dev/null
 +++ b/src/core/menu_items/FlipperOsMenu.h
 @@ -0,0 +1,21 @@
