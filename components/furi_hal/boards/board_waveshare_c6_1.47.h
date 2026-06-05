@@ -36,7 +36,14 @@
 #define BOARD_LCD_SWAP_XY       true
 #define BOARD_LCD_MIRROR_X      false
 #define BOARD_LCD_MIRROR_Y      false
-#define BOARD_LCD_INVERT_COLOR  true
+/* JD9853 (not a real ST7789): its INVON/INVOFF polarity is inverted vs the
+ * ST7789, so unlike the 1.9 this panel needs INVERT_COLOR=false to show the
+ * UI right (otherwise black text renders white and the orange bg goes red). */
+#define BOARD_LCD_INVERT_COLOR  false
+/* JD9853 also uses BGR sub-pixel order, so R and B are swapped vs the ST7789
+ * (orange bg would otherwise render blue). Switches MADCTL to BGR in the
+ * panel config (see furi_hal_display.c). */
+#define BOARD_LCD_COLOR_ORDER_BGR 1
 #define BOARD_LCD_GAP_X         0
 #define BOARD_LCD_GAP_Y         34
 #define BOARD_LCD_BL_ACTIVE_LOW false   /* Backlight is active-high (direct drive) */
