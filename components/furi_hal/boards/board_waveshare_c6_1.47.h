@@ -49,14 +49,17 @@
 #define BOARD_PIN_SD_CS         4
 #define BOARD_PIN_SD_MISO       3
 
-/* ---- Touch Controller (CST816S via I2C, shared bus with QMI8658 IMU) ---- */
+/* ---- Touch Controller (AXS5106L via I2C, shared bus with QMI8658 IMU) ----
+ * NOTE: this board uses an AXS5106L @ 0x63, NOT the CST816S @ 0x15 of the 1.9.
+ * BOARD_TOUCH_AXS5106L switches furi_hal_touch.c to the AXS5106L protocol. */
+#define BOARD_TOUCH_AXS5106L    1
 #define BOARD_PIN_TOUCH_SCL     19
 #define BOARD_PIN_TOUCH_SDA     18
 #define BOARD_PIN_TOUCH_RST     20
 #define BOARD_PIN_TOUCH_INT     21
-#define BOARD_TOUCH_I2C_ADDR    0x15
+#define BOARD_TOUCH_I2C_ADDR    0x63
 #define BOARD_TOUCH_I2C_PORT    I2C_NUM_0
-#define BOARD_TOUCH_I2C_FREQ_HZ 200000
+#define BOARD_TOUCH_I2C_FREQ_HZ 400000
 #define BOARD_TOUCH_I2C_TIMEOUT 1000    /* ticks */
 
 /* ---- IMU (QMI8658 via I2C, shared bus with touch) ---- */
@@ -86,3 +89,8 @@
 #define BOARD_HAS_RFID          0
 #define BOARD_HAS_NFC           0
 #define BOARD_HAS_SUBGHZ        0
+
+/* ---- Power Management (no fuel gauge / charger present on this board) ---- */
+#define BQ27220_ADDR                    0x55
+#define BQ25896_CHARGE_LIMIT            1280
+#define FURI_HAL_POWER_VIRTUAL_CAPACITY_MAH (1300U)

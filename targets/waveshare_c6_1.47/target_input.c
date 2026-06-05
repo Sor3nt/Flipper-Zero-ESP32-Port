@@ -1,12 +1,14 @@
 /**
  * @file target_input.c
- * Input driver for Waveshare ESP32-C6-LCD-1.9: CST816S touch + BOOT button
+ * Input driver for Waveshare ESP32-C6-Touch-LCD-1.47: AXS5106L touch + BOOT button
  *
- * Gesture mapping:
- *   SlideUp    -> InputKeyLeft
- *   SlideDown  -> InputKeyRight
- *   SlideLeft  -> InputKeyDown
- *   SlideRight -> InputKeyUp
+ * The AXS5106L reports touch coordinates only (no hardware gestures like the
+ * CST816S on the 1.9), so swipes are derived here from the X/Y travel between
+ * touch-down and touch-up.
+ *
+ * Swipe mapping (calibrated empirically — see input_detect_swipe):
+ *   vertical swipe   -> InputKeyUp / InputKeyDown
+ *   horizontal swipe -> InputKeyLeft / InputKeyRight
  *
  * BOOT button mapping:
  *   Single click -> InputKeyOk
@@ -27,6 +29,12 @@
 #define INPUT_BUTTON_SHORT_PRESS_MAX_MS   300U
 #define INPUT_BUTTON_DOUBLE_CLICK_MS      250U
 
+/* Minimum travel (in touch units) to count as a swipe rather than a tap. */
+#define INPUT_SWIPE_MIN_DELTA             25
+
+/* Set to 1 to printf raw touch coordinates / detected swipes (calibration). */
+#define INPUT_TOUCH_DEBUG 0
+
 typedef struct {
     bool raw_pressed;
     bool debounced_pressed;
@@ -39,7 +47,11 @@ typedef struct {
 
 static InputBootButtonState boot_button;
 static bool touch_interaction_active;
-static bool touch_gesture_sent;
+static bool touch_swipe_sent;
+static uint16_t touch_start_x;
+static uint16_t touch_start_y;
+static uint16_t touch_last_x;
+static uint16_t touch_last_y;
 
 /* --- helpers --- */
 
@@ -59,23 +71,27 @@ static void input_emit_short(FuriPubSub* pubsub, InputKey key, uint32_t sequence
     input_publish(pubsub, key, InputTypeRelease, sequence);
 }
 
-static bool input_map_gesture(TouchGesture gesture, InputKey* key) {
-    switch(gesture) {
-    case TouchGestureSlideUp:
-        *key = InputKeyLeft;
-        return true;
-    case TouchGestureSlideDown:
-        *key = InputKeyRight;
-        return true;
-    case TouchGestureSlideLeft:
-        *key = InputKeyDown;
-        return true;
-    case TouchGestureSlideRight:
-        *key = InputKeyUp;
-        return true;
-    default:
+/* Map a swipe delta (touch-up minus touch-down) to a key. The panel is mounted
+ * rotated 90°, so the AXS5106L axes are swapped relative to the screen:
+ *   touch-X (0..172) runs physically VERTICAL    -> Up/Down
+ *   touch-Y (0..320) runs physically HORIZONTAL  -> Left/Right
+ * Signs calibrated against measured swipes:
+ *   swipe up    -> dx<0 ; swipe down  -> dx>0
+ *   swipe left  -> dy<0 ; swipe right -> dy>0 */
+static bool input_detect_swipe(int16_t dx, int16_t dy, InputKey* key) {
+    int16_t adx = dx < 0 ? (int16_t)-dx : dx;
+    int16_t ady = dy < 0 ? (int16_t)-dy : dy;
+
+    if(adx < INPUT_SWIPE_MIN_DELTA && ady < INPUT_SWIPE_MIN_DELTA) {
         return false;
     }
+
+    if(adx >= ady) {
+        *key = (dx < 0) ? InputKeyUp : InputKeyDown;
+    } else {
+        *key = (dy < 0) ? InputKeyLeft : InputKeyRight;
+    }
+    return true;
 }
 
 static uint32_t input_elapsed_ticks(uint32_t started_at, uint32_t now) {
@@ -214,8 +230,8 @@ void target_input_init(void) {
     input_boot_button_init();
     input_boot_button_init_state(&boot_button);
     touch_interaction_active = false;
-    touch_gesture_sent = false;
-    FURI_LOG_I(TAG, "Touch + BOOT button input initialized");
+    touch_swipe_sent = false;
+    FURI_LOG_I(TAG, "Touch (AXS5106L) + BOOT button input initialized");
 }
 
 void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
@@ -238,21 +254,37 @@ void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
 
     bool touching = (touch.finger_count > 0);
 
-    if(touching && !touch_interaction_active) {
-        touch_interaction_active = true;
-        touch_gesture_sent = false;
-    }
-
-    if(touch_interaction_active && touch.gesture != 0 && !touch_gesture_sent) {
-        InputKey key;
-        if(input_map_gesture(touch.gesture, &key)) {
-            input_emit_short(pubsub, key, ++(*sequence_counter));
-            touch_gesture_sent = true;
+    if(touching) {
+        if(!touch_interaction_active) {
+            /* touch-down: remember the start point */
+            touch_interaction_active = true;
+            touch_swipe_sent = false;
+            touch_start_x = touch.x;
+            touch_start_y = touch.y;
+#if INPUT_TOUCH_DEBUG
+            /* printf goes out over USB-Serial-JTAG here (FURI_LOG doesn't). */
+            printf("[TOUCH] down x=%u y=%u\n", touch.x, touch.y);
+#endif
         }
-    }
-
-    if(touch_interaction_active && !touching) {
+        touch_last_x = touch.x;
+        touch_last_y = touch.y;
+    } else if(touch_interaction_active) {
+        /* touch-up: evaluate the swipe */
         touch_interaction_active = false;
-        touch_gesture_sent = false;
+        int16_t dx = (int16_t)touch_last_x - (int16_t)touch_start_x;
+        int16_t dy = (int16_t)touch_last_y - (int16_t)touch_start_y;
+        InputKey key;
+        bool is_swipe = input_detect_swipe(dx, dy, &key);
+#if INPUT_TOUCH_DEBUG
+        printf(
+            "[TOUCH] up dx=%d dy=%d -> %s\n",
+            dx,
+            dy,
+            is_swipe ? input_get_key_name(key) : "(tap)");
+#endif
+        if(is_swipe && !touch_swipe_sent) {
+            input_emit_short(pubsub, key, ++(*sequence_counter));
+            touch_swipe_sent = true;
+        }
     }
 }
