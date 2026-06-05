@@ -138,6 +138,11 @@ uint8_t furi_hal_bt_extra_beacon_get_data(uint8_t* data);
 bool furi_hal_bt_extra_beacon_start(void);
 bool furi_hal_bt_extra_beacon_stop(void);
 
+/* True if this board has a usable BLE radio. Boards with BOARD_HAS_BLE=0 (BLE
+ * removed to free RAM, e.g. Waveshare C6-1.47) return false, so bt_srv skips
+ * the whole radio-stack init (BT controller + Bluedroid, ~100KB heap). */
+bool furi_hal_bt_is_available(void);
+
 #ifdef __cplusplus
 }
 #endif

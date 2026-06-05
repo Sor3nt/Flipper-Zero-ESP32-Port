@@ -14,6 +14,13 @@ extern "C" {
 #define RECORD_INPUT_EVENTS            "input_events"
 #define INPUT_SEQUENCE_SOURCE_HARDWARE (0u)
 #define INPUT_SEQUENCE_SOURCE_SOFTWARE (1u)
+/* Touch panels (Waveshare). A 2-axis source: it natively distinguishes
+ * horizontal from vertical swipes, so the encoder Up/Down<->Left/Right
+ * remapping in view_dispatcher (meant for the 1-axis T-Embed rotary) must NOT
+ * be applied to it. ViewPort orientation remapping still applies (see
+ * view_port.c), so touch is treated like HARDWARE everywhere except that one
+ * encoder-specific remap. */
+#define INPUT_SEQUENCE_SOURCE_TOUCH    (2u)
 
 /** Input Keys */
 typedef enum {

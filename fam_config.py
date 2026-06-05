@@ -102,6 +102,12 @@ if _board in _boards_without_subghz:
 if _board in _boards_without_nrf24:
     APPS = [a for a in APPS if a != "nrf24"]
 
+# NOTE: cli_vcp and dolphin look like easy RAM wins (~4KB stack each) but both
+# are hard-wired into the desktop service: desktop.c calls cli_vcp_enable/disable
+# directly (USB-Storage/qFlipper toggles) and lists "dolphin" in its `requires`
+# while opening RECORD_DOLPHIN. Dropping either breaks the link / hangs the UI,
+# so they stay. The real RAM wins are BLE-off (~68KB) + smaller WiFi buffers.
+
 # qFlipper, USB-Storage and "Switch to Bruce" are no longer standalone apps —
 # they live in the desktop lock menu (applications/services/desktop). The menu
 # gates them itself: qFlipper / USB-Storage behind a compile-time USB-OTG check
