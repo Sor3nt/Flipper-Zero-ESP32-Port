@@ -35,6 +35,12 @@ const uint8_t* nrf24_jam_preset_channels(Nrf24JamPreset preset, size_t* count);
  * Handles Full (sequential sweep), Drone (random hop) and list-based presets. */
 uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index);
 
+/* Fill out[] with the full channel set for this preset and return the count.
+ * Full and Drone expand to all channels 0..124; list presets copy their list.
+ * Used by the jam worker (which then optionally Fisher-Yates shuffles a copy)
+ * and by the status view's band visualisation. cap caps the written count. */
+size_t nrf24_jam_preset_fill_channels(Nrf24JamPreset preset, uint8_t* out, size_t cap);
+
 /* Sensible default per-channel dwell time in microseconds. Presets with few
  * channels (BLE-Adv, RC, ...) get a long dwell — coverage is cheap, so a clean
  * strong carrier per channel wins. Presets spanning many channels (Full, BT)

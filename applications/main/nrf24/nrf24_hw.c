@@ -134,7 +134,20 @@ uint8_t nrf24_hw_listen_rpd(uint8_t channel) {
     return nrf24_hw_read_reg(NRF_REG_RPD) & 0x01;
 }
 
-void nrf24_hw_jammer_start(uint8_t channel) {
+/* Build an RF_SETUP byte for the given data rate (0=1M, 1=2M, 2=250k), PA level
+ * (0..3 = MIN/LOW/HIGH/MAX) and optional continuous-wave + PLL-lock bits. */
+static uint8_t nrf24_rf_setup_byte(uint8_t data_rate, uint8_t pa_level, bool cont_wave) {
+    uint8_t v = (uint8_t)((pa_level & 0x03) << 1); /* RF_PWR (bits 2:1) */
+    if(data_rate == 1) {
+        v |= 0x08; /* RF_DR_HIGH → 2 Mbps */
+    } else if(data_rate == 2) {
+        v |= 0x20; /* RF_DR_LOW → 250 kbps */
+    } /* data_rate == 0 → 1 Mbps: neither DR bit set */
+    if(cont_wave) v |= 0x80 | 0x10; /* CONT_WAVE | PLL_LOCK */
+    return v;
+}
+
+void nrf24_hw_jammer_start_ex(uint8_t channel, uint8_t pa_level) {
     /* Standby / CE low */
     furi_hal_gpio_write(&nrf24_ce, false);
 
@@ -143,8 +156,8 @@ void nrf24_hw_jammer_start(uint8_t channel) {
     nrf24_hw_write_reg(NRF_REG_CONFIG, NRF_CONFIG_PWR_UP);
     esp_rom_delay_us(5000);
 
-    /* Continuous carrier @ 2 Mbps, PA max, PLL locked */
-    nrf24_hw_write_reg(NRF_REG_RF_SETUP, NRF_RF_SETUP_JAMMER);
+    /* Continuous carrier @ 2 Mbps, configurable PA, PLL locked */
+    nrf24_hw_write_reg(NRF_REG_RF_SETUP, nrf24_rf_setup_byte(1, pa_level, true));
 
     /* The nRF24L01+ (P variant) only radiates the CONT_WAVE carrier while it is
      * actually transmitting, so we load a dummy payload and keep re-sending it
@@ -176,6 +189,10 @@ void nrf24_hw_jammer_start(uint8_t channel) {
     nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_MAX_RT);
     nrf24_hw_cmd(NRF_CMD_REUSE_TX_PL);
     furi_hal_gpio_write(&nrf24_ce, true);
+}
+
+void nrf24_hw_jammer_start(uint8_t channel) {
+    nrf24_hw_jammer_start_ex(channel, 3 /* PA max */);
 }
 
 void nrf24_hw_jammer_set_channel(uint8_t channel) {
@@ -218,7 +235,46 @@ static void nrf24_flood_write_payload(void) {
     furi_hal_spi_bus_tx(&furi_hal_spi_bus_handle_nrf24, tx, sizeof(tx), 100);
 }
 
-void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
+/* Bruce's 32-byte garbage base, XORed by the LFSR seed for the turbo pattern. */
+static const uint8_t nrf24_flood_base[32] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
+                                             0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE,
+                                             0xFF, 0x00, 0xFF, 0x00, 0xA5, 0x5A, 0xA5, 0x5A,
+                                             0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
+
+/* Fill a 32-byte payload for a turbo phase:
+ *   0 = LFSR-XOR varied base (broadband, defeats fixed CRC filters)
+ *   1 = all 0xFF        (max RF energy per bit at 2 Mbps)
+ *   2 = 0x55 / 0xAA     (max bit transitions)
+ * Phase 0 advances a persistent 8-bit xorshift seed, mirroring Bruce. */
+static void nrf24_flood_fill_phase(uint8_t* buf, uint8_t phase) {
+    static uint8_t xor_seed = 0xA5;
+    switch(phase) {
+    case 1:
+        memset(buf, 0xFF, 32);
+        break;
+    case 2:
+        for(uint8_t i = 0; i < 32; i++) {
+            buf[i] = (i & 1) ? 0xAA : 0x55;
+        }
+        break;
+    default:
+        for(uint8_t i = 0; i < 32; i++) {
+            xor_seed ^= (uint8_t)(xor_seed << 5);
+            xor_seed ^= (uint8_t)(xor_seed >> 3);
+            buf[i] = nrf24_flood_base[i] ^ xor_seed;
+        }
+        break;
+    }
+}
+
+static void nrf24_flood_write_payload_phase(uint8_t phase) {
+    uint8_t tx[1 + 32];
+    tx[0] = NRF_CMD_W_TX_PAYLOAD;
+    nrf24_flood_fill_phase(&tx[1], phase);
+    furi_hal_spi_bus_tx(&furi_hal_spi_bus_handle_nrf24, tx, sizeof(tx), 100);
+}
+
+void nrf24_hw_flood_start_ex(uint8_t channel, uint8_t data_rate, uint8_t pa_level) {
     furi_hal_gpio_write(&nrf24_ce, false);
 
     /* TX mode (PRIM_RX=0), CRC off. Wait Tpd2stby on this cold start. */
@@ -229,8 +285,7 @@ void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
     nrf24_hw_write_reg(NRF_REG_SETUP_RETR, 0x00);
     nrf24_hw_write_reg(NRF_REG_SETUP_AW, 0x01); /* 3-byte address */
     nrf24_hw_write_reg(NRF_REG_EN_RXADDR, 0x01);
-    nrf24_hw_write_reg(
-        NRF_REG_RF_SETUP, low_rate ? NRF_RF_SETUP_250K_MAX : NRF_RF_SETUP_2M_MAX);
+    nrf24_hw_write_reg(NRF_REG_RF_SETUP, nrf24_rf_setup_byte(data_rate, pa_level, false));
     nrf24_hw_write_reg(NRF_REG_DYNPD, 0x00);
     nrf24_hw_write_reg(NRF_REG_FEATURE, 0x00);
 
@@ -242,6 +297,11 @@ void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
     nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_RX_DR | NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT);
     nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
     nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
+}
+
+void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
+    /* 0=1M, 1=2M, 2=250k → legacy bool maps to 2 Mbps / 250 kbps. */
+    nrf24_hw_flood_start_ex(channel, low_rate ? 2 : 1, 3 /* PA max */);
 }
 
 void nrf24_hw_flood_channel(uint8_t channel) {
@@ -260,6 +320,43 @@ void nrf24_hw_flood_channel(uint8_t channel) {
      * (~144 µs each at 2 Mbps for a 32-byte payload). */
     furi_hal_gpio_write(&nrf24_ce, true);
     esp_rom_delay_us(500);
+    furi_hal_gpio_write(&nrf24_ce, false);
+}
+
+void nrf24_hw_flood_burst(uint8_t channel, uint8_t burst_count, bool turbo) {
+    if(burst_count < 1) burst_count = 1;
+
+    /* CE low so we can safely retune and prime the FIFO. */
+    furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
+    nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT);
+
+    /* Turbo cycles three spectral patterns (burst_count packets each); plain
+     * flood streams a single random-garbage burst. CE stays HIGH the whole
+     * time, topping up the 3-deep FIFO as it drains so frames go back-to-back. */
+    const uint8_t phase_count = turbo ? 3 : 1;
+    furi_hal_gpio_write(&nrf24_ce, true);
+    for(uint8_t p = 0; p < phase_count; p++) {
+        uint8_t sent = 0;
+        uint16_t guard = 0;
+        while(sent < burst_count && guard++ < 4000) {
+            if(nrf24_hw_read_reg(NRF_REG_FIFO_STATUS) & NRF_FIFO_TX_FULL) {
+                /* FIFO full → let one 32-byte frame drain (~144 µs @ 2 Mbps). */
+                esp_rom_delay_us(60);
+                continue;
+            }
+            if(turbo) {
+                nrf24_flood_write_payload_phase(p);
+            } else {
+                nrf24_flood_write_payload();
+            }
+            sent++;
+        }
+    }
+
+    /* Let the FIFO tail radiate before dropping CE. */
+    esp_rom_delay_us(180);
     furi_hal_gpio_write(&nrf24_ce, false);
 }
 

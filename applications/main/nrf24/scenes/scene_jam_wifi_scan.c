@@ -11,15 +11,6 @@
 static void wifi_scan_submenu_callback(void* context, uint32_t index) {
     Nrf24App* app = context;
     if(index < app->wifi_ap_count) {
-        wifi_ap_record_t* ap = &app->wifi_aps[index];
-        size_t len = strnlen((const char*)ap->ssid, sizeof(ap->ssid));
-        if(len >= sizeof(app->selected_wifi_ssid)) len = sizeof(app->selected_wifi_ssid) - 1;
-        memcpy(app->selected_wifi_ssid, ap->ssid, len);
-        app->selected_wifi_ssid[len] = '\0';
-        if(app->selected_wifi_ssid[0] == '\0') {
-            strncpy(app->selected_wifi_ssid, "<hidden>", sizeof(app->selected_wifi_ssid) - 1);
-        }
-        app->selected_wifi_channel = ap->primary;
         view_dispatcher_send_custom_event(app->view_dispatcher, SCAN_EVENT_PICK + index);
     }
 }
@@ -52,13 +43,11 @@ static void show_results(Nrf24App* app) {
     view_dispatcher_switch_to_view(app->view_dispatcher, Nrf24ViewSubmenu);
 }
 
-void nrf24_app_scene_wifi_scan_on_enter(void* context) {
+void nrf24_app_scene_jam_wifi_scan_on_enter(void* context) {
     Nrf24App* app = context;
 
-    /* Show the "Scanning..." screen first; on the next event-loop tick we kick
-     * off the (blocking) scan via a custom event. esp_wifi_* must be called
-     * from the main view-dispatcher thread because of TLS requirements -- it
-     * crashes from a FuriThread worker. */
+    /* "Scanning..." splash first; kick off the (blocking) scan on the next
+     * event-loop tick. esp_wifi_* must run on the view-dispatcher thread. */
     widget_reset(app->widget);
     widget_add_text_box_element(
         app->widget, 0, 0, 128, 14, AlignCenter, AlignTop, "\e#WiFi Scan\e#", false);
@@ -71,7 +60,7 @@ void nrf24_app_scene_wifi_scan_on_enter(void* context) {
     view_dispatcher_send_custom_event(app->view_dispatcher, SCAN_EVENT_RUN);
 }
 
-bool nrf24_app_scene_wifi_scan_on_event(void* context, SceneManagerEvent event) {
+bool nrf24_app_scene_jam_wifi_scan_on_event(void* context, SceneManagerEvent event) {
     Nrf24App* app = context;
     bool consumed = false;
 
@@ -83,9 +72,12 @@ bool nrf24_app_scene_wifi_scan_on_event(void* context, SceneManagerEvent event) 
             }
             app->wifi_ap_count = 0;
 
-            bool ok = nrf24_wifi_scan(
-                &app->wifi_aps, &app->wifi_ap_count, NRF24_WIFI_SCAN_MAX);
+            bool ok = nrf24_wifi_scan(&app->wifi_aps, &app->wifi_ap_count, NRF24_WIFI_SCAN_MAX);
             if(ok) {
+                /* Cache only on success (even if 0 APs); a failed scan stays
+                 * un-cached so the user can retry it. */
+                app->jam.wifi_scanned = true;
+                app->jam.wifi_index = 0;
                 show_results(app);
             } else {
                 widget_reset(app->widget);
@@ -96,7 +88,9 @@ bool nrf24_app_scene_wifi_scan_on_event(void* context, SceneManagerEvent event) 
             }
             consumed = true;
         } else if(event.event >= SCAN_EVENT_PICK) {
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneWifiJam);
+            app->jam.wifi_index = (uint8_t)(event.event - SCAN_EVENT_PICK);
+            /* Return to the jam engine, which rebuilds channels from this AP. */
+            scene_manager_previous_scene(app->scene_manager);
             consumed = true;
         }
     }
@@ -104,7 +98,7 @@ bool nrf24_app_scene_wifi_scan_on_event(void* context, SceneManagerEvent event) 
     return consumed;
 }
 
-void nrf24_app_scene_wifi_scan_on_exit(void* context) {
+void nrf24_app_scene_jam_wifi_scan_on_exit(void* context) {
     Nrf24App* app = context;
     submenu_reset(app->submenu);
     widget_reset(app->widget);
