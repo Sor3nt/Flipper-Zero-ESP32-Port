@@ -169,3 +169,25 @@ uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index
     (*hop_index)++;
     return ch;
 }
+
+size_t nrf24_jam_preset_fill_channels(Nrf24JamPreset preset, uint8_t* out, size_t cap) {
+    if(out == NULL || cap == 0) return 0;
+
+    size_t count = 0;
+    const uint8_t* list = nrf24_jam_preset_channels(preset, &count);
+
+    if(list == NULL || count == 0) {
+        /* Full / Drone — expand to every channel 0..124. */
+        size_t n = cap < 125 ? cap : 125;
+        for(size_t i = 0; i < n; i++) {
+            out[i] = (uint8_t)i;
+        }
+        return n;
+    }
+
+    if(count > cap) count = cap;
+    for(size_t i = 0; i < count; i++) {
+        out[i] = list[i];
+    }
+    return count;
+}

@@ -6,61 +6,58 @@
 #include <gui/view_dispatcher.h>
 #include <gui/modules/submenu.h>
 #include <gui/modules/widget.h>
+#include <gui/modules/variable_item_list.h>
 #include <dialogs/dialogs.h>
 #include <storage/storage.h>
 #include <esp_wifi.h>
 
 #include "views/nrf24_spectrum_view.h"
-#include "views/nrf24_ch_jammer_view.h"
-#include "views/nrf24_wifi_jam_view.h"
-#include "views/nrf24_smart_jam_view.h"
-#include "views/nrf24_preset_jam_view.h"
+#include "views/nrf24_jam_view.h"
+#include "views/nrf24_scan_view.h"
 #include "views/nrf24_mj_scan_view.h"
 #include "views/nrf24_mj_attack_view.h"
 #include "helpers/nrf24_mj_core.h"
+#include "helpers/nrf24_channel_source.h"
 #include "scenes/scenes.h"
 
 typedef enum {
     Nrf24ViewSubmenu,
     Nrf24ViewWidget,
     Nrf24ViewSpectrum,
-    Nrf24ViewChJammer,
-    Nrf24ViewWifiJam,
-    Nrf24ViewSmartJam,
-    Nrf24ViewPresetJam,
+    Nrf24ViewJam,
+    Nrf24ViewScan,
+    Nrf24ViewJamConfig,
     Nrf24ViewMjScan,
     Nrf24ViewMjAttack,
 } Nrf24View;
 
 #define NRF24_WIFI_SCAN_MAX 24
 
-typedef struct {
+typedef struct Nrf24App {
     Gui* gui;
     SceneManager* scene_manager;
     ViewDispatcher* view_dispatcher;
     Submenu* submenu;
     Widget* widget;
+    VariableItemList* var_item_list;
     DialogsApp* dialogs;
     Storage* storage;
 
     View* spectrum_view;
-    View* ch_jammer_view;
-    View* wifi_jam_view;
-    View* smart_jam_view;
-    View* preset_jam_view;
+    View* jam_view; /* unified jam engine */
+    View* scan_view; /* activity-scan progress */
     View* mj_scan_view;
     View* mj_attack_view;
 
-    /* WiFi scan results — owned by the wifi_scan scene */
+    /* Unified jammer selection / scan-cache state */
+    Nrf24JamState jam;
+
+    /* WiFi scan results — owned by the wifi-scan scene, consumed by the
+     * WiFi channel source. */
     wifi_ap_record_t* wifi_aps;
     uint16_t wifi_ap_count;
-
-    /* Selected AP for the WiFi jammer scene */
     char selected_wifi_ssid[33];
     uint8_t selected_wifi_channel;
-
-    /* Selected protocol preset for the preset jammer scene (Nrf24JamPreset) */
-    uint8_t selected_jam_preset;
 
     /* MouseJacker shared state (owned by the mj scenes) */
     MjTarget mj_targets[MJ_MAX_TARGETS];
