@@ -425,8 +425,14 @@ void furi_hal_power_shutdown(void) {
     gpio_set_level((gpio_num_t)BOARD_PIN_PWR_EN, 0);
 #endif
 
-    /* Keep the held GPIO levels latched across deep sleep. */
+    /* Keep the held GPIO levels latched across deep sleep. Only needed on
+     * targets without per-pin deep-sleep hold (e.g. ESP32-S3): there the
+     * global latch arms the gpio_hold_en() above. Targets that support
+     * single-IO hold in deep sleep (e.g. ESP32-C6) latch per pin already and
+     * don't provide gpio_deep_sleep_hold_en() — matches gpio.h's guard. */
+#if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP && !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     gpio_deep_sleep_hold_en();
+#endif
 
     /* Configure BOOT/encoder button (GPIO0) as wake-up source (active low) */
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
