@@ -87,7 +87,9 @@ _boards_without_wolf3d = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
 if _board in _boards_without_nfc:
     APPS = [a for a in APPS if a != "nfc"]
 
-_boards_without_subghz = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+# waveshare_c6_1.9: external CC1101 module wired up (pins in board_waveshare_c6_1.9.h,
+# BOARD_HAS_SUBGHZ=1) → SubGHz built in. 1.47 has no module → stays excluded.
+_boards_without_subghz = {"waveshare_c6_1.47"}
 
 # NRF24 plugs into the LORA slot (T-Embed CC1101). Boards without the slot
 # don't have the required pin defines.
