@@ -36,6 +36,20 @@
 #define IR_RMT_TX_RESOLUTION_HZ     1000000 /* 1 MHz = 1 us per tick */
 #define IR_RMT_RX_MAX_SYMBOLS       1024
 
+/* When the RX line returns to idle, RMT ends the burst and records the
+ * terminating space as a zero-duration "end marker" — so the long inter-frame
+ * space that trails every burst is never delivered to the decoder. The STM32
+ * capture path delivers that space naturally (when the next burst's leading
+ * edge arrives), and min_split_time protocols (NEC, Samsung, RC5/6, SIRC,
+ * Kaseikyo, RCA, Pioneer) rely on it to finish decoding mid-stream. Without it
+ * they can only complete via the silence timeout — which never fires while a
+ * button is HELD, because the ~110 ms repeat bursts keep restarting it, so a
+ * held remote is never learned. We therefore synthesise the trailing space at
+ * the end of each idle-terminated burst. Its duration must exceed the largest
+ * protocol min_split_time (Pioneer = 26000 us) yet stay below NEC's repeat
+ * pause max (150000 us) and the silence timeout, so 50 ms is a safe choice. */
+#define IR_RX_FRAME_END_SPACE_US 50000
+
 /* ---- State ---- */
 
 typedef enum {
@@ -104,6 +118,9 @@ static bool IRAM_ATTR ir_rmt_rx_done_callback(rmt_channel_handle_t channel,
     (void)channel;
     (void)user_ctx;
 
+    bool last_level_mark = false; /* level of the last edge we delivered */
+    bool any_edge = false;
+
     /* Process received symbols and call capture callback for each edge */
     for(size_t i = 0; i < edata->num_symbols; i++) {
         const rmt_symbol_word_t* sym = &edata->received_symbols[i];
@@ -117,12 +134,28 @@ static bool IRAM_ATTR ir_rmt_rx_done_callback(rmt_channel_handle_t channel,
             ir_rx.capture_callback(
                 ir_rx.capture_context, sym->level0, sym->duration0);
             ir_rx_restart_timeout();
+            last_level_mark = sym->level0;
+            any_edge = true;
         }
         if(sym->duration1 > 0 && ir_rx.capture_callback) {
             ir_rx.capture_callback(
                 ir_rx.capture_context, sym->level1, sym->duration1);
             ir_rx_restart_timeout();
+            last_level_mark = sym->level1;
+            any_edge = true;
         }
+    }
+
+    /* A burst always ends on a Mark (the trailing Space is the idle that
+     * terminated reception, dropped above as a zero-duration end marker).
+     * Deliver that trailing Space synthetically so min_split_time protocols
+     * decode immediately, instead of waiting for a silence timeout that never
+     * arrives while a held remote keeps repeating. See IR_RX_FRAME_END_SPACE_US.
+     * Decoded protocols consume it (the worker resets its timing count, so no
+     * stray raw timing); raw signals just gain a trailing gap. */
+    if(any_edge && last_level_mark && ir_rx.capture_callback) {
+        ir_rx.capture_callback(ir_rx.capture_context, false, IR_RX_FRAME_END_SPACE_US);
+        ir_rx_restart_timeout();
     }
 
     /* Re-start receiving for next burst */
