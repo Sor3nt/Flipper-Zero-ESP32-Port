@@ -92,14 +92,17 @@ static bool hsc_view_input_callback(InputEvent* event, void* context) {
         }
     }
 
-    // Up: Settings öffnen (Soft-Button-Left).
-    if(event->type == InputTypeShort && event->key == InputKeyUp) {
+    // Left: Settings öffnen (Soft-Button "Config" links). Die View läuft im
+    // ViewInputModeLeftRight, daher liefert der T-Embed-Encoder per Drehung
+    // Up→Left (Remap im view_dispatcher); auf Touch kommt ein Links-Swipe
+    // direkt als Left an.
+    if(event->type == InputTypeShort && event->key == InputKeyLeft) {
         view_dispatcher_send_custom_event(vd, WlanAppCustomEventHandshakeSettingsOpen);
         return true;
     }
 
-    // Down: Auto-Deauth toggeln (Soft-Button-Right).
-    if(event->type == InputTypeShort && event->key == InputKeyDown) {
+    // Right: Auto-Deauth toggeln (Soft-Button "Auto" rechts).
+    if(event->type == InputTypeShort && event->key == InputKeyRight) {
         view_dispatcher_send_custom_event(vd, WlanAppCustomEventHandshakeAutoToggle);
         return true;
     }
@@ -112,6 +115,10 @@ View* wlan_handshake_channel_view_alloc(void) {
     view_allocate_model(view, ViewModelTypeLocking, sizeof(WlanHsChannelViewModel));
     view_set_draw_callback(view, hsc_view_draw_callback);
     view_set_input_callback(view, hsc_view_input_callback);
+    // Soft-Buttons "Config" (links) / "Auto" (rechts) werden über Left/Right
+    // bedient. Im LeftRight-Mode remappt der view_dispatcher die Encoder-Drehung
+    // (Up/Down) passend auf Left/Right; Touch liefert Left/Right ohnehin direkt.
+    view_set_input_mode(view, ViewInputModeLeftRight);
     return view;
 }
 

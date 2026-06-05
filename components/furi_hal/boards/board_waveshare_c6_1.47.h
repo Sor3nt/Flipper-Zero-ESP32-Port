@@ -2,8 +2,9 @@
  * @file board_waveshare_c6_1.47.h
  * Board definition: Waveshare ESP32-C6-LCD-1.47
  *
- * Display:  ST7789V2 172x320 RGB565 via SPI
- * Touch:    CST816S via I2C (shared bus with QMI8658 IMU)
+ * Display:  JD9853 172x320 RGB565 via SPI (driven with the ST7789 esp_lcd
+ *           driver; needs INVERT_COLOR=false + BGR colour order, see below)
+ * Touch:    AXS5106L via I2C @ 0x63 (shared bus with QMI8658 IMU)
  * SD Card:  SPI (shared bus with display)
  * IMU:      QMI8658 via I2C (SDA=18, SCL=19, INT1=5, INT2=6)
  */
@@ -18,7 +19,7 @@
 #define BOARD_PIN_BUTTON_BOOT   9   /* BOOT button (active low) */
 #define BOARD_PIN_BATTERY_ADC   0   /* BAT_ADC (VCC / 3) */
 
-/* ---- LCD Pins (ST7789V2 via SPI) ---- */
+/* ---- LCD Pins (JD9853 via SPI) ---- */
 #define BOARD_PIN_LCD_MOSI      2   /* LCD_DIN */
 #define BOARD_PIN_LCD_SCLK      1   /* LCD_CLK */
 #define BOARD_PIN_LCD_DC        15
@@ -86,7 +87,10 @@
 /* ---- Features ---- */
 #define BOARD_HAS_TOUCH         1
 #define BOARD_HAS_SD_CARD       1
-#define BOARD_HAS_BLE           1
+/* BLE disabled on this board: the C6 has no PSRAM and Bluedroid eats ~100KB of
+ * heap, leaving too little for the WiFi driver + apps (wlan OOM-crashed). With
+ * BLE off the radio stack is never started (see furi_hal_bt_is_available). */
+#define BOARD_HAS_BLE           0
 #define BOARD_HAS_IMU           1
 #define BOARD_HAS_RGB_LED       0
 #define BOARD_HAS_VIBRO         0

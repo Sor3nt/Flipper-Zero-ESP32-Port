@@ -1,4 +1,5 @@
 #include "furi_hal_bt.h"
+#include "boards/board.h"
 
 #include <furi.h>
 #include <ble_hid.h>
@@ -80,6 +81,14 @@ static void bt_gap_event_bridge_serial(bool connected, void* context) {
 
 bool furi_hal_bt_start_radio_stack(void) {
     return true;
+}
+
+bool furi_hal_bt_is_available(void) {
+#if defined(BOARD_HAS_BLE) && (BOARD_HAS_BLE == 0)
+    return false;
+#else
+    return true;
+#endif
 }
 
 bool furi_hal_bt_is_gatt_gap_supported(void) {

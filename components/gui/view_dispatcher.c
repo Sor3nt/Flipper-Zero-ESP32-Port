@@ -272,7 +272,12 @@ void view_dispatcher_handle_input(ViewDispatcher* view_dispatcher, InputEvent* e
         view_dispatcher->ongoing_input_view = view_dispatcher->current_view;
     }
 
-    // Remap encoder input based on view's input mode
+    // Remap rotary-encoder input based on view's input mode.
+    // ONLY for HARDWARE (= the T-Embed 1-axis encoder, which physically emits
+    // Up/Down and needs Up/Down<->Left/Right swapping to drive horizontal
+    // button views). Touch panels use INPUT_SEQUENCE_SOURCE_TOUCH and are a
+    // genuine 2-axis source — they already deliver Left/Right natively, so they
+    // must be excluded here or horizontal swipes never reach LeftRight views.
     if(view_dispatcher->current_view &&
        event->sequence_source == INPUT_SEQUENCE_SOURCE_HARDWARE) {
         ViewInputMode mode = view_get_input_mode(view_dispatcher->current_view);

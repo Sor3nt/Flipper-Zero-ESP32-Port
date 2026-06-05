@@ -57,7 +57,7 @@ static uint16_t touch_last_y;
 
 static void input_publish(FuriPubSub* pubsub, InputKey key, InputType type, uint32_t sequence) {
     InputEvent event = {
-        .sequence_source = INPUT_SEQUENCE_SOURCE_HARDWARE,
+        .sequence_source = INPUT_SEQUENCE_SOURCE_TOUCH,
         .sequence_counter = sequence,
         .key = key,
         .type = type,
