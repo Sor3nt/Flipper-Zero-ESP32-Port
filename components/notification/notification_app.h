@@ -44,6 +44,13 @@ typedef struct {
     NotificationLedLayerIndex index;
 } NotificationDisplayLayer;
 
+/* UI Background palette sentinel: an ui_color_index value meaning "use the
+ * user-defined ui_custom_color" (chosen via the color picker). Sits one past
+ * the Spectrum sentinel (UI_COLOR_SPECTRUM_INDEX = 10, defined in notification.c). */
+#define UI_COLOR_CUSTOM_INDEX 11
+/* Color the picker opens with before any custom color has been defined. */
+#define UI_CUSTOM_DEFAULT_RGB 0xFF8000u
+
 typedef struct {
     float display_brightness;
     uint32_t display_off_delay_ms;
@@ -78,6 +85,14 @@ typedef struct {
      * the drawn UI elements: text, icons, borders). Same palette as
      * ui_color_index. Default = Black (preserves stock contrast). */
     uint8_t ui_fg_color_index;
+    /* User-defined custom UI Background color, packed 0x00RRGGBB. Applied when
+     * ui_color_index == UI_COLOR_CUSTOM_INDEX. Picked via the color picker in
+     * the Sound & Display settings ("UI Background" → "Custom"). */
+    uint32_t ui_custom_color;
+    /* True once the user has defined a custom background color at least once.
+     * Controls whether the "#RRGGBB" entry is offered in the UI Background
+     * value cycle (it persists as a selectable preset until replaced). */
+    bool ui_custom_color_set;
 } NotificationSettings;
 
 struct NotificationApp {

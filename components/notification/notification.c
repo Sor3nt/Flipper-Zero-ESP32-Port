@@ -21,7 +21,7 @@
 
 #define NOTIFICATION_SETTINGS_PATH    INT_PATH(".notification.settings")
 #define NOTIFICATION_SETTINGS_MAGIC   0x42
-#define NOTIFICATION_SETTINGS_VERSION 0x09
+#define NOTIFICATION_SETTINGS_VERSION 0x0A
 
 typedef enum {
     NotificationLayerMessage,
@@ -692,8 +692,14 @@ void notification_apply_ui_color(NotificationApp* app) {
     uint8_t bg_idx = app->settings.ui_color_index;
     uint8_t fg_idx = app->settings.ui_fg_color_index;
 
-    /* Push static colors immediately; defer animated ones to the timer. */
-    if(bg_idx < UI_COLOR_SPECTRUM_INDEX) {
+    /* Push static colors immediately; defer animated ones to the timer.
+     * The custom index pulls its color from settings.ui_custom_color (0x00RRGGBB)
+     * instead of the fixed palette. */
+    if(bg_idx == UI_COLOR_CUSTOM_INDEX) {
+        uint32_t c = app->settings.ui_custom_color;
+        furi_hal_display_set_fg_color(
+            ui_color_pack_swap((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF));
+    } else if(bg_idx < UI_COLOR_SPECTRUM_INDEX) {
         furi_hal_display_set_fg_color(ui_color_value[bg_idx]);
     }
     if(fg_idx < UI_COLOR_SPECTRUM_INDEX) {
@@ -742,6 +748,8 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.led_speed_tick_ms = 33; /* Default ~30fps */
     app->settings.ui_color_index = 1; /* Default: Orange (preserves stock Flipper UI) */
     app->settings.ui_fg_color_index = 0; /* Default: Black (preserves stock contrast) */
+    app->settings.ui_custom_color = UI_CUSTOM_DEFAULT_RGB; /* picker start color */
+    app->settings.ui_custom_color_set = false; /* no custom color defined yet */
     app->current_night_shift = 1.0f;
 
     /* Try to load persisted settings (NVS-backed via saved_struct).
