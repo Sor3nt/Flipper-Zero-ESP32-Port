@@ -1,7 +1,6 @@
 /**
  * Mesh-Config: persistente State-Files auf der SD-Karte.
  *
- *   /ext/mesh/mode.txt       "disabled" | "master" | "client"
  *   /ext/mesh/clients.txt    eine Zeile pro gepairtem Client: "AA:BB:CC:DD:EE:FF;Name"
  *   /ext/mesh/master.txt     einzig gepairter Master:        "AA:BB:CC:DD:EE:FF;Name"
  *
@@ -23,20 +22,10 @@ extern "C" {
 #define MESH_MAC_LEN      6
 #define MESH_CLIENTS_MAX  16  // ESP-NOW erlaubt 20 unicast peers — wir bleiben drunter
 
-typedef enum {
-    MeshModeDisabled = 0,
-    MeshModeMaster,
-    MeshModeClient,
-} MeshMode;
-
 typedef struct {
     uint8_t mac[MESH_MAC_LEN];
     char name[MESH_NAME_MAX + 1];
 } MeshPeer;
-
-/* mode.txt — fehlende Datei => MeshModeDisabled. */
-MeshMode mesh_config_load_mode(void);
-void mesh_config_save_mode(MeshMode mode);
 
 /* clients.txt — out_count wird mit der Anzahl gelesener Einträge gesetzt
  * (max MESH_CLIENTS_MAX). Gibt false zurück nur bei harten IO-Fehlern. */

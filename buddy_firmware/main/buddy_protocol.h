@@ -53,11 +53,14 @@ typedef enum {
      * the master on receipt (exact capture time isn't needed for cracking). */
     BuddyWirePcapFrame     = 12, /* buddy  → master : [seq:1][frag_idx:1][frag_cnt:1][data] */
 
-    /* Reliable result delivery: a stored result the buddy keeps re-sending until
-     * the master confirms it with BuddyWireResultAck (then the buddy drops it).
-     * Survives master absence — results stay queued and are pumped whenever the
-     * master is reachable. `id` is a buddy-local handle for ACK matching. */
-    BuddyWireResult        = 13, /* buddy  → master : [id:1][type:1][len:1][data] */
+    /* Reliable result delivery: a stored handshake the buddy keeps re-sending
+     * until the master confirms it with BuddyWireResultAck (then the buddy drops
+     * it + clears NVS). Survives master absence/buddy reboot. `id` is a buddy-local
+     * handle for ACK matching. Fragmented (the payload is bigger than one frame):
+     * the master reassembles frags 0..cnt-1 of one `id` into:
+     *   [type:1][ssid_len:1][ssid][frame_count:1]{ [msg_num:1][len:2 LE][bytes] }
+     * (msg_num 0 = beacon, 1..4 = EAPOL M1..M4) and writes a .pcap from it. */
+    BuddyWireResult        = 13, /* buddy  → master : [id:1][frag_idx:1][frag_cnt:1][chunk] */
     BuddyWireResultAck     = 14, /* master → buddy  : [id:1]                      */
 } BuddyWireType;
 

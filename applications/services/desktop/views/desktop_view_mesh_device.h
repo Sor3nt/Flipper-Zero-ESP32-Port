@@ -4,11 +4,11 @@
  * Layout:
  *   <Buddy name>            Ch:<channel>
  *   ────────────────────────────────────
- *   Identify             <start/stop>
+ *   Identify             ON/OFF
  *   Disconnect
  *
- * Identify ist eine Wert-Zeile (OK → Edit, drehen wechselt start/stop, OK
- * bestätigt → Scene sendet feature start/stop). Disconnect ist eine Action-Zeile.
+ * Identify ist ein einfacher Toggle (OK schaltet direkt start/stop → Scene sendet
+ * feature start/stop). Disconnect ist eine Action-Zeile.
  *
  * Custom-Events (an Scene):
  *   DesktopMeshDeviceEventIdentifyStart — Edit bestätigt mit "start"

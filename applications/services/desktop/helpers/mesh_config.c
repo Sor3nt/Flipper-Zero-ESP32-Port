@@ -7,7 +7,6 @@
 #define TAG "MeshConfig"
 
 #define MESH_DIR     "/ext/mesh"
-#define MESH_MODE    "/ext/mesh/mode.txt"
 #define MESH_CLIENTS "/ext/mesh/clients.txt"
 #define MESH_MASTER  "/ext/mesh/master.txt"
 
@@ -39,50 +38,6 @@ bool mesh_mac_from_str(const char* s, uint8_t out[MESH_MAC_LEN]) {
     }
     for(int i = 0; i < 6; ++i) out[i] = (uint8_t)v[i];
     return true;
-}
-
-/* ───────────────────── mode.txt ───────────────────── */
-
-MeshMode mesh_config_load_mode(void) {
-    MeshMode result = MeshModeDisabled;
-
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    Stream* s = file_stream_alloc(storage);
-
-    if(file_stream_open(s, MESH_MODE, FSAM_READ, FSOM_OPEN_EXISTING)) {
-        FuriString* line = furi_string_alloc();
-        if(stream_read_line(s, line)) {
-            furi_string_trim(line);
-            if(furi_string_equal(line, "master")) {
-                result = MeshModeMaster;
-            } else if(furi_string_equal(line, "client")) {
-                result = MeshModeClient;
-            }
-        }
-        furi_string_free(line);
-    }
-
-    stream_free(s);
-    furi_record_close(RECORD_STORAGE);
-    return result;
-}
-
-void mesh_config_save_mode(MeshMode mode) {
-    const char* text = (mode == MeshModeMaster) ? "master\n" :
-                       (mode == MeshModeClient) ? "client\n" :
-                                                  "disabled\n";
-
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    mesh_config_ensure_dir(storage);
-
-    Stream* s = file_stream_alloc(storage);
-    if(file_stream_open(s, MESH_MODE, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
-        stream_write_cstring(s, text);
-    } else {
-        FURI_LOG_E(TAG, "save_mode: open failed");
-    }
-    stream_free(s);
-    furi_record_close(RECORD_STORAGE);
 }
 
 /* ────────────────── peer-list shared helpers ────────────────── */

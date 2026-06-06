@@ -15,6 +15,7 @@
 #include <esp_netif.h>
 #include <esp_event.h>
 #include <esp_mac.h>
+#include <esp_heap_caps.h>
 
 #define TAG "MeshSvc"
 
@@ -47,11 +48,9 @@ typedef enum {
     MeshWireFeatureStop   = 10, // master → buddy : [id]
     MeshWireFeatureStatus = 11, // buddy  → master: [id][state][len][data]
     MeshWirePcapFrame     = 12, // buddy  → master: [seq][frag_idx][frag_cnt][data]
-    MeshWireResult        = 13, // buddy  → master: [id][type][len][data]  (zuverlässig, ack)
+    MeshWireResult        = 13, // buddy  → master: [id][frag_idx][frag_cnt][chunk] (zuverlässig)
     MeshWireResultAck     = 14, // master → buddy : [id]
 } MeshWireType;
-
-#define MESH_PCAP_HDR 5 /* magic,type,seq,frag_idx,frag_cnt */
 
 /* ─────── command queue ─────── */
 
@@ -90,24 +89,35 @@ static struct {
 
 static const uint8_t BROADCAST_MAC[MESH_MAC_LEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
-/* ─────── pcap-Streaming (Frame-Reassembly aus BuddyWirePcapFrame) ─────── */
-#define MESH_PCAP_FRAME_MAX 512
+/* ─────── Result-Reassembly (zuverlässiger Handshake aus BuddyWireResult) ─────── */
+#define MESH_RESULT_MAX 1400
 
-static MeshPcapSink s_pcap_sink = NULL;
-static void* s_pcap_sink_ctx = NULL;
-static struct {
-    uint8_t buf[MESH_PCAP_FRAME_MAX];
+/* Reassembly-Zustand — nur im WiFi-Task (on_recv_cb) berührt. */
+typedef struct {
+    uint8_t buf[MESH_RESULT_MAX];
     uint16_t len;
-    uint8_t seq;
-    uint8_t next_frag; /* erwarteter frag_idx */
+    uint8_t id;
+    uint8_t next_frag;
     bool active;
-} s_pcap_asm;
+} ResultAsm;
 
-void mesh_set_pcap_sink(MeshPcapSink sink, void* ctx) {
-    s_pcap_sink = sink;
-    s_pcap_sink_ctx = ctx;
-    s_pcap_asm.active = false;
-}
+/* Fertiges Result (Single-Slot) — WiFi-Task schreibt, GUI-Thread liest via
+ * mesh_take_result. Überschreiben-vor-Abholen ist unkritisch: der Buddy sendet
+ * bis zum Ack erneut (self-healing). */
+typedef struct {
+    uint8_t buf[MESH_RESULT_MAX];
+    uint16_t len;
+    uint8_t mac[MESH_MAC_LEN];
+    uint8_t id;
+    bool ready;
+} ResultSlot;
+
+/* Beide Puffer liegen im PSRAM (je 1.4 KB) — sonst würden sie internes DRAM
+ * belegen und die knappe WiFi-Init (esp_wifi_init braucht internes DRAM für die
+ * RX-Buffer) über die Kante kippen. Einmalig lazy in mesh_service_start alloziert. */
+static ResultAsm* s_result_asm = NULL;
+static ResultSlot* s_result = NULL;
+static SemaphoreHandle_t s_result_mtx = NULL;
 
 /* ─────── helpers ─────── */
 
@@ -296,57 +306,54 @@ static void on_recv_cb(const esp_now_recv_info_t* info, const uint8_t* data, int
         if(s_svc.cb) s_svc.cb(&ev, s_svc.cb_ctx);
         return;
     }
-    case MeshWirePcapFrame: {
-        if(s_svc.role != MeshRoleMaster || !s_pcap_sink) return;
-        if(len < MESH_PCAP_HDR) return;
-        uint8_t seq = data[2];
+    case MeshWireResult: {
+        /* Fragmentierter, zuverlässiger Handshake: [id][frag_idx][frag_cnt][chunk].
+         * Reassemblieren; bei Vollständigkeit in den Single-Slot legen + Event. */
+        if(s_svc.role != MeshRoleMaster) return;
+        if(!s_result_asm || !s_result) return; /* PSRAM-Puffer nicht da */
+        if(len < 5) return; /* magic,type,id,frag_idx,frag_cnt */
+        uint8_t id = data[2];
         uint8_t frag_idx = data[3];
         uint8_t frag_cnt = data[4];
-        const uint8_t* chunk = &data[MESH_PCAP_HDR];
-        int chunk_len = len - MESH_PCAP_HDR;
+        const uint8_t* chunk = &data[5];
+        int chunk_len = len - 5;
         if(frag_cnt == 0) return;
 
         if(frag_idx == 0) {
-            /* neuer Frame */
-            s_pcap_asm.active = true;
-            s_pcap_asm.seq = seq;
-            s_pcap_asm.next_frag = 0;
-            s_pcap_asm.len = 0;
+            s_result_asm->active = true;
+            s_result_asm->id = id;
+            s_result_asm->next_frag = 0;
+            s_result_asm->len = 0;
         }
-        /* Fragment muss zur laufenden Reassembly passen, sonst verwerfen. */
-        if(!s_pcap_asm.active || s_pcap_asm.seq != seq || s_pcap_asm.next_frag != frag_idx) {
-            s_pcap_asm.active = false;
+        if(!s_result_asm->active || s_result_asm->id != id || s_result_asm->next_frag != frag_idx) {
+            s_result_asm->active = false;
             return;
         }
-        if(s_pcap_asm.len + chunk_len > MESH_PCAP_FRAME_MAX) {
-            s_pcap_asm.active = false;
+        if(s_result_asm->len + chunk_len > MESH_RESULT_MAX) {
+            s_result_asm->active = false;
             return;
         }
-        memcpy(&s_pcap_asm.buf[s_pcap_asm.len], chunk, chunk_len);
-        s_pcap_asm.len += (uint16_t)chunk_len;
-        s_pcap_asm.next_frag++;
+        memcpy(&s_result_asm->buf[s_result_asm->len], chunk, chunk_len);
+        s_result_asm->len += (uint16_t)chunk_len;
+        s_result_asm->next_frag++;
 
-        if(s_pcap_asm.next_frag >= frag_cnt) {
-            s_pcap_asm.active = false;
-            if(s_pcap_sink) s_pcap_sink(s_pcap_asm.buf, s_pcap_asm.len, s_pcap_sink_ctx);
+        if(s_result_asm->next_frag >= frag_cnt) {
+            s_result_asm->active = false;
+            /* In den Single-Slot übergeben (GUI-Thread holt via mesh_take_result). */
+            if(s_result_mtx) xSemaphoreTake(s_result_mtx, portMAX_DELAY);
+            memcpy(s_result->buf, s_result_asm->buf, s_result_asm->len);
+            s_result->len = s_result_asm->len;
+            memcpy(s_result->mac, src, MESH_MAC_LEN);
+            s_result->id = id;
+            s_result->ready = true;
+            if(s_result_mtx) xSemaphoreGive(s_result_mtx);
+
+            MeshEventData ev = {.type = MeshEventResult};
+            memcpy(ev.mac, src, MESH_MAC_LEN);
+            ev.rx_channel = rxch;
+            ev.result_id = id;
+            if(s_svc.cb) s_svc.cb(&ev, s_svc.cb_ctx);
         }
-        return;
-    }
-    case MeshWireResult: {
-        if(s_svc.role != MeshRoleMaster) return;
-        if(len < 5) return; /* magic,type,id,type,len */
-        MeshEventData ev = {.type = MeshEventResult};
-        memcpy(ev.mac, src, MESH_MAC_LEN);
-        ev.rx_channel = rxch;
-        ev.result_id = data[2];
-        ev.result_type = data[3];
-        uint8_t dlen = data[4];
-        if(dlen > MESH_FEAT_DATA_MAX) dlen = MESH_FEAT_DATA_MAX;
-        if(5 + dlen > len) dlen = (uint8_t)(len - 5);
-        memcpy(ev.feat_data, &data[5], dlen);
-        ev.feat_data[dlen] = '\0';
-        ev.feat_data_len = dlen;
-        if(s_svc.cb) s_svc.cb(&ev, s_svc.cb_ctx);
         return;
     }
     default:
@@ -498,6 +505,19 @@ bool mesh_service_start(MeshRole role, MeshEventCallback cb, void* ctx) {
     s_svc.cmd_q = xQueueCreate(MESH_CMD_QLEN, sizeof(MeshCmd));
     s_svc.ready_sem = xSemaphoreCreateBinary();
     s_svc.done_sem = xSemaphoreCreateBinary();
+    if(!s_result_mtx) s_result_mtx = xSemaphoreCreateMutex();
+    /* Result-Puffer im PSRAM (nicht internes DRAM — sonst NO_MEM bei esp_wifi_init);
+     * Fallback auf internes DRAM für Boards ohne PSRAM. */
+    if(!s_result_asm) {
+        s_result_asm = heap_caps_calloc(1, sizeof(ResultAsm), MALLOC_CAP_SPIRAM);
+        if(!s_result_asm) s_result_asm = calloc(1, sizeof(ResultAsm));
+    }
+    if(!s_result) {
+        s_result = heap_caps_calloc(1, sizeof(ResultSlot), MALLOC_CAP_SPIRAM);
+        if(!s_result) s_result = calloc(1, sizeof(ResultSlot));
+    }
+    if(s_result_asm) s_result_asm->active = false;
+    if(s_result) s_result->ready = false;
     s_svc.active = true;
 
     BaseType_t ok = xTaskCreate(worker_task, "mesh_svc", 4096, NULL, 5, &s_svc.worker);
@@ -624,6 +644,29 @@ bool mesh_send_result_ack(const uint8_t to[MESH_MAC_LEN], uint8_t result_id) {
     if(s_svc.role != MeshRoleMaster) return false;
     uint8_t out[3] = {MESH_MAGIC, MeshWireResultAck, result_id};
     return mesh_enqueue(to, out, sizeof(out));
+}
+
+bool mesh_take_result(
+    uint8_t out_mac[MESH_MAC_LEN],
+    uint8_t* out_id,
+    uint8_t* buf,
+    uint16_t buf_cap,
+    uint16_t* out_len) {
+    if(!s_result_mtx || !s_result) return false;
+    bool got = false;
+    xSemaphoreTake(s_result_mtx, portMAX_DELAY);
+    if(s_result->ready) {
+        uint16_t n = s_result->len;
+        if(n > buf_cap) n = buf_cap;
+        memcpy(buf, s_result->buf, n);
+        if(out_len) *out_len = n;
+        if(out_mac) memcpy(out_mac, s_result->mac, MESH_MAC_LEN);
+        if(out_id) *out_id = s_result->id;
+        s_result->ready = false;
+        got = true;
+    }
+    xSemaphoreGive(s_result_mtx);
+    return got;
 }
 
 void mesh_service_set_channel(uint8_t channel) {

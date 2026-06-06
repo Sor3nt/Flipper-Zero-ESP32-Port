@@ -9,7 +9,7 @@
 #include "buddy_config.h"
 #include "buddy_espnow.h"
 #include "buddy_features.h"
-#include "buddy_results.h"
+#include "buddy_hs_store.h"
 #include "buddy_store.h"
 
 static const char* TAG = "buddy-node";
@@ -191,7 +191,7 @@ void buddy_node_on_frame(const uint8_t src[BUDDY_MAC_LEN], const uint8_t* data, 
         handle_feature_stop(data, len);
         break;
     case BuddyWireResultAck:
-        if(len >= 3) buddy_results_ack(data[2]);
+        if(len >= 3) buddy_hs_store_ack(data[2]);
         break;
     default:
         /* Rsp/Status are buddy→master; nothing to do if echoed back. */
@@ -199,9 +199,9 @@ void buddy_node_on_frame(const uint8_t src[BUDDY_MAC_LEN], const uint8_t* data, 
     }
 
     /* Any frame from the master means it is reachable right now — deliver any
-     * pending results (retained until acked, so this survives master absence). */
-    if(s_master.valid && buddy_results_has_pending()) {
-        buddy_results_pump(s_master.mac);
+     * pending handshakes (retained until acked, so this survives master absence). */
+    if(s_master.valid && buddy_hs_store_has_pending()) {
+        buddy_hs_store_pump(s_master.mac);
     }
 }
 
@@ -230,7 +230,7 @@ bool buddy_node_get_master_mac(uint8_t out[BUDDY_MAC_LEN]) {
 }
 
 void buddy_node_init(void) {
-    buddy_results_init();
+    buddy_hs_store_init();
 
     uint8_t mac[BUDDY_MAC_LEN] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);

@@ -24,10 +24,15 @@ power and an antenna.
 - ✅ Headless auto-accept pairing (configurable), master stored in NVS across
   reboots.
 - ✅ Capability advertisement (bitmask) + a feature framework. Features:
-  `Identify` (id 0) and `Capture HS` (id 2, passive WPA-handshake capture that
-  streams frames to the master).
+  `Identify` (id 0) and `Capture HS` (id 2, passive WPA-handshake capture).
 - ✅ Feature control + reliable result delivery are fully wired on the master
   (Lock-Menu → Mesh → client menu → Device / Wifi).
+- ✅ **Store-and-forward handshakes:** the buddy holds the EAPOL frames (M1..M4)
+  + beacon PER BSSID in a durable store (`buddy_hs_store`, RAM + **NVS**). Each
+  complete handshake (M2 & M3) is delivered as ONE fragmented, ack'd unit
+  (`BuddyWireResult`); the master reassembles it into a `.pcap` and acks — only
+  then is the record dropped. Survives arbitrary master absence AND buddy
+  reboot/power loss.
 
 ## Build & flash
 
@@ -86,14 +91,17 @@ feature id *i* supported).
 | 9 | `FeatureStart` | master → buddy | `[id][arg_len][args]` |
 | 10 | `FeatureStop` | master → buddy | `[id]` |
 | 11 | `FeatureStatus` | buddy → master | `[id][state][len][data]` |
-| 12 | `PcapFrame` | buddy → master | `[seq][frag_idx][frag_cnt][data]` |
-| 13 | `Result` | buddy → master | `[id][type][len][data]` (reliable, ack'd) |
+| 12 | `PcapFrame` | buddy → master | *(reserved/unused — handshakes go via `Result`)* |
+| 13 | `Result` | buddy → master | `[id][frag_idx][frag_cnt][chunk]` (fragmented, reliable) |
 | 14 | `ResultAck` | master → buddy | `[id]` |
 
 Types **1–6 are identical to the master's `MeshWireType`** and must not change.
-Types **7–14 are extensions** the master implements. `Result`/`ResultAck` give
-reliable delivery: the buddy keeps re-sending a queued result (e.g. a captured
-handshake → SSID) until the master acks it, so results survive master absence.
+Types **7–14 are extensions** the master implements. A `Result` reassembles (over
+its fragments of one `id`) into
+`[type:1][ssid_len:1][ssid][frame_count:1]{ [msg_num:1][len:2 LE][bytes] }`
+(msg_num 0 = beacon, 1..4 = EAPOL M1..M4). The buddy keeps re-sending it until the
+master acks (`ResultAck`), so a captured handshake survives master absence and
+buddy reboot (durable store, NVS).
 
 ## Code layout
 
@@ -105,11 +113,11 @@ main/
   buddy_store.[ch]   NVS persistence of the paired master
   buddy_node.[ch]    the brain: pairing state machine + command dispatch
   buddy_features.[ch] feature registry + capability bitmask
-  buddy_results.[ch] reliable result queue (retain until master acks)
+  buddy_hs_store.[ch] durable per-BSSID handshake store (RAM + NVS, retain-until-ack)
   buddy_hs_parser.[ch] 802.11 / EAPOL parsing for handshake capture
   features/
     feat_identify.c    id 0 — blink onboard LED to physically locate the buddy
-    feat_capture_hs.c  id 2 — passive WPA handshake capture, streams to master
+    feat_capture_hs.c  id 2 — passive WPA handshake capture → buddy_hs_store
 ```
 
 ## Adding a feature
@@ -127,7 +135,8 @@ The new capability is then advertised automatically in the bitmask and in the
 
 The T-Embed master drives all of this from the desktop service
 (`applications/services/desktop/`): `mesh_service.c` parses `caps`, sends
-`FeatureQuery`/`Start`/`Stop` + `ResultAck`, reassembles `PcapFrame`s, and the
-mesh scenes (client menu → Device / Wifi → Handshake) expose Identify, Disconnect
-and handshake capture. A captured handshake pops a 3 s "Handshake received"
-overlay (reliable `Result`/`ResultAck`).
+`FeatureQuery`/`Start`/`Stop` + `ResultAck`, and reassembles fragmented `Result`s;
+`mesh_capture.c` writes the `.pcap` (one file per net, `/ext/wifi/buddy_<name>_<ssid>.pcap`).
+The mesh scenes (client menu → Device / Wifi → Handshake) expose Identify,
+Disconnect and handshake capture. A delivered handshake pops a 3 s "Handshake
+received" overlay (reliable `Result`/`ResultAck`).
