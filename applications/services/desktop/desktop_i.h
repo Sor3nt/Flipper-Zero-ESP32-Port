@@ -11,6 +11,7 @@
 #include "views/desktop_view_lock_menu.h"
 #include "views/desktop_view_usb_storage.h"
 #include "views/desktop_view_mesh_clients.h"
+#include "views/desktop_view_mesh_action.h"
 #include "views/desktop_view_debug.h"
 #include "views/desktop_view_slideshow.h"
 #include "helpers/mesh_config.h"
@@ -35,6 +36,7 @@ typedef enum {
     DesktopViewIdLockMenu,
     DesktopViewIdUsbStorage,
     DesktopViewIdMeshClients,
+    DesktopViewIdMeshAction,
     DesktopViewIdMeshPair,
     DesktopViewIdLocked,
     DesktopViewIdDebug,
@@ -63,6 +65,7 @@ struct Desktop {
     DesktopLockMenuView* lock_menu;
     DesktopUsbStorageView* usb_storage_view;
     DesktopMeshClientsView* mesh_clients_view;
+    DesktopMeshActionView* mesh_action_view;
     DesktopDebugView* debug_view;
     DesktopViewLocked* locked_view;
     DesktopMainView* main_view;
@@ -106,6 +109,19 @@ struct Desktop {
      * verarbeitet und ignoriert weitere Requests bis er fertig ist). */
     MeshMode mesh_mode;
     MeshEventData mesh_pending;
+
+    /* Master: gewählter Client für die Action-Scene; handoff-Flag hält den
+     * Mesh-Service beim Wechsel Clients→Action am Leben. Der laufende Status der
+     * Clients wird NICHT hier gecached — er kommt live vom Buddy. */
+    MeshPeer mesh_action_client;
+    bool mesh_keep_service;
+    /* Vorab bekannte Feature-Liste des gewählten Clients (aus der Clients-Scene),
+     * damit die Action-Scene sofort anzeigt statt erneut auf eine Antwort zu
+     * warten. feature_count==0 = nichts bekannt → Action-Scene fragt selbst ab. */
+    MeshFeature mesh_action_features[MESH_FEATURES_MAX];
+    uint8_t mesh_action_feature_count;
+    uint32_t mesh_action_running_mask;
+    uint8_t mesh_action_channel; /* bekannter Kanal des gewählten Buddys (0 = unbekannt) */
 };
 
 void desktop_lock(Desktop* desktop);
