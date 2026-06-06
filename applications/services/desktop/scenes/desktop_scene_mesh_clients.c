@@ -1,8 +1,8 @@
 /**
  * Mesh-Clients-Scene (Master): zeigt gepairte + discovered Clients und treibt
- * Discovery/Pair/Remove. Der Mesh-Service läuft nur während diese Scene aktiv
- * ist — beim Verlassen wird er gestoppt (und ein eventuell aktiver Client-
- * Service-Modus ist hier nicht aktiv, weil mesh_mode==Master).
+ * Discovery/Pair/Remove. Der T-Embed ist immer Master; der Mesh-Service läuft
+ * nur während diese Scene (bzw. die Sub-Scenes) aktiv ist — beim echten
+ * Verlassen wird er gestoppt.
  *
  * Discovery-Timer: alle 30 s ein DiscoverReq via Broadcast. Erste Discovery
  * sofort beim Enter.
@@ -23,13 +23,16 @@
 #include "../views/desktop_view_mesh_clients.h"
 #include "../helpers/mesh_config.h"
 #include "../helpers/mesh_service.h"
-#include "../helpers/mesh_capture.h"
 #include "desktop_scene.h"
 
 #define TAG "DesktopMeshClients"
 
 #define PAIR_TIMEOUT_MS 15000
-#define SWEEP_PERIOD_MS 600 /* pro Kanal beim Discovery-Sweep */
+#define SWEEP_PERIOD_MS 1500 /* Verweildauer pro Kanal beim Discovery-Sweep */
+
+/* Feste Sweep-Reihenfolge (häufige AP-Kanäle 1/11/6 vorn; Kanal 13 ausgelassen). */
+static const uint8_t SWEEP_ORDER[] = {1, 11, 12, 6, 2, 3, 4, 5, 7, 8, 9, 10};
+#define SWEEP_ORDER_LEN (sizeof(SWEEP_ORDER) / sizeof(SWEEP_ORDER[0]))
 
 /* Live-Status eines Clients — NICHT persistent. Quelle ist immer der Buddy
  * (FeatureList.running_mask). Bis er geantwortet hat: reported=false → "wait...".
@@ -66,8 +69,8 @@ static struct {
 
     FuriTimer* sweep_timer; /* rotiert die Kanäle: Discovery + Status-Query je Kanal */
     FuriTimer* pair_timer;
-    uint8_t sweep_ch; /* aktueller Sweep-Kanal (1..13) */
-    uint8_t sweep_next_non1; /* nächster Nicht-ch1-Kanal (2..13) für den Sweep */
+    uint8_t sweep_idx; /* Index in SWEEP_ORDER */
+    uint8_t sweep_ch; /* aktueller Sweep-Kanal */
 
     /* MAC des aktuellen Pair-Requests (für Timeout-Recovery). */
     uint8_t pair_target[MESH_MAC_LEN];
@@ -121,14 +124,12 @@ static void desktop_scene_mesh_clients_refresh_view(Desktop* desktop) {
     }
     s_state.all_count = n;
 
-    /* Status-Label je gepairtem Client kommt live vom Buddy (kein Caching am
-     * Master): bis zur Antwort "wait...", sonst "Idle" / Action-Name. */
     const char* status[MESH_CLIENTS_MAX];
     for(size_t i = 0; i < n; ++i) {
         status[i] = NULL;
         if(s_state.paired[i]) {
             ClientStatus* st = status_ensure(s_state.all[i].mac);
-            status[i] = (st && st->reported) ? st->label : "wait...";
+            status[i] = (st && st->reported) ? st->label : "lookup";
         }
     }
 
@@ -143,17 +144,9 @@ static void query_all_paired(void) {
     }
 }
 
-/* Client-Name aus der Liste per MAC (für pcap-Dateinamen). */
-static const char* client_name_by_mac(const uint8_t mac[MESH_MAC_LEN]) {
-    for(size_t i = 0; i < s_state.all_count; ++i) {
-        if(memcmp(s_state.all[i].mac, mac, MESH_MAC_LEN) == 0) return s_state.all[i].name;
-    }
-    return "buddy";
-}
-
-/* FeatureList → Label aus running_mask + Feature-Namen ableiten. Läuft ein
- * Capture und wir sammeln noch nicht (z.B. nach Master-Reboot), hängen wir uns
- * an, um die Ergebnisse einzusammeln. */
+/* FeatureList → Label aus running_mask + Feature-Namen ableiten. Die Handshake-
+ * Ergebnisse liefert der Buddy autonom + zuverlässig (Result/Ack) — der Master
+ * muss sich um nichts „anhängen". */
 static void status_apply_featurelist(const MeshEventData* ev) {
     ClientStatus* st = status_ensure(ev->mac);
     if(!st) return;
@@ -172,24 +165,15 @@ static void status_apply_featurelist(const MeshEventData* ev) {
     }
     /* Laufendes Feature wählen: Capture bevorzugt, sonst erstes laufendes. */
     const char* chosen = NULL;
-    int cap_feat = -1;
     for(uint8_t i = 0; i < ev->feature_count; ++i) {
         if(!(ev->running_mask & (1u << ev->features[i].id))) continue;
         if(strncmp(ev->features[i].name, "Capture", 7) == 0) {
             chosen = ev->features[i].name;
-            cap_feat = ev->features[i].id;
             break;
         }
         if(!chosen) chosen = ev->features[i].name;
     }
     strlcpy(st->label, chosen ? chosen : "active", sizeof(st->label));
-
-    /* Auto-Resume der pcap-Sammlung für einen bereits laufenden Capture — auf dem
-     * Kanal, auf dem der Buddy gerade gefunden wurde. */
-    if(cap_feat >= 0 && !mesh_capture_is_active()) {
-        mesh_capture_attach(
-            ev->mac, client_name_by_mac(ev->mac), (uint8_t)cap_feat, st->channel);
-    }
 }
 
 static void desktop_scene_mesh_clients_add_discovered(const MeshPeer* p) {
@@ -211,20 +195,10 @@ static void desktop_scene_mesh_clients_add_discovered(const MeshPeer* p) {
 static void sweep_tick(void* ctx) {
     (void)ctx;
     if(s_state.pair_in_progress) return; /* während Pairing nicht weghoppen */
-    /* Beim Einsammeln eines Captures bleibt der Master auf dessen Kanal (NICHT
-     * rotieren), fragt den Buddy dort aber weiter nach Status (sonst "wait..."). */
-    if(mesh_capture_is_active()) {
-        query_all_paired();
-        return;
-    }
-    /* Bias auf ch1 (idle-Buddys sind dort): jeder zweite Tick ch1, dazwischen
-     * der nächste Nicht-ch1-Kanal (für Recovery eines capturenden Buddys). */
-    if(s_state.sweep_ch != 1) {
-        s_state.sweep_ch = 1;
-    } else {
-        s_state.sweep_ch = s_state.sweep_next_non1 ? s_state.sweep_next_non1 : 2;
-        s_state.sweep_next_non1 = (s_state.sweep_ch >= 13) ? 2 : (uint8_t)(s_state.sweep_ch + 1);
-    }
+    /* Feste Reihenfolge (SWEEP_ORDER), lange Verweildauer (SWEEP_PERIOD_MS) je
+     * Kanal, damit der Buddy zuverlässig geantwortet bekommt. */
+    s_state.sweep_ch = SWEEP_ORDER[s_state.sweep_idx];
+    s_state.sweep_idx = (uint8_t)((s_state.sweep_idx + 1) % SWEEP_ORDER_LEN);
     mesh_service_set_channel(s_state.sweep_ch);
     mesh_send_discover();
     query_all_paired();
@@ -265,8 +239,9 @@ void desktop_scene_mesh_clients_on_enter(void* context) {
 
     desktop_scene_mesh_clients_refresh_view(desktop);
 
-    /* Sweep-Timer (rotiert Kanäle: Discovery + Status je Kanal) + Pair-Timeout. */
-    s_state.sweep_ch = 0; /* erster Tick → ch1 */
+    /* Sweep-Timer (rotiert Kanäle in SWEEP_ORDER: Discovery + Status je Kanal) +
+     * Pair-Timeout. */
+    s_state.sweep_idx = 0; /* erster Tick → SWEEP_ORDER[0] (Kanal 1) */
     s_state.sweep_timer = furi_timer_alloc(sweep_tick, FuriTimerTypePeriodic, desktop);
     s_state.pair_timer = furi_timer_alloc(pair_timeout, FuriTimerTypeOnce, desktop);
     furi_timer_start(s_state.sweep_timer, furi_ms_to_ticks(SWEEP_PERIOD_MS));
@@ -345,13 +320,7 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
         if(idx < 0 || (size_t)idx >= s_state.all_count) break;
         if(!s_state.paired[idx]) break;
 
-        /* Laufende Capture-Session dieses Clients beenden. */
-        uint8_t cap_mac[MESH_MAC_LEN];
-        if(mesh_capture_is_active() && mesh_capture_get_mac(cap_mac) &&
-           memcmp(cap_mac, s_state.all[idx].mac, MESH_MAC_LEN) == 0) {
-            mesh_capture_finish();
-        }
-
+        /* Disconnect stoppt beim Buddy alle Features (auch Capture). */
         mesh_send_disconnect(s_state.all[idx].mac);
         mesh_config_remove_client(s_state.all[idx].mac);
         desktop_scene_mesh_clients_refresh_view(desktop);
@@ -428,21 +397,14 @@ void desktop_scene_mesh_clients_on_exit(void* context) {
         s_state.pair_timer = NULL;
     }
 
-    /* Handoff zur Action-Scene: Mesh-Service (und eine laufende Capture-Session)
-     * weiterlaufen lassen — beim Rückkehr-Enter wird der Service idempotent neu
-     * "gestartet" (nur Callback neu gesetzt). */
+    /* Handoff zur Action-Scene/Sub-Scenes: Mesh-Service weiterlaufen lassen — beim
+     * Rückkehr-Enter wird er idempotent neu "gestartet" (nur Callback neu gesetzt). */
     if(desktop->mesh_keep_service) {
         return;
     }
 
-    /* Echtes Verlassen des Mesh-Bereichs: nur die lokale Sammel-Session schließen
-     * (pcap zu) — der Buddy capturet AUTONOM weiter und wird NICHT gestoppt. Beim
-     * Zurückkommen sammelt der Master via Discovery/Auto-Resume wieder ein.
-     * Service stoppen (gibt WiFi frei). */
-    if(mesh_capture_is_active()) mesh_capture_finish();
-
+    /* Echtes Verlassen des Mesh-Bereichs: Service stoppen (gibt WiFi frei). Der
+     * Buddy capturet AUTONOM weiter und hält die Ergebnisse durabel (NVS) — beim
+     * Zurückkommen werden sie zuverlässig nachgeliefert. */
     mesh_service_stop();
-    if(desktop->mesh_mode == MeshModeClient && !desktop->app_running) {
-        mesh_service_start(MeshRoleClient, desktop_mesh_event_cb, desktop);
-    }
 }

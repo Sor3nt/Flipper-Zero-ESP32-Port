@@ -111,12 +111,10 @@ struct Desktop {
     bool app_running;
     bool locked;
 
-    /* Phase-1 Mesh-State. mesh_mode wird beim Boot aus /ext/mesh/mode.txt
-     * geladen und vom Lock-Menü-Toggle aktualisiert. mesh_pending hält die
-     * Daten zum letzten Pair/Disconnect-Event, das der Background-Service ans
-     * Main-Scene-Custom-Event-Handling reicht (single-shot — der Handler
-     * verarbeitet und ignoriert weitere Requests bis er fertig ist). */
-    MeshMode mesh_mode;
+    /* Mesh-State. Der T-Embed ist immer Master (kein Mode mehr). mesh_pending
+     * hält die Daten zum letzten Service-Event, das der Background-Service ans
+     * Custom-Event-Handling reicht (single-shot — der Handler verarbeitet und
+     * ignoriert weitere Requests bis er fertig ist). */
     MeshEventData mesh_pending;
 
     /* Master: gewählter Client für die Action-Scene; handoff-Flag hält den

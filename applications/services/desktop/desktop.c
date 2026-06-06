@@ -1,6 +1,7 @@
 #include "desktop_i.h"
 
 #include <string.h>
+#include <esp_heap_caps.h>
 
 #include <cli/cli_vcp.h>
 
@@ -48,16 +49,6 @@ void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx) {
     view_dispatcher_send_custom_event(desktop->view_dispatcher, custom);
 }
 
-/* Globale Reaktion auf einen FeatureStatus (auch außerhalb der Action-Scene).
- * Daten stehen in desktop->mesh_pending. */
-static void desktop_mesh_on_feature_status(Desktop* desktop) {
-    const MeshEventData* ev = &desktop->mesh_pending;
-    /* Der Status wird NICHT am Master gecached — die Anzeige fragt ihn live beim
-     * Buddy ab (FeatureList.running_mask). Die Capture-Session braucht aber den
-     * Stopped-Hinweis, um die .pcap zu finalisieren. */
-    mesh_capture_note_status(ev->mac, ev->feat_id, ev->feat_state);
-}
-
 #define MESH_OVERLAY_MS 3000
 
 /* Result-Overlay auf ALLEN Mesh-Views setzen — nur die gerade aktive zeichnet,
@@ -75,45 +66,53 @@ static void desktop_mesh_overlay_timer_cb(void* ctx) {
     view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopMeshEventOverlayExpire);
 }
 
-/* Result vom Buddy: speichern (Overlay zeigen) + bestätigen (Buddy löscht es dann).
- * Dedup gegen wiederholte Frames (Buddy sendet bis Ack erneut). */
+/* Client-Name per MAC aus clients.txt (für den pcap-Dateinamen). */
+static void desktop_mesh_client_name(const uint8_t mac[MESH_MAC_LEN], char* out, size_t out_sz) {
+    MeshPeer list[MESH_CLIENTS_MAX];
+    size_t n = 0;
+    mesh_config_load_clients(list, &n);
+    for(size_t i = 0; i < n; ++i) {
+        if(memcmp(list[i].mac, mac, MESH_MAC_LEN) == 0) {
+            strncpy(out, list[i].name, out_sz - 1);
+            out[out_sz - 1] = '\0';
+            return;
+        }
+    }
+    strncpy(out, "buddy", out_sz - 1);
+    out[out_sz - 1] = '\0';
+}
+
+/* Result vom Buddy (zuverlässig reassembliert): .pcap pro Netz schreiben (GUI-
+ * Thread → Storage erlaubt), bestätigen (Buddy löscht es dann), Overlay zeigen.
+ * Dedup gegen Wiederholungen (Buddy sendet bis Ack erneut). */
 static void desktop_mesh_on_result(Desktop* desktop) {
-    const MeshEventData* ev = &desktop->mesh_pending;
+    /* pcap-Blob im PSRAM (einmalig, lazy) — spart internes DRAM. */
+    static uint8_t* blob = NULL;
+    if(!blob) blob = heap_caps_malloc(1400, MALLOC_CAP_SPIRAM);
+    if(!blob) return;
+    uint8_t mac[MESH_MAC_LEN];
+    uint8_t id = 0;
+    uint16_t len = 0;
 
-    bool dup = desktop->mesh_last_result_valid &&
-               desktop->mesh_last_result_id == ev->result_id &&
-               memcmp(desktop->mesh_last_result_mac, ev->mac, MESH_MAC_LEN) == 0;
+    while(mesh_take_result(mac, &id, blob, 1400, &len)) {
+        /* Immer bestätigen (idempotent) — der Buddy hält das Result bis zum Ack. */
+        mesh_send_result_ack(mac, id);
 
-    /* Immer bestätigen (idempotent) — der Buddy hält das Result bis zum Ack. */
-    mesh_send_result_ack(ev->mac, ev->result_id);
-    if(dup) return;
+        bool dup = desktop->mesh_last_result_valid && desktop->mesh_last_result_id == id &&
+                   memcmp(desktop->mesh_last_result_mac, mac, MESH_MAC_LEN) == 0;
+        if(dup) continue; /* Retransmit: erneut geackt, aber kein zweites Mal schreiben/zeigen */
 
-    memcpy(desktop->mesh_last_result_mac, ev->mac, MESH_MAC_LEN);
-    desktop->mesh_last_result_id = ev->result_id;
-    desktop->mesh_last_result_valid = true;
+        char name[36];
+        desktop_mesh_client_name(mac, name, sizeof(name));
+        mesh_capture_write_handshake(name, blob, len);
 
-    const char* text =
-        (ev->result_type == MeshResultHandshake) ? "Handshake received" : "Result received";
-    desktop_mesh_set_overlay_all(desktop, text);
-    if(desktop->mesh_overlay_timer)
-        furi_timer_start(desktop->mesh_overlay_timer, furi_ms_to_ticks(MESH_OVERLAY_MS));
-}
+        memcpy(desktop->mesh_last_result_mac, mac, MESH_MAC_LEN);
+        desktop->mesh_last_result_id = id;
+        desktop->mesh_last_result_valid = true;
 
-/* Startet den Client-Mesh-Service wenn (mesh_mode==Client) UND keine App
- * vordergrundläuft. Idempotent. */
-static void desktop_mesh_client_start_if_needed(Desktop* desktop) {
-    if(desktop->mesh_mode != MeshModeClient) return;
-    if(desktop->app_running) return;
-    if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleClient) return;
-    mesh_service_start(MeshRoleClient, desktop_mesh_event_cb, desktop);
-}
-
-/* Stoppt den Client-Mesh-Service (z.B. bevor eine App startet, die WiFi
- * braucht). Lässt einen aktiven Master-Service unangetastet — der existiert
- * sowieso nur in der Mesh-Clients-Scene, von der aus keine App startet. */
-static void desktop_mesh_client_stop_if_running(void) {
-    if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleClient) {
-        mesh_service_stop();
+        desktop_mesh_set_overlay_all(desktop, "Handshake received");
+        if(desktop->mesh_overlay_timer)
+            furi_timer_start(desktop->mesh_overlay_timer, furi_ms_to_ticks(MESH_OVERLAY_MS));
     }
 }
 
@@ -241,11 +240,9 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop->app_running = true;
 
         /* WiFi/ESP-NOW abschalten, damit Apps wie wlan_app/esp_now/nrf24 ihren
-         * eigenen WiFi-Stack initialisieren können. Ein im Hintergrund laufender
-         * Capture (Master-Service lebt dann außerhalb der Mesh-Scenes weiter) muss
-         * hier sauber beendet werden: erst den Buddy stoppen, dann den Service. */
-        if(mesh_capture_is_active()) mesh_capture_finish();
-        desktop_mesh_client_stop_if_running();
+         * eigenen WiFi-Stack initialisieren können. (Der Master-Mesh-Service läuft
+         * nur in der Mesh-Clients-Scene, von der aus keine App startet — defensiv
+         * trotzdem stoppen.) */
         if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleMaster) {
             mesh_service_stop();
         }
@@ -256,7 +253,6 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         animation_manager_load_and_continue_animation(desktop->animation_manager);
         desktop_auto_lock_arm(desktop);
         desktop->app_running = false;
-        desktop_mesh_client_start_if_needed(desktop);
 
     } else if(event == DesktopGlobalAutoLock) {
         if(!desktop->app_running && !desktop->locked) {
@@ -284,12 +280,6 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         /* Silent: Master hat das Pairing beendet. master.txt entfernen, keine
          * UI. (Service hat schon ACK gesendet.) */
         mesh_config_clear_master();
-
-    } else if(event == DesktopMeshEventMasterFeatureStatus) {
-        /* Erst global (Task-Tabelle + Capture-Session), dann an die aktive Scene
-         * (Action-Scene) zur Anzeige weiterreichen. */
-        desktop_mesh_on_feature_status(desktop);
-        return scene_manager_handle_custom_event(desktop->scene_manager, event);
 
     } else if(event == DesktopMeshEventMasterResult) {
         /* Result vom Buddy: global behandeln (Overlay + Ack) — egal welche Mesh-
@@ -693,10 +683,8 @@ int32_t desktop_srv(void* p) {
 
     desktop_init_settings(desktop);
 
-    /* Mesh-State aus /ext/mesh/mode.txt laden und Client-Service auto-starten
-     * (Master-Service läuft nur on-demand in der Mesh-Clients-Scene). */
-    desktop->mesh_mode = mesh_config_load_mode();
-    desktop_mesh_client_start_if_needed(desktop);
+    /* Mesh: der T-Embed ist immer Master; der Master-Service läuft on-demand in
+     * der Mesh-Clients-Scene — beim Boot ist nichts zu starten. */
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 

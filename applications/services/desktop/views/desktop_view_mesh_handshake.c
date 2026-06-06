@@ -21,6 +21,8 @@ typedef struct {
     uint8_t selected; /* 0 = Channel-Zeile, 1 = Start/Stop-Button */
     bool editing; /* Channel im Edit-Modus */
     bool capturing;
+    bool pending; /* auf Buddy-Bestätigung warten (Countdown) */
+    uint8_t pending_secs; /* verbleibende Sekunden */
     char overlay[24];
 } MeshHandshakeModel;
 
@@ -67,8 +69,15 @@ static void draw_callback(Canvas* canvas, void* model) {
         canvas_set_color(canvas, ColorBlack);
         canvas_draw_rframe(canvas, bx, by, bw, bh, 3);
     }
-    canvas_draw_str_aligned(
-        canvas, 64, by + bh / 2, AlignCenter, AlignCenter, m->capturing ? "Stop" : "Start");
+    const char* label;
+    char cnt[8];
+    if(m->pending) {
+        snprintf(cnt, sizeof(cnt), "%us", m->pending_secs);
+        label = cnt;
+    } else {
+        label = m->capturing ? "Stop" : "Start";
+    }
+    canvas_draw_str_aligned(canvas, 64, by + bh / 2, AlignCenter, AlignCenter, label);
     canvas_set_color(canvas, ColorBlack);
 
     mesh_view_draw_overlay(canvas, m->overlay);
@@ -211,6 +220,18 @@ uint8_t desktop_mesh_handshake_get_capture_channel(DesktopMeshHandshakeView* v) 
 void desktop_mesh_handshake_set_capturing(DesktopMeshHandshakeView* v, bool capturing) {
     furi_assert(v);
     with_view_model(v->view, MeshHandshakeModel * m, { m->capturing = capturing; }, true);
+}
+
+void desktop_mesh_handshake_set_pending(DesktopMeshHandshakeView* v, bool pending, uint8_t secs) {
+    furi_assert(v);
+    with_view_model(
+        v->view,
+        MeshHandshakeModel * m,
+        {
+            m->pending = pending;
+            m->pending_secs = secs;
+        },
+        true);
 }
 
 void desktop_mesh_handshake_set_overlay(DesktopMeshHandshakeView* v, const char* text) {

@@ -15,9 +15,7 @@ typedef struct {
     char client_name[MESH_NAME_MAX + 1];
     uint8_t channel;
     uint8_t selected; /* 0 = Identify, 1 = Disconnect */
-    bool editing; /* Identify-Wert im Edit-Modus */
     bool identify_running; /* aus running_mask */
-    uint8_t edit_value; /* 0 = start, 1 = stop (während Edit) */
     char overlay[24];
 } MeshDeviceModel;
 
@@ -48,12 +46,9 @@ static void draw_callback(Canvas* canvas, void* model) {
 
         if(i == 0) {
             canvas_draw_str_aligned(canvas, 4, y_text, AlignLeft, AlignCenter, "Identify");
-            /* Wert: im Edit edit_value, sonst die sinnvolle nächste Aktion. */
-            const char* val = m->editing ? (m->edit_value ? "stop" : "start") :
-                                           (m->identify_running ? "stop" : "start");
-            char buf[12];
-            snprintf(buf, sizeof(buf), m->editing ? "[%s]" : "<%s>", val);
-            canvas_draw_str_aligned(canvas, 124, y_text, AlignRight, AlignCenter, buf);
+            /* Einfacher Toggle: rechts der Zustand (OK schaltet direkt um). */
+            canvas_draw_str_aligned(
+                canvas, 124, y_text, AlignRight, AlignCenter, m->identify_running ? "ON" : "OFF");
         } else {
             canvas_draw_str_aligned(canvas, 4, y_text, AlignLeft, AlignCenter, "Disconnect");
         }
@@ -75,49 +70,28 @@ static bool input_callback(InputEvent* event, void* context) {
         MeshDeviceModel * m,
         {
             if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
-                if(m->editing) {
-                    /* Edit-Modus: drehen wechselt Wert, OK bestätigt, Back bricht ab. */
-                    if(event->key == InputKeyUp || event->key == InputKeyDown) {
-                        m->edit_value = m->edit_value ? 0 : 1;
-                        update = true;
-                        consumed = true;
-                    } else if(event->key == InputKeyOk) {
-                        m->editing = false;
-                        fire = m->edit_value ? DesktopMeshDeviceEventIdentifyStop :
-                                               DesktopMeshDeviceEventIdentifyStart;
-                        should_fire = true;
-                        update = true;
-                        consumed = true;
-                    } else if(event->key == InputKeyBack) {
-                        m->editing = false;
-                        update = true;
-                        consumed = true;
+                if(event->key == InputKeyUp) {
+                    m->selected = m->selected ? (uint8_t)(m->selected - 1) : (ROW_COUNT - 1);
+                    update = true;
+                    consumed = true;
+                } else if(event->key == InputKeyDown) {
+                    m->selected = (uint8_t)((m->selected + 1) % ROW_COUNT);
+                    update = true;
+                    consumed = true;
+                } else if(event->key == InputKeyOk) {
+                    if(m->selected == 0) {
+                        /* Identify: einfacher Toggle — direkt start/stop. */
+                        fire = m->identify_running ? DesktopMeshDeviceEventIdentifyStop :
+                                                     DesktopMeshDeviceEventIdentifyStart;
+                    } else {
+                        fire = DesktopMeshDeviceEventDisconnect;
                     }
-                } else {
-                    if(event->key == InputKeyUp) {
-                        m->selected = m->selected ? (uint8_t)(m->selected - 1) : (ROW_COUNT - 1);
-                        update = true;
-                        consumed = true;
-                    } else if(event->key == InputKeyDown) {
-                        m->selected = (uint8_t)((m->selected + 1) % ROW_COUNT);
-                        update = true;
-                        consumed = true;
-                    } else if(event->key == InputKeyOk) {
-                        if(m->selected == 0) {
-                            /* Identify: Edit öffnen, default = sinnvolle nächste Aktion. */
-                            m->editing = true;
-                            m->edit_value = m->identify_running ? 1 : 0;
-                            update = true;
-                        } else {
-                            fire = DesktopMeshDeviceEventDisconnect;
-                            should_fire = true;
-                        }
-                        consumed = true;
-                    } else if(event->key == InputKeyBack) {
-                        fire = DesktopMeshDeviceEventBack;
-                        should_fire = true;
-                        consumed = true;
-                    }
+                    should_fire = true;
+                    consumed = true;
+                } else if(event->key == InputKeyBack) {
+                    fire = DesktopMeshDeviceEventBack;
+                    should_fire = true;
+                    consumed = true;
                 }
             }
         },
@@ -181,15 +155,7 @@ void desktop_mesh_device_set_channel(DesktopMeshDeviceView* v, uint8_t channel) 
 
 void desktop_mesh_device_set_identify_running(DesktopMeshDeviceView* v, bool running) {
     furi_assert(v);
-    with_view_model(
-        v->view,
-        MeshDeviceModel * m,
-        {
-            /* Anzeige nur außerhalb des Edit-Modus aktualisieren (sonst springt der
-             * gerade gewählte Wert weg). */
-            if(!m->editing) m->identify_running = running;
-        },
-        true);
+    with_view_model(v->view, MeshDeviceModel * m, { m->identify_running = running; }, true);
 }
 
 void desktop_mesh_device_set_overlay(DesktopMeshDeviceView* v, const char* text) {

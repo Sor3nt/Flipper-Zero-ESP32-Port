@@ -129,12 +129,16 @@ bool mesh_send_feature_stop(const uint8_t to[MESH_MAC_LEN], uint8_t feat_id);
 /* Master → Client: bestätigt ein empfangenes Resultat (Buddy löscht es dann). */
 bool mesh_send_result_ack(const uint8_t to[MESH_MAC_LEN], uint8_t result_id);
 
-/* Pcap-Sink: empfängt vom Client gestreamte, reassemblierte rohe 802.11-Frames
- * (BuddyWirePcapFrame). Wird im WiFi-Task-Kontext aufgerufen — der Sink muss
- * schnell sein (z.B. in einen Ringbuffer kopieren, ein Writer-Thread schreibt
- * die .pcap). sink==NULL deregistriert. */
-typedef void (*MeshPcapSink)(const uint8_t* frame, uint16_t len, void* ctx);
-void mesh_set_pcap_sink(MeshPcapSink sink, void* ctx);
+/* Fertig reassembliertes Handshake-Result abholen (GUI-Thread). Liefert true und
+ * füllt mac/id/buf/len, wenn eines bereitliegt — sonst false. Single-Slot; der
+ * Buddy sendet bis zum Ack erneut, ein verpasstes wird also nachgeliefert.
+ * Payload-Format: [type:1][ssid_len:1][ssid][frame_count:1]{[msg_num:1][len:2 LE][bytes]}. */
+bool mesh_take_result(
+    uint8_t out_mac[MESH_MAC_LEN],
+    uint8_t* out_id,
+    uint8_t* buf,
+    uint16_t buf_cap,
+    uint16_t* out_len);
 
 #ifdef __cplusplus
 }

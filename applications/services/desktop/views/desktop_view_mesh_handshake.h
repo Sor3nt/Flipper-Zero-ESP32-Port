@@ -47,5 +47,9 @@ uint8_t desktop_mesh_handshake_get_capture_channel(DesktopMeshHandshakeView* vie
 /** Läuft der Capture gerade? — Button zeigt dann "Stop". */
 void desktop_mesh_handshake_set_capturing(DesktopMeshHandshakeView* view, bool capturing);
 
+/** Warten auf Bestätigung vom Buddy: Button zeigt einen Countdown ("<secs>s")
+ *  statt Start/Stop. pending=false beendet den Wartezustand. */
+void desktop_mesh_handshake_set_pending(DesktopMeshHandshakeView* view, bool pending, uint8_t secs);
+
 /** Zentrales Result-Overlay setzen. NULL = ausblenden. */
 void desktop_mesh_handshake_set_overlay(DesktopMeshHandshakeView* view, const char* text);

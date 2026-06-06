@@ -5,7 +5,7 @@ idf_component_register(
         "buddy_store.c"
         "buddy_node.c"
         "buddy_features.c"
-        "buddy_results.c"
+        "buddy_hs_store.c"
         "buddy_hs_parser.c"
         "features/feat_identify.c"
         "features/feat_capture_hs.c"

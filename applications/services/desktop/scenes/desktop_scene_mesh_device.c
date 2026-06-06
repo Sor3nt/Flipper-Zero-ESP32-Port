@@ -15,7 +15,6 @@
 #include "../views/desktop_view_mesh_device.h"
 #include "../helpers/mesh_config.h"
 #include "../helpers/mesh_service.h"
-#include "../helpers/mesh_capture.h"
 #include "desktop_scene.h"
 
 #define QUERY_PERIOD_MS 1500
@@ -126,12 +125,8 @@ bool desktop_scene_mesh_device_on_event(void* context, SceneManagerEvent event) 
         break;
 
     case DesktopMeshDeviceEventDisconnect: {
-        /* Laufende Capture-Session dieses Clients beenden. */
-        uint8_t cap_mac[MESH_MAC_LEN];
-        if(mesh_capture_is_active() && mesh_capture_get_mac(cap_mac) &&
-           memcmp(cap_mac, s_state.client.mac, MESH_MAC_LEN) == 0) {
-            mesh_capture_finish();
-        }
+        /* Disconnect stoppt beim Buddy alle Features (auch Capture) → kein lokaler
+         * Cleanup nötig. */
         mesh_send_disconnect(s_state.client.mac);
         mesh_config_remove_client(s_state.client.mac);
         scene_manager_search_and_switch_to_previous_scene(

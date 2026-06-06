@@ -9,8 +9,6 @@
 #include "../desktop_i.h"
 #include "../views/desktop_view_lock_menu.h"
 #include "../helpers/qflipper_bridge.h"
-#include "../helpers/mesh_config.h"
-#include "../helpers/mesh_service.h"
 #include "desktop_scene.h"
 
 #include "sdkconfig.h"
@@ -78,17 +76,7 @@ static void desktop_scene_lock_menu_refresh(Desktop* desktop) {
         LOCK_MENU_USB_AVAILABLE,
         qflipper_bridge_is_active(),
         desktop_lock_menu_bt_enabled(),
-        desktop_lock_menu_bruce_available(),
-        desktop->mesh_mode);
-}
-
-/* Off → Master → Client → Off. */
-static MeshMode mesh_mode_next(MeshMode m) {
-    switch(m) {
-    case MeshModeDisabled: return MeshModeMaster;
-    case MeshModeMaster:   return MeshModeClient;
-    default:               return MeshModeDisabled;
-    }
+        desktop_lock_menu_bruce_available());
 }
 
 void desktop_scene_lock_menu_on_enter(void* context) {
@@ -135,27 +123,9 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
 
-        case DesktopLockMenuEventMeshModeToggle: {
-            MeshMode next = mesh_mode_next(desktop->mesh_mode);
-            desktop->mesh_mode = next;
-            mesh_config_save_mode(next);
-            /* Service-Lifecycle: Master-Mesh läuft NUR in der Mesh-Clients-Scene
-             * (Discovery/Pair-UI dort) — hier nichts starten. Client-Mesh wird
-             * vom desktop.c-Lifecycle-Hook gestartet/gestoppt, sobald keine App
-             * läuft; das setzen wir hier passend. */
-            if(next != MeshModeClient && mesh_service_is_active() &&
-               mesh_service_get_role() == MeshRoleClient) {
-                mesh_service_stop();
-            }
-            if(next == MeshModeClient && !mesh_service_is_active() && !desktop->app_running) {
-                mesh_service_start(MeshRoleClient, desktop_mesh_event_cb, desktop);
-            }
-            desktop_scene_lock_menu_refresh(desktop);
-            consumed = true;
-            break;
-        }
-
         case DesktopLockMenuEventMeshClients:
+            /* T-Embed ist immer Master; der Master-Mesh-Service läuft on-demand in
+             * der Mesh-Clients-Scene. */
             scene_manager_next_scene(desktop->scene_manager, DesktopSceneMeshClients);
             consumed = true;
             break;
