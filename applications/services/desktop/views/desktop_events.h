@@ -46,7 +46,12 @@ typedef enum {
 
     DesktopMeshClientsEventPair,
     DesktopMeshClientsEventRemove,
+    DesktopMeshClientsEventOpenAction, /* OK kurz auf gepairtem Client → Action-Scene */
     DesktopMeshClientsEventBack,
+
+    /* Action-Scene (Master): Feature eines Clients wählen/konfigurieren/starten. */
+    DesktopMeshActionEventToggle, /* OK auf Feature-Zeile → start/stop */
+    DesktopMeshActionEventBack,
 
     DesktopUsbStorageEventExit,
 
@@ -58,6 +63,8 @@ typedef enum {
     DesktopMeshEventClientDisconnect,     /* Main-Scene  (Client) */
     DesktopMeshEventMasterDiscoverRsp,    /* Mesh-Clients-Scene (Master) */
     DesktopMeshEventMasterPairRsp,        /* Mesh-Clients-Scene (Master) */
+    DesktopMeshEventMasterFeatureList,    /* Mesh-Action-Scene (Master) */
+    DesktopMeshEventMasterFeatureStatus,  /* global + Mesh-Action-Scene (Master) */
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,

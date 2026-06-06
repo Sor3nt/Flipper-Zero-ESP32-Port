@@ -14,6 +14,7 @@
 
 #include "helpers/mesh_config.h"
 #include "helpers/mesh_service.h"
+#include "helpers/mesh_capture.h"
 
 #include "furi_hal_power.h"
 
@@ -37,9 +38,21 @@ void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx) {
     case MeshEventPairResponse:      custom = DesktopMeshEventMasterPairRsp; break;
     case MeshEventPairRequest:       custom = DesktopMeshEventClientPairRequest; break;
     case MeshEventDisconnect:        custom = DesktopMeshEventClientDisconnect; break;
+    case MeshEventFeatureList:       custom = DesktopMeshEventMasterFeatureList; break;
+    case MeshEventFeatureStatus:     custom = DesktopMeshEventMasterFeatureStatus; break;
     default:                         return;
     }
     view_dispatcher_send_custom_event(desktop->view_dispatcher, custom);
+}
+
+/* Globale Reaktion auf einen FeatureStatus (auch außerhalb der Action-Scene).
+ * Daten stehen in desktop->mesh_pending. */
+static void desktop_mesh_on_feature_status(Desktop* desktop) {
+    const MeshEventData* ev = &desktop->mesh_pending;
+    /* Der Status wird NICHT am Master gecached — die Anzeige fragt ihn live beim
+     * Buddy ab (FeatureList.running_mask). Die Capture-Session braucht aber den
+     * Stopped-Hinweis, um die .pcap zu finalisieren. */
+    mesh_capture_note_status(ev->mac, ev->feat_id, ev->feat_state);
 }
 
 /* Startet den Client-Mesh-Service wenn (mesh_mode==Client) UND keine App
@@ -184,8 +197,14 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop->app_running = true;
 
         /* WiFi/ESP-NOW abschalten, damit Apps wie wlan_app/esp_now/nrf24 ihren
-         * eigenen WiFi-Stack initialisieren können. */
+         * eigenen WiFi-Stack initialisieren können. Ein im Hintergrund laufender
+         * Capture (Master-Service lebt dann außerhalb der Mesh-Scenes weiter) muss
+         * hier sauber beendet werden: erst den Buddy stoppen, dann den Service. */
+        if(mesh_capture_is_active()) mesh_capture_finish();
         desktop_mesh_client_stop_if_running();
+        if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleMaster) {
+            mesh_service_stop();
+        }
 
         furi_semaphore_release(desktop->animation_semaphore);
 
@@ -221,6 +240,12 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         /* Silent: Master hat das Pairing beendet. master.txt entfernen, keine
          * UI. (Service hat schon ACK gesendet.) */
         mesh_config_clear_master();
+
+    } else if(event == DesktopMeshEventMasterFeatureStatus) {
+        /* Erst global (Task-Tabelle + Capture-Session), dann an die aktive Scene
+         * (Action-Scene) zur Anzeige weiterreichen. */
+        desktop_mesh_on_feature_status(desktop);
+        return scene_manager_handle_custom_event(desktop->scene_manager, event);
 
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
@@ -348,6 +373,7 @@ static Desktop* desktop_alloc(void) {
     desktop->lock_menu = desktop_lock_menu_alloc();
     desktop->usb_storage_view = desktop_usb_storage_alloc();
     desktop->mesh_clients_view = desktop_mesh_clients_alloc();
+    desktop->mesh_action_view = desktop_mesh_action_alloc();
     desktop->mesh_pair_dialog = dialog_ex_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
@@ -391,6 +417,10 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdMeshClients,
         desktop_mesh_clients_get_view(desktop->mesh_clients_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshAction,
+        desktop_mesh_action_get_view(desktop->mesh_action_view));
     view_dispatcher_add_view(
         desktop->view_dispatcher,
         DesktopViewIdMeshPair,

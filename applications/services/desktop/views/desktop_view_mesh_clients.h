@@ -10,9 +10,10 @@
  *     Event beim OK gefeuert wird.
  *
  * Custom-Events (an Scene):
- *   DesktopMeshClientsEventPair    — OK auf einem ungepairten Eintrag
- *   DesktopMeshClientsEventRemove  — OK auf einem gepairten Eintrag
- *   DesktopMeshClientsEventBack    — Back-Taste
+ *   DesktopMeshClientsEventPair        — OK kurz auf ungepairtem Eintrag
+ *   DesktopMeshClientsEventOpenAction  — OK kurz auf gepairtem Eintrag
+ *   DesktopMeshClientsEventRemove      — OK lang auf gepairtem Eintrag
+ *   DesktopMeshClientsEventBack        — Back-Taste
  *
  * Nach einem Event holt die Scene den Selected-Index via get_selected_idx().
  */
@@ -36,11 +37,15 @@ void desktop_mesh_clients_set_callback(
     void* context);
 
 /** Liste in den View kopieren (max MESH_CLIENTS_MAX). count==0 ist erlaubt
- *  (leere Liste). Behält den selected_idx wenn möglich, sonst auf 0 geclampt. */
+ *  (leere Liste). Behält den selected_idx wenn möglich, sonst auf 0 geclampt.
+ *  status[i]: Label für gepairte Einträge ("Idle" oder Action-Name); NULL/leer
+ *  ⇒ "Idle". Für ungepairte Einträge ignoriert (zeigt "[pair]"). status darf
+ *  selbst NULL sein. */
 void desktop_mesh_clients_set_peers(
     DesktopMeshClientsView* view,
     const MeshPeer* peers,
     const bool* paired,
+    const char* const* status,
     size_t count);
 
 /** Footer "Wait for Accept" (true) / "Discovery" (false). */
