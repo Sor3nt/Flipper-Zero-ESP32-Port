@@ -1,5 +1,7 @@
 #include "desktop_i.h"
 
+#include <string.h>
+
 #include <cli/cli_vcp.h>
 
 #include <gui/gui_i.h>
@@ -40,6 +42,7 @@ void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx) {
     case MeshEventDisconnect:        custom = DesktopMeshEventClientDisconnect; break;
     case MeshEventFeatureList:       custom = DesktopMeshEventMasterFeatureList; break;
     case MeshEventFeatureStatus:     custom = DesktopMeshEventMasterFeatureStatus; break;
+    case MeshEventResult:            custom = DesktopMeshEventMasterResult; break;
     default:                         return;
     }
     view_dispatcher_send_custom_event(desktop->view_dispatcher, custom);
@@ -53,6 +56,47 @@ static void desktop_mesh_on_feature_status(Desktop* desktop) {
      * Buddy ab (FeatureList.running_mask). Die Capture-Session braucht aber den
      * Stopped-Hinweis, um die .pcap zu finalisieren. */
     mesh_capture_note_status(ev->mac, ev->feat_id, ev->feat_state);
+}
+
+#define MESH_OVERLAY_MS 3000
+
+/* Result-Overlay auf ALLEN Mesh-Views setzen — nur die gerade aktive zeichnet,
+ * so erscheint es egal in welcher Mesh-Scene man sich befindet. NULL = ausblenden. */
+static void desktop_mesh_set_overlay_all(Desktop* desktop, const char* text) {
+    desktop_mesh_clients_set_overlay(desktop->mesh_clients_view, text);
+    desktop_mesh_action_set_overlay(desktop->mesh_action_view, text);
+    desktop_mesh_device_set_overlay(desktop->mesh_device_view, text);
+    desktop_mesh_wifi_set_overlay(desktop->mesh_wifi_view, text);
+    desktop_mesh_handshake_set_overlay(desktop->mesh_handshake_view, text);
+}
+
+static void desktop_mesh_overlay_timer_cb(void* ctx) {
+    Desktop* desktop = ctx;
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopMeshEventOverlayExpire);
+}
+
+/* Result vom Buddy: speichern (Overlay zeigen) + bestätigen (Buddy löscht es dann).
+ * Dedup gegen wiederholte Frames (Buddy sendet bis Ack erneut). */
+static void desktop_mesh_on_result(Desktop* desktop) {
+    const MeshEventData* ev = &desktop->mesh_pending;
+
+    bool dup = desktop->mesh_last_result_valid &&
+               desktop->mesh_last_result_id == ev->result_id &&
+               memcmp(desktop->mesh_last_result_mac, ev->mac, MESH_MAC_LEN) == 0;
+
+    /* Immer bestätigen (idempotent) — der Buddy hält das Result bis zum Ack. */
+    mesh_send_result_ack(ev->mac, ev->result_id);
+    if(dup) return;
+
+    memcpy(desktop->mesh_last_result_mac, ev->mac, MESH_MAC_LEN);
+    desktop->mesh_last_result_id = ev->result_id;
+    desktop->mesh_last_result_valid = true;
+
+    const char* text =
+        (ev->result_type == MeshResultHandshake) ? "Handshake received" : "Result received";
+    desktop_mesh_set_overlay_all(desktop, text);
+    if(desktop->mesh_overlay_timer)
+        furi_timer_start(desktop->mesh_overlay_timer, furi_ms_to_ticks(MESH_OVERLAY_MS));
 }
 
 /* Startet den Client-Mesh-Service wenn (mesh_mode==Client) UND keine App
@@ -247,6 +291,15 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop_mesh_on_feature_status(desktop);
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
 
+    } else if(event == DesktopMeshEventMasterResult) {
+        /* Result vom Buddy: global behandeln (Overlay + Ack) — egal welche Mesh-
+         * Scene gerade aktiv ist. */
+        desktop_mesh_on_result(desktop);
+
+    } else if(event == DesktopMeshEventOverlayExpire) {
+        /* Overlay-Timer abgelaufen → auf allen Mesh-Views ausblenden. */
+        desktop_mesh_set_overlay_all(desktop, NULL);
+
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
     }
@@ -374,6 +427,11 @@ static Desktop* desktop_alloc(void) {
     desktop->usb_storage_view = desktop_usb_storage_alloc();
     desktop->mesh_clients_view = desktop_mesh_clients_alloc();
     desktop->mesh_action_view = desktop_mesh_action_alloc();
+    desktop->mesh_device_view = desktop_mesh_device_alloc();
+    desktop->mesh_wifi_view = desktop_mesh_wifi_alloc();
+    desktop->mesh_handshake_view = desktop_mesh_handshake_alloc();
+    desktop->mesh_overlay_timer =
+        furi_timer_alloc(desktop_mesh_overlay_timer_cb, FuriTimerTypeOnce, desktop);
     desktop->mesh_pair_dialog = dialog_ex_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
@@ -421,6 +479,18 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdMeshAction,
         desktop_mesh_action_get_view(desktop->mesh_action_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshDevice,
+        desktop_mesh_device_get_view(desktop->mesh_device_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshWifi,
+        desktop_mesh_wifi_get_view(desktop->mesh_wifi_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshHandshake,
+        desktop_mesh_handshake_get_view(desktop->mesh_handshake_view));
     view_dispatcher_add_view(
         desktop->view_dispatcher,
         DesktopViewIdMeshPair,
