@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../desktop_i.h" /* STATUS_BAR_Y_SHIFT */
+#include "mesh_view_common.h"
 
 #define LIST_VISIBLE 3
 #define ROW_H        12 /* Zeilenhöhe in der Liste */
@@ -25,6 +26,7 @@ typedef struct {
     uint8_t selected;
     uint8_t top; /* Scroll-Offset */
     bool pairing;
+    char overlay[24];
 } MeshClientsModel;
 
 struct DesktopMeshClientsView {
@@ -101,10 +103,13 @@ static void draw_callback(Canvas* canvas, void* model) {
         canvas_set_color(canvas, ColorBlack);
     }
 
-    /* Footer */
-    canvas_set_font(canvas, FontSecondary);
-    const char* footer = m->pairing ? "Wait for Accept" : "Discovery";
-    canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, footer);
+    /* Footer: nur während Pairing ("Discovery"-Anzeige im Idle entfernt). */
+    if(m->pairing) {
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, "Wait for Accept");
+    }
+
+    mesh_view_draw_overlay(canvas, m->overlay);
 }
 
 static bool input_callback(InputEvent* event, void* context) {
@@ -231,6 +236,22 @@ void desktop_mesh_clients_set_pairing(DesktopMeshClientsView* v, bool in_progres
     furi_assert(v);
     with_view_model(
         v->view, MeshClientsModel * m, { m->pairing = in_progress; }, true);
+}
+
+void desktop_mesh_clients_set_overlay(DesktopMeshClientsView* v, const char* text) {
+    furi_assert(v);
+    with_view_model(
+        v->view,
+        MeshClientsModel * m,
+        {
+            if(text) {
+                strncpy(m->overlay, text, sizeof(m->overlay) - 1);
+                m->overlay[sizeof(m->overlay) - 1] = '\0';
+            } else {
+                m->overlay[0] = '\0';
+            }
+        },
+        true);
 }
 
 int desktop_mesh_clients_get_selected_idx(DesktopMeshClientsView* v) {

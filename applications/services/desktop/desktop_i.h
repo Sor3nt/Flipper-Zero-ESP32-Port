@@ -12,6 +12,9 @@
 #include "views/desktop_view_usb_storage.h"
 #include "views/desktop_view_mesh_clients.h"
 #include "views/desktop_view_mesh_action.h"
+#include "views/desktop_view_mesh_device.h"
+#include "views/desktop_view_mesh_wifi.h"
+#include "views/desktop_view_mesh_handshake.h"
 #include "views/desktop_view_debug.h"
 #include "views/desktop_view_slideshow.h"
 #include "helpers/mesh_config.h"
@@ -37,6 +40,9 @@ typedef enum {
     DesktopViewIdUsbStorage,
     DesktopViewIdMeshClients,
     DesktopViewIdMeshAction,
+    DesktopViewIdMeshDevice,
+    DesktopViewIdMeshWifi,
+    DesktopViewIdMeshHandshake,
     DesktopViewIdMeshPair,
     DesktopViewIdLocked,
     DesktopViewIdDebug,
@@ -66,6 +72,9 @@ struct Desktop {
     DesktopUsbStorageView* usb_storage_view;
     DesktopMeshClientsView* mesh_clients_view;
     DesktopMeshActionView* mesh_action_view;
+    DesktopMeshDeviceView* mesh_device_view;
+    DesktopMeshWifiView* mesh_wifi_view;
+    DesktopMeshHandshakeView* mesh_handshake_view;
     DesktopDebugView* debug_view;
     DesktopViewLocked* locked_view;
     DesktopMainView* main_view;
@@ -122,6 +131,13 @@ struct Desktop {
     uint8_t mesh_action_feature_count;
     uint32_t mesh_action_running_mask;
     uint8_t mesh_action_channel; /* bekannter Kanal des gewählten Buddys (0 = unbekannt) */
+
+    /* Result-Overlay ("Handshake received"): 3-s-Timer + Dedup gegen wiederholte
+     * Result-Frames (Buddy sendet bis zum Ack erneut). */
+    FuriTimer* mesh_overlay_timer;
+    uint8_t mesh_last_result_mac[MESH_MAC_LEN];
+    uint8_t mesh_last_result_id;
+    bool mesh_last_result_valid;
 };
 
 void desktop_lock(Desktop* desktop);

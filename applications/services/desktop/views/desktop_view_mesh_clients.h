@@ -1,7 +1,7 @@
 /**
  * Mesh-Clients-View: zeigt im Master-Modus die Liste der gepairten + neu
- * entdeckten Clients und erlaubt pair/remove. Footer zeigt "Discovery" oder
- * "Wait for Accept" während ein Pair-Request raus ist.
+ * entdeckten Clients und erlaubt pair/remove. Footer zeigt "Wait for Accept"
+ * während ein Pair-Request raus ist (sonst kein Footer).
  *
  * Datenmodell:
  *   - Die Peers werden vom Scene-Handler über set_peers übergeben (gepairte aus
@@ -48,8 +48,11 @@ void desktop_mesh_clients_set_peers(
     const char* const* status,
     size_t count);
 
-/** Footer "Wait for Accept" (true) / "Discovery" (false). */
+/** Footer "Wait for Accept" einblenden (true) / ausblenden (false). */
 void desktop_mesh_clients_set_pairing(DesktopMeshClientsView* view, bool in_progress);
+
+/** Zentrales Result-Overlay setzen ("Handshake received"). NULL = ausblenden. */
+void desktop_mesh_clients_set_overlay(DesktopMeshClientsView* view, const char* text);
 
 /** Aktuell selektierter Eintrag, -1 wenn Liste leer. */
 int desktop_mesh_clients_get_selected_idx(DesktopMeshClientsView* view);

@@ -47,6 +47,8 @@ typedef enum {
     MeshWireFeatureStop   = 10, // master → buddy : [id]
     MeshWireFeatureStatus = 11, // buddy  → master: [id][state][len][data]
     MeshWirePcapFrame     = 12, // buddy  → master: [seq][frag_idx][frag_cnt][data]
+    MeshWireResult        = 13, // buddy  → master: [id][type][len][data]  (zuverlässig, ack)
+    MeshWireResultAck     = 14, // master → buddy : [id]
 } MeshWireType;
 
 #define MESH_PCAP_HDR 5 /* magic,type,seq,frag_idx,frag_cnt */
@@ -330,6 +332,23 @@ static void on_recv_cb(const esp_now_recv_info_t* info, const uint8_t* data, int
         }
         return;
     }
+    case MeshWireResult: {
+        if(s_svc.role != MeshRoleMaster) return;
+        if(len < 5) return; /* magic,type,id,type,len */
+        MeshEventData ev = {.type = MeshEventResult};
+        memcpy(ev.mac, src, MESH_MAC_LEN);
+        ev.rx_channel = rxch;
+        ev.result_id = data[2];
+        ev.result_type = data[3];
+        uint8_t dlen = data[4];
+        if(dlen > MESH_FEAT_DATA_MAX) dlen = MESH_FEAT_DATA_MAX;
+        if(5 + dlen > len) dlen = (uint8_t)(len - 5);
+        memcpy(ev.feat_data, &data[5], dlen);
+        ev.feat_data[dlen] = '\0';
+        ev.feat_data_len = dlen;
+        if(s_svc.cb) s_svc.cb(&ev, s_svc.cb_ctx);
+        return;
+    }
     default:
         return;
     }
@@ -598,6 +617,12 @@ bool mesh_send_feature_start(
 bool mesh_send_feature_stop(const uint8_t to[MESH_MAC_LEN], uint8_t feat_id) {
     if(s_svc.role != MeshRoleMaster) return false;
     uint8_t out[3] = {MESH_MAGIC, MeshWireFeatureStop, feat_id};
+    return mesh_enqueue(to, out, sizeof(out));
+}
+
+bool mesh_send_result_ack(const uint8_t to[MESH_MAC_LEN], uint8_t result_id) {
+    if(s_svc.role != MeshRoleMaster) return false;
+    uint8_t out[3] = {MESH_MAGIC, MeshWireResultAck, result_id};
     return mesh_enqueue(to, out, sizeof(out));
 }
 

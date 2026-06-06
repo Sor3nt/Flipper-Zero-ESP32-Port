@@ -43,6 +43,7 @@ typedef enum {
                                 //         master.txt löschen)
     MeshEventFeatureList,       // Master: Client hat seine Feature-Liste geschickt
     MeshEventFeatureStatus,     // Master: Client meldet Feature-Status (run/stop/data)
+    MeshEventResult,            // Master: Client liefert ein Resultat (zuverlässig, ack)
 } MeshEvent;
 
 /* Feature-Status-Werte (müssen zum Buddy buddy_protocol.h BuddyFeatState passen). */
@@ -56,6 +57,11 @@ typedef enum {
 #define MESH_FEAT_NAME_MAX 20
 #define MESH_FEATURES_MAX  8
 #define MESH_FEAT_DATA_MAX 40
+
+/* Result-Typen (müssen zum Buddy buddy_protocol.h BuddyResultType passen). */
+typedef enum {
+    MeshResultHandshake = 1, /* feat_data = SSID-String */
+} MeshResultType;
 
 typedef struct {
     uint8_t id;
@@ -80,6 +86,11 @@ typedef struct {
     uint8_t feat_state;  // MeshFeatState
     uint8_t feat_data[MESH_FEAT_DATA_MAX + 1]; // +1: NUL-terminierbar für Text-Display
     uint8_t feat_data_len;
+
+    // MeshEventResult — Nutzdaten liegen ebenfalls in feat_data/feat_data_len
+    // (NUL-terminiert), z.B. die SSID bei einem Handshake-Resultat.
+    uint8_t result_id;    // Buddy-lokale id (für ResultAck)
+    uint8_t result_type;  // BuddyResultType (1 = Handshake)
 } MeshEventData;
 
 typedef void (*MeshEventCallback)(const MeshEventData* ev, void* ctx);
@@ -114,6 +125,9 @@ bool mesh_send_feature_start(
     const uint8_t* args,
     uint8_t arg_len);
 bool mesh_send_feature_stop(const uint8_t to[MESH_MAC_LEN], uint8_t feat_id);
+
+/* Master → Client: bestätigt ein empfangenes Resultat (Buddy löscht es dann). */
+bool mesh_send_result_ack(const uint8_t to[MESH_MAC_LEN], uint8_t result_id);
 
 /* Pcap-Sink: empfängt vom Client gestreamte, reassemblierte rohe 802.11-Frames
  * (BuddyWirePcapFrame). Wird im WiFi-Task-Kontext aufgerufen — der Sink muss
