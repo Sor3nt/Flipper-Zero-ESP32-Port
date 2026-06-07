@@ -51,7 +51,7 @@ static void draw_callback(Canvas* canvas, void* model) {
 
     /* Aktuelle Action zentriert unten. */
     const char* label = m->label[0] ? m->label : "Idle";
-    canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, label);
+    canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, label);
 
     mesh_view_draw_overlay(canvas, m->overlay);
 }
