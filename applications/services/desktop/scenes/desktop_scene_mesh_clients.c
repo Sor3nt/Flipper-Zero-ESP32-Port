@@ -290,12 +290,19 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
         if(idx < 0 || (size_t)idx >= s_state.all_count) break;
         if(!s_state.paired[idx]) break; /* nur gepairte Clients haben Actions */
 
+        /* Nur betretbar, wenn der Buddy diese Session geantwortet hat (erreichbar).
+         * Unerreichbar (Liste zeigt "lookup") → OK tut nichts. */
+        ClientStatus* st = status_find(s_state.all[idx].mac);
+        if(!st || !st->reported) {
+            consumed = true;
+            break;
+        }
+
         desktop->mesh_action_client = s_state.all[idx];
         desktop->mesh_keep_service = true; /* Service über den Scene-Wechsel halten */
 
         /* Bereits bekannte Feature-Liste + Kanal mitgeben; auf den Kanal tunen,
          * damit die Abfragen der Action-Scene den Buddy erreichen. */
-        ClientStatus* st = status_find(s_state.all[idx].mac);
         uint8_t ch = (st && st->channel) ? st->channel : 1;
         desktop->mesh_action_channel = ch;
         mesh_service_set_channel(ch);
