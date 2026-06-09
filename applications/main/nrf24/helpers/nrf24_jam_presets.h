@@ -47,6 +47,17 @@ size_t nrf24_jam_preset_fill_channels(Nrf24JamPreset preset, uint8_t* out, size_
  * get a short dwell so the whole band is swept quickly. */
 uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset);
 
+/* Default jam strategy (Nrf24JamStrategy) for a preset. Narrow presets that
+ * cover only a handful of fixed channels (BLE-Adv 37/38/39, RC, USB, Video) win
+ * with a continuous carrier (CW) parked on each channel — maximum spectral
+ * energy exactly where it matters. Wide sweeps / FHSS targets default to Turbo
+ * (packet collisions + random hop). Returns a Nrf24JamStrategy value. */
+uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset);
+
+/* Default hop order for a preset: sequential (0) for the few-channel CW presets
+ * (shuffling 3 channels is pointless), random (1) for the wide Turbo sweeps. */
+uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset);
+
 /* Live-tuning bounds / step for the dwell time. */
 #define NRF24_JAM_DWELL_MIN_US 100
 #define NRF24_JAM_DWELL_MAX_US 5000

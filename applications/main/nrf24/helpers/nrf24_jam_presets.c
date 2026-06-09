@@ -1,4 +1,5 @@
 #include "nrf24_jam_presets.h"
+#include "nrf24_jam_config.h" /* Nrf24JamStrategy values */
 
 #include <stdlib.h>
 
@@ -147,6 +148,27 @@ uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset) {
     default:
         return 200; /* fast sweep across many channels */
     }
+}
+
+uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset) {
+    switch(preset) {
+    case Nrf24JamPresetBleAdv: /* 3 fixed channels */
+    case Nrf24JamPresetRc: /* 4 channels */
+    case Nrf24JamPresetUsb: /* 3 channels */
+    case Nrf24JamPresetVideo: /* 3 channels */
+        /* Few channels → a continuous carrier parked on each is strongest (it is
+         * exactly what makes the FAP's BLE-advertising jam so effective). */
+        return Nrf24StrategyCw;
+    default:
+        /* Wide sweeps / FHSS → Turbo packet collisions across the band. */
+        return Nrf24StrategyTurbo;
+    }
+}
+
+uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset) {
+    /* CW presets walk their handful of channels sequentially (no point shuffling
+     * 3 channels); the Turbo sweeps randomise to spread collisions. */
+    return nrf24_jam_preset_default_strategy(preset) == Nrf24StrategyCw ? 0 : 1;
 }
 
 uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index) {

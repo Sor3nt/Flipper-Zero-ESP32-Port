@@ -57,8 +57,10 @@ void nrf24_jam_config_save(void);
 /* Restore built-in defaults and persist them. */
 void nrf24_jam_config_reset(void);
 
-/* Mutable pointer to a source's live config (source = Nrf24JamSource 0..3). */
-Nrf24JamConfig* nrf24_jam_config_get(uint8_t source);
+/* Mutable pointer to the live config for a (source, protocol) pair. The Protocol
+ * source keeps a separate slot per preset (BLE-Adv wants CW, Drone wants Turbo,
+ * ...), so the preset must be passed; it is ignored for WiFi / Activity. */
+Nrf24JamConfig* nrf24_jam_config_get(uint8_t source, uint8_t protocol);
 
 /* Monotonic counter, bumped whenever a config value is edited. The jam worker
  * watches it to know when to re-apply RF settings / rebuild the channel list. */

@@ -8,39 +8,49 @@
 
 #define NRF24_JAM_CFG_PATH    INT_PATH(".nrf24jam.cfg")
 #define NRF24_JAM_CFG_MAGIC   (0x4E) /* 'N' — unused by other settings */
-#define NRF24_JAM_CFG_VERSION (3) /* v3: 3 sources (Manual removed), was 4 */
+#define NRF24_JAM_CFG_VERSION (4) /* v4: Protocol config split per preset, was 3 */
 
-/* Persisted blob: one config slot per channel source. */
+/* Persisted blob: WiFi/Activity get one slot each, while the Protocol source
+ * keeps a separate slot per preset (each protocol has its own optimal strategy:
+ * BLE-Adv wants a parked CW carrier, Drone wants Turbo + random hop, ...). */
 typedef struct {
-    Nrf24JamConfig modes[Nrf24SourceCount];
+    Nrf24JamConfig protocol[Nrf24JamPresetCount];
+    Nrf24JamConfig wifi;
+    Nrf24JamConfig activity;
 } Nrf24JamSettings;
 
 static Nrf24JamSettings g_settings;
 static uint32_t g_generation = 0;
 
-/* Built-in defaults, one per source. PA max / 2 Mbps / burst 6 throughout;
- * strategy & hop follow the Bruce rationale (CW saturates AGC → good for the
- * WiFi sweep & single channel; Turbo packet collisions + random hop → good for
- * the protocol presets & activity targets). */
-static void nrf24_jam_config_defaults(void) {
-    static const struct {
-        uint8_t strategy;
-        uint8_t random_hop;
-        uint16_t dwell_us;
-    } d[Nrf24SourceCount] = {
-        [Nrf24SourceProtocol] = {Nrf24StrategyTurbo, 1, 300},
-        [Nrf24SourceWifi] = {Nrf24StrategyCw, 0, 200},
-        [Nrf24SourceActivity] = {Nrf24StrategyTurbo, 1, 200},
-    };
+/* Apply common defaults (PA max / 2 Mbps / burst 6) plus the given strategy,
+ * hop and dwell to a single config slot. */
+static void nrf24_jam_config_fill(
+    Nrf24JamConfig* c,
+    uint8_t strategy,
+    uint8_t random_hop,
+    uint16_t dwell_us) {
+    c->pa_level = Nrf24Pa_Max;
+    c->data_rate = Nrf24Rate_2M;
+    c->strategy = strategy;
+    c->burst_count = 6;
+    c->random_hop = random_hop;
+    c->dwell_us = dwell_us;
+}
 
-    for(uint32_t i = 0; i < Nrf24SourceCount; i++) {
-        g_settings.modes[i].pa_level = Nrf24Pa_Max;
-        g_settings.modes[i].data_rate = Nrf24Rate_2M;
-        g_settings.modes[i].strategy = d[i].strategy;
-        g_settings.modes[i].burst_count = 6;
-        g_settings.modes[i].random_hop = d[i].random_hop;
-        g_settings.modes[i].dwell_us = d[i].dwell_us;
+/* Built-in defaults. Each Protocol preset gets its own strategy/hop/dwell
+ * (narrow presets like BLE-Adv default to a parked CW carrier — the trick that
+ * makes the FAP's BLE jam strong); WiFi sweeps with CW; Activity floods with
+ * Turbo + random hop. */
+static void nrf24_jam_config_defaults(void) {
+    for(uint32_t p = 0; p < Nrf24JamPresetCount; p++) {
+        nrf24_jam_config_fill(
+            &g_settings.protocol[p],
+            nrf24_jam_preset_default_strategy((Nrf24JamPreset)p),
+            nrf24_jam_preset_default_hop((Nrf24JamPreset)p),
+            nrf24_jam_preset_default_dwell_us((Nrf24JamPreset)p));
     }
+    nrf24_jam_config_fill(&g_settings.wifi, Nrf24StrategyCw, 0, 200);
+    nrf24_jam_config_fill(&g_settings.activity, Nrf24StrategyTurbo, 1, 200);
 }
 
 static void nrf24_jam_config_clamp(Nrf24JamConfig* c) {
@@ -67,9 +77,11 @@ void nrf24_jam_config_load(void) {
         nrf24_jam_config_defaults();
     }
 
-    for(uint32_t i = 0; i < Nrf24SourceCount; i++) {
-        nrf24_jam_config_clamp(&g_settings.modes[i]);
+    for(uint32_t p = 0; p < Nrf24JamPresetCount; p++) {
+        nrf24_jam_config_clamp(&g_settings.protocol[p]);
     }
+    nrf24_jam_config_clamp(&g_settings.wifi);
+    nrf24_jam_config_clamp(&g_settings.activity);
     g_generation++;
 }
 
@@ -90,9 +102,17 @@ void nrf24_jam_config_reset(void) {
     nrf24_jam_config_save();
 }
 
-Nrf24JamConfig* nrf24_jam_config_get(uint8_t source) {
-    if(source >= Nrf24SourceCount) source = 0;
-    return &g_settings.modes[source];
+Nrf24JamConfig* nrf24_jam_config_get(uint8_t source, uint8_t protocol) {
+    switch(source) {
+    case Nrf24SourceWifi:
+        return &g_settings.wifi;
+    case Nrf24SourceActivity:
+        return &g_settings.activity;
+    case Nrf24SourceProtocol:
+    default:
+        if(protocol >= Nrf24JamPresetCount) protocol = 0;
+        return &g_settings.protocol[protocol];
+    }
 }
 
 uint32_t nrf24_jam_config_generation(void) {
