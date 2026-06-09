@@ -123,7 +123,7 @@ static int32_t jam_worker(void* context) {
 
     while(!ctx->stop) {
         bool want = ctx->desired_running;
-        Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source);
+        Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source, app->jam.protocol);
 
         if(ctx->dirty || !built) {
             /* (Re)build channel set for the current source + selection. */
@@ -270,7 +270,7 @@ void nrf24_app_scene_jam_on_enter(void* context) {
     char sel[20];
     nrf24_source_selection_label(app, sel, sizeof(sel));
     const char* type = nrf24_source_type_label(app->jam.source);
-    const Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source);
+    const Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source, app->jam.protocol);
 
     with_view_model(
         app->jam_view,

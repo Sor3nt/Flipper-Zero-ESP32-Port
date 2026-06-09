@@ -8,7 +8,10 @@
 void nrf24_jam_state_init(Nrf24JamState* st) {
     memset(st, 0, sizeof(*st));
     st->source = Nrf24SourceProtocol;
-    st->protocol = Nrf24JamPresetBle;
+    /* Default to BLE advertising (ch 37/38/39): only 3 channels but the ones
+     * every BLE device uses for discovery/connection setup — concentrating all
+     * energy there is what makes BLE jamming actually bite. */
+    st->protocol = Nrf24JamPresetBleAdv;
     /* wifi/activity start unscanned; everything else zeroed. */
 }
 

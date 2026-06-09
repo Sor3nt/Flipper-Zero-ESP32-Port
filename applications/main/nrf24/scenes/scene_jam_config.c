@@ -12,7 +12,7 @@
 static void jam_config_set_pa(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    nrf24_jam_config_get(app->jam.source)->pa_level = idx;
+    nrf24_jam_config_get(app->jam.source, app->jam.protocol)->pa_level = idx;
     variable_item_set_current_value_text(item, nrf24_jam_pa_label_long(idx));
     nrf24_jam_config_touch();
 }
@@ -20,7 +20,7 @@ static void jam_config_set_pa(VariableItem* item) {
 static void jam_config_set_rate(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    nrf24_jam_config_get(app->jam.source)->data_rate = idx;
+    nrf24_jam_config_get(app->jam.source, app->jam.protocol)->data_rate = idx;
     variable_item_set_current_value_text(item, nrf24_jam_rate_label(idx));
     nrf24_jam_config_touch();
 }
@@ -28,7 +28,7 @@ static void jam_config_set_rate(VariableItem* item) {
 static void jam_config_set_strategy(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    nrf24_jam_config_get(app->jam.source)->strategy = idx;
+    nrf24_jam_config_get(app->jam.source, app->jam.protocol)->strategy = idx;
     variable_item_set_current_value_text(item, nrf24_jam_strategy_label_long(idx));
     nrf24_jam_config_touch();
 }
@@ -37,7 +37,7 @@ static void jam_config_set_dwell(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
     uint16_t dwell = (uint16_t)(NRF24_JAM_DWELL_MIN_US + (uint32_t)idx * NRF24_JAM_DWELL_STEP_US);
-    Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source);
+    Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source, app->jam.protocol);
     cfg->dwell_us = dwell;
     char buf[12];
     /* AFH interprets the dwell value as milliseconds, not microseconds. */
@@ -54,7 +54,7 @@ static void jam_config_set_burst(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
     uint8_t burst = (uint8_t)(idx + NRF24_JAM_BURST_MIN);
-    nrf24_jam_config_get(app->jam.source)->burst_count = burst;
+    nrf24_jam_config_get(app->jam.source, app->jam.protocol)->burst_count = burst;
     char buf[8];
     snprintf(buf, sizeof(buf), "%u", burst);
     variable_item_set_current_value_text(item, buf);
@@ -64,7 +64,7 @@ static void jam_config_set_burst(VariableItem* item) {
 static void jam_config_set_hop(VariableItem* item) {
     Nrf24App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
-    nrf24_jam_config_get(app->jam.source)->random_hop = idx ? 1 : 0;
+    nrf24_jam_config_get(app->jam.source, app->jam.protocol)->random_hop = idx ? 1 : 0;
     variable_item_set_current_value_text(item, nrf24_jam_hop_label(idx));
     nrf24_jam_config_touch();
 }
@@ -72,12 +72,24 @@ static void jam_config_set_hop(VariableItem* item) {
 void nrf24_app_scene_jam_config_on_enter(void* context) {
     Nrf24App* app = context;
     VariableItemList* vil = app->var_item_list;
-    Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source);
+    Nrf24JamConfig* cfg = nrf24_jam_config_get(app->jam.source, app->jam.protocol);
     VariableItem* item;
     char buf[12];
 
     variable_item_list_reset(vil);
-    variable_item_list_set_header(vil, nrf24_source_type_label(app->jam.source));
+    /* Protocol config is per-preset, so name the preset in the header (e.g.
+     * "Protocol: BLE Adv") to make clear which slot is being edited. */
+    if(app->jam.source == Nrf24SourceProtocol) {
+        char header[24];
+        snprintf(
+            header,
+            sizeof(header),
+            "Protocol: %s",
+            nrf24_jam_preset_short((Nrf24JamPreset)app->jam.protocol));
+        variable_item_list_set_header(vil, header);
+    } else {
+        variable_item_list_set_header(vil, nrf24_source_type_label(app->jam.source));
+    }
 
     item = variable_item_list_add(vil, "PA Level", Nrf24Pa_Count, jam_config_set_pa, app);
     variable_item_set_current_value_index(item, cfg->pa_level);
