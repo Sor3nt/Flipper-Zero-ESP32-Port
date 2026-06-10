@@ -1,10 +1,8 @@
 #include "../nrf24_app.h"
-#include "../helpers/nrf24_jam_presets.h"
 
 enum SubmenuIndex {
     SubmenuIndexSpectrum,
     SubmenuIndexJammer,
-    SubmenuIndexBleJammer,
     SubmenuIndexMouseJacker,
 };
 
@@ -24,8 +22,6 @@ void nrf24_app_scene_menu_on_enter(void* context) {
         app);
     submenu_add_item(
         app->submenu, "Jammer", SubmenuIndexJammer, nrf24_scene_menu_submenu_callback, app);
-    submenu_add_item(
-        app->submenu, "BLE Jammer", SubmenuIndexBleJammer, nrf24_scene_menu_submenu_callback, app);
     submenu_add_item(
         app->submenu,
         "MouseJacker",
@@ -47,15 +43,6 @@ bool nrf24_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case SubmenuIndexJammer:
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneJam);
-            consumed = true;
-            break;
-        case SubmenuIndexBleJammer:
-            /* Jump straight into the BLE-advertising jam (Protocol/BLE-Adv); the
-             * preset's saved config defaults to a parked CW carrier. */
-            app->jam.source = Nrf24SourceProtocol;
-            app->jam.protocol = Nrf24JamPresetBleAdv;
-            app->jam.resume_running = false;
             scene_manager_next_scene(app->scene_manager, Nrf24AppSceneJam);
             consumed = true;
             break;
