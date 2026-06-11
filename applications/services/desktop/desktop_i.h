@@ -51,7 +51,6 @@ typedef enum {
     DesktopViewIdPinInput,
     DesktopViewIdPinTimeout,
     DesktopViewIdSlideshow,
-    DesktopViewIdUsbStorage,
     DesktopViewIdTotal,
 } DesktopViewId;
 
@@ -83,7 +82,6 @@ struct Desktop {
     DesktopViewPinTimeout* pin_timeout_view;
     DesktopSlideshowView* slideshow_view;
     DesktopViewPinInput* pin_input_view;
-    DesktopUsbStorageView* usb_storage_view;
 
     ViewStack* main_view_stack;
     ViewStack* locked_view_stack;
@@ -96,6 +94,7 @@ struct Desktop {
     Loader* loader;
     Storage* storage;
     NotificationApp* notification;
+    FuriString* archive_dir;
 
     FuriPubSub* status_pubsub;
     FuriPubSub* input_events_pubsub;
@@ -151,3 +150,5 @@ void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);
  * view_dispatcher_send_custom_event. Aus dem Mesh-Service-Worker-Task sicher
  * aufrufbar (view_dispatcher hat eigene message queue). */
 void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx);
+int32_t desktop_shutdown(void* context);
+void desktop_launch_archive(Desktop* desktop, const char* open_dir);

@@ -87,6 +87,9 @@ extern unsigned long long __umoddi3(unsigned long long, unsigned long long);
 /* <math.h> doesn't declare these here (newlib config) — declare explicitly. */
 extern double pow(double, double);
 extern double floor(double);
+/* bt_stop_stack from btshim — extern to avoid include conflict (bt.h and btshim.h both define bt_set_status_changed_callback). */
+struct Bt;
+void bt_stop_stack(struct Bt* bt);
 /* subghz headers - resolved via subghz component INCLUDE_DIRS */
 #include "devices.h"
 #include "receiver.h"
@@ -556,13 +559,8 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0x85aa1a2b, .address = (uint32_t)locale_celsius_to_fahrenheit }, /* locale_celsius_to_fahrenheit */
     { .hash = 0x85b3004e, .address = (uint32_t)subghz_setting_get_inx_preset_by_name }, /* subghz_setting_get_inx_preset_by_name */
     { .hash = 0x8658fbb8, .address = (uint32_t)&I_Message_8x7 }, /* I_Message_8x7 */
-<<<<<<< HEAD
-    { .hash = 0x86de72c7, .address = (uint32_t)number_input_alloc }, /* number_input_alloc */
-    { .hash = 0x86ac0d27, .address = (uint32_t)furi_hal_gpio_write }, /* furi_hal_gpio_write */
-=======
     { .hash = 0x86ac0d27, .address = (uint32_t)furi_hal_gpio_write }, /* furi_hal_gpio_write */
     { .hash = 0x86de72c7, .address = (uint32_t)number_input_alloc }, /* number_input_alloc */
->>>>>>> upstream/main
     { .hash = 0x870064dd, .address = (uint32_t)submenu_get_view }, /* submenu_get_view */
     { .hash = 0x871f6356, .address = (uint32_t)subghz_devices_deinit }, /* subghz_devices_deinit */
     { .hash = 0x8742c103, .address = (uint32_t)popup_alloc }, /* popup_alloc */
