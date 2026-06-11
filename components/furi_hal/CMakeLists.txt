@@ -65,7 +65,7 @@ else()
 endif()
 
 # Add encoder driver for boards with rotary encoder
-if(FLIPPER_BOARD STREQUAL "lilygo_t_embed_cc1101")
+if(FLIPPER_BOARD STREQUAL "lilygo_t_embed_cc1101" OR FLIPPER_BOARD STREQUAL "esp32s3_generic")
     list(APPEND FURI_HAL_SRCS "furi_hal_encoder.c")
 endif()
 
