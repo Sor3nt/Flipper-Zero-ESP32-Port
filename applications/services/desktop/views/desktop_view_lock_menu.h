@@ -29,7 +29,8 @@ void desktop_lock_menu_set_idx(DesktopLockMenuView* lock_menu, uint8_t idx);
 
 /** Rebuild the menu items from the current toggle states and reset the
  *  selection. `usb_available` gates the qFlipper / USB-Storage entries (USB-OTG
- *  is ESP32-S3/S2 only); `bruce_available` gates the multi-boot entry. */
+ *  is ESP32-S3/S2 only); `bruce_available` gates the multi-boot entry. "Mesh
+ *  Clients" ist immer dabei (T-Embed ist immer Master). */
 void desktop_lock_menu_set_states(
     DesktopLockMenuView* lock_menu,
     bool usb_available,

@@ -21,7 +21,7 @@
 
 #define NOTIFICATION_SETTINGS_PATH    INT_PATH(".notification.settings")
 #define NOTIFICATION_SETTINGS_MAGIC   0x42
-#define NOTIFICATION_SETTINGS_VERSION 0x09
+#define NOTIFICATION_SETTINGS_VERSION 0x0A
 
 typedef enum {
     NotificationLayerMessage,
@@ -302,8 +302,15 @@ static void input_event_callback(const void* value, void* context) {
 
     NotificationApp* app = context;
     notification_message(app, &sequence_display_backlight_on);
-    /* Re-light the WS2812 ring with the saved color and reset the idle-off timer. */
-    notification_apply_led_color(app);
+    /* Keep the WS2812 ring alive on user input. If the idle-off timer already
+     * darkened it, re-light fully (resets phase + restarts the effect). If it's
+     * still lit, only re-arm the idle-off timer — restarting here would reset a
+     * running animation back to frame 0 on every encoder tick. */
+    if(app->led_idle_off) {
+        notification_apply_led_color(app);
+    } else if(app->led_off_timer && app->settings.led_off_delay_ms > 0) {
+        furi_timer_start(app->led_off_timer, furi_ms_to_ticks(app->settings.led_off_delay_ms));
+    }
 }
 
 static void notification_message_send(
@@ -560,6 +567,8 @@ static void notification_led_effect_tick(void* context) {
  * Also (re)starts the idle-off timer. */
 void notification_apply_led_color(NotificationApp* app) {
     if(!app) return;
+    /* About to re-light the ring — clear the idle-off marker. */
+    app->led_idle_off = false;
     /* Always stop the effect timer; we'll restart for animated effects. */
     if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
         furi_timer_stop(app->led_effect_timer);
@@ -613,6 +622,7 @@ static void notification_led_off_timer_cb(void* context) {
         furi_timer_stop(app->led_effect_timer);
     }
     furi_hal_light_set_rgb_all(0, 0, 0);
+    app->led_idle_off = true;
 }
 
 /* ─────────────────────────── UI color (LCD foreground) ─────────────────────
@@ -682,8 +692,14 @@ void notification_apply_ui_color(NotificationApp* app) {
     uint8_t bg_idx = app->settings.ui_color_index;
     uint8_t fg_idx = app->settings.ui_fg_color_index;
 
-    /* Push static colors immediately; defer animated ones to the timer. */
-    if(bg_idx < UI_COLOR_SPECTRUM_INDEX) {
+    /* Push static colors immediately; defer animated ones to the timer.
+     * The custom index pulls its color from settings.ui_custom_color (0x00RRGGBB)
+     * instead of the fixed palette. */
+    if(bg_idx == UI_COLOR_CUSTOM_INDEX) {
+        uint32_t c = app->settings.ui_custom_color;
+        furi_hal_display_set_fg_color(
+            ui_color_pack_swap((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF));
+    } else if(bg_idx < UI_COLOR_SPECTRUM_INDEX) {
         furi_hal_display_set_fg_color(ui_color_value[bg_idx]);
     }
     if(fg_idx < UI_COLOR_SPECTRUM_INDEX) {
@@ -732,6 +748,8 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.led_speed_tick_ms = 33; /* Default ~30fps */
     app->settings.ui_color_index = 1; /* Default: Orange (preserves stock Flipper UI) */
     app->settings.ui_fg_color_index = 0; /* Default: Black (preserves stock contrast) */
+    app->settings.ui_custom_color = UI_CUSTOM_DEFAULT_RGB; /* picker start color */
+    app->settings.ui_custom_color_set = false; /* no custom color defined yet */
     app->current_night_shift = 1.0f;
 
     /* Try to load persisted settings (NVS-backed via saved_struct).

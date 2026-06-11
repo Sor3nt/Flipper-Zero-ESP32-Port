@@ -43,7 +43,7 @@ bool nrf24_app_scene_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case SubmenuIndexJammer:
-            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneJammerMenu);
+            scene_manager_next_scene(app->scene_manager, Nrf24AppSceneJam);
             consumed = true;
             break;
         case SubmenuIndexMouseJacker:

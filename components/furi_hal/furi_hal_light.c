@@ -17,6 +17,7 @@
 #include "boards/board.h"
 
 #include <driver/ledc.h>
+#include <driver/gpio.h>
 #include <esp_log.h>
 
 #ifdef BOARD_PIN_WS2812_DATA
@@ -87,6 +88,12 @@ static void furi_hal_light_ws2812_init(void) {
 #endif
 
 void furi_hal_light_init(void) {
+    /* Release any deep-sleep GPIO hold on the backlight pin. The power-off path
+     * latches this pin LOW with gpio_hold so the backlight stays off in deep
+     * sleep; the latch survives the deep-sleep wake reset, so we must clear it
+     * here before LEDC can drive the pin again. No-op on a cold boot. */
+    gpio_hold_dis((gpio_num_t)gpio_lcd_bl.pin);
+
     /* Configure LEDC timer for backlight PWM */
     ledc_timer_config_t timer_conf = {
         .speed_mode = BACKLIGHT_LEDC_SPEED,

@@ -122,7 +122,9 @@ static bool loader_applications_select_app(LoaderApplicationsApp* loader_applica
     return result;
 }
 
-static void loader_applications_show_js_not_supported(LoaderApplicationsApp* app) {
+// TODO: aufrufen, sobald JS-Apps im Browser auswaehlbar sind (Hook fehlt noch) -> bewusst ungenutzt
+__attribute__((unused)) static void
+    loader_applications_show_js_not_supported(LoaderApplicationsApp* app) {
     DialogMessage* message = dialog_message_alloc();
     dialog_message_set_header(message, "JS not supported", 64, 3, AlignCenter, AlignTop);
     dialog_message_set_text(

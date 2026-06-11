@@ -98,11 +98,18 @@ static void js_gui_icon_load_fxbm(struct mjs* mjs) {
             break;
         }
 
+        // 'icon' ist das erste Feld (Offset 0) der malloc-allozierten (aligned) Struktur,
+        // seine Member sind also korrekt ausgerichtet -- das Packing betrifft nur die Felder
+        // dahinter. FURI_CONST_ASSIGN expandiert via _Generic in viele (T*)&x-Zweige, daher
+        // die address-of-packed-member-Warnung hier gezielt (und sicher) unterdruecken.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
         FURI_CONST_ASSIGN(fxbm->icon.width, fxbm_header.width);
         FURI_CONST_ASSIGN(fxbm->icon.height, fxbm_header.height);
         FURI_CONST_ASSIGN(fxbm->icon.frame_count, 1);
         FURI_CONST_ASSIGN(fxbm->icon.frame_rate, 1);
         FURI_CONST_ASSIGN_PTR(fxbm->icon.frames, fxbm->frames);
+#pragma GCC diagnostic pop
         fxbm->frames[0] = (void*)&fxbm->frame;
         fxbm->frame.is_compressed = false;
     } while(false);

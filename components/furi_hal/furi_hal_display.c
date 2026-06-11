@@ -336,6 +336,14 @@ void furi_hal_display_set_backlight(uint8_t brightness) {
     furi_hal_light_set(LightBacklight, brightness);
 }
 
+void furi_hal_display_sleep(void) {
+    if(!panel_handle) return;
+    furi_hal_spi_bus_lock();
+    /* SLPIN: stop the panel's internal oscillator/booster to cut idle current */
+    esp_lcd_panel_disp_on_off(panel_handle, false);
+    furi_hal_spi_bus_unlock();
+}
+
 uint16_t furi_hal_display_get_h_res(void) {
     return LCD_H_RES;
 }

@@ -63,7 +63,10 @@ static const CanvasOrientation view_port_orientation_mapping[ViewPortOrientation
 static void view_port_map_input(InputEvent* event, ViewPortOrientation orientation) {
     furi_check(orientation < ViewPortOrientationMAX && event->key < InputKeyMAX);
 
-    if(event->sequence_source != INPUT_SEQUENCE_SOURCE_HARDWARE) {
+    // Software-injected events (RPC) already arrive in the final, orientation-
+    // corrected coordinate system, so they are not remapped. Physical sources
+    // (HARDWARE encoder/buttons and TOUCH panels) are.
+    if(event->sequence_source == INPUT_SEQUENCE_SOURCE_SOFTWARE) {
         return;
     }
 
