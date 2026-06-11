@@ -22,7 +22,6 @@
 #include <momentum/asset_packs.h>
 #include <loader/loader_menu.h>
 #include <lib/subghz/subghz_setting.h>
-
 #include <toolbox/colors.h>
 #include <momentum/namespoof.h>
 #include <dolphin/dolphin.h>
