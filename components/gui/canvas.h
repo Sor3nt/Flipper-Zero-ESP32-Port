@@ -270,6 +270,23 @@ void canvas_draw_icon_animation(
     int32_t y,
     IconAnimation* icon_animation);
 
+/** Draw icon at position defined by x,y with scale.
+ *
+ * @param      canvas          Canvas instance
+ * @param      x               x coordinate
+ * @param      y               y coordinate
+ * @param      width_scale     Scaled (%) width of the icon (1-100%)
+ * @param      height_scale    Scaled (%) height of the icon (1-100%)
+ * @param      icon_animation  IconAnimation instance
+ */
+void canvas_draw_icon_animation_ex(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    int32_t width_scale,
+    int32_t height_scale,
+    IconAnimation* icon_animation);
+
 /** Draw icon at position defined by x,y.
  *
  * @param      canvas  Canvas instance

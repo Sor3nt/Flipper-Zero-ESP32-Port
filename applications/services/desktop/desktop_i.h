@@ -2,6 +2,7 @@
 
 #include "desktop.h"
 #include "desktop_settings.h"
+#include "desktop_keybinds.h"
 
 #include "animations/animation_manager.h"
 #include "views/desktop_view_pin_timeout.h"
@@ -93,6 +94,7 @@ struct Desktop {
     Loader* loader;
     Storage* storage;
     NotificationApp* notification;
+    FuriString* archive_dir;
 
     FuriPubSub* status_pubsub;
     FuriPubSub* input_events_pubsub;
@@ -138,7 +140,7 @@ struct Desktop {
     bool mesh_last_result_valid;
 };
 
-void desktop_lock(Desktop* desktop);
+void desktop_lock(Desktop* desktop, bool with_pin);
 void desktop_unlock(Desktop* desktop);
 void desktop_set_dummy_mode_state(Desktop* desktop, bool enabled);
 void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);
@@ -148,3 +150,5 @@ void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);
  * view_dispatcher_send_custom_event. Aus dem Mesh-Service-Worker-Task sicher
  * aufrufbar (view_dispatcher hat eigene message queue). */
 void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx);
+int32_t desktop_shutdown(void* context);
+void desktop_launch_archive(Desktop* desktop, const char* open_dir);

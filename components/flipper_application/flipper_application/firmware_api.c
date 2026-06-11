@@ -87,6 +87,9 @@ extern unsigned long long __umoddi3(unsigned long long, unsigned long long);
 /* <math.h> doesn't declare these here (newlib config) — declare explicitly. */
 extern double pow(double, double);
 extern double floor(double);
+/* bt_stop_stack from btshim — extern to avoid include conflict (bt.h and btshim.h both define bt_set_status_changed_callback). */
+struct Bt;
+void bt_stop_stack(struct Bt* bt);
 /* subghz headers - resolved via subghz component INCLUDE_DIRS */
 #include "devices.h"
 #include "receiver.h"
@@ -99,7 +102,7 @@ extern double floor(double);
 #include "blocks/generic.h"
 #include "protocol_items.h"
 #include "subghz_protocol_registry.h"
-#include "blocks/math.h"
+#include "blocks/subghz_math.h"
 #include "blocks/decoder.h"
 
 #include <mjs_core_public.h>

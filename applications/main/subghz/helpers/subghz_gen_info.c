@@ -1,7 +1,7 @@
 #include "subghz_gen_info.h"
 #include "../helpers/subghz_txrx_create_protocol_key.h"
 #include <lib/subghz/protocols/protocol_items.h>
-#include <lib/subghz/blocks/math.h>
+#include <lib/subghz/blocks/subghz_math.h>
 
 void subghz_gen_info_reset(GenInfo* gen_info) {
     furi_assert(gen_info);

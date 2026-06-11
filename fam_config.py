@@ -40,6 +40,7 @@ APPS = [
     "cli_subghz",
     "subghz_load_dangerous_settings",
     "passport",
+    "momentum_app",
     "nfc",
     "infrared",
     "lfrfid",

@@ -67,28 +67,45 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
         } break;
 
         case DesktopMainEventOpenArchive:
-            loader_start_detached_with_gui_error(
-                desktop->loader, FLIPPER_ARCHIVE.appid, NULL);
+            if(desktop->archive_dir && !furi_string_empty(desktop->archive_dir)) {
+                loader_start_detached_with_gui_error(
+                    desktop->loader,
+                    FLIPPER_ARCHIVE.appid,
+                    furi_string_get_cstr(desktop->archive_dir));
+            } else {
+                loader_start_detached_with_gui_error(
+                    desktop->loader, FLIPPER_ARCHIVE.appid, NULL);
+            }
             consumed = true;
             break;
 
-        case DesktopMainEventLock:
-            FURI_LOG_I(TAG, "Lock action not yet ported");
+        case DesktopMainEventLockKeypad:
+            desktop_lock(desktop, false);
+            consumed = true;
+            break;
+
+        case DesktopMainEventLockWithPin:
+            desktop_lock(desktop, true);
             consumed = true;
             break;
 
         case DesktopMainEventOpenLockMenu:
-            FURI_LOG_I(TAG, "Lock menu not yet ported");
-            consumed = true;
-            break;
-
-        case DesktopMainEventOpenDebug:
-            FURI_LOG_I(TAG, "Debug scene not yet ported");
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneLockMenu);
             consumed = true;
             break;
 
         case DesktopMainEventOpenPowerOff:
-            FURI_LOG_I(TAG, "Power off action not yet ported");
+            desktop_shutdown(desktop);
+            consumed = true;
+            break;
+
+        case DesktopLockedEventUpdate:
+            desktop_view_locked_update(desktop->locked_view);
+            consumed = true;
+            break;
+
+        case DesktopGlobalApiUnlock:
+            desktop_unlock(desktop);
             consumed = true;
             break;
 
@@ -101,7 +118,9 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case DesktopAnimationEventInteractAnimation:
-            animation_manager_interact_process(desktop->animation_manager);
+            if(!animation_manager_interact_process(desktop->animation_manager)) {
+                desktop_run_keybind(desktop, InputTypeShort, InputKeyRight);
+            }
             consumed = true;
             break;
 

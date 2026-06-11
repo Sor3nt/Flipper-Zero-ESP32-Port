@@ -30,11 +30,18 @@ CONFIG_HEAP_TRACING_OFF=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_DEFAULT_LEVEL=3
 
-# Task watchdog
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+# Task watchdog: generous timeout (PHY calibration on first boot can take 15-20s)
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# Interrupt watchdog: disabled — first PHY calibration (>15s) fires TG0WDT
+# and creates a boot loop before calibration completes.
+# CONFIG_ESP_INT_WDT is not set
 
 # System
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# TinyUSB: disable MSC (no callback implementations provided)
+# CONFIG_TINYUSB_MSC_ENABLED is not set
 
 # FAT filesystem: enable Long File Names (stored on heap)
 CONFIG_FATFS_LFN_HEAP=y

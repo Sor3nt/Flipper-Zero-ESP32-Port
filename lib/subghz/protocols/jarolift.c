@@ -7,7 +7,7 @@
 #include "../blocks/decoder.h"
 #include "../blocks/encoder.h"
 #include "../blocks/generic.h"
-#include "../blocks/math.h"
+#include "../blocks/subghz_math.h"
 
 #include "../blocks/custom_btn_i.h"
 

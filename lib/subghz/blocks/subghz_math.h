@@ -1,5 +1,9 @@
 #pragma once
 
+// Include the system math.h first so that standard math functions (sin, cos, etc.) are available.
+// This file shadows the system math.h due to include path order.
+#include_next <math.h>
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -32,7 +36,7 @@
         (value) &= ~(_one << (bit));  \
     })
 #define bit_write(value, bit, bitvalue) (bitvalue ? bit_set(value, bit) : bit_clear(value, bit))
-#define DURATION_DIFF(x, y)             (((x) < (y)) ? ((y) - (x)) : ((x) - (y)))
+#define DURATION_DIFF(x, y)             (((x) < (y)) ? ((y) - (x)) : ((x) - (x)))
 
 #ifdef __cplusplus
 extern "C" {
@@ -201,7 +205,7 @@ uint16_t subghz_protocol_blocks_lfsr_digest16(
 /** Compute Addition of a number of bytes
  *
  * @param      message  bytes of message data
- * @param      size     number of bytes to sum
+ * @param      size     number of bytes to add
  *
  * @return     summation value
  */

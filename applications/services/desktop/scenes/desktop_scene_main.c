@@ -123,9 +123,15 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
         } break;
 
-        case DesktopMainEventLock:
+        case DesktopMainEventLockKeypad:
             scene_manager_set_scene_state(desktop->scene_manager, DesktopSceneLockMenu, 0);
-            desktop_lock(desktop);
+            desktop_lock(desktop, false);
+            consumed = true;
+            break;
+
+        case DesktopMainEventLockWithPin:
+            scene_manager_set_scene_state(desktop->scene_manager, DesktopSceneLockMenu, 0);
+            desktop_lock(desktop, true);
             consumed = true;
             break;
 
@@ -145,7 +151,7 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case DesktopMainEventOpenPowerOff: {
-            loader_start_detached_with_gui_error(desktop->loader, "Power", "off");
+            desktop_shutdown(desktop);
             consumed = true;
             break;
         }
@@ -186,13 +192,7 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case DesktopAnimationEventInteractAnimation:
             if(!animation_manager_interact_process(desktop->animation_manager)) {
-                if(!desktop->settings.dummy_mode) {
-                    desktop_scene_main_open_app_or_profile(
-                        desktop, &desktop->settings.favorite_apps[FavoriteAppRightShort]);
-                } else {
-                    desktop_scene_main_open_app_or_profile(
-                        desktop, &desktop->settings.dummy_apps[DummyAppRightShort]);
-                }
+                desktop_run_keybind(desktop, InputTypeShort, InputKeyRight);
             }
             consumed = true;
             break;
@@ -216,7 +216,7 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
                     desktop, &desktop->settings.dummy_apps[DummyAppUpLong]);
             } else {
                 scene_manager_set_scene_state(desktop->scene_manager, DesktopSceneLockMenu, 0);
-                desktop_lock(desktop);
+                desktop_lock(desktop, false);
             }
             break;
         case DesktopDummyEventOpenDownLong:

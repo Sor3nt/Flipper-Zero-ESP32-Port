@@ -252,6 +252,24 @@ void elements_scrollable_text_line(
     size_t scroll,
     bool ellipsis);
 
+void elements_scrollable_text_line_centered(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    size_t width,
+    FuriString* string,
+    size_t scroll,
+    bool ellipsis,
+    bool centered);
+
+void elements_scrollbar_horizontal(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    size_t width,
+    size_t pos,
+    size_t total);
+
 void elements_scrollable_text_line_str(
     Canvas* canvas,
     uint8_t x,

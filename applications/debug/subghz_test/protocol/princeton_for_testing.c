@@ -1,7 +1,7 @@
 #include "princeton_for_testing.h"
 
 #include <furi_hal.h>
-#include "math.h"
+#include "subghz_math.h"
 
 /*
  * Help

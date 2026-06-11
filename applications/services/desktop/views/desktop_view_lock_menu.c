@@ -12,7 +12,6 @@
 //   USB-Storage    open the full-screen mass-storage scene  [USB-OTG only]
 //   Bluetooth      Enable/Disable
 //   Switch to Bruce  reboot into the Bruce firmware         [multi-boot only]
-//   Mesh: Off/Master/Client    cycle the mesh role
 //   Mesh Clients   open the discovery/pairing scene          [Master only]
 
 typedef struct {

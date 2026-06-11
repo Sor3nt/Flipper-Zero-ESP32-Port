@@ -14,6 +14,7 @@
 #include "views/nrf24_spectrum_view.h"
 #include "views/nrf24_jam_view.h"
 #include "views/nrf24_scan_view.h"
+#include "views/nrf24_preset_jam_view.h"
 #include "views/nrf24_mj_scan_view.h"
 #include "views/nrf24_mj_attack_view.h"
 #include "helpers/nrf24_mj_core.h"
@@ -27,6 +28,7 @@ typedef enum {
     Nrf24ViewJam,
     Nrf24ViewScan,
     Nrf24ViewJamConfig,
+    Nrf24ViewPresetJam,
     Nrf24ViewMjScan,
     Nrf24ViewMjAttack,
 } Nrf24View;
@@ -46,6 +48,7 @@ typedef struct Nrf24App {
     View* spectrum_view;
     View* jam_view; /* unified jam engine */
     View* scan_view; /* activity-scan progress */
+    View* preset_jam_view;
     View* mj_scan_view;
     View* mj_attack_view;
 
@@ -58,6 +61,9 @@ typedef struct Nrf24App {
     uint16_t wifi_ap_count;
     char selected_wifi_ssid[33];
     uint8_t selected_wifi_channel;
+
+    /* Selected protocol preset for the preset jammer scene (Nrf24JamPreset) */
+    uint8_t selected_jam_preset;
 
     /* MouseJacker shared state (owned by the mj scenes) */
     MjTarget mj_targets[MJ_MAX_TARGETS];

@@ -38,6 +38,12 @@ extern const size_t input_pins_count;
 extern const GpioPin gpio_button_boot; /* GPIO9 - BOOT button (active low) */
 extern const GpioPin gpio_battery_sense; /* GPIO0 - BAT_ADC (VCC / 3) */
 
+#ifdef BOARD_HAS_ENCODER
+/* Rotary Encoder Pins (LilyGo T-Embed CC1101) */
+extern const GpioPin gpio_encoder_a;
+extern const GpioPin gpio_encoder_b;
+#endif
+
 /* LCD Pins (Waveshare ESP32-C6-LCD-1.9, ST7789V2) */
 extern const GpioPin gpio_lcd_din;  /* GPIO4  - SPI MOSI */
 extern const GpioPin gpio_lcd_clk;  /* GPIO5  - SPI SCLK */

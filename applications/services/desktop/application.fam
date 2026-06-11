@@ -11,9 +11,8 @@ App(
         "input",
         "bt",
     ],
-    provides=[],
+    provides=["desktop_settings"],
     conflicts=["updater"],
-    stack_size=4 * 1024,
-    order=200,
-    sdk_headers=["desktop_settings.h", "desktop.h"],
+    stack_size=2 * 1024,
+    order=60,
 )
