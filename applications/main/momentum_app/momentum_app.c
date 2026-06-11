@@ -113,10 +113,6 @@ bool momentum_app_apply(MomentumApp* app) {
         dolphin_reload_state(app->dolphin);
     }
 
-    if(app->save_backlight) {
-        rgb_backlight_save_settings();
-    }
-
     if(app->save_settings) {
         momentum_settings_save();
     }

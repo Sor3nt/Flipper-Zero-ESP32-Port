@@ -15,6 +15,7 @@
 struct Menu {
     View* view;
     FuriTimer* scroll_timer;
+    bool ok_held;
 };
 
 typedef struct {
@@ -559,13 +560,40 @@ static bool menu_input_callback(InputEvent* event, void* context) {
     Menu* menu = context;
     bool consumed = true;
 
+    // Track OK hold state for encoder remapping
+    if(event->key == InputKeyOk) {
+        if(event->type == InputTypePress) {
+            menu->ok_held = true;
+        } else if(event->type == InputTypeRelease) {
+            menu->ok_held = false;
+        }
+    }
+
     if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
+        MenuStyle style = momentum_settings.menu_style;
+
         switch(event->key) {
         case InputKeyUp:
-            menu_process_up(menu);
+            // Horizontal/vertical carousel: encoder navigates left/right
+            if(style == MenuStyleDsi || style == MenuStylePs4 ||
+               style == MenuStyleCoverFlow || style == MenuStyleVertical) {
+                menu_process_left(menu);
+            } else if(menu->ok_held) {
+                // OK held: alternate navigation (grid rows, page jumps)
+                menu_process_left(menu);
+            } else {
+                menu_process_up(menu);
+            }
             break;
         case InputKeyDown:
-            menu_process_down(menu);
+            if(style == MenuStyleDsi || style == MenuStylePs4 ||
+               style == MenuStyleCoverFlow || style == MenuStyleVertical) {
+                menu_process_right(menu);
+            } else if(menu->ok_held) {
+                menu_process_right(menu);
+            } else {
+                menu_process_down(menu);
+            }
             break;
         case InputKeyLeft:
             menu_process_left(menu);
