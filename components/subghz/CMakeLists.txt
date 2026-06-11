@@ -11,7 +11,12 @@ idf_component_register(
         ".."
         "../../lib/drivers"
         "../../lib/subghz"
-        "../../lib/subghz/blocks"
+        # NICHT "../../lib/subghz/blocks": dessen math.h enthaelt nur subghz-CRC-Helfer
+        # (keine libm-Prototypen) und wuerde, global exportiert, jedes <math.h> ueberschatten
+        # -> implizite Deklarationen von log/sqrt/sinf/floorf/... in furi_hal/js_app/nfc.
+        # subghz-intern wird der Header relativ inkludiert ("math.h" / "../blocks/math.h"),
+        # externe Nutzer ueber <lib/subghz/blocks/...> bzw. firmware_api ueber "blocks/math.h"
+        # (relativ zu lib/subghz) -- keiner braucht diesen Pfad als -I.
         "../../lib/subghz/devices"
         "../../lib/subghz/protocols"
     REQUIRES furi furi_hal toolbox mlib flipper_application storage flipper_format rpc

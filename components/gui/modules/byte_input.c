@@ -504,18 +504,23 @@ static void byte_input_clear_selected_byte(ByteInputModel* model) {
  * @param      model  The model
  */
 static void byte_input_handle_up(ByteInputModel* model) {
-    if(model->selected_row > -2) {
-        model->selected_row -= 1;
-    } else if(model->selected_row == -2) {
-        if(!model->selected_high_nibble) {
-            model->bytes[model->selected_byte] = (model->bytes[model->selected_byte] & 0xF0) |
-                                                 ((model->bytes[model->selected_byte] + 1) & 0x0F);
+    if(byte_input_keyboard_selected(model)) {
+        if(model->selected_column > 0) {
+            model->selected_column -= 1;
         } else {
-            model->bytes[model->selected_byte] =
-                ((model->bytes[model->selected_byte] + 0x10) & 0xF0) |
-                (model->bytes[model->selected_byte] & 0x0F);
+            model->selected_column = byte_input_get_row_size(model->selected_row) - 1;
+            if(model->selected_row > 0) {
+                model->selected_row -= 1;
+            } else {
+                model->selected_row = keyboard_row_count - 1;
+            }
         }
-        byte_input_call_changed_callback(model);
+    } else {
+        if(model->selected_row != -2) {
+            byte_input_dec_selected_byte(model);
+        } else {
+            byte_input_dec_selected_byte_mini(model);
+        }
     }
 }
 
@@ -524,6 +529,31 @@ static void byte_input_handle_up(ByteInputModel* model) {
  * @param      model  The model
  */
 static void byte_input_handle_down(ByteInputModel* model) {
+        if(byte_input_keyboard_selected(model)) {
+        if(model->selected_column < byte_input_get_row_size(model->selected_row) - 1) {
+            model->selected_column += 1;
+        } else {
+            model->selected_column = 0;
+            if(model->selected_row < keyboard_row_count - 1) {
+                model->selected_row += 1;
+            } else {
+                model->selected_row = 0;
+            }
+        }
+    } else {
+        if(model->selected_row != -2) {
+            byte_input_inc_selected_byte(model);
+        } else {
+            byte_input_inc_selected_byte_mini(model);
+        }
+    }
+}
+
+/** Handle left button
+ *
+ * @param      model  The model
+ */
+static void byte_input_handle_left(ByteInputModel* model) { // XXX
     if(model->selected_row != -2) {
         if(byte_input_keyboard_selected(model)) {
             if(model->selected_row < keyboard_row_count - 1) {
@@ -545,43 +575,23 @@ static void byte_input_handle_down(ByteInputModel* model) {
     }
 }
 
-/** Handle left button
- *
- * @param      model  The model
- */
-static void byte_input_handle_left(ByteInputModel* model) { // XXX
-    if(byte_input_keyboard_selected(model)) {
-        if(model->selected_column > 0) {
-            model->selected_column -= 1;
-        } else {
-            model->selected_column = byte_input_get_row_size(model->selected_row) - 1;
-        }
-    } else {
-        if(model->selected_row != -2) {
-            byte_input_dec_selected_byte(model);
-        } else {
-            byte_input_dec_selected_byte_mini(model);
-        }
-    }
-}
-
 /** Handle right button
  *
  * @param      model  The model
  */
 static void byte_input_handle_right(ByteInputModel* model) { // XXX
-    if(byte_input_keyboard_selected(model)) {
-        if(model->selected_column < byte_input_get_row_size(model->selected_row) - 1) {
-            model->selected_column += 1;
+    if(model->selected_row > -2) {
+        model->selected_row -= 1;
+    } else if(model->selected_row == -2) {
+        if(!model->selected_high_nibble) {
+            model->bytes[model->selected_byte] = (model->bytes[model->selected_byte] & 0xF0) |
+                                                 ((model->bytes[model->selected_byte] + 1) & 0x0F);
         } else {
-            model->selected_column = 0;
+            model->bytes[model->selected_byte] =
+                ((model->bytes[model->selected_byte] + 0x10) & 0xF0) |
+                (model->bytes[model->selected_byte] & 0x0F);
         }
-    } else {
-        if(model->selected_row != -2) {
-            byte_input_inc_selected_byte(model);
-        } else {
-            byte_input_inc_selected_byte_mini(model);
-        }
+        byte_input_call_changed_callback(model);
     }
 }
 

@@ -1,5 +1,8 @@
 #include "desktop_i.h"
 
+#include <string.h>
+#include <esp_heap_caps.h>
+
 #include <cli/cli_vcp.h>
 
 #include <gui/gui_i.h>
@@ -13,10 +16,107 @@
 #include "scenes/desktop_scene.h"
 #include "scenes/desktop_scene_locked.h"
 
+#include "helpers/mesh_config.h"
+#include "helpers/mesh_service.h"
+#include "helpers/mesh_capture.h"
+
 #include "furi_hal_power.h"
 #include <power/power_service/power.h>
 
 #define TAG "Desktop"
+
+/* ─── Mesh helpers (Phase 1) ─────────────────────────────────────────────
+ * desktop_mesh_event_cb wird vom Mesh-Service-Worker-Task aufgerufen. Wir
+ * legen die Daten in desktop->mesh_pending ab und feuern ein Custom-Event an
+ * den view_dispatcher (intern thread-safe). Das Custom-Event wird in
+ * desktop_custom_event_callback global verarbeitet — damit erscheinen
+ * Pair/Disconnect-Reaktionen unabhängig von der aktuellen Scene. */
+
+void desktop_mesh_event_cb(const MeshEventData* ev, void* ctx) {
+    Desktop* desktop = ctx;
+    if(!desktop) return;
+    desktop->mesh_pending = *ev;
+
+    uint32_t custom;
+    switch(ev->type) {
+    case MeshEventDiscoverResponse:  custom = DesktopMeshEventMasterDiscoverRsp; break;
+    case MeshEventPairResponse:      custom = DesktopMeshEventMasterPairRsp; break;
+    case MeshEventPairRequest:       custom = DesktopMeshEventClientPairRequest; break;
+    case MeshEventDisconnect:        custom = DesktopMeshEventClientDisconnect; break;
+    case MeshEventFeatureList:       custom = DesktopMeshEventMasterFeatureList; break;
+    case MeshEventFeatureStatus:     custom = DesktopMeshEventMasterFeatureStatus; break;
+    case MeshEventResult:            custom = DesktopMeshEventMasterResult; break;
+    default:                         return;
+    }
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, custom);
+}
+
+#define MESH_OVERLAY_MS 3000
+
+/* Result-Overlay auf ALLEN Mesh-Views setzen — nur die gerade aktive zeichnet,
+ * so erscheint es egal in welcher Mesh-Scene man sich befindet. NULL = ausblenden. */
+static void desktop_mesh_set_overlay_all(Desktop* desktop, const char* text) {
+    desktop_mesh_clients_set_overlay(desktop->mesh_clients_view, text);
+    desktop_mesh_action_set_overlay(desktop->mesh_action_view, text);
+    desktop_mesh_device_set_overlay(desktop->mesh_device_view, text);
+    desktop_mesh_wifi_set_overlay(desktop->mesh_wifi_view, text);
+    desktop_mesh_handshake_set_overlay(desktop->mesh_handshake_view, text);
+}
+
+static void desktop_mesh_overlay_timer_cb(void* ctx) {
+    Desktop* desktop = ctx;
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopMeshEventOverlayExpire);
+}
+
+/* Client-Name per MAC aus clients.txt (für den pcap-Dateinamen). */
+static void desktop_mesh_client_name(const uint8_t mac[MESH_MAC_LEN], char* out, size_t out_sz) {
+    MeshPeer list[MESH_CLIENTS_MAX];
+    size_t n = 0;
+    mesh_config_load_clients(list, &n);
+    for(size_t i = 0; i < n; ++i) {
+        if(memcmp(list[i].mac, mac, MESH_MAC_LEN) == 0) {
+            strncpy(out, list[i].name, out_sz - 1);
+            out[out_sz - 1] = '\0';
+            return;
+        }
+    }
+    strncpy(out, "buddy", out_sz - 1);
+    out[out_sz - 1] = '\0';
+}
+
+/* Result vom Buddy (zuverlässig reassembliert): .pcap pro Netz schreiben (GUI-
+ * Thread → Storage erlaubt), bestätigen (Buddy löscht es dann), Overlay zeigen.
+ * Dedup gegen Wiederholungen (Buddy sendet bis Ack erneut). */
+static void desktop_mesh_on_result(Desktop* desktop) {
+    /* pcap-Blob im PSRAM (einmalig, lazy) — spart internes DRAM. */
+    static uint8_t* blob = NULL;
+    if(!blob) blob = heap_caps_malloc(1400, MALLOC_CAP_SPIRAM);
+    if(!blob) return;
+    uint8_t mac[MESH_MAC_LEN];
+    uint8_t id = 0;
+    uint16_t len = 0;
+
+    while(mesh_take_result(mac, &id, blob, 1400, &len)) {
+        /* Immer bestätigen (idempotent) — der Buddy hält das Result bis zum Ack. */
+        mesh_send_result_ack(mac, id);
+
+        bool dup = desktop->mesh_last_result_valid && desktop->mesh_last_result_id == id &&
+                   memcmp(desktop->mesh_last_result_mac, mac, MESH_MAC_LEN) == 0;
+        if(dup) continue; /* Retransmit: erneut geackt, aber kein zweites Mal schreiben/zeigen */
+
+        char name[36];
+        desktop_mesh_client_name(mac, name, sizeof(name));
+        mesh_capture_write_handshake(name, blob, len);
+
+        memcpy(desktop->mesh_last_result_mac, mac, MESH_MAC_LEN);
+        desktop->mesh_last_result_id = id;
+        desktop->mesh_last_result_valid = true;
+
+        desktop_mesh_set_overlay_all(desktop, "Handshake received");
+        if(desktop->mesh_overlay_timer)
+            furi_timer_start(desktop->mesh_overlay_timer, furi_ms_to_ticks(MESH_OVERLAY_MS));
+    }
+}
 
 static void desktop_auto_lock_arm(Desktop*);
 static void desktop_auto_lock_inhibit(Desktop*);
@@ -52,7 +152,9 @@ static void desktop_lock_icon_draw_callback(Canvas* canvas, void* context) {
     canvas_draw_icon(canvas, 0, 0, &I_Lock_7x8);
 }
 
-static void desktop_dummy_mode_icon_draw_callback(Canvas* canvas, void* context) {
+// Dummy-/Game-Mode-Icon: im Port noch nicht verdrahtet (vgl. stm32/-Referenz) -> bewusst ungenutzt
+__attribute__((unused)) static void
+    desktop_dummy_mode_icon_draw_callback(Canvas* canvas, void* context) {
     UNUSED(context);
     furi_assert(canvas);
     canvas_draw_icon(canvas, 0, 0, &I_GameMode_11x8);
@@ -139,6 +241,14 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
 
         desktop->app_running = true;
 
+        /* WiFi/ESP-NOW abschalten, damit Apps wie wlan_app/esp_now/nrf24 ihren
+         * eigenen WiFi-Stack initialisieren können. (Der Master-Mesh-Service läuft
+         * nur in der Mesh-Clients-Scene, von der aus keine App startet — defensiv
+         * trotzdem stoppen.) */
+        if(mesh_service_is_active() && mesh_service_get_role() == MeshRoleMaster) {
+            mesh_service_stop();
+        }
+
         furi_semaphore_release(desktop->animation_semaphore);
 
     } else if(event == DesktopGlobalAfterAppFinished) {
@@ -162,6 +272,25 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
     } else if(event == DesktopGlobalReloadSettings) {
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
+
+    } else if(event == DesktopMeshEventClientPairRequest) {
+        /* Auch im Lock-Menü/anderen Scenes Pair-Confirm zeigen. Push eine neue
+         * Scene; bei Yes/No navigiert die zurück zur Main-Scene (search). */
+        scene_manager_next_scene(desktop->scene_manager, DesktopSceneMeshPair);
+
+    } else if(event == DesktopMeshEventClientDisconnect) {
+        /* Silent: Master hat das Pairing beendet. master.txt entfernen, keine
+         * UI. (Service hat schon ACK gesendet.) */
+        mesh_config_clear_master();
+
+    } else if(event == DesktopMeshEventMasterResult) {
+        /* Result vom Buddy: global behandeln (Overlay + Ack) — egal welche Mesh-
+         * Scene gerade aktiv ist. */
+        desktop_mesh_on_result(desktop);
+
+    } else if(event == DesktopMeshEventOverlayExpire) {
+        /* Overlay-Timer abgelaufen → auf allen Mesh-Views ausblenden. */
+        desktop_mesh_set_overlay_all(desktop, NULL);
 
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
@@ -288,6 +417,15 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher, desktop_back_event_callback);
 
     desktop->lock_menu = desktop_lock_menu_alloc();
+    desktop->usb_storage_view = desktop_usb_storage_alloc();
+    desktop->mesh_clients_view = desktop_mesh_clients_alloc();
+    desktop->mesh_action_view = desktop_mesh_action_alloc();
+    desktop->mesh_device_view = desktop_mesh_device_alloc();
+    desktop->mesh_wifi_view = desktop_mesh_wifi_alloc();
+    desktop->mesh_handshake_view = desktop_mesh_handshake_alloc();
+    desktop->mesh_overlay_timer =
+        furi_timer_alloc(desktop_mesh_overlay_timer_cb, FuriTimerTypeOnce, desktop);
+    desktop->mesh_pair_dialog = dialog_ex_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
     desktop->locked_view = desktop_view_locked_alloc();
@@ -322,6 +460,34 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdLockMenu,
         desktop_lock_menu_get_view(desktop->lock_menu));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdUsbStorage,
+        desktop_usb_storage_get_view(desktop->usb_storage_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshClients,
+        desktop_mesh_clients_get_view(desktop->mesh_clients_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshAction,
+        desktop_mesh_action_get_view(desktop->mesh_action_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshDevice,
+        desktop_mesh_device_get_view(desktop->mesh_device_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshWifi,
+        desktop_mesh_wifi_get_view(desktop->mesh_wifi_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshHandshake,
+        desktop_mesh_handshake_get_view(desktop->mesh_handshake_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdMeshPair,
+        dialog_ex_get_view(desktop->mesh_pair_dialog));
     view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdDebug, desktop_debug_get_view(desktop->debug_view));
     view_dispatcher_add_view(
@@ -544,6 +710,9 @@ int32_t desktop_srv(void* p) {
     Desktop* desktop = desktop_alloc();
 
     desktop_init_settings(desktop);
+
+    /* Mesh: der T-Embed ist immer Master; der Master-Service läuft on-demand in
+     * der Mesh-Clients-Scene — beim Boot ist nichts zu starten. */
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 

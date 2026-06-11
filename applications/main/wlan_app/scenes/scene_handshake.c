@@ -297,6 +297,10 @@ static void hs_stop_deauth(WlanApp* app) {
 // ---------------------------------------------------------------------------
 static void hs_rx_callback_single(void* buf, wifi_promiscuous_pkt_type_t type) {
     UNUSED(type);
+    /* The WiFi RX task may still deliver frames after the pool was freed (or
+     * before it was allocated) — promiscuous on/off and alloc/free race. Guard
+     * against the NULL pool to avoid a store-to-NULL crash. */
+    if(!s_pkt_pool) return;
     const wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
     const uint8_t* payload = pkt->payload;
     int len = pkt->rx_ctrl.sig_len;
@@ -450,6 +454,9 @@ static void hsc_process_packet(const uint8_t* payload, int len, uint32_t timesta
 
 static void hs_rx_callback_channel(void* buf, wifi_promiscuous_pkt_type_t type) {
     UNUSED(type);
+    /* Same race guard as hs_rx_callback_single: the RX task may fire after the
+     * pool was freed or before it was allocated. */
+    if(!s_pkt_pool) return;
     const wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
     const uint8_t* payload = pkt->payload;
     int len = pkt->rx_ctrl.sig_len;

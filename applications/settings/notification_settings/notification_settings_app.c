@@ -13,11 +13,24 @@
 #include <gui/modules/variable_item_list.h>
 #include <gui/view_dispatcher.h>
 #include <lib/toolbox/value_index.h>
+#include <stdio.h>
+#include "notification_settings_color_picker.h"
+
+/* View IDs in this app's dispatcher. */
+#define NOTIFICATION_SETTINGS_VIEW_LIST   0
+#define NOTIFICATION_SETTINGS_VIEW_PICKER 1
+
+/* Custom event: "UI Background → Custom" was selected, open the picker. */
+#define NOTIFICATION_SETTINGS_EVENT_OPEN_PICKER 1
 
 typedef struct {
     NotificationApp* notification;
     ViewDispatcher* view_dispatcher;
     VariableItemList* variable_item_list;
+    NotificationColorPicker* color_picker;
+    /* The "UI Background" item — kept so we can grow its value cycle with the
+     * "Custom" trigger and the resulting "#RRGGBB" entry. */
+    VariableItem* ui_bg_item;
     /* Direct refs so the night_shift lock callback doesn't depend on a
      * hardcoded index — the menu shape changes per board (LED items gated
      * on BOARD_HAS_RGB_LED) and per future feature additions. */
@@ -319,13 +332,98 @@ const char* const ui_color_text[UI_COLOR_COUNT] = {
     "Magenta", "Yellow", "White", "Purple", "Spectrum",
 };
 
+/* The UI Background value cycle is dynamic:
+ *   [0 .. UI_COLOR_COUNT-1]   fixed presets (Black .. Spectrum)
+ *   [UI_COLOR_COUNT]          "#RRGGBB"  — only once a custom color is defined
+ *   [last]                    "Custom"   — opens the color picker
+ * Rebuild the item's value count + currently-shown value from persisted state. */
+static void ui_bg_item_sync(NotificationAppSettings* app) {
+    NotificationSettings* s = &app->notification->settings;
+    uint8_t count = s->ui_custom_color_set ? (UI_COLOR_COUNT + 2) : (UI_COLOR_COUNT + 1);
+    variable_item_set_values_count(app->ui_bg_item, count);
+
+    if(s->ui_color_index == UI_COLOR_CUSTOM_INDEX && s->ui_custom_color_set) {
+        char buf[10];
+        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(s->ui_custom_color & 0xFFFFFF));
+        variable_item_set_current_value_index(app->ui_bg_item, UI_COLOR_COUNT); /* hex slot */
+        variable_item_set_current_value_text(app->ui_bg_item, buf);
+    } else {
+        uint8_t idx = s->ui_color_index < UI_COLOR_COUNT ? s->ui_color_index : 1;
+        variable_item_set_current_value_index(app->ui_bg_item, idx);
+        variable_item_set_current_value_text(app->ui_bg_item, ui_color_text[idx]);
+    }
+}
+
 static void ui_bg_color_changed(VariableItem* item) {
     NotificationAppSettings* app = variable_item_get_context(item);
+    NotificationSettings* s = &app->notification->settings;
     uint8_t index = variable_item_get_current_value_index(item);
-    variable_item_set_current_value_text(item, ui_color_text[index]);
-    app->notification->settings.ui_color_index = index;
-    notification_apply_ui_color(app->notification);     /* live preview */
-    notification_message_save_settings(app->notification); /* persist */
+
+    if(index < UI_COLOR_COUNT) {
+        /* A fixed preset (Black .. Spectrum). */
+        variable_item_set_current_value_text(item, ui_color_text[index]);
+        s->ui_color_index = index;
+        notification_apply_ui_color(app->notification);     /* live preview */
+        notification_message_save_settings(app->notification); /* persist */
+        return;
+    }
+
+    if(s->ui_custom_color_set && index == UI_COLOR_COUNT) {
+        /* The persisted "#RRGGBB" custom color entry. */
+        char buf[10];
+        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(s->ui_custom_color & 0xFFFFFF));
+        variable_item_set_current_value_text(item, buf);
+        s->ui_color_index = UI_COLOR_CUSTOM_INDEX;
+        notification_apply_ui_color(app->notification);
+        notification_message_save_settings(app->notification);
+        return;
+    }
+
+    /* Trailing "Custom" entry → open the picker. Deferred via a custom event so
+     * we don't switch views from inside the variable_item_list model lock. */
+    variable_item_set_current_value_text(item, "Custom");
+    view_dispatcher_send_custom_event(
+        app->view_dispatcher, NOTIFICATION_SETTINGS_EVENT_OPEN_PICKER);
+}
+
+/* Picker result: Save stores + selects the new custom color; Back reverts the
+ * live preview and restores the previous selection. Either way return to the list. */
+static void ui_bg_color_picker_result(void* context, uint32_t rgb, bool confirmed) {
+    NotificationAppSettings* app = context;
+    NotificationSettings* s = &app->notification->settings;
+
+    if(confirmed) {
+        s->ui_custom_color = rgb & 0xFFFFFF;
+        s->ui_custom_color_set = true;
+        s->ui_color_index = UI_COLOR_CUSTOM_INDEX;
+        ui_bg_item_sync(app); /* grow the cycle + select the new "#RRGGBB" entry */
+        notification_apply_ui_color(app->notification);
+        notification_message_save_settings(app->notification);
+    } else {
+        /* Cancelled — restore selection text and revert the previewed color. */
+        ui_bg_item_sync(app);
+        notification_apply_ui_color(app->notification);
+    }
+    view_dispatcher_switch_to_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_LIST);
+}
+
+static bool notification_settings_custom_event(void* context, uint32_t event) {
+    NotificationAppSettings* app = context;
+    if(event == NOTIFICATION_SETTINGS_EVENT_OPEN_PICKER) {
+        NotificationSettings* s = &app->notification->settings;
+        /* Stop the Spectrum hue-cycle timer (if the last selection was Spectrum)
+         * so it doesn't overwrite the picker's live preview every tick. */
+        if(app->notification->ui_spectrum_timer &&
+           furi_timer_is_running(app->notification->ui_spectrum_timer)) {
+            furi_timer_stop(app->notification->ui_spectrum_timer);
+        }
+        uint32_t init =
+            s->ui_custom_color_set ? (s->ui_custom_color & 0xFFFFFF) : UI_CUSTOM_DEFAULT_RGB;
+        notification_color_picker_set_color(app->color_picker, init);
+        view_dispatcher_switch_to_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_PICKER);
+        return true;
+    }
+    return false;
 }
 
 static void ui_fg_color_changed(VariableItem* item) {
@@ -347,6 +445,8 @@ static NotificationAppSettings* alloc_settings(void) {
     NotificationAppSettings* app = malloc(sizeof(NotificationAppSettings));
     app->night_shift_start_item = NULL;
     app->night_shift_end_item = NULL;
+    app->color_picker = NULL;
+    app->ui_bg_item = NULL;
     app->notification = furi_record_open(RECORD_NOTIFICATION);
 
     app->variable_item_list = variable_item_list_alloc();
@@ -365,13 +465,14 @@ static NotificationAppSettings* alloc_settings(void) {
     variable_item_set_current_value_text(item, backlight_text[value_index]);
 
     /* UI Background tint — fills the field around drawn UI elements
-     * (default Orange). Last preset is "Spectrum" → cycles HSV via timer. */
+     * (default Orange). Presets end with "Spectrum" (HSV cycle), then a
+     * "Custom" entry that opens the color picker, plus a persisted "#RRGGBB"
+     * entry once a custom color has been chosen. ui_bg_item_sync() sets the
+     * actual value count + current selection from saved state. */
     item = variable_item_list_add(
-        app->variable_item_list, "UI Background", UI_COLOR_COUNT, ui_bg_color_changed, app);
-    value_index = app->notification->settings.ui_color_index < UI_COLOR_COUNT
-                      ? app->notification->settings.ui_color_index : 1;
-    variable_item_set_current_value_index(item, value_index);
-    variable_item_set_current_value_text(item, ui_color_text[value_index]);
+        app->variable_item_list, "UI Background", UI_COLOR_COUNT + 2, ui_bg_color_changed, app);
+    app->ui_bg_item = item;
+    ui_bg_item_sync(app);
 
     /* UI Foreground tint — fills the drawn UI elements themselves: text,
      * icons, borders (default Black). When both UI colors are Spectrum, the
@@ -493,17 +594,29 @@ static NotificationAppSettings* alloc_settings(void) {
         variable_item_set_current_value_text(item, volume_text[value_index]);
     }
 
+    app->color_picker = notification_color_picker_alloc();
+    notification_color_picker_set_callback(app->color_picker, ui_bg_color_picker_result, app);
+
     Gui* gui = furi_record_open(RECORD_GUI);
     app->view_dispatcher = view_dispatcher_alloc();
     view_dispatcher_attach_to_gui(app->view_dispatcher, gui, ViewDispatcherTypeFullscreen);
-    view_dispatcher_add_view(app->view_dispatcher, 0, view);
-    view_dispatcher_switch_to_view(app->view_dispatcher, 0);
+    view_dispatcher_set_event_callback_context(app->view_dispatcher, app);
+    view_dispatcher_set_custom_event_callback(
+        app->view_dispatcher, notification_settings_custom_event);
+    view_dispatcher_add_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_LIST, view);
+    view_dispatcher_add_view(
+        app->view_dispatcher,
+        NOTIFICATION_SETTINGS_VIEW_PICKER,
+        notification_color_picker_get_view(app->color_picker));
+    view_dispatcher_switch_to_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_LIST);
     return app;
 }
 
 static void free_settings(NotificationAppSettings* app) {
-    view_dispatcher_remove_view(app->view_dispatcher, 0);
+    view_dispatcher_remove_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_LIST);
+    view_dispatcher_remove_view(app->view_dispatcher, NOTIFICATION_SETTINGS_VIEW_PICKER);
     variable_item_list_free(app->variable_item_list);
+    notification_color_picker_free(app->color_picker);
     view_dispatcher_free(app->view_dispatcher);
 
     furi_record_close(RECORD_GUI);

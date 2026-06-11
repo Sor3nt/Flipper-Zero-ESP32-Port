@@ -4,7 +4,6 @@ enum NetworkActionsIndex {
     NaIndexHandshake,
     NaIndexDeauth,
     NaIndexSniffer,
-    NaIndexSsidSpam,
     NaIndexEvilPortal,
 };
 
@@ -31,7 +30,6 @@ void wlan_app_scene_network_actions_on_enter(void* context) {
     submenu_add_item(app->submenu, "Capture Handshake", NaIndexHandshake, network_actions_submenu_cb, app);
     submenu_add_item(app->submenu, "Deauth", NaIndexDeauth, network_actions_submenu_cb, app);
     submenu_add_item(app->submenu, "Package Sniffer", NaIndexSniffer, network_actions_submenu_cb, app);
-    submenu_add_item(app->submenu, "SSID Spam", NaIndexSsidSpam, network_actions_submenu_cb, app);
     submenu_add_item(app->submenu, "Evil Portal", NaIndexEvilPortal, network_actions_submenu_cb, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewSubmenu);
@@ -55,10 +53,6 @@ bool wlan_app_scene_network_actions_on_event(void* context, SceneManagerEvent ev
             break;
         case NaIndexSniffer:
             scene_manager_next_scene(app->scene_manager, WlanAppScenePackageSniffer);
-            consumed = true;
-            break;
-        case NaIndexSsidSpam:
-            scene_manager_next_scene(app->scene_manager, WlanAppSceneSsidSpam);
             consumed = true;
             break;
         case NaIndexEvilPortal: {

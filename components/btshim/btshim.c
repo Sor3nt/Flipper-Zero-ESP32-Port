@@ -762,6 +762,14 @@ int32_t bt_srv(void* p) {
     /* Load settings FIRST to know if BLE should be started */
     bt_settings_load(&bt->bt_settings);
 
+    if(!furi_hal_bt_is_available()) {
+        /* Board without BLE radio (e.g. Waveshare C6-1.47): force-disable so the
+         * radio stack (BT controller + Bluedroid, ~100KB heap) is never started,
+         * leaving that RAM for WiFi. The service still runs so RECORD_BT exists
+         * and BLE-dependent code degrades gracefully instead of crashing. */
+        bt->bt_settings.enabled = false;
+    }
+
     if(bt->bt_settings.enabled) {
         /* Start the BLE stack and default profile */
         if(furi_hal_bt_start_radio_stack()) {

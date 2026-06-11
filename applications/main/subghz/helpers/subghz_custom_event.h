@@ -63,6 +63,11 @@ typedef enum {
     SubGhzCustomEventViewFreqAnalOkLong,
 
     SubGhzCustomEventByteInputDone,
+    SubGhzCustomEventNumberInputDone,
+    SubGhzCustomEventTpmsEditPressure,
+    SubGhzCustomEventTpmsEditTemperature,
+    SubGhzCustomEventTpmsEditId,
+    SubGhzCustomEventTpmsToggleBattery,
 } SubGhzCustomEvent;
 
 typedef enum {

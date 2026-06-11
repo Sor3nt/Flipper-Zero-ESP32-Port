@@ -11,6 +11,7 @@
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
 #include <lwip/sockets.h>
 #include <lwip/inet.h>
 #include <esp_timer.h>
@@ -622,7 +623,7 @@ static void dns_task(void* arg) {
     if(s_dns_socket < 0) {
         ESP_LOGE(TAG, "DNS socket failed");
         s_dns_task = NULL;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -636,7 +637,7 @@ static void dns_task(void* arg) {
         close(s_dns_socket);
         s_dns_socket = -1;
         s_dns_task = NULL;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -743,13 +744,13 @@ static void dns_task(void* arg) {
                 struct timeval tv2 = {.tv_sec = 3, .tv_usec = 0};
                 setsockopt(fwd, SOL_SOCKET, SO_RCVTIMEO, &tv2, sizeof(tv2));
                 setsockopt(fwd, SOL_SOCKET, SO_SNDTIMEO, &tv2, sizeof(tv2));
-                int bind_rc = -1;
                 if(sta_ip_be != 0) {
                     struct sockaddr_in bind_addr = {0};
                     bind_addr.sin_family = AF_INET;
                     bind_addr.sin_addr.s_addr = sta_ip_be;
                     bind_addr.sin_port = 0;
-                    bind_rc = bind(fwd, (struct sockaddr*)&bind_addr, sizeof(bind_addr));
+                    // best-effort: an STA-IP binden; Fehler ist unkritisch (Forwarder laeuft trotzdem)
+                    bind(fwd, (struct sockaddr*)&bind_addr, sizeof(bind_addr));
                 }
                 struct sockaddr_in dns_dst = {0};
                 dns_dst.sin_family = AF_INET;
@@ -835,7 +836,7 @@ static void dns_task(void* arg) {
     close(s_dns_socket);
     s_dns_socket = -1;
     s_dns_task = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,7 +1193,12 @@ static void evil_portal_start_worker(void* arg) {
 
     ESP_LOGI(TAG, "[worker] starting DNS task");
     s_dns_run = true;
-    if(xTaskCreate(dns_task, "EpDns", DNS_TASK_STACK, NULL, 4, &s_dns_task) != pdPASS) {
+    // Task-Stack ins PSRAM legen (CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y):
+    // der interne Heap ist nach esp_wifi_init + httpd (13 Sockets) zu knapp fuer
+    // 6 KB Stack. Erfordert vTaskDeleteWithCaps() beim Self-Delete (siehe dns_task).
+    if(xTaskCreateWithCaps(
+           dns_task, "EpDns", DNS_TASK_STACK, NULL, 4, &s_dns_task, MALLOC_CAP_SPIRAM) !=
+       pdPASS) {
         ESP_LOGE(TAG, "  DNS task create FAILED");
         s_dns_run = false;
         stop_http();
