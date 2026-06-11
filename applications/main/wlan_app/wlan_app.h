@@ -14,9 +14,7 @@
 #include "scenes/scenes.h"
 #include "views/wlan_view_events.h"
 #include "wlan_handshake_settings.h"
-#include "wlan_mitm_payloads.h"
 #include "wlan_evil_portal_templates.h"
-#include "wlan_sd_update.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_connect_view.h"
 #include "views/wlan_portscan_view.h"
@@ -27,7 +25,6 @@
 #include "views/wlan_evil_portal_view.h"
 #include "views/wlan_evil_portal_captured_view.h"
 #include "views/wlan_live_creds_view.h"
-#include "views/wlan_sd_update_view.h"
 
 #define WLAN_APP_TAG "WlanApp"
 #define WLAN_APP_MAX_APS 64
@@ -53,7 +50,6 @@ typedef enum {
     WlanAppViewEvilPortal,
     WlanAppViewEvilPortalCaptured,
     WlanAppViewLiveCreds,
-    WlanAppViewSdUpdate,
 } WlanAppView;
 
 typedef struct {
@@ -227,13 +223,6 @@ struct WlanApp {
     FuriString* text_buf;
 
     WlanNetcut* netcut;
-
-    // Update-SD-Flow: true sobald der User "Update SD" gewählt hat; steuert,
-    // dass scene_ssid_connect nach erfolgreichem Connect zur Update-SD-Scene
-    // statt zum ARP-Scan springt. Wird in scene_update_sd konsumiert.
-    bool update_sd_flow;
-    WlanSdUpdate* sd_update;
-    View* view_sd_update;
 };
 
 /** Schlüssel der aktuellen Picker-Assoziation: Channel-Key im Channel-Mode,
