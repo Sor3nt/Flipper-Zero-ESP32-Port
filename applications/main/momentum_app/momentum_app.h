@@ -22,7 +22,8 @@
 #include <momentum/asset_packs.h>
 #include <loader/loader_menu.h>
 #include <lib/subghz/subghz_setting.h>
-#include <rgb_backlight.h>
+
+#include <toolbox/colors.h>
 #include <momentum/namespoof.h>
 #include <dolphin/dolphin.h>
 #include <dolphin/dolphin_i.h>
@@ -78,7 +79,6 @@ typedef struct {
     uint8_t subghz_hopper_index;
     bool subghz_extend;
     bool subghz_bypass;
-    RgbColor lcd_color;
     RgbColor vgm_color;
     char device_name[FURI_HAL_VERSION_ARRAY_NAME_LENGTH];
     uint32_t dolphin_xp;
@@ -93,7 +93,6 @@ typedef struct {
     bool save_xp;
     bool save_angry;
     bool save_dolphin;
-    bool save_backlight;
     bool save_settings;
     bool apply_pack;
     bool show_slideshow;
