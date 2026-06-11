@@ -52,8 +52,118 @@ static bool subghz_scene_receiver_info_update_parser(void* context) {
     return false;
 }
 
+// TPMS view action callback — translate view-level actions into the same custom
+// events the widget callback emits so subghz_scene_receiver_info_on_event can
+// reuse its existing TX/Save handling.
+static void
+    subghz_scene_receiver_info_tpms_action(SubGhzViewTpmsInfoAction action, void* context) {
+    furi_assert(context);
+    SubGhz* subghz = context;
+    switch(action) {
+    case SubGhzViewTpmsInfoActionTxStart:
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventSceneReceiverInfoTxStart);
+        break;
+    case SubGhzViewTpmsInfoActionTxStop:
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventSceneReceiverInfoTxStop);
+        break;
+    case SubGhzViewTpmsInfoActionSave:
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventSceneReceiverInfoSave);
+        break;
+    case SubGhzViewTpmsInfoActionEdit: {
+        // Stash the selected field so the edit scene knows what to ask for
+        SubGhzViewTpmsField field =
+            subghz_view_tpms_info_get_selected_field(subghz->subghz_tpms_info);
+        subghz->tpms_edit_field = field;
+        if(field == SubGhzViewTpmsFieldPressure ||
+           field == SubGhzViewTpmsFieldTemperature ||
+           field == SubGhzViewTpmsFieldId) {
+            view_dispatcher_send_custom_event(
+                subghz->view_dispatcher,
+                (uint32_t)(field == SubGhzViewTpmsFieldId ?
+                               SubGhzCustomEventTpmsEditId :
+                               (field == SubGhzViewTpmsFieldTemperature ?
+                                    SubGhzCustomEventTpmsEditTemperature :
+                                    SubGhzCustomEventTpmsEditPressure)));
+        }
+        break;
+    }
+    case SubGhzViewTpmsInfoActionToggleBattery:
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventTpmsToggleBattery);
+        break;
+    }
+}
+
+// Toggle TPMS_NO_BATT → 0 (ok) → 1 (low) → TPMS_NO_BATT and persist into the
+// history item. Since the Schrader payload has no known battery bit in the data
+// word, only the .sub-file "Batt" field changes (data + CRC stay intact).
+static void subghz_scene_receiver_info_tpms_toggle_battery(SubGhz* subghz) {
+    TPMSBlockGeneric generic = {0};
+    generic.protocol_name = subghz_history_get_protocol_name(
+        subghz->history, subghz->idx_menu_chosen);
+    FlipperFormat* fff = subghz_history_get_raw_data(
+        subghz->history, subghz->idx_menu_chosen);
+    if(!fff || tpms_block_generic_deserialize(&generic, fff) != SubGhzProtocolStatusOk) {
+        return;
+    }
+    generic.protocol_name = subghz_history_get_protocol_name(
+        subghz->history, subghz->idx_menu_chosen);
+
+    if(generic.battery_low == TPMS_NO_BATT) {
+        generic.battery_low = 0;
+    } else if(generic.battery_low == 0) {
+        generic.battery_low = 1;
+    } else {
+        generic.battery_low = TPMS_NO_BATT;
+    }
+
+    // No data/CRC change needed — the battery field lives only in the .sub
+    // file representation, not in the over-the-air payload for Schrader GG4.
+    subghz_history_replace_tpms_payload(
+        subghz->history, subghz->idx_menu_chosen, &generic);
+}
+
+// If the decoded protocol is a TPMS sensor, route to the dedicated TPMS view
+// instead of the generic widget rendering. Returns true if the view was switched.
+static bool subghz_scene_receiver_info_try_tpms(SubGhz* subghz) {
+    SubGhzProtocolDecoderBase* decoder = subghz_txrx_get_decoder(subghz->txrx);
+    if(!decoder || !decoder->protocol) return false;
+    if(decoder->protocol->type != SubGhzProtocolTypeTpms) return false;
+
+    FuriString* frequency_str = furi_string_alloc();
+    FuriString* modulation_str = furi_string_alloc();
+    subghz_txrx_get_frequency_and_modulation(
+        subghz->txrx, frequency_str, modulation_str, false);
+
+    bool can_save = subghz_txrx_protocol_is_serializable(subghz->txrx);
+    bool can_send = subghz_txrx_protocol_is_transmittable(subghz->txrx, false);
+
+    subghz_view_tpms_info_set_callback(
+        subghz->subghz_tpms_info, subghz_scene_receiver_info_tpms_action, subghz);
+
+    subghz_view_tpms_info_update(
+        subghz->subghz_tpms_info,
+        subghz_history_get_raw_data(subghz->history, subghz->idx_menu_chosen),
+        furi_string_get_cstr(frequency_str),
+        furi_string_get_cstr(modulation_str),
+        can_send,
+        can_save);
+
+    furi_string_free(frequency_str);
+    furi_string_free(modulation_str);
+
+    view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdTpmsInfo);
+    return true;
+}
+
 void subghz_scene_receiver_info_draw_widget(SubGhz* subghz) {
     if(subghz_scene_receiver_info_update_parser(subghz)) {
+        if(subghz_scene_receiver_info_try_tpms(subghz)) {
+            return;
+        }
         FuriString* frequency_str = furi_string_alloc();
         FuriString* modulation_str = furi_string_alloc();
         FuriString* text = furi_string_alloc();
@@ -175,6 +285,23 @@ bool subghz_scene_receiver_info_on_event(void* context, SceneManagerEvent event)
                 subghz->save_datetime_set = true;
                 scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSaveName);
             }
+            return true;
+        } else if(
+            event.event == SubGhzCustomEventTpmsEditPressure ||
+            event.event == SubGhzCustomEventTpmsEditTemperature ||
+            event.event == SubGhzCustomEventTpmsEditId) {
+            // Stop RX while the edit scene is active so the underlying decoder
+            // stays stable, then hand off.
+            subghz->state_notifications = SubGhzNotificationStateIDLE;
+            subghz_txrx_hopper_set_state(subghz->txrx, SubGhzHopperStateOFF);
+            subghz_txrx_stop(subghz->txrx);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneTpmsEdit);
+            return true;
+        } else if(event.event == SubGhzCustomEventTpmsToggleBattery) {
+            subghz_scene_receiver_info_tpms_toggle_battery(subghz);
+            // Re-load the TPMS view from the now-modified history payload
+            subghz_scene_receiver_info_update_parser(subghz);
+            subghz_scene_receiver_info_try_tpms(subghz);
             return true;
         }
     } else if(event.type == SceneManagerEventTypeTick) {

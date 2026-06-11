@@ -35,11 +35,28 @@ const uint8_t* nrf24_jam_preset_channels(Nrf24JamPreset preset, size_t* count);
  * Handles Full (sequential sweep), Drone (random hop) and list-based presets. */
 uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index);
 
+/* Fill out[] with the full channel set for this preset and return the count.
+ * Full and Drone expand to all channels 0..124; list presets copy their list.
+ * Used by the jam worker (which then optionally Fisher-Yates shuffles a copy)
+ * and by the status view's band visualisation. cap caps the written count. */
+size_t nrf24_jam_preset_fill_channels(Nrf24JamPreset preset, uint8_t* out, size_t cap);
+
 /* Sensible default per-channel dwell time in microseconds. Presets with few
  * channels (BLE-Adv, RC, ...) get a long dwell — coverage is cheap, so a clean
  * strong carrier per channel wins. Presets spanning many channels (Full, BT)
  * get a short dwell so the whole band is swept quickly. */
 uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset);
+
+/* Default jam strategy (Nrf24JamStrategy) for a preset. Narrow presets that
+ * cover only a handful of fixed channels (BLE-Adv 37/38/39, RC, USB, Video) win
+ * with a continuous carrier (CW) parked on each channel — maximum spectral
+ * energy exactly where it matters. Wide sweeps / FHSS targets default to Turbo
+ * (packet collisions + random hop). Returns a Nrf24JamStrategy value. */
+uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset);
+
+/* Default hop order for a preset: sequential (0) for the few-channel CW presets
+ * (shuffling 3 channels is pointless), random (1) for the wide Turbo sweeps. */
+uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset);
 
 /* Live-tuning bounds / step for the dwell time. */
 #define NRF24_JAM_DWELL_MIN_US 100

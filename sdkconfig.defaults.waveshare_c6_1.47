@@ -1,0 +1,16 @@
+# Overrides for Waveshare ESP32-C6-LCD-1.47 (4MB flash)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_singleapp_4mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp_4mb.csv"
+
+# WiFi: shrink the driver buffers. The C6 has no PSRAM and (with the wlan app)
+# ran out of DMA-capable RAM during wifi_init ("esf_buf_setup_static: alloc eb
+# fail" -> ESP_ERR_NO_MEM), especially after heap fragmentation. Defaults are
+# tuned for throughput (static_rx=10, dyn_rx/tx=32); these are plenty for
+# scanning/sniffing/deauth and free ~10-15KB of DMA RAM.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_RX_BA_WIN=4

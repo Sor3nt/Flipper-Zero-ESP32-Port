@@ -154,6 +154,20 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
         subghz->widget = widget_alloc();
         view_dispatcher_add_view(
             subghz->view_dispatcher, SubGhzViewIdWidget, widget_get_view(subghz->widget));
+
+        // TPMS info view (shown instead of Widget when selecting a TPMS history entry)
+        subghz->subghz_tpms_info = subghz_view_tpms_info_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdTpmsInfo,
+            subghz_view_tpms_info_get_view(subghz->subghz_tpms_info));
+
+        // NumberInput (used by the TPMS edit scene for pressure/temperature)
+        subghz->number_input = number_input_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdNumberInput,
+            number_input_get_view(subghz->number_input));
     }
     //Dialog
     subghz->dialogs = furi_record_open(RECORD_DIALOGS);
@@ -316,6 +330,14 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // Custom Widget
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdWidget);
         widget_free(subghz->widget);
+
+        // TPMS info view
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdTpmsInfo);
+        subghz_view_tpms_info_free(subghz->subghz_tpms_info);
+
+        // NumberInput
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdNumberInput);
+        number_input_free(subghz->number_input);
     }
     //Dialog
     furi_record_close(RECORD_DIALOGS);

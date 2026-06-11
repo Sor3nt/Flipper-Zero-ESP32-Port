@@ -46,6 +46,10 @@ uint8_t nrf24_hw_listen_rpd(uint8_t channel);
  * Must be wrapped in acquire/release. CE is left HIGH on return. */
 void nrf24_hw_jammer_start(uint8_t channel);
 
+/* As nrf24_hw_jammer_start but with a selectable PA level (0..3 =
+ * MIN/LOW/HIGH/MAX). Must be wrapped in acquire/release. */
+void nrf24_hw_jammer_start_ex(uint8_t channel, uint8_t pa_level);
+
 /* Retune the running carrier to a new channel without reconfiguring RF_SETUP.
  * Must be wrapped in acquire/release. */
 void nrf24_hw_jammer_set_channel(uint8_t channel);
@@ -67,10 +71,22 @@ void nrf24_hw_jammer_stop(void);
  * Must be wrapped in acquire/release. CE is left LOW. */
 void nrf24_hw_flood_start(uint8_t channel, bool low_rate);
 
+/* As nrf24_hw_flood_start but with explicit data rate (0=1M, 1=2M, 2=250k) and
+ * PA level (0..3). Must be wrapped in acquire/release. CE is left LOW. */
+void nrf24_hw_flood_start_ex(uint8_t channel, uint8_t data_rate, uint8_t pa_level);
+
 /* Retune to a channel and fire one burst of random garbage packets (fills the
  * 3-deep TX FIFO and pulses CE). Used for channel-hopping flooding.
  * Must be wrapped in acquire/release. */
 void nrf24_hw_flood_channel(uint8_t channel);
+
+/* Retune to a channel and stream burst_count packets back-to-back (CE held
+ * HIGH, FIFO topped up as it drains). When turbo is true three spectral
+ * patterns are cycled (LFSR-varied random, all-ones, alternating 0x55/0xAA) —
+ * burst_count packets per pattern — to defeat CRC filters and spread energy.
+ * When false a single random-garbage burst is sent. Mirrors Bruce's
+ * turboFloodChannel / floodChannel. Must be wrapped in acquire/release. */
+void nrf24_hw_flood_burst(uint8_t channel, uint8_t burst_count, bool turbo);
 
 /* Continuous single-channel flooding: top up the TX FIFO with random garbage
  * while it has room and hold CE HIGH, so the radio transmits back-to-back for

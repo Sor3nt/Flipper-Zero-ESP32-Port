@@ -382,6 +382,9 @@ static void rpc_system_storage_read_process(const PB_Main* request, void* contex
             } else {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+                // nanopb flexible-array-Idiom: ALLOCSIZE(0) belegt bewusst nur das size-Feld;
+                // GCC sieht das als zu kleine Allokation fuer den Gesamttyp -> false positive.
+#pragma GCC diagnostic ignored "-Walloc-size"
                 response->content.storage_read_response.file.data =
                     malloc(PB_BYTES_ARRAY_T_ALLOCSIZE(0));
                 response->content.storage_read_response.file.data->size = 0;

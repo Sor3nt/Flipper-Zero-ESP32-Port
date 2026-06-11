@@ -987,6 +987,11 @@ bool wlan_cred_sniff_armed(WlanCredSniff* cs) {
 
 WlanCredSniff* wlan_cred_sniff_alloc(void) {
     WlanCredSniff* cs = malloc(sizeof(WlanCredSniff));
+    if(!cs) {
+        /* ~15KB allocation; on low-RAM boards (C6, no PSRAM) this can fail when
+         * WiFi+BLE are already up. Bail out cleanly instead of memset(NULL). */
+        return NULL;
+    }
     memset(cs, 0, sizeof(*cs));
     return cs;
 }

@@ -1,4 +1,5 @@
 #include "nrf24_jam_presets.h"
+#include "nrf24_jam_config.h" /* Nrf24JamStrategy values */
 
 #include <stdlib.h>
 
@@ -149,6 +150,27 @@ uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset) {
     }
 }
 
+uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset) {
+    switch(preset) {
+    case Nrf24JamPresetBleAdv: /* 3 fixed channels */
+    case Nrf24JamPresetRc: /* 4 channels */
+    case Nrf24JamPresetUsb: /* 3 channels */
+    case Nrf24JamPresetVideo: /* 3 channels */
+        /* Few channels → a continuous carrier parked on each is strongest (it is
+         * exactly what makes the FAP's BLE-advertising jam so effective). */
+        return Nrf24StrategyCw;
+    default:
+        /* Wide sweeps / FHSS → Turbo packet collisions across the band. */
+        return Nrf24StrategyTurbo;
+    }
+}
+
+uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset) {
+    /* CW presets walk their handful of channels sequentially (no point shuffling
+     * 3 channels); the Turbo sweeps randomise to spread collisions. */
+    return nrf24_jam_preset_default_strategy(preset) == Nrf24StrategyCw ? 0 : 1;
+}
+
 uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index) {
     if(preset == Nrf24JamPresetDrone) {
         /* FHSS target — random hop across the whole band. */
@@ -168,4 +190,26 @@ uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index
     uint8_t ch = list[*hop_index % count];
     (*hop_index)++;
     return ch;
+}
+
+size_t nrf24_jam_preset_fill_channels(Nrf24JamPreset preset, uint8_t* out, size_t cap) {
+    if(out == NULL || cap == 0) return 0;
+
+    size_t count = 0;
+    const uint8_t* list = nrf24_jam_preset_channels(preset, &count);
+
+    if(list == NULL || count == 0) {
+        /* Full / Drone — expand to every channel 0..124. */
+        size_t n = cap < 125 ? cap : 125;
+        for(size_t i = 0; i < n; i++) {
+            out[i] = (uint8_t)i;
+        }
+        return n;
+    }
+
+    if(count > cap) count = cap;
+    for(size_t i = 0; i < count; i++) {
+        out[i] = list[i];
+    }
+    return count;
 }

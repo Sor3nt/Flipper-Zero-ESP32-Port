@@ -4,6 +4,8 @@
 #include "wlan_hal.h"
 #include "wlan_netcut.h"
 
+#include <esp_heap_caps.h> /* TEMP: heap diagnostics for the C6 OOM crash */
+
 static bool wlan_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     WlanApp* app = context;
@@ -139,7 +141,13 @@ static WlanApp* wlan_app_alloc(void) {
 
     app->text_buf = furi_string_alloc();
     app->netcut = wlan_netcut_alloc();
+    /* TEMP: log heap right before the 15KB cred_sniff alloc that OOM-crashed. */
+    printf(
+        "[WLAN] heap before cred_sniff: free=%u largest_block=%u\n",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     app->cred_sniff = wlan_cred_sniff_alloc();
+    printf("[WLAN] cred_sniff=%p\n", (void*)app->cred_sniff);
     wlan_netcut_set_cred_sniff(app->netcut, app->cred_sniff);
     wlan_html_inject_set_cred_sniff(app->cred_sniff);
 

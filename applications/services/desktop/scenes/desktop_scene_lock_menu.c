@@ -123,6 +123,13 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
 
+        case DesktopLockMenuEventMeshClients:
+            /* T-Embed ist immer Master; der Master-Mesh-Service läuft on-demand in
+             * der Mesh-Clients-Scene. */
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneMeshClients);
+            consumed = true;
+            break;
+
         default:
             break;
         }
