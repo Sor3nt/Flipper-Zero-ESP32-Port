@@ -5,7 +5,7 @@
 #include "../blocks/decoder.h"
 #include "../blocks/encoder.h"
 #include "tpms_generic.h"
-#include "../blocks/math.h"
+#include "../blocks/subghz_math.h"
 
 #define TPMS_PROTOCOL_RENAULT_NAME "Renault TPMS"
 

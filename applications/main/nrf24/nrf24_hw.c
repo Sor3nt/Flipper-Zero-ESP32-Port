@@ -299,14 +299,11 @@ void nrf24_hw_flood_start_ex(uint8_t channel, uint8_t data_rate, uint8_t pa_leve
     nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
 }
 
-<<<<<<< HEAD
-=======
 void nrf24_hw_flood_start(uint8_t channel, bool low_rate) {
     /* 0=1M, 1=2M, 2=250k → legacy bool maps to 2 Mbps / 250 kbps. */
     nrf24_hw_flood_start_ex(channel, low_rate ? 2 : 1, 3 /* PA max */);
 }
 
->>>>>>> upstream/main
 void nrf24_hw_flood_channel(uint8_t channel) {
     /* CE low so we can safely retune and refill the FIFO. */
     furi_hal_gpio_write(&nrf24_ce, false);
