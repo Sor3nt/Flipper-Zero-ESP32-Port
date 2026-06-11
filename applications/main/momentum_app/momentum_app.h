@@ -96,6 +96,8 @@ typedef struct {
     bool apply_pack;
     bool show_slideshow;
     bool require_reboot;
+    RgbColor lcd_color;
+    bool save_backlight;
 } MomentumApp;
 
 typedef enum {

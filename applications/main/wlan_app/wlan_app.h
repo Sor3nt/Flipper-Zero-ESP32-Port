@@ -14,6 +14,7 @@
 #include "scenes/scenes.h"
 #include "views/wlan_view_events.h"
 #include "wlan_handshake_settings.h"
+#include "wlan_mitm_payloads.h"
 #include "wlan_evil_portal_templates.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_connect_view.h"

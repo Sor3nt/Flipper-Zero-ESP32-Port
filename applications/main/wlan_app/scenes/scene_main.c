@@ -25,9 +25,6 @@ void wlan_app_scene_main_on_enter(void* context) {
 
     // Channel-Aktionen sind immer sichtbar; Verbindungs-Aktionen sind state-abhängig.
     app->channel_mode_active = false;
-    // Hub-Scene: evtl. abgebrochene Flows zurücksetzen.
-    app->update_sd_flow = false;
-
     if(!app->connected && !app->target_selected) {
         submenu_add_item_centered(
             app->submenu, "Select Wifi", MainIndexSelectWifi, wlan_app_scene_main_submenu_cb, app);
