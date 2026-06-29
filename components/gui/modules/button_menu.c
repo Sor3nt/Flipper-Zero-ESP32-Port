@@ -30,6 +30,7 @@ ARRAY_DEF(ButtonMenuItemArray, ButtonMenuItem, M_POD_OPLIST); //-V658
 struct ButtonMenu {
     View* view;
     bool freeze_input;
+    bool standard_navigation;
 };
 
 typedef struct {
@@ -328,19 +329,35 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
         switch(event->key) {
         case InputKeyUp:
             consumed = true;
-            button_menu_process_left(button_menu);
+            if(button_menu->standard_navigation) {
+                button_menu_process_up(button_menu);
+            } else {
+                button_menu_process_left(button_menu);
+            }
             break;
         case InputKeyDown:
             consumed = true;
-            button_menu_process_right(button_menu);
+            if(button_menu->standard_navigation) {
+                button_menu_process_down(button_menu);
+            } else {
+                button_menu_process_right(button_menu);
+            }
             break;
         case InputKeyRight:
             consumed = true;
-            button_menu_process_up(button_menu);
+            if(button_menu->standard_navigation) {
+                button_menu_process_right(button_menu);
+            } else {
+                button_menu_process_up(button_menu);
+            }
             break;
         case InputKeyLeft:
             consumed = true;
-            button_menu_process_down(button_menu);
+            if(button_menu->standard_navigation) {
+                button_menu_process_left(button_menu);
+            } else {
+                button_menu_process_down(button_menu);
+            }
             break;
         default:
             break;
@@ -353,6 +370,11 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
 View* button_menu_get_view(ButtonMenu* button_menu) {
     furi_check(button_menu);
     return button_menu->view;
+}
+
+void button_menu_set_standard_navigation(ButtonMenu* button_menu, bool enabled) {
+    furi_check(button_menu);
+    button_menu->standard_navigation = enabled;
 }
 
 void button_menu_reset(ButtonMenu* button_menu) {
@@ -433,6 +455,7 @@ ButtonMenu* button_menu_alloc(void) {
         true);
 
     button_menu->freeze_input = false;
+    button_menu->standard_navigation = false;
     return button_menu;
 }
 

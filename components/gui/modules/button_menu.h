@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "../view.h"
 
 #ifdef __cplusplus
@@ -88,6 +89,13 @@ void button_menu_set_header(ButtonMenu* button_menu, const char* header);
  * @param      index        index of ButtonMenu to be selected
  */
 void button_menu_set_selected_item(ButtonMenu* button_menu, uint32_t index);
+
+/** Use normal directional navigation for this Button Menu instance.
+ *
+ * On T-Embed, this makes plain wheel rotation move one item at a time.
+ * Disabled by default so existing applications keep their behavior.
+ */
+void button_menu_set_standard_navigation(ButtonMenu* button_menu, bool enabled);
 
 #ifdef __cplusplus
 }
