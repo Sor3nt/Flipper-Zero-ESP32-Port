@@ -41,7 +41,7 @@ CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 
 # NFC needs 3DES (felica, mf_ultralight)
-CONFIG_MBEDTLS_DES_C=y
+CONFIG_MBEDTLS_DES_C=n
 
 # WiFi "Update SD": HTTPS-Download ohne Server-Zertifikatsprüfung erlauben
 CONFIG_ESP_TLS_INSECURE=y

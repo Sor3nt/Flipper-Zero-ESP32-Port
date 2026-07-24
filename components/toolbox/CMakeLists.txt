@@ -3,7 +3,7 @@ idf_component_register(
         "version.c"
         "microtar.c"
         "pipe.c"
-        "md5_calc.c"
+        "md5_calc_stub.c"
         "hex.c"
         "args.c"
         "dir_walk.c"

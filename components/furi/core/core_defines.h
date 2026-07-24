@@ -68,9 +68,10 @@ extern "C" {
     } while(0)
 #endif
 
-#ifndef PLACE_IN_SECTION
-#define PLACE_IN_SECTION(x) __attribute__((section(x)))
-#endif
+/* ESP-IDF 6.2 provides PLACE_IN_SECTION in esp_attr.h, so we don't redefine it */
+/* #ifndef PLACE_IN_SECTION */
+/* #define PLACE_IN_SECTION(x) __attribute__((section(x))) */
+/* #endif */
 
 #ifndef ALIGN
 #define ALIGN(n) __attribute__((aligned(n)))

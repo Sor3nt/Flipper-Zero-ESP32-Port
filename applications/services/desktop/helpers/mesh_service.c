@@ -184,8 +184,8 @@ static bool mesh_enqueue(const uint8_t mac[MESH_MAC_LEN], const uint8_t* data, u
 
 /* ─────── ESP-NOW callbacks (run in WiFi-internal task context) ─────── */
 
-static void on_send_cb(const uint8_t* mac, esp_now_send_status_t status) {
-    (void)mac;
+static void on_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    (void)mac_addr;
     if(status != ESP_NOW_SEND_SUCCESS) {
         FURI_LOG_D(TAG, "send fail");
     }

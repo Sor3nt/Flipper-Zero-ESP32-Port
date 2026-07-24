@@ -11,6 +11,8 @@ extern "C" {
 #define FURI_NORETURN noreturn
 #endif
 
+#define _ATTRIBUTE __attribute__
+
 // ESP32: No CMSIS, use ESP-IDF/FreeRTOS APIs
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>

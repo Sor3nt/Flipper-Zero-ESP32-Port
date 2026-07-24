@@ -112,7 +112,7 @@ idf_component_register(
         "protocols/slix"
         "protocols/st25tb"
         "protocols/type_4_tag"
-    REQUIRES furi furi_hal toolbox mlib flipper_format storage bit_lib
+    REQUIRES furi furi_hal toolbox mlib flipper_format storage bit_lib compat
     PRIV_REQUIRES mbedtls
 )
 

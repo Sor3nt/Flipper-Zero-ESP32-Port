@@ -12,6 +12,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <m-core.h>
+#include "common_defines.h"
 
 #ifdef __cplusplus
 extern "C" {

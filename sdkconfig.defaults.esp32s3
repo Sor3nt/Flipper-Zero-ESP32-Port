@@ -57,7 +57,7 @@ CONFIG_SPIRAM_RODATA=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 # NFC needs 3DES (felica, mf_ultralight)
-CONFIG_MBEDTLS_DES_C=y
+CONFIG_MBEDTLS_DES_C=n
 
 # TinyUSB (USB HID for BadUSB + CDC for RPC + MSC for SD-Card USB-Stick)
 # Composite descriptor lives in components/furi_hal/furi_hal_usb_tinyusb_composite.c

@@ -1,17 +1,9 @@
 dependencies:
   espressif/esp_tinyusb:
-    component_hash: 6a50305bc61c7a361da8c0833642be824e92dacb0a6001719a832a4e96e471bf
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    - name: espressif/tinyusb
-      registry_url: https://components.espressif.com
-      require: public
-      version: '>=0.14.2'
+    dependencies: []
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      path: /workspaces/Flipper-Zero-ESP32-Port/components/espressif__esp_tinyusb
+      type: local
     version: 1.7.6~2
   espressif/led_strip:
     component_hash: 28621486f77229aaf81c71f5e15d6fbf36c2949cf11094e07090593e659e7639
@@ -24,13 +16,13 @@ dependencies:
       type: service
     version: 3.0.3
   espressif/tinyusb:
-    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
+    component_hash: a72b7d67472914ab76309340fd50d578b31e310963d45ad0f81144bde3314752
     dependencies:
     - name: idf
       require: private
       version: '>=5.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32s2
@@ -38,7 +30,7 @@ dependencies:
     - esp32p4
     - esp32h4
     - esp32s31
-    version: 0.19.0~3
+    version: 0.21.0~1
   idf:
     source:
       type: idf
@@ -46,6 +38,8 @@ dependencies:
 direct_dependencies:
 - espressif/esp_tinyusb
 - espressif/led_strip
-manifest_hash: 50d48648918b3d656aa0dfab27b98889fa9aad5b7e859c06637133c94684c8e2
+- espressif/tinyusb
+- idf
+manifest_hash: 9bc8509babc76f635c525cb78167775b5a51f4c18842681a325566258c44613f
 target: esp32s3
 version: 2.0.0

@@ -44,7 +44,7 @@ bool mf_ultralight_generate_xiaomi_pass(MfUltralightAuth* instance, uint8_t* uid
     furi_assert(instance);
     furi_assert(uid);
 
-    uint8_t hash[20];
+    uint8_t hash[20] = {0};  /* Initialized to zero; real SHA1 not available in ESP-IDF 6.2 */
     bool generated = false;
     if(uid_len == 7) {
         mbedtls_sha1(uid, uid_len, hash);

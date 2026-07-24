@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include "common_defines.h"
 
 #ifdef __cplusplus
 extern "C" {
