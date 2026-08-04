@@ -1,0 +1,13 @@
+App(
+    appid="roulette",
+    name="Roulette",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="roulette_app",
+    requires=["gui"],
+    stack_size=2 * 1024,
+    fap_icon="icon.png",
+    fap_category="Games",
+    fap_author="Superagent",
+    fap_version="1.0",
+    fap_description="Spin an American roulette wheel (0, 00, 1-36) with an animated ball and sound.",
+)

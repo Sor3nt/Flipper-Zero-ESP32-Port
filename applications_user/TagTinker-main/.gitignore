@@ -1,0 +1,32 @@
+# Build artifacts
+*.o
+*.d
+*.elf
+*.fap
+*.map
+dist/
+build/
+
+# ufbt
+.ufbt/
+
+# AI Assistants
+.gemini/
+.codex/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# OS garbage
+.DS_Store
+Desktop.ini

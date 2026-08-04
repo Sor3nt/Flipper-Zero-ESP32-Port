@@ -1,9 +1,10 @@
 #include "mitsubishi_v0.h"
+#include "protocols_common.h"
 #include <string.h>
 
 // Original implementation by @lupettohf
 
-#define MITSUBISHI_BIT_COUNT 96
+#define MITSUBISHI_BIT_COUNT  96
 #define MITSUBISHI_DATA_BYTES 12
 
 static const SubGhzBlockConst subghz_protocol_mitsubishi_const = {
@@ -46,27 +47,23 @@ static void mitsubishi_unscramble_payload(uint8_t* payload) {
     }
 }
 
-static inline bool mitsubishi_is_short(uint32_t duration) {
-    return DURATION_DIFF(duration, subghz_protocol_mitsubishi_const.te_short) <
-           subghz_protocol_mitsubishi_const.te_delta;
-}
-
-static inline bool mitsubishi_is_long(uint32_t duration) {
-    return DURATION_DIFF(duration, subghz_protocol_mitsubishi_const.te_long) <
-           subghz_protocol_mitsubishi_const.te_delta;
-}
-
 static void mitsubishi_reset_payload(SubGhzProtocolDecoderMitsubishi* instance) {
     instance->bit_count = 0;
     memset(instance->decode_data, 0, sizeof(instance->decode_data));
 }
 
-static bool mitsubishi_collect_pair(SubGhzProtocolDecoderMitsubishi* instance, uint32_t high, uint32_t low) {
+static bool mitsubishi_collect_pair(
+    SubGhzProtocolDecoderMitsubishi* instance,
+    uint32_t high,
+    uint32_t low) {
     bool bit_value;
 
-    if(mitsubishi_is_short(high) && mitsubishi_is_long(low)) {
+    if(pp_is_short(high, &subghz_protocol_mitsubishi_const) &&
+       pp_is_long(low, &subghz_protocol_mitsubishi_const)) {
         bit_value = true;
-    } else if(mitsubishi_is_long(high) && mitsubishi_is_short(low)) {
+    } else if(
+        pp_is_long(high, &subghz_protocol_mitsubishi_const) &&
+        pp_is_short(low, &subghz_protocol_mitsubishi_const)) {
         bit_value = false;
     } else {
         return false;
@@ -91,9 +88,8 @@ static void mitsubishi_publish_frame(SubGhzProtocolDecoderMitsubishi* instance) 
     mitsubishi_unscramble_payload(payload);
 
     instance->generic.data_count_bit = instance->bit_count;
-    instance->generic.serial =
-        ((uint32_t)payload[0] << 24) | ((uint32_t)payload[1] << 16) | ((uint32_t)payload[2] << 8) |
-        payload[3];
+    instance->generic.serial = ((uint32_t)payload[0] << 24) | ((uint32_t)payload[1] << 16) |
+                               ((uint32_t)payload[2] << 8) | payload[3];
     instance->generic.cnt = ((uint16_t)payload[4] << 8) | payload[5];
     instance->generic.btn = payload[6];
 
@@ -104,7 +100,7 @@ static void mitsubishi_publish_frame(SubGhzProtocolDecoderMitsubishi* instance) 
 
 const SubGhzProtocolDecoder subghz_protocol_mitsubishi_decoder = {
     .alloc = subghz_protocol_decoder_mitsubishi_alloc,
-    .free = subghz_protocol_decoder_mitsubishi_free,
+    .free = pp_decoder_free_default,
     .feed = subghz_protocol_decoder_mitsubishi_feed,
     .reset = subghz_protocol_decoder_mitsubishi_reset,
     .get_hash_data = subghz_protocol_decoder_mitsubishi_get_hash_data,
@@ -124,10 +120,18 @@ const SubGhzProtocolEncoder subghz_protocol_mitsubishi_encoder = {
 const SubGhzProtocol mitsubishi_v0_protocol = {
     .name = MITSUBISHI_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_868 | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable |
-            SubGhzProtocolFlag_Load | SubGhzProtocolFlag_Save,
+    .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_FM |
+            SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Load | SubGhzProtocolFlag_Save,
+#if PROTOPIRATE_WITH_DECODER
     .decoder = &subghz_protocol_mitsubishi_decoder,
+#else
+    .decoder = NULL,
+#endif
+#if PROTOPIRATE_WITH_ENCODER
     .encoder = &subghz_protocol_mitsubishi_encoder,
+#else
+    .encoder = NULL,
+#endif
 };
 
 void* subghz_protocol_decoder_mitsubishi_alloc(SubGhzEnvironment* environment) {
@@ -137,12 +141,6 @@ void* subghz_protocol_decoder_mitsubishi_alloc(SubGhzEnvironment* environment) {
     instance->base.protocol = &mitsubishi_v0_protocol;
     instance->generic.protocol_name = instance->base.protocol->name;
     return instance;
-}
-
-void subghz_protocol_decoder_mitsubishi_free(void* context) {
-    furi_check(context);
-    SubGhzProtocolDecoderMitsubishi* instance = context;
-    free(instance);
 }
 
 void subghz_protocol_decoder_mitsubishi_reset(void* context) {
@@ -216,10 +214,13 @@ SubGhzProtocolStatus subghz_protocol_decoder_mitsubishi_serialize(
     SubGhzProtocolStatus ret =
         subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
     if(ret == SubGhzProtocolStatusOk) {
-        flipper_format_write_uint32(flipper_format, "Serial", &instance->generic.serial, 1);
-        flipper_format_write_uint32(flipper_format, "Cnt", &instance->generic.cnt, 1);
-        uint32_t btn = instance->generic.btn;
-        flipper_format_write_uint32(flipper_format, "Btn", &btn, 1);
+        pp_serialize_fields(
+            flipper_format,
+            PP_FIELD_SERIAL | PP_FIELD_BTN | PP_FIELD_CNT,
+            instance->generic.serial,
+            instance->generic.btn,
+            instance->generic.cnt,
+            0);
     }
     return ret;
 }
@@ -234,10 +235,9 @@ SubGhzProtocolStatus
         subghz_protocol_mitsubishi_const.min_count_bit_for_found);
 
     if(ret == SubGhzProtocolStatusOk) {
-        flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1);
-        flipper_format_read_uint32(flipper_format, "Cnt", &instance->generic.cnt, 1);
-        uint32_t btn = 0;
-        flipper_format_read_uint32(flipper_format, "Btn", &btn, 1);
+        uint32_t btn = instance->generic.btn;
+        pp_encoder_read_fields(
+            flipper_format, &instance->generic.serial, &btn, &instance->generic.cnt, NULL);
         instance->generic.btn = (uint8_t)btn;
     }
 

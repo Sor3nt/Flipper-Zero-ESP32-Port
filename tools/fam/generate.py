@@ -77,6 +77,9 @@ def parse_manifest(manifest_path: Path) -> list[FlipperApplication]:
         "ExtFile": ExtFile,
         "Lib": Lib,
         "FlipperAppType": FlipperAppType,
+        # Path to this manifest — upstream fbt exposes it so manifests can locate
+        # sibling files (e.g. protopirate reads its defines.h relative to it).
+        "app_manifest_path": str(manifest_path),
     }
     try:
         with manifest_path.open("rt", encoding="utf-8") as manifest_file:

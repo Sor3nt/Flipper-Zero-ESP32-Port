@@ -286,15 +286,7 @@ void view_dispatcher_handle_input(ViewDispatcher* view_dispatcher, InputEvent* e
             else if(event->key == InputKeyDown) event->key = InputKeyRight;
             else if(event->key == InputKeyLeft) event->key = InputKeyDown;
             else if(event->key == InputKeyRight) event->key = InputKeyUp;
-        } else if(mode == ViewInputModeUpDown) {
-            /*
-             * T-Embed has one rotary axis. In vertical views the viewport
-             * can rotate that axis into Left/Right. Standard menus need
-             * Up/Down, so convert it back before the view receives it.
-             */
-            if(event->key == InputKeyLeft) event->key = InputKeyDown;
-            else if(event->key == InputKeyRight) event->key = InputKeyUp;
-        }
+        } 
     }
 
     // Deliver event

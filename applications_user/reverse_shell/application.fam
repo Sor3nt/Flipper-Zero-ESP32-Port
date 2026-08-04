@@ -1,0 +1,18 @@
+App(
+    appid="reverse_shell",
+    name="Reverse Shell",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    targets=["all"],
+    entry_point="reverse_shell_app",
+    requires=[
+        "gui",
+        "storage",
+    ],
+    stack_size=4 * 1024,
+    fap_category="Tools",
+    fap_description="WiFi STA + TCP dial-out reverse shell (on-device cmd loop). Authorized testing only.",
+    fap_version="1.0",
+    fap_author="cardputer",
+    icon="A_Sub1ghz_14",
+    order=68,
+)

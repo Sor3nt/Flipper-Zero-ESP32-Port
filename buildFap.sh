@@ -156,6 +156,8 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/lwip/port/include"
     -I"$IDF/lwip/port/freertos/include"
     -I"$IDF/lwip/port/esp32xx/include"
+    -I"$IDF/esp_wifi/include"
+    -I"$IDF/esp_netif/include"
     -I"$IDF/driver/deprecated"
     -I"$IDF/driver/i2c/include"
     -I"$IDF/esp_driver_i2s/include"
@@ -186,6 +188,14 @@ COMMON_CFLAGS=(
     -Wall
     -Wno-unused-parameter
     -Wno-sign-compare
+    # GCC 14 promoted these three C warnings to hard errors by default. Upstream
+    # Flipper apps were written for older toolchains where they were warnings, so
+    # keep them as warnings — exactly what the firmware components do (see e.g.
+    # components/infrared/CMakeLists.txt, lfrfid, furi_hal). Purely additive:
+    # downgrading errors to warnings can never break a build that already passed.
+    -Wno-error=incompatible-pointer-types
+    -Wno-error=int-conversion
+    -Wno-error=implicit-function-declaration
     -Os
     -g
     -DESP_PLATFORM
@@ -241,7 +251,9 @@ build_for_target() {
     local BUILD_DIR="$PROJECT_DIR/$FW_BUILD_DIR/fap/$(basename "$APP_DIR")"
     local OUTPUT_DIR="$PROJECT_DIR/$FW_BUILD_DIR/fap"
     local OUTPUT="$OUTPUT_DIR/$FAP_FILENAME"
-    mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
+    # dirname of OUTPUT so FAP_OUTPUT_NAME may carry a subpath (embedded plugins
+    # land under <appid>_assets/plugins/<plugin>.fal).
+    mkdir -p "$BUILD_DIR" "$OUTPUT_DIR" "$(dirname "$OUTPUT")"
 
     echo ""
     echo "━━━ Building for $BOARD ($IDF_TARGET) ━━━"
@@ -254,7 +266,14 @@ build_for_target() {
     TARGET_INCLUDES+=(-I"$IDF/esp_hw_support/include/soc/$IDF_TARGET")
 
     if [ "$IDF_TARGET" = "esp32s3" ]; then
-        TARGET_CFLAGS+=(-mlongcalls)
+        # -mlongcalls: allow calls beyond the ±512KB direct-call range (needed as
+        #   the FAP + firmware end up far apart in memory).
+        # -mtext-section-literals: place each function's L32R literals INSIDE its
+        #   .text.<func> section (next to the code) instead of in separate
+        #   .literal sections. Xtensa L32R only reaches ~256KB backwards; on large
+        #   FAPs (e.g. wolf3d) the split-out literal pool lands out of range and
+        #   the ELF loader fails with "L32R offset out of range". Mirrors ESP-IDF.
+        TARGET_CFLAGS+=(-mlongcalls -mtext-section-literals)
         TARGET_INCLUDES+=(
             -I"$IDF/freertos/config/xtensa/include"
             -I"$IDF/freertos/config/include"
@@ -323,18 +342,33 @@ build_for_target() {
 
     local ICONS_GEN_DIR="$BUILD_DIR/icons"
     if [ -n "$ICON_ASSETS_DIR" ] && [ -d "$ICON_ASSETS_DIR" ]; then
-        # Detect icon filename from source includes (e.g. #include "proto_pirate_icons.h")
-        local ICON_STEM="${APP_ID}_icons"
-        local DETECTED=$(grep -rh '#include ".*_icons\.h"' "$APP_DIR" 2>/dev/null | head -1 | sed 's/.*"\(.*\)\.h".*/\1/')
-        [ -n "$DETECTED" ] && ICON_STEM="$DETECTED"
+        # Detect icon header stem(s) from #include "..._icons.h". Scan only the
+        # sources actually being built (FAP_SOURCES/FAP_SINGLE_SOURCE for an
+        # embedded plugin) so a plugin gets its OWN header name — e.g. psa_bf
+        # includes protopirate_psa_bf_plugin_icons.h, not proto_pirate_icons.h.
+        local ICON_SCAN="$APP_DIR"
+        [ -n "$FAP_SOURCES" ] && ICON_SCAN="$FAP_SOURCES"
+        [ -n "$FAP_SINGLE_SOURCE" ] && ICON_SCAN="$FAP_SINGLE_SOURCE"
+        local ICON_STEMS
+        ICON_STEMS=$(grep -rh '#include ".*_icons\.h"' $ICON_SCAN 2>/dev/null | sed 's/.*"\(.*\)\.h".*/\1/' | sort -u)
+        [ -z "$ICON_STEMS" ] && ICON_STEMS="${APP_ID}_icons"
 
         mkdir -p "$ICONS_GEN_DIR"
-        python3 "$SCRIPT_DIR/tools/fam/compile_icons.py" icons \
-            --filename "$ICON_STEM" \
-            "$ICON_ASSETS_DIR" "$ICONS_GEN_DIR" 2>/dev/null || true
-        if [ -f "$ICONS_GEN_DIR/${ICON_STEM}.h" ]; then
-            TARGET_INCLUDES+=(-I"$ICONS_GEN_DIR")
-        fi
+        # Generate every referenced header from the same assets dir. All stems get
+        # identical icon symbols (named by PNG file), so keep only the FIRST .c to
+        # avoid duplicate definitions at link; the extra headers stay declaration-only.
+        local _icon_first=1
+        for stem in $ICON_STEMS; do
+            python3 "$SCRIPT_DIR/tools/fam/compile_icons.py" icons \
+                --filename "$stem" \
+                "$ICON_ASSETS_DIR" "$ICONS_GEN_DIR" 2>/dev/null || true
+            if [ "$_icon_first" = "1" ] && [ -f "$ICONS_GEN_DIR/${stem}.h" ]; then
+                _icon_first=0
+            else
+                [ -f "$ICONS_GEN_DIR/${stem}.c" ] && rm -f "$ICONS_GEN_DIR/${stem}.c"
+            fi
+        done
+        TARGET_INCLUDES+=(-I"$ICONS_GEN_DIR")
     fi
 
     # Honor fap_private_libs[].sources: apps may vendor a big library (e.g.
@@ -357,9 +391,31 @@ build_for_target() {
         done <<< "$LIB_INFO"
     fi
 
+    # Honor an explicit main-app `sources=[...]` list in the .fam (fbt glob/exclude
+    # semantics). Needed for apps with a plugin architecture (e.g. protopirate)
+    # that exclude their plugin *template* .c files from the main app — blanket-
+    # globbing those trips their `#error "PP_* must be defined"` guards. Emits
+    # nothing for apps that build "everything", so they keep the plain glob below.
+    # Skip entirely for explicit-source sub-builds (FAP_SOURCES / FAP_SINGLE_SOURCE,
+    # e.g. an embedded plugin): the main app's fam sources/cdefines must NOT leak
+    # into them — a leaked PROTOPIRATE_PROTOCOL_RX_ONLY would flip the TX plugins'
+    # PROTOPIRATE_WITH_ENCODER to 0 and hide the encoder API they use.
+    local -a FAM_SOURCES=()
+    if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_SINGLE_SOURCE" ] && [ -f "$APP_DIR/application.fam" ]; then
+        local APP_INFO
+        APP_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null || true)
+        while IFS=$'\t' read -r kind val; do
+            case "$kind" in
+                APPSOURCE)  [ -n "$val" ] && FAM_SOURCES+=("$APP_DIR/$val") ;;
+                APPCDEFINE) [ -n "$val" ] && TARGET_CFLAGS+=("-D$val") ;;
+            esac
+        done <<< "$APP_INFO"
+    fi
+
     # Find source files. Priority:
     #   FAP_SOURCES        - explicit space-separated list (multi-source plugin)
     #   FAP_SINGLE_SOURCE  - one source (single-source plugin)
+    #   FAM_SOURCES        - main-app sources resolved from the .fam (see above)
     #   else               - whole app dir, minus excluded private-lib dirs,
     #                        plus the selected private-lib sources
     local -a C_SOURCES=()
@@ -368,12 +424,34 @@ build_for_target() {
         C_SOURCES=($FAP_SOURCES)
     elif [ -n "$FAP_SINGLE_SOURCE" ]; then
         C_SOURCES=("$FAP_SINGLE_SOURCE")
+    elif [ ${#FAM_SOURCES[@]} -gt 0 ]; then
+        # Split the fam-resolved list by extension; add private-lib sources too.
+        for s in "${FAM_SOURCES[@]}" "${LIB_SOURCES[@]}"; do
+            case "$s" in
+                *.cpp) CXX_SOURCES+=("$s") ;;
+                *)     C_SOURCES+=("$s") ;;
+            esac
+        done
     else
         # Build a prune expression for the excluded private-lib directories.
         local -a PRUNE=()
         for d in "${LIB_EXCLUDE_DIRS[@]}"; do
             PRUNE+=(-path "$d" -prune -o)
         done
+        # Never glob host-only test harnesses (test/ and tests/ dirs hold their
+        # own main() and duplicate registry stubs -> "multiple definition" at
+        # link time) or a vendored .git dir. These are compiled separately (see
+        # tests/Makefile), never bundled into the FAP.
+        PRUNE+=(-name tests -type d -prune -o)
+        PRUNE+=(-name test -type d -prune -o)
+        PRUNE+=(-name .git -type d -prune -o)
+        # Prune nested app roots: any SUBdir that carries its own application.fam
+        # is a separate app (ufbt "separate app root" marker), e.g. a vendored
+        # PlatformIO/ESP32 port tagged "[DO NOT BUILD]". Its sources need a
+        # foreign toolchain (Arduino.h, …) and must never land in this FAP.
+        while IFS= read -r nested_fam; do
+            PRUNE+=(-path "$(dirname "$nested_fam")" -prune -o)
+        done < <(find "$APP_DIR" -mindepth 2 -name application.fam -type f)
         C_SOURCES=($(find "$APP_DIR" "${PRUNE[@]}" -name '*.c' -type f -print))
         CXX_SOURCES=($(find "$APP_DIR" "${PRUNE[@]}" -name '*.cpp' -type f -print))
         # Add the selected private-lib sources back in.
@@ -496,6 +574,44 @@ for target_line in "${TARGETS[@]}"; do
     read -r BOARD IDF_TARGET TOOLCHAIN FW_BUILD_DIR <<< "$target_line"
     build_for_target "$BOARD" "$IDF_TARGET" "$TOOLCHAIN" "$FW_BUILD_DIR"
 done
+
+# ── Embedded plugins (fal_embedded) ─────────────────────────────────
+# Apps like protopirate ship their protocol decoders as separate PLUGIN apps
+# and load them at runtime from APP_ASSETS_PATH("plugins/<appid>.fal"). Build
+# each as a .fal by re-invoking ourselves with the per-plugin sources/entry/
+# cdefines. Skip while we ARE a plugin sub-build (FAP_SOURCES set) so we don't
+# recurse. Output goes to <appid>_assets/plugins/ for deployment to the SD at
+# /ext/apps_assets/<mainappid>/plugins/.
+if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_OUTPUT_NAME" ] && [ -f "$APP_DIR/application.fam" ]; then
+    PLUGIN_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | grep '^PLUGIN' || true)
+    if [ -n "$PLUGIN_INFO" ]; then
+        echo ""
+        echo "━━━ Embedded plugins (fal_embedded) ━━━"
+        _p_id=""; _p_ep=""; _p_srcs=""; _p_defs=""
+        build_one_plugin() {
+            [ -z "$_p_id" ] && return 0
+            echo ""
+            echo "  ┄ plugin: $_p_id (entry=$_p_ep)"
+            FAP_SOURCES="$_p_srcs" \
+            FAP_ENTRY_OVERRIDE="$_p_ep" \
+            FAP_STACK_OVERRIDE=0 \
+            FAP_OUTPUT_NAME="${APP_ID}_assets/plugins/${_p_id}.fal" \
+            FAP_CDEFINES="$_p_defs" \
+            "$SCRIPT_DIR/buildFap.sh" "$APP_DIR" 2>&1 \
+                | grep -E '✓|error:|fatal error:|missing API symbols' | sed 's/^/    /' || true
+        }
+        while IFS=$'\t' read -r kind a b; do
+            case "$kind" in
+                PLUGIN)
+                    build_one_plugin              # flush the previous plugin
+                    _p_id="$a"; _p_ep="$b"; _p_srcs=""; _p_defs="" ;;
+                PLUGINSRC)  _p_srcs="$_p_srcs $APP_DIR/$b" ;;
+                PLUGINDEF)  _p_defs="$_p_defs -D$b" ;;
+            esac
+        done <<< "$PLUGIN_INFO"
+        build_one_plugin                          # flush the last plugin
+    fi
+fi
 
 echo ""
 echo "Done."

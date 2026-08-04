@@ -1,0 +1,18 @@
+App(
+    appid="rfid2_reader",
+    name="RFID2 Reader",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    targets=["all"],
+    entry_point="rfid2_reader_app",
+    requires=[
+        "gui",
+    ],
+    stack_size=4 * 1024,
+    fap_category="NFC",
+    fap_icon="assets/rfid2_10px.png",
+    fap_icon_assets="assets",
+    fap_description="Read 13.56MHz card UIDs via the M5Stack Unit RFID2 (WS1850S, I2C)",
+    fap_version="1.0",
+    fap_author="cardputer",
+    icon="A_Plugins_14",
+)

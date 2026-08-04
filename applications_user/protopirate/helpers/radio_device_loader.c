@@ -5,12 +5,13 @@
 #include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
 #include <furi.h>
 #include <furi_hal.h>
+#include "../defines.h"
 
 #define TAG "RadioDeviceLoader"
 
-static bool protopirate_radio_device_loader_otg_enabled_by_loader = false;
+static bool radio_device_loader_otg_enabled_by_loader = false;
 
-static void protopirate_radio_device_loader_power_on() {
+static void radio_device_loader_power_on() {
     uint8_t attempts = 0;
     while(!furi_hal_power_is_otg_enabled() && attempts++ < 5) {
         furi_hal_power_enable_otg();
@@ -18,25 +19,25 @@ static void protopirate_radio_device_loader_power_on() {
         furi_delay_ms(10);
     }
     if(furi_hal_power_is_otg_enabled()) {
-        protopirate_radio_device_loader_otg_enabled_by_loader = true;
+        radio_device_loader_otg_enabled_by_loader = true;
     }
     FURI_LOG_D(TAG, "OTG power enabled after %d attempts", attempts);
 }
 
-static void protopirate_radio_device_loader_power_off() {
-    if(protopirate_radio_device_loader_otg_enabled_by_loader && furi_hal_power_is_otg_enabled()) {
+static void radio_device_loader_power_off() {
+    if(radio_device_loader_otg_enabled_by_loader && furi_hal_power_is_otg_enabled()) {
         furi_hal_power_disable_otg();
-        protopirate_radio_device_loader_otg_enabled_by_loader = false;
+        radio_device_loader_otg_enabled_by_loader = false;
         FURI_LOG_D(TAG, "OTG power disabled");
     }
 }
 
-bool protopirate_radio_device_loader_is_connect_external(const char* name) {
+bool radio_device_loader_is_connect_external(const char* name) {
     bool is_connect = false;
     bool is_otg_enabled = furi_hal_power_is_otg_enabled();
 
     if(!is_otg_enabled) {
-        protopirate_radio_device_loader_power_on();
+        radio_device_loader_power_on();
     }
 
     const SubGhzDevice* device = subghz_devices_get_by_name(name);
@@ -48,20 +49,20 @@ bool protopirate_radio_device_loader_is_connect_external(const char* name) {
     }
 
     if(!is_otg_enabled) {
-        protopirate_radio_device_loader_power_off();
+        radio_device_loader_power_off();
     }
     return is_connect;
 }
 
-const SubGhzDevice* protopirate_radio_device_loader_set(
+const SubGhzDevice* radio_device_loader_set(
     const SubGhzDevice* current_radio_device,
     SubGhzRadioDeviceType radio_device_type) {
     const SubGhzDevice* target_radio_device = NULL;
 
     // Decide the target device first (external if requested+present, else internal)
     if(radio_device_type == SubGhzRadioDeviceTypeExternalCC1101 &&
-       protopirate_radio_device_loader_is_connect_external(SUBGHZ_DEVICE_CC1101_EXT_NAME)) {
-        protopirate_radio_device_loader_power_on();
+       radio_device_loader_is_connect_external(SUBGHZ_DEVICE_CC1101_EXT_NAME)) {
+        radio_device_loader_power_on();
         target_radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_EXT_NAME);
         if(!target_radio_device) {
             FURI_LOG_E(TAG, "Failed to get external CC1101 device, falling back to internal");
@@ -88,7 +89,7 @@ const SubGhzDevice* protopirate_radio_device_loader_set(
 
     // Cleanly stop the current device before switching
     if(current_radio_device) {
-        protopirate_radio_device_loader_end(current_radio_device);
+        radio_device_loader_end(current_radio_device);
     }
 
     // Start the target device
@@ -108,7 +109,7 @@ const SubGhzDevice* protopirate_radio_device_loader_set(
     return target_radio_device;
 }
 
-bool protopirate_radio_device_loader_is_external(const SubGhzDevice* radio_device) {
+bool radio_device_loader_is_external(const SubGhzDevice* radio_device) {
     if(!radio_device) {
         FURI_LOG_W(TAG, "is_external called with NULL device");
         return false;
@@ -128,7 +129,7 @@ bool protopirate_radio_device_loader_is_external(const SubGhzDevice* radio_devic
     return is_external;
 }
 
-void protopirate_radio_device_loader_end(const SubGhzDevice* radio_device) {
+void radio_device_loader_end(const SubGhzDevice* radio_device) {
     furi_check(radio_device);
 
     if(radio_device != subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME)) {
@@ -137,5 +138,5 @@ void protopirate_radio_device_loader_end(const SubGhzDevice* radio_device) {
     } else {
         FURI_LOG_D(TAG, "Internal radio device - no cleanup needed");
     }
-    protopirate_radio_device_loader_power_off();
+    radio_device_loader_power_off();
 }
