@@ -30,11 +30,31 @@
                     { path: 'release/waveshare_c6_1.9/latest/furi_esp32.bin', offset: 0x10000 },
                 ],
             },
+            'reaper-fury': {
+                name: 'Reaper Fury (ESP32-S3)',
+                chip: 'ESP32-S3',
+                flashSize: '16MB',
+                // Single-app image: factory app at 0x10000 (partitions_singleapp_16mb.csv).
+                parts: [
+                    { path: 'release/reaper_fury/latest/bootloader.bin', offset: 0x0 },
+                    { path: 'release/reaper_fury/latest/partition-table.bin', offset: 0x8000 },
+                    { path: 'release/reaper_fury/latest/furi_esp32.bin', offset: 0x10000 },
+                ],
+            },
         };
 
         let selectedBoard = null;
         let port = null;
         let transport = null;
+        
+        function getSdcardUrl(boardKey) {
+            const sdcardUrls = {
+                't-embed': 'release/t-embed/latest/sdcard.zip',
+                'waveshare-c6': 'release/waveshare_c6_1.9/latest/sdcard.zip',
+                'reaper-fury': 'release/reaper_fury/latest/sdcard.zip',
+            };
+            return sdcardUrls[boardKey] || 'release/t-embed/latest/sdcard.zip';
+        }
 
         const $ = id => document.getElementById(id);
 
@@ -173,6 +193,7 @@
                 await transport.setRTS(false);
                 await new Promise(r => setTimeout(r, 100));
 
+                updateSdcardLink();
                 showScreen('screen-success');
 
             } catch (e) {
@@ -182,6 +203,16 @@
                 port = null;
                 transport = null;
                 showScreen('screen-connect');
+            }
+        }
+        
+        function updateSdcardLink() {
+            const sdcardLink = $('sdcard-link');
+            if (sdcardLink && selectedBoard) {
+                const boardKey = Object.keys(BOARDS).find(key => BOARDS[key] === selectedBoard);
+                if (boardKey) {
+                    sdcardLink.href = getSdcardUrl(boardKey);
+                }
             }
         }
 
@@ -581,6 +612,13 @@
                     <p>ESP32-C6 &bull; Wifi &bull; BLE &bull; Touch</p>
                 </div>
             </div>
+            <div id="board-reaper-fury" class="board-card" onclick="selectBoard('reaper-fury')">
+                <div class="board-icon">&#9881;</div>
+                <div class="board-info">
+                    <h3>Reaper Fury (ESP32-S3)</h3>
+                    <p>Sub-GHz &bull; NRF &bull; Wifi &bull; BLE &bull; NFC &bull; IR &bull; SD Card</p>
+                </div>
+            </div>
             <a href="https://trollmaster419.github.io/" target="_blank" rel="noopener" class="board-card">
                 <div class="board-icon">&#9881;</div>
                 <div class="board-info">
@@ -635,7 +673,7 @@
             </ol>
         </div>
 
-        <a href="release/t-embed/latest/sdcard.zip" download class="cta-btn">
+        <a href="release/t-embed/latest/sdcard.zip" download id="sdcard-link" class="cta-btn">
             &#11015; Download sdcard.zip <span class="cta-size">~10 MB</span>
         </a>
     </div>
