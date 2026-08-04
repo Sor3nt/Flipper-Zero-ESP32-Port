@@ -8,6 +8,8 @@
     <script type="module">
         import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
 
+        const REPO_BASE = 'https://raw.githubusercontent.com/davidmuhamad268-maker/Flipper-Zero-ESP32-Port/main';
+        
         const BOARDS = {
             't-embed': {
                 name: 'LilyGo T-Embed CC1101',
@@ -15,9 +17,9 @@
                 flashSize: '16MB',
                 // Single-app image: factory app at 0x10000 (partitions_singleapp_16mb.csv).
                 parts: [
-                    { path: 'release/t-embed/latest/bootloader.bin', offset: 0x0 },
-                    { path: 'release/t-embed/latest/partition-table.bin', offset: 0x8000 },
-                    { path: 'release/t-embed/latest/furi_esp32.bin', offset: 0x10000 },
+                    { path: `${REPO_BASE}/release/t-embed/latest/bootloader.bin`, offset: 0x0 },
+                    { path: `${REPO_BASE}/release/t-embed/latest/partition-table.bin`, offset: 0x8000 },
+                    { path: `${REPO_BASE}/release/t-embed/latest/furi_esp32.bin`, offset: 0x10000 },
                 ],
             },
             'waveshare-c6': {
@@ -25,9 +27,9 @@
                 chip: 'ESP32-C6',
                 flashSize: '8MB',
                 parts: [
-                    { path: 'release/waveshare_c6_1.9/latest/bootloader.bin', offset: 0x0 },
-                    { path: 'release/waveshare_c6_1.9/latest/partition-table.bin', offset: 0x8000 },
-                    { path: 'release/waveshare_c6_1.9/latest/furi_esp32.bin', offset: 0x10000 },
+                    { path: `${REPO_BASE}/release/waveshare_c6_1.9/latest/bootloader.bin`, offset: 0x0 },
+                    { path: `${REPO_BASE}/release/waveshare_c6_1.9/latest/partition-table.bin`, offset: 0x8000 },
+                    { path: `${REPO_BASE}/release/waveshare_c6_1.9/latest/furi_esp32.bin`, offset: 0x10000 },
                 ],
             },
             'reaper-fury': {
@@ -36,9 +38,9 @@
                 flashSize: '16MB',
                 // Single-app image: factory app at 0x10000 (partitions_singleapp_16mb.csv).
                 parts: [
-                    { path: 'release/reaper_fury/latest/bootloader.bin', offset: 0x0 },
-                    { path: 'release/reaper_fury/latest/partition-table.bin', offset: 0x8000 },
-                    { path: 'release/reaper_fury/latest/furi_esp32.bin', offset: 0x10000 },
+                    { path: `${REPO_BASE}/release/reaper_fury/latest/bootloader.bin`, offset: 0x0 },
+                    { path: `${REPO_BASE}/release/reaper_fury/latest/partition-table.bin`, offset: 0x8000 },
+                    { path: `${REPO_BASE}/release/reaper_fury/latest/furi_esp32.bin`, offset: 0x10000 },
                 ],
             },
         };
@@ -49,11 +51,11 @@
         
         function getSdcardUrl(boardKey) {
             const sdcardUrls = {
-                't-embed': 'release/t-embed/latest/sdcard.zip',
-                'waveshare-c6': 'release/waveshare_c6_1.9/latest/sdcard.zip',
-                'reaper-fury': 'release/reaper_fury/latest/sdcard.zip',
+                't-embed': `${REPO_BASE}/release/t-embed/latest/sdcard.zip`,
+                'waveshare-c6': `${REPO_BASE}/release/waveshare_c6_1.9/latest/sdcard.zip`,
+                'reaper-fury': `${REPO_BASE}/release/reaper_fury/latest/sdcard.zip`,
             };
-            return sdcardUrls[boardKey] || 'release/t-embed/latest/sdcard.zip';
+            return sdcardUrls[boardKey] || `${REPO_BASE}/release/t-embed/latest/sdcard.zip`;
         }
 
         const $ = id => document.getElementById(id);
@@ -673,7 +675,7 @@
             </ol>
         </div>
 
-        <a href="release/t-embed/latest/sdcard.zip" download id="sdcard-link" class="cta-btn">
+        <a href="https://raw.githubusercontent.com/davidmuhamad268-maker/Flipper-Zero-ESP32-Port/main/release/t-embed/latest/sdcard.zip" download id="sdcard-link" class="cta-btn">
             &#11015; Download sdcard.zip <span class="cta-size">~10 MB</span>
         </a>
     </div>
