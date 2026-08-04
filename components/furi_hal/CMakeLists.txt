@@ -3,7 +3,7 @@
 #   waveshare_c6_1.9        - Waveshare ESP32-C6-LCD-1.9 (default, touch input)
 #   waveshare_c6_1.47       - Waveshare ESP32-C6-LCD-1.47 (touch input + IMU)
 #   lilygo_t_embed_cc1101   - LilyGo T-Embed CC1101 (ESP32-S3, encoder input, CC1101/NFC/IR)
-#   my_custom_board         - Custom ESP32-S3 board (6-way button pad, ST7789 display)
+#   reaper_fury             - Custom ESP32-S3 board (6-way button pad, ST7789 display)
 if(NOT DEFINED FLIPPER_BOARD)
     set(FLIPPER_BOARD "waveshare_c6_1.9" CACHE STRING "Target board for Flipper ESP32 port")
 endif()
@@ -43,6 +43,12 @@ set(FURI_HAL_SRCS
     "furi_hal_battery_stubs.c"
     "fatfs_compat.c"
 )
+
+# Include target-specific GPIO definitions if available
+set(TARGET_GPIO_PATH "${CMAKE_CURRENT_LIST_DIR}/../../targets/${FLIPPER_BOARD}/target_gpio.c")
+if(EXISTS "${TARGET_GPIO_PATH}")
+    list(APPEND FURI_HAL_SRCS "${TARGET_GPIO_PATH}")
+endif()
 
 set(FURI_HAL_REQUIRES
     furi toolbox input driver esp_lcd fatfs sdmmc datetime

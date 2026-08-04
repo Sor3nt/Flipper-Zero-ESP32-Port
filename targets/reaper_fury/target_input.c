@@ -1,18 +1,29 @@
 /**
  * @file target_input.c
  * Input driver for the custom board using dedicated button pins.
+ *
+ * Features:
+ *   - 6-way button pad (Up/Down/Left/Right) + Select/OK (BOOT pin)
+ *   - Back button (pin 21) with long-press detection for shutdown
+ *   - Back button also wired to BQ25896 QON for power-on wake
+ *   - Debouncing (2 polls)
+ *   - Long-press detection: hold Back for 2.5s triggers power shutdown
  */
 
 #include "target_input.h"
 
 #include <furi_hal_resources.h>
+#include <furi_hal_power.h>
 #include <boards/board.h>
 #include <driver/gpio.h>
 #include <esp_err.h>
+#include <esp_timer.h>
 
 #define TAG "InputCustom"
 
-#define INPUT_DEBOUNCE_POLLS 2U
+#define INPUT_DEBOUNCE_POLLS    2U
+#define LONGPRESS_TIMER_PERIOD  50000  /* 50ms polling interval */
+#define LONGPRESS_THRESHOLD_US  (BOARD_LONGPRESS_SHUTDOWN_MS * 1000)  /* 2.5s threshold */
 
 typedef struct {
     gpio_num_t gpio;
@@ -20,6 +31,7 @@ typedef struct {
     bool raw_pressed;
     bool debounced_pressed;
     uint8_t debounce_polls;
+    int64_t press_start_us;  /* Timestamp when button transitioned to pressed */
 } ButtonState;
 
 static ButtonState btn_up;
@@ -28,6 +40,7 @@ static ButtonState btn_left;
 static ButtonState btn_right;
 static ButtonState btn_ok;
 static ButtonState btn_back;
+static esp_timer_handle_t longpress_timer = NULL;
 
 static void input_publish(FuriPubSub* pubsub, InputKey key, InputType type, uint32_t sequence) {
     InputEvent event = {
@@ -43,6 +56,20 @@ static void input_emit_short(FuriPubSub* pubsub, InputKey key, uint32_t sequence
     input_publish(pubsub, key, InputTypePress, sequence);
     input_publish(pubsub, key, InputTypeShort, sequence);
     input_publish(pubsub, key, InputTypeRelease, sequence);
+}
+
+static void longpress_timer_callback(void* arg) {
+    /* Timer fires periodically to check for long-press on back button */
+    if(btn_back.debounced_pressed) {
+        int64_t now = esp_timer_get_time();
+        int64_t press_duration_us = now - btn_back.press_start_us;
+        
+        if(press_duration_us >= LONGPRESS_THRESHOLD_US) {
+            FURI_LOG_W(TAG, "Long-press detected on button key (pin %d), triggering shutdown...", BOARD_PIN_BUTTON_KEY);
+            /* Trigger system shutdown (without emitting additional input events) */
+            furi_hal_power_shutdown();
+        }
+    }
 }
 
 static bool button_is_pressed(ButtonState* btn) {
@@ -70,6 +97,7 @@ static void button_init_state(ButtonState* btn, gpio_num_t gpio, bool inverted) 
     btn->raw_pressed = button_is_pressed(btn);
     btn->debounced_pressed = btn->raw_pressed;
     btn->debounce_polls = INPUT_DEBOUNCE_POLLS;
+    btn->press_start_us = 0;  /* Not pressed initially */
 }
 
 static void button_poll(ButtonState* btn, FuriPubSub* pubsub, InputKey key, uint32_t* sequence_counter) {
@@ -89,10 +117,15 @@ static void button_poll(ButtonState* btn, FuriPubSub* pubsub, InputKey key, uint
 
     btn->debounced_pressed = btn->raw_pressed;
 
-    if(btn->debounced_pressed) {
+    if(b/* Button pressed → record timestamp for long-press detection */
+        btn->press_start_us = esp_timer_get_time();
+        input_publish(pubsub, key, InputTypePress, ++(*sequence_counter));
         return;
     }
 
+    /* Button released */
+    btn->press_start_us = 0;
+    input_publish(pubsub, key, InputTypeRelease
     input_emit_short(pubsub, key, ++(*sequence_counter));
 }
 
@@ -110,7 +143,21 @@ void target_input_init(void) {
     button_init_state(&btn_right, (gpio_num_t)BOARD_PIN_BTN_RIGHT, true);
 
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
-    button_init_state(&btn_ok, (gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
+    /* Setup long-press timer for shutdown detection on back button */
+    const esp_timer_create_args_t timer_args = {
+        .callback = longpress_timer_callback,
+        .name = "longpress_timer",
+        .arg = NULL,
+    };
+    esp_err_t err = esp_timer_create(&timer_args, &longpress_timer);
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "Failed to create long-press timer: %s", esp_err_to_name(err));
+    } else {
+        esp_timer_start_periodic(longpress_timer, LONGPRESS_TIMER_PERIOD);
+        FURI_LOG_I(TAG, "Long-press timer started (threshold: %lldms)", BOARD_LONGPRESS_SHUTDOWN_MS);
+    }
+
+    FURI_LOG_I(TAG, "Custom board input initialized (ESP32-S3, 6-way + long-press shutdown)N_BUTTON_BOOT, true);
 
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_KEY, true);
     button_init_state(&btn_back, (gpio_num_t)BOARD_PIN_BUTTON_KEY, true);

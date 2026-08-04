@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_SCRIPT="${ESP_IDF_EXPORT_SCRIPT:-${HOME}/esp/esp-idf/export.sh}"
 
 # Configuration for custom board
-BOARD="my_custom_board"
+BOARD="reaper_fury"
 BUILD_DIR="build_custom"
 TARGET="esp32s3"
 PORT="${ESPPORT:-}"

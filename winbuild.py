@@ -40,6 +40,7 @@ BOARDS = {
     "t_embed":      ("lilygo_t_embed_cc1101", "esp32s3", "build_t_embed"),
     "esp32s3":      ("esp32s3_generic",       "esp32s3", "build_s3"),
     "waveshare_c6": ("waveshare_c6_1.9",      "esp32c6", "build_waveshare_c6"),
+    "reaper_fury": ("reaper_fury",            "esp32s3", "build_custom"),
 }
 
 REPO_ROOT = Path(__file__).resolve().parent

@@ -49,3 +49,34 @@ const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = UINT16_MAX};
 #endif
 const GpioPin gpio_ibutton  = {.port = NULL, .pin = UINT16_MAX};
 const GpioPin gpio_speaker  = {.port = NULL, .pin = UINT16_MAX};
+
+/* External GPIO Pins (for reaper_fury external modules and expansions) */
+#ifdef BOARD_PIN_EXT_GPIO_1
+const GpioPin gpio_ext_gpio_1 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_1};
+#else
+const GpioPin gpio_ext_gpio_1 = {.port = NULL, .pin = UINT16_MAX};
+#endif
+
+#ifdef BOARD_PIN_EXT_GPIO_2
+const GpioPin gpio_ext_gpio_2 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_2};
+#else
+const GpioPin gpio_ext_gpio_2 = {.port = NULL, .pin = UINT16_MAX};
+#endif
+
+#ifdef BOARD_PIN_EXT_GPIO_3
+const GpioPin gpio_ext_gpio_3 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_3};
+#else
+const GpioPin gpio_ext_gpio_3 = {.port = NULL, .pin = UINT16_MAX};
+#endif
+
+#ifdef BOARD_PIN_EXT_GPIO_4
+const GpioPin gpio_ext_gpio_4 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_4};
+#else
+const GpioPin gpio_ext_gpio_4 = {.port = NULL, .pin = UINT16_MAX};
+#endif
+
+#ifdef BOARD_PIN_EXT_GPIO_5
+const GpioPin gpio_ext_gpio_5 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_5};
+#else
+const GpioPin gpio_ext_gpio_5 = {.port = NULL, .pin = UINT16_MAX};
+#endif

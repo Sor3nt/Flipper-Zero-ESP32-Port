@@ -2,7 +2,7 @@ dependencies:
   espressif/esp_tinyusb:
     dependencies: []
     source:
-      path: /workspaces/Flipper-Zero-ESP32-Port/components/espressif__esp_tinyusb
+      path: C:\Users\X1 Carbon\Folder Baru\Flipper-Zero-ESP32-Port\components\espressif__esp_tinyusb
       type: local
     version: 1.7.6~2
   espressif/led_strip:

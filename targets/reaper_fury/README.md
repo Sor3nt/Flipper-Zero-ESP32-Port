@@ -1,4 +1,6 @@
-# Custom ESP32-S3 Board
+# Build for Reaper Fury Custom Board
+
+This directory contains board-specific configuration and target files for the **Reaper Fury** custom ESP32-S3 board (N16R8 variant).
 
 Board configuration untuk custom ESP32-S3 dengan 6-way button pad, ST7789 display, dan peripheral.
 
@@ -55,10 +57,10 @@ Board configuration untuk custom ESP32-S3 dengan 6-way button pad, ST7789 displa
 idf.py set-target esp32s3
 
 # Build with custom board configuration
-idf.py -DFLIPPER_BOARD=my_custom_board build
+idf.py -DFLIPPER_BOARD=reaper_fury build
 
 # Flash to device
-idf.py -DFLIPPER_BOARD=my_custom_board flash
+idf.py -DFLIPPER_BOARD=reaper_fury flash
 
 # Monitor serial output
 idf.py monitor
@@ -66,14 +68,14 @@ idf.py monitor
 
 Or all in one:
 ```bash
-idf.py -DFLIPPER_BOARD=my_custom_board build flash monitor
+idf.py -DFLIPPER_BOARD=reaper_fury build flash monitor
 ```
 
 ## Display Troubleshooting
 
 If display colors are inverted or display is blank:
 
-1. Edit `components/furi_hal/boards/board_my_custom_board.h`
+1. Edit `components/furi_hal/boards/board_reaper_fury.h`
 2. Change `BOARD_LCD_INVERT_COLOR` from `false` to `true` (or vice versa)
 3. Rebuild and reflash
 
@@ -84,6 +86,6 @@ If display is rotated incorrectly, adjust:
 
 ## Files Modified
 
-- `components/furi_hal/boards/board_my_custom_board.h` - Board hardware definitions
-- `targets/my_custom_board/target_input.c` - Input driver for 6-way buttons
+- `components/furi_hal/boards/board_reaper_fury.h` - Board hardware definitions
+- `targets/reaper_fury/target_gpio.c` - GPIO pins for external expansions
 

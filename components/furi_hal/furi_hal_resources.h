@@ -34,6 +34,19 @@ typedef struct {
 extern const InputPin input_pins[];
 extern const size_t input_pins_count;
 
+/* GPIO Pin Record for GPIO Application
+ * Describes available GPIO pins that can be controlled via the GPIO app
+ */
+typedef struct {
+    const GpioPin* pin;        /* Pointer to GpioPin structure */
+    const char* name;          /* Friendly name (e.g., "EXT_GPIO_1", "PA2") */
+    bool debug;                /* Debug-only flag (excluded from GPIO app UI) */
+    uint8_t channel;           /* ADC channel (0xFF = FuriHalAdcChannelNone for non-ADC pins) */
+} GpioPinRecord;
+
+extern const GpioPinRecord gpio_pins[];
+extern const size_t gpio_pins_count;
+
 /* Hardware Button Pins (Waveshare ESP32-C6-Touch-LCD-1.9) */
 extern const GpioPin gpio_button_boot; /* GPIO9 - BOOT button (active low) */
 extern const GpioPin gpio_battery_sense; /* GPIO0 - BAT_ADC (VCC / 3) */
@@ -72,6 +85,13 @@ extern const GpioPin gpio_cc1101_g0; /* CC1101 GDO0 - GPIO23 */
 extern const GpioPin gpio_nrf24_cs; /* NRF24 CSN -- T-Embed: GPIO44 */
 extern const GpioPin gpio_ibutton;
 extern const GpioPin gpio_speaker;
+
+/* External GPIO Pins (for expansion modules and external GPIO control) */
+extern const GpioPin gpio_ext_gpio_1;
+extern const GpioPin gpio_ext_gpio_2;
+extern const GpioPin gpio_ext_gpio_3;
+extern const GpioPin gpio_ext_gpio_4;
+extern const GpioPin gpio_ext_gpio_5;
 
 #ifdef __cplusplus
 }
