@@ -1,0 +1,1000 @@
+00:00:00,Officially Xerox  but 0:0:0
+00:00:01,Xerox Corporation
+00:00:02,Xerox Corporation
+00:00:03,Xerox Corporation
+00:00:04,Xerox Corporation
+00:00:05,Xerox Corporation
+00:00:06,Xerox Corporation
+00:00:07,Xerox Corporation
+00:00:08,Xerox Corporation
+00:00:09,Xerox Corporation
+00:00:0A,Omron Tateisi Electronics C
+00:00:0B,Matrix Corporation
+00:00:0C,Cisco Systems  Inc
+00:00:0D,Fibronics Ltd.
+00:00:0E,Fujitsu Limited
+00:00:0F,Next  Inc.
+00:00:10,Sytek Inc.
+00:00:11,Normerel Systemes
+00:00:12,Information Technology Limi
+00:00:13,Camex
+00:00:14,Netronix
+00:00:15,Datapoint Corporation
+00:00:16,Du Pont Pixel Systems.
+00:00:17,Oracle
+00:00:18,Webster Computer Corporatio
+00:00:19,Applied Dynamics Internatio
+00:00:1A,Advanced Micro Devices
+00:00:1B,Novell  Inc.
+00:00:1C,Bell Technologies
+00:00:1D,Cabletron Systems  Inc.
+00:00:1E,Telsist Industria Electroni
+00:00:1F,Telco Systems  Inc.
+00:00:20,Dataindustrier Diab Ab
+00:00:21,Sureman Comp. & Commun. Cor
+00:00:22,Visual Technology Inc.
+00:00:23,Abb Industrial Systems Ab
+00:00:24,Connect As
+00:00:25,Ramtek Corp.
+00:00:26,Sha-Ken Co.  Ltd.
+00:00:27,Japan Radio Company
+00:00:28,Prodigy Systems Corporation
+00:00:29,Imc Networks Corp.
+00:00:2A,Trw - Sedd/Inp
+00:00:2B,Crisp Automation  Inc
+00:00:2C,Autotote Limited
+00:00:2D,Chromatics Inc
+00:00:2E,Societe Evira
+00:00:2F,Timeplex Inc.
+00:00:30,Vg Laboratory Systems Ltd
+00:00:31,Qpsx Communications  Ltd.
+00:00:32,Marconi plc
+00:00:33,Egan Machinery Company
+00:00:34,Network Resources Corporati
+00:00:35,Spectragraphics Corporation
+00:00:36,Atari Corporation
+00:00:37,Oxford Metrics Limited
+00:00:38,Css Labs
+00:00:39,Toshiba Corporation
+00:00:3A,Chyron Corporation
+00:00:3B,i Controls  Inc.
+00:00:3C,Auspex Systems Inc.
+00:00:3D,Unisys
+00:00:3E,Simpact
+00:00:3F,Syntrex  Inc.
+00:00:40,Applicon  Inc.
+00:00:41,Ice Corporation
+00:00:42,Metier Management Systems L
+00:00:43,Micro Technology
+00:00:44,Castelle Corporation
+00:00:45,Ford Aerospace & Comm. Corp
+00:00:46,Olivetti North America
+00:00:47,Nicolet Instruments Corp.
+00:00:48,Seiko Epson Corporation
+00:00:49,Apricot Computers  Ltd
+00:00:4A,Adc Codenoll Technology Cor
+00:00:4B,Icl Data Oy
+00:00:4C,NEC Corporation
+00:00:4D,Dci Corporation
+00:00:4E,Ampex Corporation
+00:00:4F,Logicraft  Inc.
+00:00:50,Radisys Corporation
+00:00:51,Hob Electronic Gmbh & Co. K
+00:00:52,Intrusion.com  Inc.
+00:00:53,Compucorp
+00:00:54,Schneider Electric
+00:00:55,Commissariat A L`Energie At
+00:00:56,Dr. B. Struck
+00:00:57,Scitex Corporation Ltd.
+00:00:58,Racore Computer Products In
+00:00:59,Hellige GMBH
+00:00:5A,SysKonnect GmbH
+00:00:5B,Eltec Elektronik Ag
+00:00:5C,Telematics International In
+00:00:5D,Cs Telecom
+00:00:5E,ICANN  IANA Department
+00:00:5F,Sumitomo Electric Industrie
+00:00:60,Kontron Europe GmbH
+00:00:61,Gateway Communications
+00:00:62,Bull Hn Information Systems
+00:00:63,Barco Control Rooms Gmbh
+00:00:64,Yokogawa Digital Computer C
+00:00:65,Network General Corporation
+00:00:66,Talaris Systems  Inc.
+00:00:67,Soft * Rite  Inc.
+00:00:68,Rosemount Controls
+00:00:69,Concord Communications Inc
+00:00:6A,Computer Consoles Inc.
+00:00:6B,Silicon Graphics
+00:00:6C,Schneider Electric
+00:00:6D,Cray Communications  Ltd.
+00:00:6E,Artisoft Inc.
+00:00:6F,Madge Ltd.
+00:00:70,Hcl Limited
+00:00:71,Adra Systems Inc.
+00:00:72,Miniware Technology
+00:00:73,Siecor Corporation
+00:00:74,Ricoh Company Ltd.
+00:00:75,Nortel Networks
+00:00:76,Abekas Video System
+00:00:77,Interphase Corporation
+00:00:78,Labtam Limited
+00:00:79,Networth Incorporated
+00:00:7A,Dana Computer Inc.
+00:00:7B,Research Machines
+00:00:7C,Ampere Incorporated
+00:00:7D,Oracle Corporation
+00:00:7E,Clustrix Corporation
+00:00:7F,Linotype-Hell Ag
+00:00:80,Cray Communications A/S
+00:00:81,Bay Networks
+00:00:82,Lectra Systemes Sa
+00:00:83,Tadpole Technology Plc
+00:00:84,Supernet
+00:00:85,Canon Inc.
+00:00:86,Megahertz Corporation
+00:00:87,Hitachi  Ltd.
+00:00:88,Brocade Communications Syst
+00:00:89,Cayman Systems Inc.
+00:00:8A,Datahouse Information Syste
+00:00:8B,Infotron
+00:00:8C,Alloy Computer Products (Au
+00:00:8D,Cryptek Inc.
+00:00:8E,Solbourne Computer  Inc.
+00:00:8F,Raytheon
+00:00:90,Microcom
+00:00:91,Anritsu Corporation
+00:00:92,Cogent Data Technologies
+00:00:93,Proteon Inc.
+00:00:94,Asante Technologies
+00:00:95,Sony Tektronix Corp.
+00:00:96,Marconi Electronics Ltd.
+00:00:97,Dell EMC
+00:00:98,Crosscomm Corporation
+00:00:99,Mtx  Inc.
+00:00:9A,Rc Computer A/S
+00:00:9B,Information International
+00:00:9C,Rolm Mil-Spec Computers
+00:00:9D,Locus Computing Corporation
+00:00:9E,Marli S.A.
+00:00:9F,Ameristar Technologies Inc.
+00:00:A0,SANYO Electric Co.  Ltd.
+00:00:A1,Marquette Electric Co.
+00:00:A2,Bay Networks
+00:00:A3,Network Application Technol
+00:00:A4,Acorn Computers Limited
+00:00:A5,Tattile SRL
+00:00:A6,Network General Corporation
+00:00:A7,Network Computing Devices I
+00:00:A8,Stratus Technologies
+00:00:A9,Network Systems Corp.
+00:00:AA,Xerox Corporation
+00:00:AB,Logic Modeling Corporation
+00:00:AC,Conware Computer Consulting
+00:00:AD,Bruker Instruments Inc.
+00:00:AE,Dassault Electronique
+00:00:AF,Canberra Industries  Inc.
+00:00:B0,Rnd-Rad Network Devices
+00:00:B1,Alpha Micro
+00:00:B2,Televideo Systems  Inc.
+00:00:B3,Cimlinc Incorporated
+00:00:B4,Edimax Technology Co. Ltd.
+00:00:B5,Datability Software Sys. In
+00:00:B6,Micro-Matic Research
+00:00:B7,Dove Computer Corporation
+00:00:B8,Seikosha Co.  Ltd.
+00:00:B9,Mcdonnell Douglas Computer
+00:00:BA,Siig  Inc.
+00:00:BB,Tri-Data
+00:00:BC,Rockwell Automation
+00:00:BD,RYOSEI  Ltd.
+00:00:BE,The Nti Group
+00:00:BF,Symmetric Computer Systems
+00:00:C0,Western Digital Corporation
+00:00:C1,Madge Ltd.
+00:00:C2,Information Presentation Te
+00:00:C3,Harris Corporation
+00:00:C4,Waters Div. Of Millipore
+00:00:C5,Commscope
+00:00:C6,Eon Systems
+00:00:C7,Arix Corporation
+00:00:C8,Altos Computer Systems
+00:00:C9,Emulex Corporation
+00:00:CA,Commscope
+00:00:CB,Compu-Shack Electronic Gmbh
+00:00:CC,Densan Co.  Ltd.
+00:00:CD,Allied Telesis Labs Ltd
+00:00:CE,Megadata Corp.
+00:00:CF,Hayes Microcomputer Product
+00:00:D0,Develcon Electronics Ltd.
+00:00:D1,Adaptec Incorporated
+00:00:D2,Sbe  Inc.
+00:00:D3,Wang Laboratories Inc.
+00:00:D4,Pure Data Ltd.
+00:00:D5,Micrognosis International
+00:00:D6,Punch Line Holding
+00:00:D7,Dartmouth College
+00:00:D8,Novell  Inc.
+00:00:D9,Nippon Telegraph & Telephon
+00:00:DA,Atex
+00:00:DB,British Telecommunications
+00:00:DC,Hayes Microcomputer Product
+00:00:DD,Tcl Incorporated
+00:00:DE,Cetia
+00:00:DF,Bell & Howell Pub Sys Div
+00:00:E0,Quadram Corp.
+00:00:E1,Grid Systems
+00:00:E2,Acer Technologies Corp.
+00:00:E3,Integrated Micro Products L
+00:00:E4,In2 Groupe Intertechnique
+00:00:E5,Sigmex Ltd.
+00:00:E6,Aptor Produits De Comm Indu
+00:00:E7,Star Gate Technologies
+00:00:E8,Accton Technology Corp.
+00:00:E9,Isicad  Inc.
+00:00:EA,Upnod Ab
+00:00:EB,Matsushita Comm. Ind. Co. L
+00:00:EC,Microprocess
+00:00:ED,April
+00:00:EE,Network Designers  Ltd.
+00:00:EF,Kti
+00:00:F0,Samsung Electronics Co. Ltd
+00:00:F1,Magna Computer Corporation
+00:00:F2,Spider Communications
+00:00:F3,Gandalf Data Limited
+00:00:F4,Allied Telesis  Inc.
+00:00:F5,Diamond Sales Limited
+00:00:F6,Applied Microsystems Corp.
+00:00:F7,Youth Keep Enterprise Co Lt
+00:00:F8,Digital Equipment Corporati
+00:00:F9,Quotron Systems Inc.
+00:00:FA,Microsage Computer Systems
+00:00:FB,Rechner Zur Kommunikation
+00:00:FC,Meiko
+00:00:FD,High Level Hardware
+00:00:FE,Annapolis Micro Systems  In
+00:00:FF,Camtec Electronics Ltd.
+00:01:00,Equip'Trans
+00:01:01,Private
+00:01:02,3Com
+00:01:03,3Com
+00:01:04,DVICO Co.  Ltd.
+00:01:05,Beckhoff Automation GmbH
+00:01:06,Tews Datentechnik GmbH
+00:01:07,Leiser GmbH
+00:01:08,AVLAB Technology  Inc.
+00:01:09,Nagano Japan Radio Co.  Ltd
+00:01:0A,Cis Technology Inc.
+00:01:0B,Space CyberLink  Inc.
+00:01:0C,System Talks Inc.
+00:01:0D,Teledyne DALSA Inc.
+00:01:0E,Bri-Link Technologies Co.
+00:01:0F,Brocade Communications Syst
+00:01:10,Gotham Networks
+00:01:11,iDigm Inc.
+00:01:12,Shark Multimedia Inc.
+00:01:13,Olympus Corporation
+00:01:14,Kanda Tsushin Kogyo Co.  Lt
+00:01:15,Extratech Corporation
+00:01:16,Netspect Technologies  Inc.
+00:01:17,Canal +
+00:01:18,EZ Digital Co.  Ltd.
+00:01:19,RTUnet (Australia)
+00:01:1A,Hoffmann und Burmeister GbR
+00:01:1B,Unizone Technologies  Inc.
+00:01:1C,Universal Talkware Corporat
+00:01:1D,Centillium Communications
+00:01:1E,Precidia Technologies  Inc.
+00:01:1F,RC Networks  Inc.
+00:01:20,Oscilloquartz S.A.
+00:01:21,WatchGuard Technologies  In
+00:01:22,Trend Communications  Ltd.
+00:01:23,Schneider Electric Japan Ho
+00:01:24,Acer Incorporated
+00:01:25,Yaesu Musen Co.  Ltd.
+00:01:26,PAC Labs
+00:01:27,OPEN Networks Pty Ltd
+00:01:28,EnjoyWeb  Inc.
+00:01:29,DFI Inc.
+00:01:2A,Telematica Sistems Intelige
+00:01:2B,TELENET Co.  Ltd.
+00:01:2C,Aravox Technologies  Inc.
+00:01:2D,Komodo Technology
+00:01:2E,PC Partner Ltd.
+00:01:2F,Twinhead International Corp
+00:01:30,Extreme Networks Headquarte
+00:01:31,Bosch Security Systems  Inc
+00:01:32,Dranetz - BMI
+00:01:33,KYOWA Electronic Instrument
+00:01:34,Selectron Systems AG
+00:01:35,KDC Corp.
+00:01:36,CyberTAN Technology Inc.
+00:01:37,IT Farm Corporation
+00:01:38,XAVi Technologies Corp.
+00:01:39,Point Multimedia Systems
+00:01:3A,Shelcad Communications  Ltd
+00:01:3B,Bna Systems
+00:01:3C,Tiw Systems
+00:01:3D,RiscStation Ltd.
+00:01:3E,Ascom Tateco AB
+00:01:3F,Neighbor World Co.  Ltd.
+00:01:40,Sendtek Corporation
+00:01:41,Cable Print
+00:01:42,Cisco Systems  Inc
+00:01:43,Cisco Systems  Inc
+00:01:44,Dell EMC
+00:01:45,Winsystems  Inc.
+00:01:46,Tesco Controls  Inc.
+00:01:47,Zhone Technologies  Inc.
+00:01:48,X-traWeb Inc.
+00:01:49,Tdt Ag
+00:01:4A,Sony Corporation
+00:01:4B,Ennovate Networks  Inc.
+00:01:4C,Berkeley Process Control
+00:01:4D,Shin Kin Enterprises Co.  L
+00:01:4E,WIN Enterprises  Inc.
+00:01:4F,Adtran Inc
+00:01:50,Gilat Communications  Ltd.
+00:01:51,Ensemble Communications
+00:01:52,Chromatek Inc.
+00:01:53,Archtek Telecom Corporation
+00:01:54,G3M Corporation
+00:01:55,Promise Technology  Inc.
+00:01:56,Firewiredirect.Com  Inc.
+00:01:57,Syswave Co.  Ltd
+00:01:58,Electro Industries/Gauge Te
+00:01:59,S1 Corporation
+00:01:5A,Digital Video Broadcasting
+00:01:5B,ITALTEL S.p.A/RF-UP-I
+00:01:5C,Cadant Inc.
+00:01:5D,Oracle Corporation
+00:01:5E,Best Technology Co.  Ltd.
+00:01:5F,DIGITAL DESIGN GmbH
+00:01:60,ELMEX Co.  LTD.
+00:01:61,Meta Machine Technology
+00:01:62,Cygnet Technologies  Inc.
+00:01:63,Cisco Systems  Inc
+00:01:64,Cisco Systems  Inc
+00:01:65,AirSwitch Corporation
+00:01:66,Tc Group A/S
+00:01:67,Hioki E.E. Corporation
+00:01:68,Vitana Corporation
+00:01:69,Celestix Networks Pte Ltd.
+00:01:6A,Alitec
+00:01:6B,LightChip  Inc.
+00:01:6C,Foxconn
+00:01:6D,CarrierComm Inc.
+00:01:6E,Conklin Corporation
+00:01:6F,Inkel Corp.
+00:01:70,ESE Embedded System Enginee
+00:01:71,Allied Data Technologies
+00:01:72,TechnoLand Co.  LTD.
+00:01:73,Amcc
+00:01:74,CyberOptics Corporation
+00:01:75,Radiant Communications Corp
+00:01:76,Orient Silver Enterprises
+00:01:77,Edsl
+00:01:78,MARGI Systems  Inc.
+00:01:79,Wireless Technology  Inc.
+00:01:7A,Chengdu Maipu Electric Indu
+00:01:7B,Heidelberger Druckmaschinen
+00:01:7C,AG-E GmbH
+00:01:7D,ThermoQuest
+00:01:7E,ADTEK System Science Co.  L
+00:01:7F,Experience Music Project
+00:01:80,AOpen  Inc.
+00:01:81,Nortel Networks
+00:01:82,Dica Technologies Ag
+00:01:83,Anite Telecoms
+00:01:84,Sieb & Meyer Ag
+00:01:85,Hitachi Aloka Medical  Ltd.
+00:01:86,Uwe Disch
+00:01:87,I2SE GmbH
+00:01:88,LXCO Technologies ag
+00:01:89,Refraction Technology  Inc.
+00:01:8A,Roi Computer Ag
+00:01:8B,NetLinks Co.  Ltd.
+00:01:8C,Mega Vision
+00:01:8D,AudeSi Technologies
+00:01:8E,Logitec Corporation
+00:01:8F,Kenetec  Inc.
+00:01:90,Smk-M
+00:01:91,SYRED Data Systems
+00:01:92,Texas Digital Systems
+00:01:93,Hanbyul Telecom Co.  Ltd.
+00:01:94,Capital Equipment Corporati
+00:01:95,Sena Technologies  Inc.
+00:01:96,Cisco Systems  Inc
+00:01:97,Cisco Systems  Inc
+00:01:98,Darim Vision
+00:01:99,HeiSei Electronics
+00:01:9A,LEUNIG GmbH
+00:01:9B,Kyoto Microcomputer Co.  Lt
+00:01:9C,Lumentum
+00:01:9D,E-Control Systems  Inc.
+00:01:9E,ESS Technology  Inc.
+00:01:9F,ReadyNet
+00:01:A0,Infinilink Corporation
+00:01:A1,Mag-Tek  Inc.
+00:01:A2,Logical Co.  Ltd.
+00:01:A3,Genesys Logic  Inc.
+00:01:A4,Microlink Corporation
+00:01:A5,Nextcomm  Inc.
+00:01:A6,Scientific-Atlanta Arcodan
+00:01:A7,Unex Technology Corporation
+00:01:A8,Welltech Computer Co.  Ltd.
+00:01:A9,Bmw Ag
+00:01:AA,Airspan Communications  Ltd
+00:01:AB,Main Street Networks
+00:01:AC,Sitara Networks  Inc.
+00:01:AD,Coach Master International
+00:01:AE,Trex Enterprises
+00:01:AF,Artesyn Embedded Technologi
+00:01:B0,Fulltek Technology Co.  Ltd
+00:01:B1,General Bandwidth
+00:01:B2,Digital Processing Systems
+00:01:B3,Precision Electronic Manufa
+00:01:B4,Wayport  Inc.
+00:01:B5,Turin Networks  Inc.
+00:01:B6,SAEJIN T&M Co.  Ltd.
+00:01:B7,Centos  Inc.
+00:01:B8,Netsensity  Inc.
+00:01:B9,SKF (U.K.) Limited
+00:01:BA,IC-Net  Inc.
+00:01:BB,Frequentis
+00:01:BC,Brains Corporation
+00:01:BD,Peterson Electro-Musical Pr
+00:01:BE,Gigalink Co.  Ltd.
+00:01:BF,Teleforce Co.  Ltd.
+00:01:C0,CompuLab  Ltd.
+00:01:C1,Vitesse Semiconductor Corpo
+00:01:C2,ARK Research Corp.
+00:01:C3,Acromag  Inc.
+00:01:C4,NeoWave  Inc.
+00:01:C5,Simpler Networks
+00:01:C6,Quarry Technologies
+00:01:C7,Cisco Systems  Inc
+00:01:C8,Thomas Conrad Corp.
+00:01:C9,Cisco Systems  Inc
+00:01:CA,Geocast Network Systems  In
+00:01:CB,Evr
+00:01:CC,Brand Maker Enabler Inc.
+00:01:CD,ARtem
+00:01:CE,Custom Micro Products  Ltd.
+00:01:CF,Alpha Data Parallel Systems
+00:01:D0,VitalPoint  Inc.
+00:01:D1,CoNet Communications  Inc.
+00:01:D2,inXtron  Inc.
+00:01:D3,PAXCOMM  Inc.
+00:01:D4,Leisure Time  Inc.
+00:01:D5,Haedong Info & Comm Co.  Lt
+00:01:D6,manroland AG
+00:01:D7,F5 Inc.
+00:01:D8,Teltronics  Inc.
+00:01:D9,Sigma  Inc.
+00:01:DA,WINCOMM Corporation
+00:01:DB,Freecom Technologies GmbH
+00:01:DC,Activetelco
+00:01:DD,Avail Networks
+00:01:DE,Trango Systems  Inc.
+00:01:DF,ISDN Communications  Ltd.
+00:01:E0,Fast Systems  Inc.
+00:01:E1,Kinpo Electronics  Inc.
+00:01:E2,Ando Electric Corporation
+00:01:E3,Siemens AG
+00:01:E4,Sitera  Inc.
+00:01:E5,Supernet  Inc.
+00:01:E6,Hewlett Packard
+00:01:E7,Hewlett Packard
+00:01:E8,Force10 Networks  Inc.
+00:01:E9,Litton Marine Systems B.V.
+00:01:EA,Cirilium Corp.
+00:01:EB,C-COM Corporation
+00:01:EC,Ericsson Group
+00:01:ED,SETA Corp.
+00:01:EE,Comtrol Europe  Ltd.
+00:01:EF,Camtel Technology Corp.
+00:01:F0,Tridium  Inc.
+00:01:F1,Innovative Concepts  Inc.
+00:01:F2,Mark of the Unicorn  Inc.
+00:01:F3,QPS  Inc.
+00:01:F4,Enterasys
+00:01:F5,Erim S.A.
+00:01:F6,Association of Musical Elec
+00:01:F7,Image Display Systems  Inc.
+00:01:F8,Texio Technology Corporatio
+00:01:F9,TeraGlobal Communications C
+00:01:FA,Horoscas
+00:01:FB,DoTop Technology  Inc.
+00:01:FC,Keyence Corporation
+00:01:FD,Digital Voice Systems  Inc.
+00:01:FE,Digital Equipment Corporati
+00:01:FF,Data Direct Networks  Inc.
+00:02:00,Net & Sys Co.  Ltd.
+00:02:01,IFM Electronic gmbh
+00:02:02,Amino Communications  Ltd.
+00:02:03,Woonsang Telecom  Inc.
+00:02:04,Bodmann Industries Elektron
+00:02:05,Hitachi Denshi  Ltd.
+00:02:06,Telital R&D Denmark A/S
+00:02:07,VisionGlobal Network Corp.
+00:02:08,Unify Networks  Inc.
+00:02:09,Shenzhen SED Information Te
+00:02:0A,Gefran Spa
+00:02:0B,Native Networks  Inc.
+00:02:0C,Metro-Optix
+00:02:0D,Micronpc.com
+00:02:0E,ECI Telecom Ltd.
+00:02:0F,Aatr
+00:02:10,Fenecom
+00:02:11,Nature Worldwide Technology
+00:02:12,SierraCom
+00:02:13,S.D.E.L.
+00:02:14,Dtvro
+00:02:15,Cotas Computer Technology A
+00:02:16,Cisco Systems  Inc
+00:02:17,Cisco Systems  Inc
+00:02:18,Advanced Scientific Corp
+00:02:19,Paralon Technologies
+00:02:1A,Zuma Networks
+00:02:1B,Kollmorgen-Servotronix
+00:02:1C,Network Elements  Inc.
+00:02:1D,Data General Communication
+00:02:1E,Simtel S.R.L.
+00:02:1F,Aculab PLC
+00:02:20,Canon Finetech Inc.
+00:02:21,DSP Application  Ltd.
+00:02:22,Chromisys  Inc.
+00:02:23,ClickTV
+00:02:24,C-Cor
+00:02:25,One Stop Systems
+00:02:26,XESystems  Inc.
+00:02:27,ESD Electronic System Desig
+00:02:28,Necsom  Ltd.
+00:02:29,Adtec Corporation
+00:02:2A,Asound Electronic
+00:02:2B,SAXA  Inc.
+00:02:2C,ABB Bomem  Inc.
+00:02:2D,Agere Systems
+00:02:2E,TEAC Corp. R& D
+00:02:2F,P-Cube  Ltd.
+00:02:30,Intersoft Electronics
+00:02:31,Ingersoll-Rand
+00:02:32,Avision  Inc.
+00:02:33,Mantra Communications  Inc.
+00:02:34,Imperial Technology  Inc.
+00:02:35,Paragon Networks Internatio
+00:02:36,INIT GmbH
+00:02:37,Cosmo Research Corp.
+00:02:38,Serome Technology  Inc.
+00:02:39,Visicom
+00:02:3A,ZSK Stickmaschinen GmbH
+00:02:3B,Ericsson
+00:02:3C,Creative Technology  Ltd.
+00:02:3D,Cisco Systems  Inc
+00:02:3E,Selta Telematica S.p.a
+00:02:3F,Compal Electronics INC.
+00:02:40,Seedek Co.  Ltd.
+00:02:41,Amer.com
+00:02:42,Videoframe Systems
+00:02:43,Raysis Co.  Ltd.
+00:02:44,SURECOM Technology Co.
+00:02:45,Lampus Co  Ltd.
+00:02:46,All-Win Tech Co.  Ltd.
+00:02:47,Great Dragon Information Te
+00:02:48,Pilz GmbH & Co.
+00:02:49,Aviv Infocom Co  Ltd.
+00:02:4A,Cisco Systems  Inc
+00:02:4B,Cisco Systems  Inc
+00:02:4C,SiByte  Inc.
+00:02:4D,Mannesman Dematic Colby Pty
+00:02:4E,Datacard Group
+00:02:4F,IPM Datacom S.R.L.
+00:02:50,Geyser Networks  Inc.
+00:02:51,Soma Networks  Inc.
+00:02:52,Carrier Corporation
+00:02:53,Televideo  Inc.
+00:02:54,WorldGate
+00:02:55,IBM Corp
+00:02:56,Alpha Processor  Inc.
+00:02:57,Microcom Corp.
+00:02:58,Flying Packets Communicatio
+00:02:59,Tsann Kuen China (Shanghai)
+00:02:5A,Catena Networks
+00:02:5B,Cambridge Silicon Radio
+00:02:5C,SCI Systems (Kunshan) Co.
+00:02:5D,Calix Networks
+00:02:5E,High Technology Ltd
+00:02:5F,Nortel Networks
+00:02:60,Accordion Networks  Inc.
+00:02:61,Tilgin AB
+00:02:62,Soyo Group Soyo Com Tech Co
+00:02:63,RPS S.p.A.
+00:02:64,AudioRamp.com
+00:02:65,Virditech Co. Ltd.
+00:02:66,Thermalogic Corporation
+00:02:67,Node Runner  Inc.
+00:02:68,Harris Government Communica
+00:02:69,Nadatel Co.  Ltd
+00:02:6A,Cocess Telecom Co.  Ltd.
+00:02:6B,BCM Computers Co.  Ltd.
+00:02:6C,Philips CFT
+00:02:6D,Adept Telecom
+00:02:6E,NeGeN Access  Inc.
+00:02:6F,Senao International Co.  Lt
+00:02:70,Crewave Co.  Ltd.
+00:02:71,Zhone Technologies  Inc.
+00:02:72,CC&C Technologies  Inc.
+00:02:73,Coriolis Networks
+00:02:74,Tommy Technologies Corp.
+00:02:75,SMART Technologies  Inc.
+00:02:76,Primax Electronics Ltd.
+00:02:77,Cash Systemes Industrie
+00:02:78,Samsung Electro Mechanics C
+00:02:79,Control Applications  Ltd.
+00:02:7A,IOI Technology Corporation
+00:02:7B,Amplify Net  Inc.
+00:02:7C,Trilithic  Inc.
+00:02:7D,Cisco Systems  Inc
+00:02:7E,Cisco Systems  Inc
+00:02:7F,ask-technologies.com
+00:02:80,Mu Net  Inc.
+00:02:81,Madge Ltd.
+00:02:82,ViaClix  Inc.
+00:02:83,Spectrum Controls  Inc.
+00:02:84,UK Grid Solutions Limited
+00:02:85,Riverstone Networks
+00:02:86,Occam Networks
+00:02:87,Adapcom
+00:02:88,Global Village Communicatio
+00:02:89,DNE Technologies
+00:02:8A,Ambit Microsystems Corporat
+00:02:8B,VDSL Systems OY
+00:02:8C,Micrel-Synergy Semiconducto
+00:02:8D,Movita Technologies  Inc.
+00:02:8E,Rapid 5 Networks  Inc.
+00:02:8F,Globetek  Inc.
+00:02:90,Woorigisool  Inc.
+00:02:91,Open Network Co.  Ltd.
+00:02:92,Logic Innovations  Inc.
+00:02:93,Solid Data Systems
+00:02:94,Tokyo Sokushin Co.  Ltd.
+00:02:95,Mavenir Ipa Uk Ltd
+00:02:96,Lectron Co . Ltd.
+00:02:97,C-COR.net
+00:02:98,Broadframe Corporation
+00:02:99,Apex  Inc.
+00:02:9A,Storage Apps
+00:02:9B,Kreatel Communications AB
+00:02:9C,3Com
+00:02:9D,Merix Corp.
+00:02:9E,Information Equipment Co.
+00:02:9F,L-3 Communication Aviation
+00:02:A0,Flatstack Ltd.
+00:02:A1,World Wide Packets
+00:02:A2,Hilscher GmbH
+00:02:A3,Hitachi Energy Switzerland
+00:02:A4,AddPac Technology Co.  Ltd.
+00:02:A5,Hewlett Packard
+00:02:A6,Effinet Systems Co.  Ltd.
+00:02:A7,Vivace Networks
+00:02:A8,Air Link Technology
+00:02:A9,RACOM  s.r.o.
+00:02:AA,PLcom Co.  Ltd.
+00:02:AB,CTC Union Technologies Co.
+00:02:AC,3PAR data
+00:02:AD,HOYA Corporation
+00:02:AE,Scannex Electronics Ltd.
+00:02:AF,TeleCruz Technology  Inc.
+00:02:B0,Hokubu Communication & Indu
+00:02:B1,Anritsu  Ltd.
+00:02:B2,Cablevision
+00:02:B3,Intel Corporation
+00:02:B4,Daphne
+00:02:B5,Avnet  Inc.
+00:02:B6,Acrosser Technology Co.  Lt
+00:02:B7,Watanabe Electric Industry
+00:02:B8,Whi Konsult Ab
+00:02:B9,Cisco Systems  Inc
+00:02:BA,Cisco Systems  Inc
+00:02:BB,Continuous Computing Corp
+00:02:BC,LVL 7 Systems  Inc.
+00:02:BD,Bionet Co.  Ltd.
+00:02:BE,Totsu Engineering  Inc.
+00:02:BF,dotRocket  Inc.
+00:02:C0,Bencent Tzeng Industry Co.
+00:02:C1,Innovative Electronic Desig
+00:02:C2,Net Vision Telecom
+00:02:C3,Arelnet Ltd.
+00:02:C4,OPT Machine Vision Tech Co.
+00:02:C5,Evertz Microsystems Ltd.
+00:02:C6,Data Track Technology PLC
+00:02:C7,Alpsalpine Co .Ltd
+00:02:C8,Technocom Communications Te
+00:02:C9,Mellanox Technologies  Inc.
+00:02:CA,EndPoints  Inc.
+00:02:CB,TriState Ltd.
+00:02:CC,M.C.C.I
+00:02:CD,TeleDream  Inc.
+00:02:CE,FoxJet  Inc.
+00:02:CF,ZyGate Communications  Inc.
+00:02:D0,Comdial Corporation
+00:02:D1,Vivotek  Inc.
+00:02:D2,Workstation AG
+00:02:D3,NetBotz  Inc.
+00:02:D4,PDA Peripherals  Inc.
+00:02:D5,Acr
+00:02:D6,NICE Systems
+00:02:D7,EMPEG Ltd
+00:02:D8,BRECIS Communications Corpo
+00:02:D9,Reliable Controls
+00:02:DA,ExiO Communications  Inc.
+00:02:DB,Netsec
+00:02:DC,GENERAL Inc.
+00:02:DD,Bromax Communications  Ltd.
+00:02:DE,Astrodesign  Inc.
+00:02:DF,Net Com Systems  Inc.
+00:02:E0,ETAS GmbH
+00:02:E1,Integrated Network Corporat
+00:02:E2,NDC Infared Engineering
+00:02:E3,LITE-ON Communications  Inc
+00:02:E4,JC HYUN Systems  Inc.
+00:02:E5,Timeware Ltd.
+00:02:E6,Gould Instrument Systems  I
+00:02:E7,CAB GmbH & Co KG
+00:02:E8,E.D.&A.
+00:02:E9,CS Systemes De Securite - C
+00:02:EA,Focus Enhancements
+00:02:EB,Pico Communications
+00:02:EC,Maschoff Design Engineering
+00:02:ED,DXO Telecom Co.  Ltd.
+00:02:EE,Nokia Danmark A/S
+00:02:EF,CCC Network Systems Group L
+00:02:F0,AME Optimedia Technology Co
+00:02:F1,Pinetron Co.  Ltd.
+00:02:F2,eDevice  Inc.
+00:02:F3,Media Serve Co.  Ltd.
+00:02:F4,PCTEL  Inc.
+00:02:F5,VIVE Synergies  Inc.
+00:02:F6,Equipe Communications
+00:02:F7,Arm
+00:02:F8,SEAKR Engineering  Inc.
+00:02:F9,MIMOS Berhad
+00:02:FA,DX Antenna Co.  Ltd.
+00:02:FB,Baumuller Aulugen-Systemtec
+00:02:FC,Cisco Systems  Inc
+00:02:FD,Cisco Systems  Inc
+00:02:FE,Viditec  Inc.
+00:02:FF,Handan BroadInfoCom
+00:03:00,Barracuda Networks  Inc.
+00:03:01,Exfo
+00:03:02,Charles Industries
+00:03:03,JAMA Electronics Co.  Ltd.
+00:03:04,Pacific Broadband Communica
+00:03:05,MSC Vertriebs GmbH
+00:03:06,Fusion In Tech Co.  Ltd.
+00:03:07,Secure Works  Inc.
+00:03:08,AM Communications  Inc.
+00:03:09,Texcel Technology PLC
+00:03:0A,Argus Technologies
+00:03:0B,Hunter Technology  Inc.
+00:03:0C,Telesoft Technologies Ltd.
+00:03:0D,Uniwill Computer Corp.
+00:03:0E,Core Communications Co.  Lt
+00:03:0F,Digital China (Shanghai) Ne
+00:03:10,E-Globaledge Corporation
+00:03:11,Micro Technology Co.  Ltd.
+00:03:12,TRsystems GmbH
+00:03:13,Access Media SPA
+00:03:14,Teleware Network Systems
+00:03:15,Cidco Incorporated
+00:03:16,Nobell Communications  Inc.
+00:03:17,Merlin Systems  Inc.
+00:03:18,Cyras Systems  Inc.
+00:03:19,Infineon AG
+00:03:1A,Beijing Broad Telecom Ltd.
+00:03:1B,Cellvision Systems  Inc.
+00:03:1C,Svenska Hardvarufabriken AB
+00:03:1D,Taiwan Commate Computer  In
+00:03:1E,Optranet  Inc.
+00:03:1F,Condev Ltd.
+00:03:20,Xpeed  Inc.
+00:03:21,Reco Research Co.  Ltd.
+00:03:22,IDIS Co.  Ltd.
+00:03:23,Cornet Technology  Inc.
+00:03:24,LIMNO Co.  Ltd.
+00:03:25,Arima Computer Corp.
+00:03:26,Iwasaki Information Systems
+00:03:27,HMS Industrial Networks
+00:03:28,Mace Group  Inc.
+00:03:29,F3  Inc.
+00:03:2A,UniData Communication Syste
+00:03:2B,GAI Datenfunksysteme GmbH
+00:03:2C,ABB Switzerland Ltd
+00:03:2D,IBASE Technology  Inc.
+00:03:2E,Scope Information Managemen
+00:03:2F,Global Sun Technology  Inc.
+00:03:30,Imagenics  Co.  Ltd.
+00:03:31,Cisco Systems  Inc
+00:03:32,Cisco Systems  Inc
+00:03:33,Digitel Co.  Ltd.
+00:03:34,Omega Engineering Inc.
+00:03:35,Mirae Technology
+00:03:36,Zetes Technologies
+00:03:37,Vaone  Inc.
+00:03:38,Oak Technology
+00:03:39,Eurologic Systems  Ltd.
+00:03:3A,Silicon Wave  Inc.
+00:03:3B,TAMI Tech Co.  Ltd.
+00:03:3C,Daiden Co.  Ltd.
+00:03:3D,ILSHin Lab
+00:03:3E,Tateyama System Laboratory
+00:03:3F,BigBand Networks  Ltd.
+00:03:40,Floware Wireless Systems  L
+00:03:41,EVS Broadcast Equipment
+00:03:42,Nortel Networks
+00:03:43,Martin Professional A/S
+00:03:44,Tietech.Co.  Ltd.
+00:03:45,Routrek Networks Corporatio
+00:03:46,KOKUSAI DENKI Electric Inc.
+00:03:47,Intel Corporation
+00:03:48,Norscan Instruments  Ltd.
+00:03:49,Vidicode Datacommunicatie B
+00:03:4A,RIAS Corporation
+00:03:4B,Nortel Networks
+00:03:4C,Shanghai DigiVision Technol
+00:03:4D,Chiaro Networks  Ltd.
+00:03:4E,Pos Data Company  Ltd.
+00:03:4F,Sur-Gard Security
+00:03:50,Bticino Spa
+00:03:51,Diebold Nixdorf
+00:03:52,Colubris Networks
+00:03:53,Mitac  Inc.
+00:03:54,Fiber Logic Communications
+00:03:55,TeraBeam Internet Systems
+00:03:56,Diebold Nixdorf
+00:03:57,Intervoice-Brite  Inc.
+00:03:58,Hanyang Digitech Co.Ltd
+00:03:59,DigitalSis
+00:03:5A,Photron Limited
+00:03:5B,BridgeWave Communications
+00:03:5C,Saint Song Corp.
+00:03:5D,Bosung Hi-Net Co.  Ltd.
+00:03:5E,Metropolitan Area Networks
+00:03:5F,Prüftechnik Condition Monit
+00:03:60,PAC Interactive Technology
+00:03:61,Widcomm  Inc.
+00:03:62,Vodtel Communications  Inc.
+00:03:63,Miraesys Co.  Ltd.
+00:03:64,Scenix Semiconductor  Inc.
+00:03:65,Kira Information & Communic
+00:03:66,ASM Pacific Technology
+00:03:67,Jasmine Networks  Inc.
+00:03:68,Embedone Co.  Ltd.
+00:03:69,Nippon Antenna Co.  Ltd.
+00:03:6A,Mainnet  Ltd.
+00:03:6B,Cisco Systems  Inc
+00:03:6C,Cisco Systems  Inc
+00:03:6D,Runtop  Inc.
+00:03:6E,Nicon Systems (Pty) Limited
+00:03:6F,Telsey SPA
+00:03:70,NXTV  Inc.
+00:03:71,Acomz Networks Corp.
+00:03:72,Ulan
+00:03:73,Aselsan A.S
+00:03:74,Control Microsystems
+00:03:75,NetMedia  Inc.
+00:03:76,Graphtec Technology  Inc.
+00:03:77,Gigabit Wireless
+00:03:78,HUMAX Co.  Ltd.
+00:03:79,Proscend Communications  In
+00:03:7A,Taiyo Yuden Co.  Ltd.
+00:03:7B,IDEC IZUMI Corporation
+00:03:7C,Coax Media
+00:03:7D,Stellcom
+00:03:7E,PORTech Communications  Inc
+00:03:7F,Atheros Communications  Inc
+00:03:80,SSH Communications Security
+00:03:81,Ingenico International
+00:03:82,A-One Co.  Ltd.
+00:03:83,Metera Networks  Inc.
+00:03:84,Aeta
+00:03:85,Actelis Networks  Inc.
+00:03:86,Ho Net  Inc.
+00:03:87,Blaze Network Products
+00:03:88,Fastfame Technology Co.  Lt
+00:03:89,Plantronics  Inc.
+00:03:8A,America Online  Inc.
+00:03:8B,PLUS-ONE I&T  Inc.
+00:03:8C,Total Impact
+00:03:8D,PCS Revenue Control Systems
+00:03:8E,Atoga Systems  Inc.
+00:03:8F,Weinschel Corporation
+00:03:90,Digital Video Communication
+00:03:91,Advanced Digital Broadcast
+00:03:92,Hyundai Teletek Co.  Ltd.
+00:03:93,Apple  Inc.
+00:03:94,Connect One
+00:03:95,California Amplifier
+00:03:96,EZ Cast Co.  Ltd.
+00:03:97,FireBrick Limited
+00:03:98,Wisi
+00:03:99,Dongju Informations & Commu
+00:03:9A,SiConnect
+00:03:9B,NetChip Technology  Inc.
+00:03:9C,OptiMight Communications  I
+00:03:9D,Qisda Corporation
+00:03:9E,Tera System Co.  Ltd.
+00:03:9F,Cisco Systems  Inc
+00:03:A0,Cisco Systems  Inc
+00:03:A1,HIPER Information & Communi
+00:03:A2,Catapult Communications
+00:03:A3,MAVIX  Ltd.
+00:03:A4,Imation Corp.
+00:03:A5,Medea Corporation
+00:03:A6,Traxit Technology  Inc.
+00:03:A7,Unixtar Technology  Inc.
+00:03:A8,IDOT Computers  Inc.
+00:03:A9,AXCENT Media AG
+00:03:AA,Watlow
+00:03:AB,Bridge Information Systems
+00:03:AC,Fronius Schweissmaschinen
+00:03:AD,Emerson Energy Systems AB
+00:03:AE,Allied Advanced Manufacturi
+00:03:AF,Paragea Communications
+00:03:B0,Xsense Technology Corp.
+00:03:B1,ICU Medical  Inc.
+00:03:B2,Radware
+00:03:B3,IA Link Systems Co.  Ltd.
+00:03:B4,Macrotek International Corp
+00:03:B5,Entra Technology Co.
+00:03:B6,QSI Corporation
+00:03:B7,ZACCESS Systems
+00:03:B8,NetKit Solutions  LLC
+00:03:B9,Hualong Telecom Co.  Ltd.
+00:03:BA,Oracle Corporation
+00:03:BB,Signal Communications Limit
+00:03:BC,COT GmbH
+00:03:BD,OmniCluster Technologies  I
+00:03:BE,Netility
+00:03:BF,Centerpoint Broadband Techn
+00:03:C0,RFTNC Co.  Ltd.
+00:03:C1,Packet Dynamics Ltd
+00:03:C2,Solphone K.K.
+00:03:C3,Micronik Multimedia
+00:03:C4,Tomra Systems ASA
+00:03:C5,Mobotix AG
+00:03:C6,ICUE Systems  Inc.
+00:03:C7,hopf Elektronik GmbH
+00:03:C8,CML Emergency Services
+00:03:C9,TECOM Co.  Ltd.
+00:03:CA,MTS Systems Corp.
+00:03:CB,SystemGear Co.  Ltd.
+00:03:CC,Momentum Computer  Inc.
+00:03:CD,Clovertech  Inc.
+00:03:CE,ETEN Technologies  Inc.
+00:03:CF,Muxcom  Inc.
+00:03:D0,KOANKEISO Co.  Ltd.
+00:03:D1,Takaya Corporation
+00:03:D2,Crossbeam Systems  Inc.
+00:03:D3,Internet Energy Systems  In
+00:03:D4,Alloptic  Inc.
+00:03:D5,Advanced Communications Co.
+00:03:D6,RADVision  Ltd.
+00:03:D7,NextNet Wireless  Inc.
+00:03:D8,iMPath Networks  Inc.
+00:03:D9,Secheron SA
+00:03:DA,Takamisawa Cybernetics Co.
+00:03:DB,Apogee Electronics Corp.
+00:03:DC,Lexar Media  Inc.
+00:03:DD,Comark Interactive Solution
+00:03:DE,OTC Wireless
+00:03:DF,Desana Systems
+00:03:E0,Commscope
+00:03:E1,Winmate Communication  Inc.
+00:03:E2,Comspace Corporation
+00:03:E3,Cisco Systems  Inc
+00:03:E4,Cisco Systems  Inc
+00:03:E5,Hermstedt SG
+00:03:E6,Entone  Inc.
+00:03:E7,Logostek Co. Ltd.

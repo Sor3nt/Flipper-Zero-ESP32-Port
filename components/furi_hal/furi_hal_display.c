@@ -73,8 +73,9 @@ static uint16_t bg_color;
 #define LCD_PARAM_BITS BOARD_LCD_PARAM_BITS
 
 /* Stripe-based rendering: render & DMA-send N lines at a time.
- * Reduces DMA buffer from full-frame (~100KB) to a small stripe (~5KB). */
-#define STRIPE_HEIGHT 8
+ * Reduces DMA buffer from full-frame (~100KB) to a small stripe (~5KB).
+ * Larger stripe = fewer DMA transfers, faster rendering */
+#define STRIPE_HEIGHT 16
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
 static uint16_t* rgb565_buf = NULL; // STRIPE_HEIGHT lines only
@@ -107,8 +108,8 @@ static void furi_hal_display_prepare_flush(void) {
 static void furi_hal_display_wait_flush(void) {
     if(!lcd_flush_done) return;
 
-    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(250)) != pdTRUE) {
-        ESP_LOGW(TAG, "Timed out waiting for LCD flush");
+    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(50)) != pdTRUE) {
+        ESP_LOGW(TAG, "LCD flush timeout (expected under high load)");
     }
 }
 

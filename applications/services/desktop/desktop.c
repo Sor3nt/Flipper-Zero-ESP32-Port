@@ -724,6 +724,11 @@ int32_t desktop_srv(void* p) {
         animation_manager_unload_and_stall_animation(desktop->animation_manager);
     }
 
+    // Load animation after UI is ready (was deferred during alloc)
+    if(!animation_manager_is_animation_loaded(desktop->animation_manager)) {
+        animation_manager_load_and_continue_animation(desktop->animation_manager);
+    }
+
     view_dispatcher_run(desktop->view_dispatcher);
 
     // Should never get here (a service thread will crash automatically if it returns)

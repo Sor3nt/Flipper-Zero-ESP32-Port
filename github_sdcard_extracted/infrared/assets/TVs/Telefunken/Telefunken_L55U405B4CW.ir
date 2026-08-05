@@ -1,0 +1,290 @@
+Filetype: IR signals file
+Version: 1
+# 
+# Telefunken TV L55U405B4CW , JMB JT0122005B/01, Bush DLED32265HDDVDB
+# Remote: RC4875
+#
+# On JMB/Bush non Smart TV's 
+# SMART_HOME will not work.
+# 
+name: Power
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 0C 00 00 00
+# 
+name: Vol_up
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 10 00 00 00
+# 
+name: Vol_dn
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 11 00 00 00
+# 
+name: Ch_next
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 20 00 00 00
+# 
+name: Ch_prev
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 21 00 00 00
+# 
+name: Up
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 14 00 00 00
+# 
+name: Down
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 13 00 00 00
+# 
+name: Left
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 15 00 00 00
+# 
+name: Right
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 16 00 00 00
+# 
+name: Ok
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 35 00 00 00
+# 
+name: Back
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 0A 00 00 00
+# 
+name: Exit
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 25 00 00 00
+# 
+name: Smart_home
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 2E 00 00 00
+# 
+name: Source
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 38 00 00 00
+# 
+name: Menu
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 30 00 00 00
+# 
+name: Q-menu
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 2B 00 00 00
+# 
+name: Mute
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 0D 00 00 00
+# 
+name: 1
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 01 00 00 00
+# 
+name: 2
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 02 00 00 00
+# 
+name: 3
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 03 00 00 00
+# 
+name: 4
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 04 00 00 00
+# 
+name: 5
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 05 00 00 00
+# 
+name: 6
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 06 00 00 00
+# 
+name: 7
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 07 00 00 00
+# 
+name: 8
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 08 00 00 00
+# 
+name: 9
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 09 00 00 00
+# 
+name: 0
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 00 00 00 00
+# 
+name: Ch_list
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 26 00 00 00
+# 
+name: Prev_ch
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 22 00 00 00
+# 
+name: Info
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 12 00 00 00
+# 
+name: Usb
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 39 00 00 00
+# 
+name: P_guide
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 2F 00 00 00
+# 
+name: 1st_ch
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 3B 00 00 00
+# 
+name: Ch_net_type
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 1A 00 00 00
+# 
+name: Lang
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 0F 00 00 00
+# 
+name: Subtitle
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 1F 00 00 00
+# 
+name: Aspect
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 0B 00 00 00
+# 
+name: Rewind
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 1B 00 00 00
+# 
+name: Pause
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 31 00 00 00
+# 
+name: Play
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 19 00 00 00
+# 
+name: F_forward
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 1C 00 00 00
+# 
+name: Stop
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 18 00 00 00
+# 
+name: Record
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 33 00 00 00
+# 
+name: Red
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 37 00 00 00
+# 
+name: Green
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 36 00 00 00
+# 
+name: Yellow
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 32 00 00 00
+# 
+name: Blue
+type: parsed
+protocol: RC5
+address: 01 00 00 00
+command: 34 00 00 00

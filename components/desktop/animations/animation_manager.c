@@ -170,8 +170,7 @@ AnimationManager* animation_manager_alloc(void) {
         animation_manager_interact_callback,
         animation_manager);
 
-    FURI_LOG_I(TAG, "Starting first idle animation...");
-    animation_manager_start_new_idle(animation_manager);
+    FURI_LOG_I(TAG, "Deferring first idle animation load...");
     FURI_LOG_I(TAG, "Alloc complete");
 
     return animation_manager;

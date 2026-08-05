@@ -2,6 +2,7 @@
 #include <assets_icons.h>
 
 #define TAG "GuiSrv"
+#define GUI_FRAME_TIME_MS (1000 / 60)
 
 ViewPort* gui_view_port_find_enabled(ViewPortArray_t array) {
     // Iterating backward
@@ -39,7 +40,15 @@ size_t gui_active_view_port_count(Gui* gui, GuiLayer layer) {
 
 void gui_update(Gui* gui) {
     furi_assert(gui);
-    if(!gui->direct_draw) furi_thread_flags_set(gui->thread_id, GUI_THREAD_FLAG_DRAW);
+    if(!gui->direct_draw) {
+        static uint32_t last_frame_tick = 0;
+        uint32_t now = furi_get_tick();
+
+        if(now - last_frame_tick >= GUI_FRAME_TIME_MS) {
+            furi_thread_flags_set(gui->thread_id, GUI_THREAD_FLAG_DRAW);
+            last_frame_tick = now;
+        }
+    }
 }
 
 void gui_input_events_callback(const void* value, void* ctx) {

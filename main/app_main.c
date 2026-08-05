@@ -140,7 +140,7 @@ void app_main(void) {
         furi_thread_set_appid(thread, FLIPPER_SERVICES[i].appid);
         furi_thread_start(thread);
 
-        furi_delay_ms(10);
+        furi_delay_ms(1);
     }
 
     for(size_t i = 0; i < FLIPPER_ON_SYSTEM_START_COUNT; i++) {

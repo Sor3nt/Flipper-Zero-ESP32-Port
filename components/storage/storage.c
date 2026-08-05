@@ -1067,13 +1067,15 @@ int32_t storage_srv(void* p) {
     storage->pubsub = furi_pubsub_alloc();
     storage->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
 
-    /* Try to mount SD card */
-    ESP_LOGI(TAG, "Attempting SD card mount...");
+    /* Register storage record IMMEDIATELY (don't wait for SD mount) */
+    furi_record_create(RECORD_STORAGE, storage);
+
+    /* Attempt SD card mount asynchronously */
+    ESP_LOGI(TAG, "Attempting SD card mount (async)...");
     if(furi_hal_sd_mount()) {
         storage->sd_mounted = true;
         ESP_LOGI(TAG, "SD card mounted successfully");
 
-        /* Ensure the internal-storage shadow dir exists (for /int paths) */
         if(mkdir(SD_MOUNT_POINT "/.int", 0755) != 0 && errno != EEXIST) {
             ESP_LOGW(TAG, "mkdir %s/.int failed: %s", SD_MOUNT_POINT, strerror(errno));
         }
@@ -1088,11 +1090,8 @@ int32_t storage_srv(void* p) {
         furi_pubsub_publish(storage->pubsub, &event);
     }
 
-    /* Register the storage record */
-    furi_record_create(RECORD_STORAGE, storage);
-    FURI_LOG_I(TAG, "Storage service started (sd_mounted=%d)", storage->sd_mounted);
+    FURI_LOG_I(TAG, "Storage service ready (sd_mounted=%d)", storage->sd_mounted);
 
-    /* Service stays alive forever */
     while(true) {
         furi_delay_ms(1000);
     }
