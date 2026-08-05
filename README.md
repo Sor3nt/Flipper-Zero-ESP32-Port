@@ -24,7 +24,7 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 | **LilyGo T-Embed CC1101** | ESP32-S3 (Xtensa LX7) | ST7789 320×170 | Rotary encoder + button | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
 | **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320×172 | CST816S touch | — | — | — | SPI |
 | **Waveshare ESP32-C6-LCD-1.47** ⚠️ | ESP32-C6 (RISC-V) | JD9853 320×172 | AXS5106L touch | — | — | — | SPI |
-| `new`**Reaper Fury Esp32 S3 N16R8** ⚙️🔧 | ESP32-S3 (Xtensa LX7) N16R8 | ST7789 1.9 320×172 | 6-way button pad | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
+| `new`**Reaper Fury Esp32 S3 N16R8** ⚙️🔧 | ESP32-S3 (Xtensa LX7) N16R8 | ST7789 1.9 320×170 | 6-way button pad | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
 | **DIY ESP32-S3 with 2.8" TFT** ⚠️| ESP32-S3 (Xtensa LX7) |2.8  ILI9341 320×240 | 6× Tactile buttons | CC1101 | PN532 (I2C) |  TX  | SPI |
 
 
