@@ -143,6 +143,8 @@ void target_input_init(void) {
     button_init_state(&btn_right, (gpio_num_t)BOARD_PIN_BTN_RIGHT, true);
 
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
+    button_init_state(&btn_ok, (gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
+
     /* Setup long-press timer for shutdown detection on back button */
     const esp_timer_create_args_t timer_args = {
         .callback = longpress_timer_callback,
