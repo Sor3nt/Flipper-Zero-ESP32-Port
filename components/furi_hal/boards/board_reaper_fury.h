@@ -101,10 +101,9 @@
 #define BOARD_PIN_IR_RX         1       /* IR_RX — receive */
 
 /* ---- RFID / RDM6300 (via UART2) ---- */
-/* TODO: Configure RFID UART if module is present. Use UART2 or other available UART */
-#define BOARD_RFID_UART_NUM     2           /* UART2 for RDM6300 RFID reader (if installed) */
-#define BOARD_PIN_RFID_RX       UINT16_MAX  /* Define actual RX pin when RFID module added */
-#define BOARD_PIN_RFID_TX       UINT16_MAX  /* Define actual TX pin when RFID module added */
+#define BOARD_RFID_UART_NUM     2           /* UART2 for RDM6300 RFID reader */
+#define BOARD_PIN_RFID_RX       44          /* UART2 RX */
+#define BOARD_PIN_RFID_TX       43          /* UART2 TX */
 #define BOARD_RFID_UART_BAUD    9600        /* RDM6300 baud rate */
 
 /* ---- Buzzer (GPIO PWM) ---- */
