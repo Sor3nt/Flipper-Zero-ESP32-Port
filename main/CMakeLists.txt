@@ -6,8 +6,13 @@ set(ESP32_FAM_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ESP32_FAM_REGISTRY_C "${ESP32_FAM_GENERATED_DIR}/applications.c")
 set(ESP32_FAM_PORTED_CMAKE "${ESP32_FAM_GENERATED_DIR}/ported_apps.cmake")
 
+# Priority: CMake -D param > environment variable > default
 if(NOT DEFINED FLIPPER_BOARD)
-    set(FLIPPER_BOARD "waveshare_c6_1.9")
+    if(DEFINED ENV{FLIPPER_BOARD})
+        set(FLIPPER_BOARD "$ENV{FLIPPER_BOARD}")
+    else()
+        set(FLIPPER_BOARD "waveshare_c6_1.9")
+    endif()
 endif()
 
 set(ENV{FLIPPER_BOARD} "${FLIPPER_BOARD}")

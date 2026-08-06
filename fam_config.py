@@ -93,7 +93,7 @@ _boards_without_subghz = {"waveshare_c6_1.47"}
 
 # NRF24 plugs into the LORA slot (T-Embed CC1101). Boards without the slot
 # don't have the required pin defines.
-_boards_without_nrf24 = {"waveshare_c6_1.9", "waveshare_c6_1.47"}
+_boards_without_nrf24 = {"waveshare_c6_1.9", "waveshare_c6_1.47", "reaper_fury"}
 
 if _board in _boards_without_ir:
     APPS = [a for a in APPS if a not in ("infrared", "js_infrared")]

@@ -33,6 +33,8 @@ set(FURI_HAL_SRCS
     "furi_hal_display.c"
     "furi_hal_spi_bus.c"
     "furi_hal_spi.c"
+    "furi_hal_spi_stability.c"
+    "furi_hal_spi_optimize.c"
     "furi_hal_subghz.c"
     "furi_hal_nfc.c"
     "furi_hal_random.c"

@@ -102,7 +102,7 @@
 
 /* ---- RFID / RDM6300 (via UART2) ---- */
 /* TODO: Configure RFID UART if module is present. Use UART2 or other available UART */
-#define BOARD_RFID_UART         UART_NUM_2  /* UART for RDM6300 RFID reader (if installed) */
+#define BOARD_RFID_UART_NUM     2           /* UART2 for RDM6300 RFID reader (if installed) */
 #define BOARD_PIN_RFID_RX       UINT16_MAX  /* Define actual RX pin when RFID module added */
 #define BOARD_PIN_RFID_TX       UINT16_MAX  /* Define actual TX pin when RFID module added */
 #define BOARD_RFID_UART_BAUD    9600        /* RDM6300 baud rate */
@@ -132,7 +132,7 @@
 #define BOARD_HAS_BLE           1       /* Bluetooth Low Energy via ESP32-S3 */
 #define BOARD_HAS_RGB_LED       1       /* WS2812 addressable RGB LED on IO45 */
 #define BOARD_HAS_VIBRO         0       /* No vibration motor */
-#define BOARD_HAS_SPEAKER       1       /* Buzzer on IO10 */
+#define BOARD_HAS_SPEAKER       0       /* I2S Speaker not supported; GPIO buzzer only (IO10) */
 #define BOARD_HAS_IR            1       /* Infrared TX + RX */
 #define BOARD_HAS_IBUTTON       0       /* iButton not supported */
 #define BOARD_HAS_RFID          1       /* RDM6300 via UART (TODO: define RFID UART) */
@@ -156,11 +156,11 @@
 #define FURI_HAL_DEBUG_ENABLED  1       /* Enable HAL debug output */
 
 /* SPI Bus Stability Settings */
-#define BOARD_SPI2_FREQ_CONSERVATIVE (35 * 1000 * 1000)  /* 35MHz - fallback for stability */
-#define BOARD_SPI2_FREQ_NORMAL       (40 * 1000 * 1000)  /* 40MHz - optimized default */
-#define BOARD_SPI2_FREQ_FAST         (50 * 1000 * 1000)  /* 50MHz - max safe for SD card */
-#define BOARD_SPI2_FREQ_LCD          (40 * 1000 * 1000)  /* 40MHz - display optimal speed */
-#define BOARD_SPI2_FREQ_SDCARD       (40 * 1000 * 1000)  /* 40MHz - SD card optimal speed */
+#define BOARD_SPI2_FREQ_CONSERVATIVE (25 * 1000 * 1000)  /* 25MHz - conservative/fallback */
+#define BOARD_SPI2_FREQ_NORMAL       (30 * 1000 * 1000)  /* 30MHz - normal balanced speed */
+#define BOARD_SPI2_FREQ_FAST         (40 * 1000 * 1000)  /* 40MHz - fast mode (test only) */
+#define BOARD_SPI2_FREQ_LCD          (40 * 1000 * 1000)  /* 40MHz - display only speed */
+#define BOARD_SPI2_FREQ_SDCARD       (20 * 1000 * 1000)  /* 20MHz - SD card safe stable speed */
 #define BOARD_SPI2_CS_DELAY_US  5       /* Reduced chip select delay for faster operations */
 
 /* I2C Bus Stability Settings */

@@ -8,6 +8,7 @@ idf_component_register(
         "core/log.c"
         "core/memmgr.c"
         "core/memmgr_heap.c"
+        "core/furi_memory_optimize.c"
         "core/thread.c"
         "core/thread_list.c"
         "core/mutex.c"

@@ -275,16 +275,16 @@ void furi_hal_display_init(void) {
     size_t stripe_bytes = LCD_H_RES * STRIPE_HEIGHT * sizeof(uint16_t);
     rgb565_buf = heap_caps_malloc(stripe_bytes, MALLOC_CAP_DMA);
     if(!rgb565_buf) {
-        ESP_LOGE(TAG, "Failed to allocate RGB565 stripe buffer (%d bytes)",
-                 (int)stripe_bytes);
+        ESP_LOGE(TAG, "Failed to allocate RGB565 stripe buffer (%zu bytes)",
+                 stripe_bytes);
         return;
     }
 
     /* Clear entire screen to background (unset pixels = FG) */
     display_fill_color(fg_color);
 
-    ESP_LOGI(TAG, "Display initialized (%dx%d, scaled %dx%d, stripe=%d lines, buf=%d bytes)",
-             FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
+    ESP_LOGI(TAG, "Display initialized (%dx%d, scaled %dx%d, stripe=%d lines, buf=%zu bytes)",
+             FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, stripe_bytes);
 }
 
 void furi_hal_display_commit(const uint8_t* data, uint32_t size) {

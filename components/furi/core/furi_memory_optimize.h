@@ -55,14 +55,46 @@ extern MemoryPool furi_memory_pool;
 void furi_memory_pool_init(void);
 
 /**
+ * Deinitialize memory pools (cleanup)
+ */
+void furi_memory_pool_deinit(void);
+
+/**
  * Get buffer from pre-allocated DMA pool
- * Returns NULL if pool exhausted
+ * Returns NULL if pool exhausted or not initialized
  */
 void* furi_memory_pool_get_dma(size_t size);
+
+/**
+ * Get buffer from pre-allocated PSRAM pool
+ * Returns NULL if pool exhausted or not initialized
+ */
+void* furi_memory_pool_get_psram(size_t size);
+
+/**
+ * Get buffer from pre-allocated animation pool
+ * Returns NULL if pool exhausted or not initialized
+ */
+void* furi_memory_pool_get_animation(size_t size);
 
 /**
  * Release buffer back to pool
  */
 void furi_memory_pool_release(void* ptr);
+
+/**
+ * Get free DMA pool size
+ */
+size_t furi_memory_pool_get_dma_free(void);
+
+/**
+ * Get free PSRAM pool size
+ */
+size_t furi_memory_pool_get_psram_free(void);
+
+/**
+ * Get free animation pool size
+ */
+size_t furi_memory_pool_get_animation_free(void);
 
 #endif /* FURI_MEMORY_OPTIMIZE_H */

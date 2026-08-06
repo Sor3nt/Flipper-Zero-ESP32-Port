@@ -46,7 +46,7 @@ static bool sd_ensure_bounce_buf(void) {
     sd_bounce_buf = heap_caps_aligned_alloc(
         64, 512 * SD_BOUNCE_SECTORS, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if(!sd_bounce_buf) {
-        ESP_LOGE(TAG, "Failed to allocate %d-byte SD bounce buffer", 512 * SD_BOUNCE_SECTORS);
+        ESP_LOGE(TAG, "Failed to allocate %zu-byte SD bounce buffer", (size_t)(512 * SD_BOUNCE_SECTORS));
         return false;
     }
     return true;

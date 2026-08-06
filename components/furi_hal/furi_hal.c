@@ -3,6 +3,10 @@
 #include <furi_hal_gpio.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
+/* Memory pool optimization - from furi component */
+#include "../furi/core/furi_memory_optimize.h"
+/* SPI communication optimization */
+#include "furi_hal_spi_optimize.h"
 
 static const char* TAG = "FuriHal";
 
@@ -48,6 +52,12 @@ void furi_hal_init(void) {
         nvs_flash_erase();
         nvs_flash_init();
     }
+
+    /* Initialize memory pools for DMA, PSRAM, and animation buffers */
+    furi_memory_pool_init();
+
+    /* Initialize SPI communication optimization layer */
+    furi_hal_spi_optimize_init();
 
     furi_hal_rtc_init();
     furi_hal_version_init();

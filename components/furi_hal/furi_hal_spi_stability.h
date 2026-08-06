@@ -163,6 +163,26 @@ void furi_hal_spi_stability_set_device_config(
  */
 void furi_hal_spi_stability_enable_recovery(SpiDevice device, bool enabled);
 
+/**
+ * Get device configuration
+ * @return true if successful
+ */
+bool furi_hal_spi_stability_get_device_config(
+    SpiDevice device,
+    SpiDeviceConfig* config
+);
+
+/**
+ * Check if device has error recovery enabled
+ */
+bool furi_hal_spi_stability_is_recovery_enabled(SpiDevice device);
+
+/**
+ * Monitor SPI bus and detect deadlocks
+ * Call periodically from a watchdog task
+ */
+void furi_hal_spi_stability_monitor(void);
+
 /* Default timeout values for each device */
 #define SPI_TIMEOUT_LCD_MS          100   /* 100ms for display frames */
 #define SPI_TIMEOUT_SD_MS           5000  /* 5s for block operations */

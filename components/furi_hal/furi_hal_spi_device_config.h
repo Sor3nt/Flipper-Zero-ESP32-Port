@@ -23,22 +23,23 @@
 #define LCD_SPI_PRIORITY            0    /* Highest */
 
 /* ============ SD Card (SDMMC) ============
- * Frequency: 40 MHz (normal), up to 50 MHz (fast)
+ * Frequency: 20 MHz (normal/stable), up to 40 MHz (fast)
  * Mode: SPI_MODE_0
- * Requirements: Reliable block transfers, timeout tolerance
+ * Requirements: Reliable block transfers, shared bus stability, timeout tolerance
+ * Note: Conservative 20MHz for shared SPI2 bus with LCD/CC1101
  */
-#define SD_SPI_FREQ_HZ_NORMAL       (40 * 1000 * 1000)
-#define SD_SPI_FREQ_HZ_FAST         (50 * 1000 * 1000)
-#define SD_SPI_FREQ_HZ_FALLBACK     (25 * 1000 * 1000)
+#define SD_SPI_FREQ_HZ_NORMAL       (20 * 1000 * 1000)  /* Safe stable speed */
+#define SD_SPI_FREQ_HZ_FAST         (40 * 1000 * 1000)  /* Fast mode - requires testing */
+#define SD_SPI_FREQ_HZ_FALLBACK     (15 * 1000 * 1000)  /* Emergency fallback */
 #define SD_SPI_MODE                 0
-#define SD_SPI_CS_HOLD_US           4
-#define SD_SPI_CS_SETUP_US          4
-#define SD_SPI_OPERATION_TIMEOUT    5000  /* 5 seconds for block operations */
+#define SD_SPI_CS_HOLD_US           5      /* Increased for stability */
+#define SD_SPI_CS_SETUP_US          5      /* Increased for stability */
+#define SD_SPI_OPERATION_TIMEOUT    5000   /* 5 seconds for block operations */
 #define SD_SPI_MAX_TRANSFER_SIZE    (64 * 1024)  /* 64KB per transfer */
-#define SD_SPI_DMA_ENABLED          1
-#define SD_SPI_PRIORITY             1     /* High */
-#define SD_SPI_RETRY_COUNT          3
-#define SD_SPI_RETRY_DELAY_MS       10
+#define SD_SPI_DMA_ENABLED          1      /* Enable DMA for better throughput */
+#define SD_SPI_PRIORITY             1      /* High priority for SD ops */
+#define SD_SPI_RETRY_COUNT          5      /* Increased retries for stability */
+#define SD_SPI_RETRY_DELAY_MS       20     /* Longer retry delay for shared bus */
 
 /* ============ CC1101 (SubGHz) ============
  * Frequency: 10 MHz (conservative for RF stability)

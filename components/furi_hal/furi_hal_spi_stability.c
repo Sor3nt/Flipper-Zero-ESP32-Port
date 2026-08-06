@@ -28,7 +28,30 @@ static const uint8_t device_base_priority[] = {
     3,  /* NRF24 */
 };
 
+/* Device configurations */
+typedef struct {
+    uint32_t clock_hz;
+    uint8_t cs_hold_us;
+    uint8_t cs_setup_us;
+    uint16_t timeout_ms;
+    bool recovery_enabled;
+} DeviceConfigInternal;
+
+static DeviceConfigInternal device_configs[SpiDeviceMAX] = {
+    /* LCD */ {40000000, 5, 5, 100, true},
+    /* SD */  {40000000, 5, 5, 5000, true},
+    /* CC1101 */ {10000000, 3, 3, 500, true},
+    /* NRF24 */ {10000000, 3, 3, 1000, true}
+};
+
+static volatile uint8_t spi_initialized = 0;
+
 void furi_hal_spi_stability_init(void) {
+    if (spi_initialized) {
+        ESP_LOGW(TAG, "SPI Stability Manager already initialized");
+        return;
+    }
+
     ESP_LOGI(TAG, "Initializing SPI Stability Manager");
 
     memset(&spi_stability, 0, sizeof(SpiStabilityManager));
@@ -45,6 +68,7 @@ void furi_hal_spi_stability_init(void) {
     spi_stability.bus_ready = xSemaphoreCreateBinary();
     if (!spi_stability.bus_ready) {
         ESP_LOGE(TAG, "Failed to create bus ready semaphore!");
+        vSemaphoreDelete(spi_stability.bus_mutex);
         return;
     }
 
@@ -52,12 +76,14 @@ void furi_hal_spi_stability_init(void) {
     for (int i = 0; i < SpiDeviceMAX; i++) {
         spi_stability.device_active[i] = 0;
         spi_stability.device_last_access_ms[i] = 0;
+        spi_stability.device_priority[i] = device_base_priority[i];
     }
 
     spi_stability.current_owner = SpiDeviceMAX;  /* No owner initially */
     spi_stability.operation_timeout_ms = 5000;   /* 5 second default timeout */
+    spi_initialized = 1;
 
-    ESP_LOGI(TAG, "SPI Stability Manager ready");
+    ESP_LOGI(TAG, "SPI Stability Manager initialized successfully");
 }
 
 bool furi_hal_spi_stability_acquire(
@@ -65,8 +91,18 @@ bool furi_hal_spi_stability_acquire(
     SpiPriority priority,
     uint32_t timeout_ms
 ) {
+    if (!spi_initialized) {
+        ESP_LOGE(TAG, "SPI Stability Manager not initialized!");
+        return false;
+    }
+
     if (device >= SpiDeviceMAX) {
-        ESP_LOGE(TAG, "Invalid device: %d", device);
+        ESP_LOGE(TAG, "Invalid device: %d", (int)device);
+        return false;
+    }
+
+    if (!spi_stability.bus_mutex) {
+        ESP_LOGE(TAG, "Bus mutex not created!");
         return false;
     }
 
@@ -83,9 +119,10 @@ bool furi_hal_spi_stability_acquire(
     if (xSemaphoreTake(spi_stability.bus_mutex, wait_ticks) != pdTRUE) {
         ESP_LOGW(
             TAG,
-            "Bus lock timeout for %s (timeout=%lu ms)",
+            "Bus lock timeout for %s (timeout=%lu ms, owner=%s)",
             device_names[device],
-            timeout_ms
+            timeout_ms,
+            spi_stability.current_owner < SpiDeviceMAX ? device_names[spi_stability.current_owner] : "NONE"
         );
         spi_stability.timeout_count++;
         return false;
@@ -98,19 +135,34 @@ bool furi_hal_spi_stability_acquire(
     spi_stability.device_active[device] = 1;
     spi_stability.device_last_access_ms[device] = spi_stability.operation_start_ms;
 
-    ESP_LOGV(TAG, "Bus acquired by %s", device_names[device]);
+    /* Apply device-specific timeout if configured */
+    if (device_configs[device].timeout_ms > 0) {
+        spi_stability.operation_timeout_ms = device_configs[device].timeout_ms;
+    }
+
+    ESP_LOGV(TAG, "Bus acquired by %s (priority=%d)", device_names[device], priority);
     spi_stability.total_operations++;
 
     return true;
 }
 
 void furi_hal_spi_stability_release(SpiDevice device) {
+    if (!spi_initialized) {
+        ESP_LOGW(TAG, "SPI Manager not initialized on release");
+        return;
+    }
+
+    if (device >= SpiDeviceMAX) {
+        ESP_LOGW(TAG, "Invalid device on release: %d", device);
+        return;
+    }
+
     if (spi_stability.current_owner != device) {
         ESP_LOGW(
             TAG,
-            "Release by %s but owner is %s!",
+            "Release mismatch: %s attempting to release but owner is %s",
             device_names[device],
-            device_names[spi_stability.current_owner]
+            spi_stability.current_owner < SpiDeviceMAX ? device_names[spi_stability.current_owner] : "NONE"
         );
         return;
     }
@@ -118,9 +170,10 @@ void furi_hal_spi_stability_release(SpiDevice device) {
     spi_stability.current_owner = SpiDeviceMAX;
     spi_stability.device_active[device] = 0;
 
-    /* Release mutex */
-    xSemaphoreGive(spi_stability.bus_mutex);
-    xSemaphoreGive(spi_stability.bus_ready);  /* Signal operation done */
+    /* Release mutex only once */
+    if (spi_stability.bus_mutex) {
+        xSemaphoreGive(spi_stability.bus_mutex);
+    }
 
     ESP_LOGV(TAG, "Bus released by %s", device_names[device]);
 }
@@ -157,12 +210,17 @@ SpiDevice furi_hal_spi_stability_get_owner(void) {
 }
 
 void furi_hal_spi_stability_emergency_reset(void) {
-    ESP_LOGW(TAG, "EMERGENCY SPI BUS RESET!");
+    if (!spi_initialized) return;
 
-    /* Release all semaphores */
+    ESP_LOGW(TAG, "EMERGENCY SPI BUS RESET! Owner was: %s",
+        spi_stability.current_owner < SpiDeviceMAX ? device_names[spi_stability.current_owner] : "NONE");
+
+    /* Safely release the bus lock - give it only once */
     if (spi_stability.bus_mutex) {
-        xSemaphoreGive(spi_stability.bus_mutex);
-        xSemaphoreGive(spi_stability.bus_mutex);  /* Extra give for safety */
+        BaseType_t result = xSemaphoreGive(spi_stability.bus_mutex);
+        if (result != pdTRUE) {
+            ESP_LOGW(TAG, "Failed to give bus mutex during emergency reset");
+        }
     }
 
     /* Reset state */
@@ -172,6 +230,7 @@ void furi_hal_spi_stability_emergency_reset(void) {
     }
 
     spi_stability.conflict_count++;
+    ESP_LOGI(TAG, "SPI Bus emergency reset complete (conflicts: %lu)", spi_stability.conflict_count);
 }
 
 bool furi_hal_spi_stability_detect_deadlock(void) {
@@ -213,11 +272,21 @@ void furi_hal_spi_stability_set_device_config(
     SpiDevice device,
     const SpiDeviceConfig* config
 ) {
-    if (!config || device >= SpiDeviceMAX) return;
+    if (!config || device >= SpiDeviceMAX) {
+        ESP_LOGW(TAG, "Invalid device config parameters");
+        return;
+    }
+
+    /* Store device configuration */
+    device_configs[device].clock_hz = config->clock_hz;
+    device_configs[device].cs_hold_us = config->cs_hold_us;
+    device_configs[device].cs_setup_us = config->cs_setup_us;
+    device_configs[device].timeout_ms = config->timeout_ms;
+    device_configs[device].recovery_enabled = true;
 
     ESP_LOGI(
         TAG,
-        "Configuring %s: clock=%lu Hz, CS setup=%u us, CS hold=%u us, timeout=%u ms",
+        "Device %s configured: clock=%lu Hz, CS setup=%u us, CS hold=%u us, timeout=%u ms",
         device_names[device],
         config->clock_hz,
         config->cs_setup_us,
@@ -227,6 +296,12 @@ void furi_hal_spi_stability_set_device_config(
 }
 
 void furi_hal_spi_stability_enable_recovery(SpiDevice device, bool enabled) {
+    if (device >= SpiDeviceMAX) {
+        ESP_LOGW(TAG, "Invalid device for recovery config: %d", device);
+        return;
+    }
+
+    device_configs[device].recovery_enabled = enabled;
     ESP_LOGI(
         TAG,
         "Device %s error recovery: %s",
@@ -237,7 +312,33 @@ void furi_hal_spi_stability_enable_recovery(SpiDevice device, bool enabled) {
 
 /* Watchdog-like monitor function to detect deadlocks */
 void furi_hal_spi_stability_monitor(void) {
+    if (!spi_initialized) return;
+
     if (furi_hal_spi_stability_detect_deadlock()) {
         ESP_LOGE(TAG, "SPI deadlock detected and recovered!");
     }
+}
+
+/* Get device configuration */
+bool furi_hal_spi_stability_get_device_config(
+    SpiDevice device,
+    SpiDeviceConfig* config
+) {
+    if (!config || device >= SpiDeviceMAX) {
+        return false;
+    }
+
+    config->clock_hz = device_configs[device].clock_hz;
+    config->cs_hold_us = device_configs[device].cs_hold_us;
+    config->cs_setup_us = device_configs[device].cs_setup_us;
+    config->timeout_ms = device_configs[device].timeout_ms;
+    config->priority = device_base_priority[device];
+
+    return true;
+}
+
+/* Check if device has recovery enabled */
+bool furi_hal_spi_stability_is_recovery_enabled(SpiDevice device) {
+    if (device >= SpiDeviceMAX) return false;
+    return device_configs[device].recovery_enabled;
 }
