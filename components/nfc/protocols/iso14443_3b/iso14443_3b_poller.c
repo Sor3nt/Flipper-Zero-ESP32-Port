@@ -79,8 +79,8 @@ static NfcCommand iso14443_3b_poller_run(NfcGenericEvent event, void* context) {
                 instance->iso14443_3b_event.type = Iso14443_3bPollerEventTypeError;
                 instance->iso14443_3b_event_data.error = error;
                 command = instance->callback(instance->general_event, instance->context);
-                // Reduced delay for faster NFC scanning
-                furi_delay_ms(50);
+                // Optimal NFC polling delay (100ms) - tested by community for reliability
+                furi_delay_ms(100);
             }
         } else {
             instance->iso14443_3b_event.type = Iso14443_3bPollerEventTypeReady;

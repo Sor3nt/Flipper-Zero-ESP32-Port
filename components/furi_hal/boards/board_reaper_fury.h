@@ -46,7 +46,7 @@
 #define BOARD_LCD_H_RES         320     /* Native width after swap_xy */
 #define BOARD_LCD_V_RES         170     /* Native height after swap_xy */
 #define BOARD_LCD_SPI_HOST      SPI2_HOST
-#define BOARD_LCD_SPI_FREQ_HZ   (40 * 1000 * 1000)  /* Optimized to 40MHz for better speed */
+#define BOARD_LCD_SPI_FREQ_HZ   (30 * 1000 * 1000)  /* 30MHz - optimal stable speed for shared SPI2 bus (LCD+SD+CC1101+NRF24) */
 #define BOARD_LCD_CMD_BITS      8
 #define BOARD_LCD_PARAM_BITS    8
 #define BOARD_LCD_SWAP_XY       true

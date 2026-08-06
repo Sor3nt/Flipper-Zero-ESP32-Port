@@ -2,7 +2,7 @@
 #include <assets_icons.h>
 
 #define TAG "GuiSrv"
-#define GUI_FRAME_TIME_MS (1000 / 60)
+#define GUI_FRAME_TIME_MS (1000 / 45)  /* 45 FPS stable frame rate - optimal for MCU with SD card ops */
 
 ViewPort* gui_view_port_find_enabled(ViewPortArray_t array) {
     // Iterating backward

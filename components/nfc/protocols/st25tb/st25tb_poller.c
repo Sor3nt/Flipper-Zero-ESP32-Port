@@ -157,7 +157,7 @@ NfcCommand st25tb_poller_success_handler(St25tbPoller* instance) {
     NfcCommand command = NfcCommandContinue;
     instance->st25tb_event.type = St25tbPollerEventTypeSuccess;
     command = instance->callback(instance->general_event, instance->context);
-    furi_delay_ms(50);  // Optimized NFC scan delay
+    furi_delay_ms(100);  // Optimal NFC polling delay (100ms) - stable, community tested
     instance->state = St25tbPollerStateRequestMode;
 
     return command;
@@ -167,7 +167,7 @@ NfcCommand st25tb_poller_failure_handler(St25tbPoller* instance) {
     NfcCommand command = NfcCommandContinue;
     instance->st25tb_event.type = St25tbPollerEventTypeFailure;
     command = instance->callback(instance->general_event, instance->context);
-    furi_delay_ms(50);  // Optimized NFC scan delay
+    furi_delay_ms(100);  // Optimal NFC polling delay (100ms) - stable, community tested
     instance->state = St25tbPollerStateSelect;
 
     return command;

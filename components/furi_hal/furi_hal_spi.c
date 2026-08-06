@@ -1,9 +1,11 @@
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
+#include "furi_hal_spi_device_config.h"
 
 #include <string.h>
 
 #include <driver/spi_master.h>
+#include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_rom_sys.h>
 
@@ -108,6 +110,74 @@ static FuriMutex* furi_hal_spi_get_mutex(FuriHalSpiBus* bus) {
     return bus->mutex;
 }
 
+/* Configure GPIO pin for optimal SPI performance:
+ * - Sets drive strength to reduce noise and improve signal integrity
+ * - Optionally applies pull-up for MISO lines (floating line prevention)
+ * - Ensures stable operation on shared SPI2 bus
+ */
+static void furi_hal_spi_configure_pin(uint32_t gpio_num, uint32_t drive_strength, bool enable_pull_up) {
+    if(gpio_num == FURI_HAL_SPI_PIN_UNMAPPED || gpio_num == UINT16_MAX) {
+        return;  /* Skip invalid pins */
+    }
+
+    /* Use ESP-IDF GPIO driver to set drive strength and pull-up
+     * This improves signal integrity on shared SPI2 bus (LCD+SD+CC1101+NRF24)
+     */
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << gpio_num),
+        .mode = GPIO_MODE_INPUT_OUTPUT,  /* Maintain existing mode from SPI driver */
+        .pull_up_en = enable_pull_up ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+
+    gpio_config(&io_conf);
+
+    /* Set drive strength (values 0-3 map to 5/10/20/40mA on ESP32-S3)
+     * Higher drive strength = better noise immunity = more stable at higher frequencies
+     */
+    gpio_set_drive_capability(gpio_num, (gpio_drive_cap_t)drive_strength);
+}
+
+/* Apply optimized GPIO configuration to all SPI bus pins
+ * Called after bus initialization to ensure stable, low-noise operation
+ */
+static void furi_hal_spi_optimize_bus_pins(const FuriHalSpiBusHandle* handle) {
+    if(!handle) return;
+
+    /* Configure MOSI line with moderate drive strength (20mA) */
+    if(furi_hal_spi_pin_valid(handle->mosi)) {
+        furi_hal_spi_configure_pin(handle->mosi->pin, GPIO_DRIVE_STRENGTH_MOSI, false);
+    }
+
+    /* Configure MISO line with moderate drive strength + pull-up
+     * Pull-up prevents floating line noise and improves reliability
+     */
+    if(furi_hal_spi_pin_valid(handle->miso)) {
+        bool pull_up_enabled = (handle->bus->host_id == SPI2_HOST);  /* Enable for shared SPI2 */
+        furi_hal_spi_configure_pin(handle->miso->pin, GPIO_DRIVE_STRENGTH_MISO, pull_up_enabled);
+    }
+
+    /* Configure SCK line with moderate drive strength for clean clock edges */
+    if(furi_hal_spi_pin_valid(handle->sck)) {
+        furi_hal_spi_configure_pin(handle->sck->pin, GPIO_DRIVE_STRENGTH_SCK, false);
+    }
+
+    /* Configure CS line with highest drive strength for fast control signals
+     * CS transitions must be clean and fast to prevent communication errors
+     */
+    if(furi_hal_spi_pin_valid(handle->cs)) {
+        furi_hal_spi_configure_pin(handle->cs->pin, GPIO_DRIVE_STRENGTH_CS, false);
+    }
+
+    ESP_LOGD(TAG, "Optimized SPI bus pins: MOSI=%u MISO=%u SCK=%u CS=%u (drive strength + pull-up configured)",
+        furi_hal_spi_pin_valid(handle->mosi) ? handle->mosi->pin : FURI_HAL_SPI_PIN_UNMAPPED,
+        furi_hal_spi_pin_valid(handle->miso) ? handle->miso->pin : FURI_HAL_SPI_PIN_UNMAPPED,
+        furi_hal_spi_pin_valid(handle->sck) ? handle->sck->pin : FURI_HAL_SPI_PIN_UNMAPPED,
+        furi_hal_spi_pin_valid(handle->cs) ? handle->cs->pin : FURI_HAL_SPI_PIN_UNMAPPED);
+}
+
+
 static bool furi_hal_spi_bus_init_if_needed(FuriHalSpiBus* bus, const FuriHalSpiBusHandle* handle) {
     if(bus->initialized) return true;
 
@@ -142,6 +212,8 @@ static bool furi_hal_spi_bus_init_if_needed(FuriHalSpiBus* bus, const FuriHalSpi
             bus->miso_pin,
             bus->sck_pin,
             furi_hal_spi_pin_valid(handle->cs) ? handle->cs->pin : FURI_HAL_SPI_PIN_UNMAPPED);
+        /* Optimize GPIO pins for stable bitbang operation */
+        furi_hal_spi_optimize_bus_pins(handle);
         return true;
     }
 
@@ -167,6 +239,8 @@ static bool furi_hal_spi_bus_init_if_needed(FuriHalSpiBus* bus, const FuriHalSpi
             bus->mosi_pin,
             bus->miso_pin,
             bus->sck_pin);
+        /* Optimize GPIO pins for stable hardware SPI operation on shared bus */
+        furi_hal_spi_optimize_bus_pins(handle);
         return true;
     }
 

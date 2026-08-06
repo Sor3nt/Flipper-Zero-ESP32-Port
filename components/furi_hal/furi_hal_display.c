@@ -108,7 +108,7 @@ static void furi_hal_display_prepare_flush(void) {
 static void furi_hal_display_wait_flush(void) {
     if(!lcd_flush_done) return;
 
-    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(50)) != pdTRUE) {
+    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(100)) != pdTRUE) {
         ESP_LOGW(TAG, "LCD flush timeout (expected under high load)");
     }
 }

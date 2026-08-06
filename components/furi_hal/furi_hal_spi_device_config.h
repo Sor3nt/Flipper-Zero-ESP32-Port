@@ -23,13 +23,13 @@
 #define LCD_SPI_PRIORITY            0    /* Highest */
 
 /* ============ SD Card (SDMMC) ============
- * Frequency: 20 MHz (normal/stable), up to 40 MHz (fast)
+ * Frequency: 20 MHz (normal/stable), 25 MHz (fast/optimal)
  * Mode: SPI_MODE_0
  * Requirements: Reliable block transfers, shared bus stability, timeout tolerance
- * Note: Conservative 20MHz for shared SPI2 bus with LCD/CC1101
+ * Note: Conservative 20MHz for normal, 25MHz for fast on shared SPI2 bus (no contention)
  */
 #define SD_SPI_FREQ_HZ_NORMAL       (20 * 1000 * 1000)  /* Safe stable speed */
-#define SD_SPI_FREQ_HZ_FAST         (40 * 1000 * 1000)  /* Fast mode - requires testing */
+#define SD_SPI_FREQ_HZ_FAST         (25 * 1000 * 1000)  /* Fast mode - optimal without contention */
 #define SD_SPI_FREQ_HZ_FALLBACK     (15 * 1000 * 1000)  /* Emergency fallback */
 #define SD_SPI_MODE                 0
 #define SD_SPI_CS_HOLD_US           5      /* Increased for stability */
@@ -72,6 +72,26 @@
 #define NRF24_SPI_PRIORITY          2
 #define NRF24_SPI_ATOMIC_OPS        1
 #define NRF24_SPI_LOCK_REQUIRED     1
+
+/* ============ GPIO Drive Strength Configuration ============ */
+/* Optimizes signal integrity on shared SPI2 bus (LCD+SD+CC1101+NRF24)
+ * Higher drive strength reduces noise and improves reliability at higher frequencies
+ * Values: 0=5mA, 1=10mA, 2=20mA, 3=40mA (ESP32-S3 GPIO_DRIVE_CAP_*)
+ */
+
+/* Data lines (MOSI/MISO) - moderate drive for minimal noise */
+#define GPIO_DRIVE_STRENGTH_MOSI    2  /* 20mA - balanced for signal quality */
+#define GPIO_DRIVE_STRENGTH_MISO    2  /* 20mA - with pull-up helps termination */
+
+/* Clock line - higher drive for clean edges */
+#define GPIO_DRIVE_STRENGTH_SCK     2  /* 20mA - critical for timing */
+
+/* Chip Select lines - highest drive for control signals */
+#define GPIO_DRIVE_STRENGTH_CS      3  /* 40mA - ensures fast transitions */
+
+/* Pull-up configuration for MISO lines */
+#define GPIO_PULL_UP_MISO           1  /* Enable pull-up on MISO (prevents floating) */
+#define GPIO_PULL_UP_SDCARD_MISO    1  /* Strong pull-up on SD MISO for stability */
 
 /* ============ Safety Configuration ============ */
 

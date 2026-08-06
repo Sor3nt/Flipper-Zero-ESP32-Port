@@ -11,6 +11,7 @@
 #include "furi_hal_resources.h"
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
+#include "furi_hal_spi_device_config.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #include <esp_memory_utils.h>
 #include <sdmmc_cmd.h>
 #include <driver/sdspi_host.h>
+#include <driver/gpio.h>
 
 static const char* TAG = "FuriHalSd";
 
@@ -69,6 +71,47 @@ static bool sd_host_conflicts_with(const FuriHalSpiBus* bus) {
            bus->mosi_pin == gpio_sdcard_cs.pin || bus->miso_pin == gpio_sdcard_cs.pin ||
            bus->sck_pin == gpio_sdcard_cs.pin;
 }
+
+/* Optimize SD card GPIO pins for stable, reliable operation
+ * Configures pull-ups and drive strength to prevent signal noise and CRC errors
+ * This is critical for 25MHz fast mode operation on shared SPI2 bus
+ */
+static void sd_optimize_gpio_pins(void) {
+    /* Configure SD MISO pin with pull-up to prevent floating line noise
+     * Pull-up helps maintain signal level when no device is driving the line
+     * This is essential for reliability at higher speeds on shared bus
+     */
+    if(gpio_sdcard_miso.pin != UINT16_MAX) {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << gpio_sdcard_miso.pin),
+            .mode = GPIO_MODE_INPUT_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  /* Enable pull-up for MISO stability */
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io_conf);
+        gpio_set_drive_capability(gpio_sdcard_miso.pin, GPIO_DRIVE_CAP_2);  /* 20mA */
+        ESP_LOGD(TAG, "Optimized SD MISO pin=%u (pull-up + 20mA drive strength)", gpio_sdcard_miso.pin);
+    }
+
+    /* Configure SD CS pin with high drive strength for fast control transitions
+     * CS timing is critical; 40mA drive ensures clean, fast transitions
+     * Reduces chip select setup/hold time violations
+     */
+    if(gpio_sdcard_cs.pin != UINT16_MAX) {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << gpio_sdcard_cs.pin),
+            .mode = GPIO_MODE_INPUT_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io_conf);
+        gpio_set_drive_capability(gpio_sdcard_cs.pin, GPIO_DRIVE_CAP_3);  /* 40mA - highest */
+        ESP_LOGD(TAG, "Optimized SD CS pin=%u (40mA drive strength)", gpio_sdcard_cs.pin);
+    }
+}
+
 
 static uint16_t sd_read_le16(const uint8_t* data) {
     return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
@@ -572,6 +615,12 @@ static bool sd_prepare_card(void) {
     do {
         ret = sdspi_host_init();
         if(ret != ESP_OK) break;
+
+        /* Optimize SD card GPIO pins for stable, noise-free operation
+         * This ensures reliable communication at 25MHz+ frequencies
+         * on the shared SPI2 bus with LCD, CC1101, and NRF24
+         */
+        sd_optimize_gpio_pins();
 
         ret = sdspi_host_init_device(&dev_cfg, &sd_handle);
         if(ret != ESP_OK) break;
