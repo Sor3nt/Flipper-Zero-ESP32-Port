@@ -55,7 +55,6 @@ void furi_hal_init(void) {
     furi_memory_pool_init();
 
     /* Initialize SPI communication optimization layer */
-    furi_hal_spi_optimize_init();
 
     furi_hal_rtc_init();
     furi_hal_version_init();

@@ -10,7 +10,7 @@
  * SD Card:  SPI (shared bus with display + CC1101)
  * NFC:      PN532 via I2C
  * IR:       TX (IO02) + RX (IO01)
- * RGB LED:  WS2812 x1+ (IO45, power-gated via BQ25896)
+ * RGB LED:  WS2812 x3+ (IO45, power-gated via BQ25896)
  * Buzzer:   GPIO buzzer (IO10)
  * Power:    BQ25896 charger + BQ27220 fuel gauge (via I2C)
  * Shutdown: Button Key (IO21) held 2-3s triggers shutdown; same pin wired to BQ25896 QON for wake
@@ -42,7 +42,7 @@
 #define BOARD_PIN_LCD_RST       16   /* Reset */
 #define BOARD_PIN_LCD_BL        6    /* Backlight PWM */
 
-/* ---- LCD Display Configuration (320×172 ST7789) ---- */
+/* ---- LCD Display Configuration (320×170 ST7789) ---- */
 #define BOARD_LCD_H_RES         320     /* Native width after swap_xy */
 #define BOARD_LCD_V_RES         170     /* Native height after swap_xy */
 #define BOARD_LCD_SPI_HOST      SPI2_HOST
@@ -112,13 +112,11 @@
 
 /* ---- WS2812 RGB LED Strip ---- */
 #define BOARD_PIN_WS2812_DATA   45      /* WS2812 data line (power-gated via BQ25896 SYSOFF) */
-#define BOARD_WS2812_LED_COUNT  1       /* Single RGB LED or addressable strip */
+#define BOARD_WS2812_LED_COUNT  3       /* Single RGB LED or addressable strip */
 
 /* ---- NFC / PN532 (via I2C) ---- */
 #define BOARD_PIN_NFC_SCL       48
 #define BOARD_PIN_NFC_SDA       47
-#define BOARD_PIN_NFC_IRQ       UINT16_MAX
-#define BOARD_PIN_NFC_RST       UINT16_MAX
 #define BOARD_NFC_I2C_PORT      I2C_NUM_0
 
 /* ---- Qwiic / External I2C (shared with NFC) ---- */
