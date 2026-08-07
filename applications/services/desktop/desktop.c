@@ -423,6 +423,7 @@ static Desktop* desktop_alloc(void) {
     desktop->mesh_overlay_timer =
         furi_timer_alloc(desktop_mesh_overlay_timer_cb, FuriTimerTypeOnce, desktop);
     desktop->mesh_pair_dialog = dialog_ex_alloc();
+    desktop->flash_mode_dialog = dialog_ex_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
     desktop->locked_view = desktop_view_locked_alloc();
@@ -485,6 +486,10 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdMeshPair,
         dialog_ex_get_view(desktop->mesh_pair_dialog));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdFlashMode,
+        dialog_ex_get_view(desktop->flash_mode_dialog));
     view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdDebug, desktop_debug_get_view(desktop->debug_view));
     view_dispatcher_add_view(

@@ -44,6 +44,7 @@ typedef enum {
     DesktopViewIdMeshWifi,
     DesktopViewIdMeshHandshake,
     DesktopViewIdMeshPair,
+    DesktopViewIdFlashMode,
     DesktopViewIdLocked,
     DesktopViewIdDebug,
     DesktopViewIdPopup,
@@ -68,6 +69,7 @@ struct Desktop {
 
     Popup* popup;
     DialogEx* mesh_pair_dialog;
+    DialogEx* flash_mode_dialog;
     DesktopLockMenuView* lock_menu;
     DesktopUsbStorageView* usb_storage_view;
     DesktopMeshClientsView* mesh_clients_view;

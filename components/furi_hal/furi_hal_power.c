@@ -18,6 +18,14 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <driver/gpio.h>
+#include <sdkconfig.h>
+
+/* FORCE_DOWNLOAD_BOOT lives in the RTC domain on the S3/S2. The C6 keeps the
+ * same flag in the LP_AON block under a different name, so the header only
+ * exists on the chips we actually use it on. */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
+#include <soc/rtc_cntl_reg.h>
+#endif
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -461,6 +469,38 @@ void furi_hal_power_off(void) {
 }
 
 FURI_NORETURN void furi_hal_power_reset(void) {
+    esp_restart();
+    __builtin_unreachable();
+}
+
+/* Reboot straight into the ROM download mode, so the board can be flashed
+ * without touching a button.
+ *
+ * FORCE_DOWNLOAD_BOOT lives in the RTC domain and survives the software reset,
+ * so the ROM comes up waiting for esptool instead of booting this app. That
+ * matters on the T-Embed CC1101: its RST button sits on the PCB under the back
+ * shell, and the encoder button (GPIO0/BOOT) is only sampled by the strapping
+ * logic on a cold boot — holding it while the app runs does nothing.
+ *
+ * The way out is a host running esptool: it clears this bit itself before
+ * resetting (see esptool targets/esp32s3.py, workaround for arduino-esp32
+ * #6762). Failing that, a power cycle. Nothing on the device can undo it, which
+ * is exactly why the caller puts a confirmation screen in front.
+ *
+ * Backlight and panel go off first so the screen visibly dies, matching what
+ * the confirmation screen promised.
+ */
+FURI_NORETURN void furi_hal_power_enter_download_mode(void) {
+    FURI_LOG_I(TAG, "Entering ROM download mode");
+
+#ifdef BOARD_PIN_LCD_BL
+    furi_hal_display_set_backlight(0);
+#endif
+    furi_hal_display_sleep();
+
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
+    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+#endif
     esp_restart();
     __builtin_unreachable();
 }

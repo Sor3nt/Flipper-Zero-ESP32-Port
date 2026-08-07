@@ -88,6 +88,13 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
 
+        case DesktopLockMenuEventFlashMode:
+            /* Never acts directly: the flash-mode scene asks for confirmation
+             * first, because only a PC can undo it. */
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneFlashMode);
+            consumed = true;
+            break;
+
         case DesktopLockMenuEventMeshClients:
             /* T-Embed ist immer Master; der Master-Mesh-Service läuft on-demand in
              * der Mesh-Clients-Scene. */

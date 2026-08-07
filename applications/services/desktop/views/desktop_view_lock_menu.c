@@ -1,6 +1,7 @@
 #include <furi.h>
 #include <gui/elements.h>
 #include <assets_icons.h>
+#include <sdkconfig.h>
 
 #include "../desktop_i.h"
 #include "desktop_view_lock_menu.h"
@@ -51,6 +52,14 @@ static void lock_menu_build_items(bool usb_available, bool qflipper_on, bool bt_
     /* Mesh: der T-Embed ist immer Master — kein Mode-Toggle, "Mesh Clients"
      * (Discovery/Pair) ist immer verfügbar. */
     s_items[s_item_count++] = (LockMenuItem){"Mesh Clients", DesktopLockMenuEventMeshClients};
+
+    /* Reboot into the ROM download mode for flashing. Same chip gate as the USB
+     * entries above: only the S3/S2 have the FORCE_DOWNLOAD_BOOT flag this
+     * relies on. Kept last — it is the most destructive entry of the menu, and
+     * it always opens a confirmation screen. */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
+    s_items[s_item_count++] = (LockMenuItem){"Flash Mode", DesktopLockMenuEventFlashMode};
+#endif
 }
 
 void desktop_lock_menu_set_callback(

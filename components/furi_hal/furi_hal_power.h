@@ -34,6 +34,15 @@ void furi_hal_power_shutdown(void);
 void furi_hal_power_off(void);
 FURI_NORETURN void furi_hal_power_reset(void);
 
+/** Reboot into the ROM download mode so the board can be flashed over USB
+ * without pressing BOOT/RST. Never returns.
+ *
+ * Only a host running esptool (or a power cycle) gets the device back out, so
+ * always confirm with the user first. No-op on targets without the flag: they
+ * simply reboot normally.
+ */
+FURI_NORETURN void furi_hal_power_enter_download_mode(void);
+
 bool furi_hal_power_enable_otg(void);
 void furi_hal_power_disable_otg(void);
 bool furi_hal_power_check_otg_fault(void);
