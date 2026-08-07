@@ -12,6 +12,7 @@
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
 #include "furi_hal_spi_device_config.h"
+#include "boards/board.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -28,7 +29,7 @@ static const char* TAG = "FuriHalSd";
 
 #define SD_FATFS_DRIVE "0:"
 #define SD_SPI_HOST    SPI2_HOST
-#define SD_MAX_FREQ    (20 * 1000) /* 20 MHz — conservative for shared bus */
+#define SD_MAX_FREQ    BOARD_SD_SPI_FREQ_HZ /* SD card SPI frequency from board config */
 #define SD_BOUNCE_SECTORS 8 /* 4 KiB persistent DMA bounce buffer */
 
 static sdmmc_card_t* sd_card = NULL;

@@ -152,17 +152,14 @@
 /* Enable debug logging for critical systems */
 #define FURI_HAL_DEBUG_ENABLED  1       /* Enable HAL debug output */
 
-/* SPI Bus Stability Settings */
-#define BOARD_SPI2_FREQ_CONSERVATIVE (25 * 1000 * 1000)  /* 25MHz - conservative/fallback */
-#define BOARD_SPI2_FREQ_NORMAL       (30 * 1000 * 1000)  /* 30MHz - normal balanced speed */
-#define BOARD_SPI2_FREQ_FAST         (40 * 1000 * 1000)  /* 40MHz - fast mode (test only) */
-#define BOARD_SPI2_FREQ_LCD          (40 * 1000 * 1000)  /* 40MHz - display only speed */
-#define BOARD_SPI2_FREQ_SDCARD       (20 * 1000 * 1000)  /* 20MHz - SD card safe stable speed */
-#define BOARD_SPI2_CS_DELAY_US  5       /* Reduced chip select delay for faster operations */
+/* ---- SPI Bus Frequency Configuration (per-device) ---- */
+#define BOARD_SUBGHZ_SPI_FREQ_HZ    (8 * 1000 * 1000)   /* CC1101 SubGHz frequency */
+#define BOARD_NRF24_SPI_FREQ_HZ     (4 * 1000 * 1000)   /* NRF24 frequency */
+#define BOARD_EXTERNAL_SPI_FREQ_HZ  (2 * 1000 * 1000)   /* External SPI (bitbang) */
+#define BOARD_SD_SPI_FREQ_HZ        (20 * 1000)         /* SD card frequency (in kHz) */
 
-/* I2C Bus Stability Settings */
-#define BOARD_I2C_FREQ_HZ       400000  /* Standard I2C frequency (400kHz) */
-#define BOARD_I2C_TIMEOUT_MS    1000    /* I2C operation timeout */
+/* ---- I2C Bus Frequency Configuration ---- */
+#define BOARD_NFC_I2C_FREQ_HZ       100000              /* NFC (PN532) I2C frequency */
 
 /* Power Stability Notes:
  * - BQ25896 (charger) and BQ27220 (fuel gauge) share I2C_NUM_0 @ 400kHz

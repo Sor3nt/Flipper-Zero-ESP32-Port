@@ -197,7 +197,7 @@ static esp_err_t pn532_i2c_init(void) {
         .scl_io_num = BOARD_PIN_NFC_SCL,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
+        .master.clk_speed = BOARD_NFC_I2C_FREQ_HZ,
     };
 
     esp_err_t err = i2c_driver_install(BOARD_NFC_I2C_PORT, conf.mode, 0, 0, 0);

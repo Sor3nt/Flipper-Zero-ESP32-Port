@@ -60,7 +60,7 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_external = {
     .cs = &gpio_ext_pa4,
     .device = NULL,
     .initialized = false,
-    .frequency_hz = 2 * 1000 * 1000,
+    .frequency_hz = BOARD_EXTERNAL_SPI_FREQ_HZ,
     .mode = 0,
 };
 
@@ -72,7 +72,7 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_subghz = {
     .cs = &gpio_ext_pa4,
     .device = NULL,
     .initialized = false,
-    .frequency_hz = 8 * 1000 * 1000,
+    .frequency_hz = BOARD_SUBGHZ_SPI_FREQ_HZ,
     .mode = 0,
 };
 
@@ -86,7 +86,7 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_nrf24 = {
     .cs = &gpio_nrf24_cs,
     .device = NULL,
     .initialized = false,
-    .frequency_hz = 4 * 1000 * 1000,
+    .frequency_hz = BOARD_NRF24_SPI_FREQ_HZ,
     .mode = 0,
 };
 
