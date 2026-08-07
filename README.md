@@ -11,7 +11,7 @@
 
 A port of the [Flipper Zero](https://flipperzero.one/) firmware to ESP32-based development boards. This project brings the Flipper Zero UI, services, and application framework to affordable ESP32 hardware — no Flipper Zero required.
 
-# The repository is a fork of sor3nt/Flipper-Zero-ESP32
+# this open source code was developed from the sor3nt open source code
 
 This firmware is the result of porting the Flipper Zero firmware to the ESP32 platform. The project was developed from the **Unleashed** firmware and then ported to ESP32 by **Sor3nt** as an open-source project.
 
