@@ -105,7 +105,7 @@
 #define BOARD_SUBGHZ_SPI_FREQ_HZ    (8 * 1000 * 1000)   /* CC1101 SubGHz frequency */
 #define BOARD_NRF24_SPI_FREQ_HZ     (4 * 1000 * 1000)   /* NRF24 frequency */
 #define BOARD_EXTERNAL_SPI_FREQ_HZ  (2 * 1000 * 1000)   /* External SPI (bitbang) */
-#define BOARD_SD_SPI_FREQ_HZ        (20 * 1000)         /* SD card frequency (in kHz) */
+#define BOARD_SD_SPI_FREQ_HZ        (20 * 1000 * 1000)         /* SD card frequency (in Hz) */
 
 /* ---- I2C Bus Frequency Configuration ---- */
 #define BOARD_NFC_I2C_FREQ_HZ       100000              /* NFC (PN532) I2C frequency */

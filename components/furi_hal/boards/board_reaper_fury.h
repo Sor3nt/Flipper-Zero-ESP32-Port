@@ -152,36 +152,16 @@
 /* Enable debug logging for critical systems */
 #define FURI_HAL_DEBUG_ENABLED  1       /* Enable HAL debug output */
 
-/* ---- SPI Bus Frequency Configuration (per-device) ---- */
-#define BOARD_SUBGHZ_SPI_FREQ_HZ    (8 * 1000 * 1000)   /* CC1101 SubGHz frequency */
-#define BOARD_NRF24_SPI_FREQ_HZ     (4 * 1000 * 1000)   /* NRF24 frequency */
-#define BOARD_EXTERNAL_SPI_FREQ_HZ  (2 * 1000 * 1000)   /* External SPI (bitbang) */
-#define BOARD_SD_SPI_FREQ_HZ        (20 * 1000)         /* SD card frequency (in kHz) */
+/* SPI Bus Stability Settings */
+#define BOARD_SUBGHZ_SPI_FREQ_HZ   (8 * 1000 * 1000)   /* 8MHz - Menggantikan literal hardcoded SubGHz */
+#define BOARD_NRF24_SPI_FREQ_HZ     (4 * 1000 * 1000)   /* 4MHz - Menggantikan literal hardcoded NRF24 */
+#define BOARD_EXTERNAL_SPI_FREQ_HZ  (2 * 1000 * 1000)   /* 2MHz - Untuk fallback bitbang */
+#define BOARD_SD_SPI_FREQ_HZ        (20 * 1000 * 1000)  /* 20MHz murni - Menggantikan SD_MAX_FREQ lama (Bukan 20kHz!) */
+#define BOARD_NFC_I2C_FREQ_HZ       100000  /* 100kHz - Menggantikan hardcoded I2C NFC */
 
-/* ---- I2C Bus Frequency Configuration ---- */
-#define BOARD_NFC_I2C_FREQ_HZ       100000              /* NFC (PN532) I2C frequency */
-
-/* Power Stability Notes:
- * - BQ25896 (charger) and BQ27220 (fuel gauge) share I2C_NUM_0 @ 400kHz
- * - Ensure both devices' addressing is correct (0x6A and 0x55)
- * - BQ25896 QON pin (IO21, Button Key) handles power-on and shutdown
- * - Always verify I2C pull-ups are present on board (4.7k typical)
- */
-
-/* SPI Bus Sharing Notes:
- * - SPI2_HOST shared by: LCD, CC1101, NRF24, SD card
- * - Operating frequency: 40MHz (optimized from 35MHz)
- * - Ensure CS pins are individually controlled (IO7, IO9, IO13, IO3)
- * - Fast switching between devices with optimized CS delays
- * - Performance: 2x faster SD reads with safe timing margins
- */
-
-/* GPIO Configuration Stability Notes:
- * - External GPIO pins (4,5,11,12,42) should use minimal drive current
- * - Avoid connecting high-capacitance loads without series resistor
- * - Maximum recommended load: 12mA per GPIO (total ESP32-S3: 40mA)
- * - Use 10k-100k pull-up/pull-down if interfacing with CMOS
- */
+/* I2C Bus Stability Settings */
+#define BOARD_I2C_FREQ_HZ       100000
+#define BOARD_I2C_TIMEOUT_MS    100
 
 /* ---- External GPIO Pins (for expansion modules) ---- */
 /* These pins are exposed for external module connections */
@@ -203,15 +183,6 @@
 #define BOARD_PIN_EXT_5V_EN     UINT16_MAX  /* Controlled via BQ25896 charger IC (via I2C) */
 #define BOARD_EXT_5V_CONTROL    1           /* 5V power control enabled */
 
-/* 5V Power Control Notes:
- * - Use furi_hal_power_enable_otg() to turn ON 5V (for external modules)
- * - Use furi_hal_power_disable_otg() to turn OFF 5V (power saving)
- * - Controlled via I2C commands to BQ25896 chip
- * - Max available current from VBUS: Limited by charger IC (typically 500mA-2A)
- * - Always verify external module current draw < available capacity
- * - Use power monitor or multimeter to verify 5V is present
- */
-
 /* ---- Expansion Module UART ---- */
 /* Expansion protocol uses UART for serial communication */
 #define BOARD_EXPANSION_UART         UART_NUM_0      /* Use UART0 for expansion modules */
@@ -219,60 +190,5 @@
 #define BOARD_PIN_EXPANSION_RX       UINT16_MAX      /* UART0 RX (default ESP32-S3) */
 #define BOARD_EXPANSION_UART_BAUD    9600            /* Standard expansion protocol baud rate */
 
-/* Expansion Module Protocol Notes:
- * - Serial baud rate: 9600 (mandatory for Flipper Zero protocol compatibility)
- * - Timeout: 250ms max inactivity before module considered disconnected
- * - Frame format: Custom binary protocol with CRC checking
- * - RPC over expansion: Supported (remote control via serial)
- * - OTG control: Supported (5V power enable/disable via serial commands)
- * - Debug: Monitor UART0 output for expansion protocol debug logs
- */
-
-/* ---- Shutdown & Power Management ---- */
-/* BOARD_PIN_BUTTON_KEY (IO21) triggers shutdown when held 2.5 seconds */
-/* Same pin is wired to BQ25896 QON for power-on wake (external circuit) */
 #define BOARD_SHUTDOWN_BUTTON   BOARD_PIN_BUTTON_KEY
 #define BOARD_SHUTDOWN_TIME_MS  BOARD_LONGPRESS_SHUTDOWN_MS
-
-/* Shutdown Stability Notes:
- * - Long-press detection uses esp_timer (50ms polling, 2500ms threshold)
- * - Shutdown is graceful: Furi OS has ~3s to save state before power-off
- * - Wake-up: Press Button Key again (external BQ25896 circuit handles this)
- * - Deep sleep is NOT supported yet (ESP32-S3 limitation in current HAL)
- * - Battery monitoring: Handled by BQ27220 fuel gauge (read via I2C)
- */
-
-/* ---- Overall Stability Checklist ---- */
-/*
- * Before deploying firmware to hardware, verify:
- *
- * 1. POWER:
- *    [ ] Power supply provides stable 5V within 10% regulation
- *    [ ] BQ25896 is properly configured and accessible via I2C
- *    [ ] BQ27220 fuel gauge is present and calibrated
- *    [ ] Battery connector is secure
- *
- * 2. DISPLAY:
- *    [ ] ST7789 LCD initializes correctly (check boot logs)
- *    [ ] SPI frequency is 35MHz (reduced from 40MHz for stability)
- *    [ ] Display orientation is correct (swap_xy=true, mirror_x=true)
- *
- * 3. INPUT:
- *    [ ] All 6 buttons respond (Up/Down/Left/Right/Select/Back)
- *    [ ] Button debounce works (50ms, 4-tick threshold)
- *    [ ] Long-press shutdown activates after 2.5s on Button Key
- *
- * 4. COMMUNICATIONS:
- *    [ ] Expansion UART0 @ 9600 baud works (use USB serial monitor)
- *    [ ] I2C bus clock is 400kHz (check pull-ups present)
- *    [ ] SPI shared bus operates at 35MHz (LCD, CC1101, NRF24, SD)
- *
- * 5. EXTERNAL GPIO:
- *    [ ] All 5 external GPIO pins are accessible via GPIO app
- *    [ ] Pins can be set to HIGH/LOW without crashing
- *    [ ] Verify voltage levels with multimeter (3.3V HIGH, 0V LOW)
- *
- * 6. EXPANSION:
- *    [ ] 5V OTG can be enabled/disabled via furi_hal_power_*_otg()
- *    [ ] Expansion module detection works (if module connected)
- */

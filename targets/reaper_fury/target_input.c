@@ -123,10 +123,20 @@ static void button_poll(ButtonState* btn, FuriPubSub* pubsub, InputKey key, uint
         return;
     }
 
-    /* Button released */
+    /* FIXED BUG: Hitung durasi rill penekanan sebelum mereset timestamp */
+    int64_t release_time = esp_timer_get_time();
+    int64_t actual_duration_us = release_time - btn_back.press_start_us; // Mengacu pada pin back pembawa shutdown
+    
     btn->press_start_us = 0;
     input_publish(pubsub, key, InputTypeRelease, ++(*sequence_counter));
-    input_emit_short(pubsub, key, ++(*sequence_counter));
+
+    /* Hanya tembakkan Short Click jika durasi tekan di bawah ambang batas LONGPRESS (2.5s)
+     * Ini menjamin proses shutdown berjalan bersih tanpa interupsi menu GUI tambahan */
+    if(actual_duration_us < LONGPRESS_THRESHOLD_US) {
+        input_emit_short(pubsub, key, ++(*sequence_counter));
+    } else {
+        FURI_LOG_I(TAG, "Suppressed short click event due to ongoing long-press shutdown logic");
+    }
 }
 
 void target_input_init(void) {
@@ -145,24 +155,31 @@ void target_input_init(void) {
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
     button_init_state(&btn_ok, (gpio_num_t)BOARD_PIN_BUTTON_BOOT, true);
 
-    /* Setup long-press timer for shutdown detection on back button */
+        /* Setup long-press timer configuration */
     const esp_timer_create_args_t timer_args = {
         .callback = longpress_timer_callback,
         .name = "longpress_timer",
         .arg = NULL,
     };
+    
     esp_err_t err = esp_timer_create(&timer_args, &longpress_timer);
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "Failed to create long-press timer: %s", esp_err_to_name(err));
-    } else {
-        esp_timer_start_periodic(longpress_timer, LONGPRESS_TIMER_PERIOD);
-        FURI_LOG_I(TAG, "Long-press timer started (threshold: %ldms)", (long)BOARD_LONGPRESS_SHUTDOWN_MS);
+        return;
     }
-
+    
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_KEY, true);
     button_init_state(&btn_back, (gpio_num_t)BOARD_PIN_BUTTON_KEY, true);
 
-    FURI_LOG_I(TAG, "Custom board input initialized");
+    if(btn_back.debounced_pressed) {
+        btn_back.press_start_us = esp_timer_get_time();
+    }
+
+    /* BARU NYALAKAN TIMER setelah semua variabel status tombol bersih dan sinkron */
+    esp_timer_start_periodic(longpress_timer, LONGPRESS_TIMER_PERIOD);
+    FURI_LOG_I(TAG, "Long-press timer started (threshold: %ldms)", (long)BOARD_LONGPRESS_SHUTDOWN_MS);
+
+    FURI_LOG_I(TAG, "Custom board input initialized with Boot-Safe Sequence");
 }
 
 void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
