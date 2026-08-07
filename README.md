@@ -13,7 +13,7 @@ A port of the [Flipper Zero](https://flipperzero.one/) firmware to ESP32-based d
 
 # The repository is a fork of sor3nt/Flipper-Zero-ESP32
 
-This is open-source code for a new board—the "Reaper" board. The pin configuration matches that used for the Reaper board in the Bruce firmware; this new board is currently undergoing optimization but is already functioning normally on the hardware. (`Note: We have no intention of counterfeiting or hijacking open-source code; the code provided here consists of additions for the new board, minor modifications to stabilize certain code sections, and optimizations to maximize performance and resolve existing bugs.`)
+This is the open-source code for the new "Reaper" board. The pin configuration matches that used for the Reaper board in the Bruce firmware. This new board is currently undergoing optimization; we are refining existing functions and optimizing memory usage within the firmware. Additionally, we are fixing bugs and optimizing the SD card ZIP file.
 
 ## Discord
 
