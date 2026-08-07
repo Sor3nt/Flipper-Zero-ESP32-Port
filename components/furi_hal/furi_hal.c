@@ -5,8 +5,6 @@
 #include <nvs_flash.h>
 /* Memory pool optimization - from furi component */
 #include "../furi/core/furi_memory_optimize.h"
-/* SPI communication optimization */
-#include "furi_hal_spi_optimize.h"
 
 static const char* TAG = "FuriHal";
 
