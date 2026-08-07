@@ -72,7 +72,7 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_subghz = {
     .cs = &gpio_ext_pa4,
     .device = NULL,
     .initialized = false,
-    .frequency_hz = 100 * 1000,
+    .frequency_hz = 8 * 1000 * 1000,
     .mode = 0,
 };
 

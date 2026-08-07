@@ -22,7 +22,7 @@ static const char* attack_short_names[] = {
     [BleSpamAttackPairSpamCustom] = "Pair Spam Custom",
 };
 
-static const uint32_t speed_steps[] = {50, 100, 150, 200, 300, 500};
+static const uint32_t speed_steps[] = {20, 30, 40, 50, 70, 100, 150, 200, 300, 500};
 #define SPEED_STEP_COUNT (sizeof(speed_steps) / sizeof(speed_steps[0]))
 
 static FuriThread* s_spam_thread = NULL;
@@ -157,7 +157,44 @@ void ble_spam_scene_running_on_enter(void* context) {
 
     app->running = false;
     app->packet_count = 0;
-    app->delay_ms = 100;
+    switch(app->attack_type) {
+    case BleSpamAttackAppleDevice:
+        app->delay_ms = 30;
+        break;
+    case BleSpamAttackAppleAction:
+        app->delay_ms = 30;
+        break;
+    case BleSpamAttackAppleNotYourDevice:
+        app->delay_ms = 30;
+        break;
+    case BleSpamAttackFastPair:
+        app->delay_ms = 100;
+        break;
+    case BleSpamAttackSwiftPair:
+        app->delay_ms = 50;
+        break;
+    case BleSpamAttackSamsungBuds:
+        app->delay_ms = 40;   
+        break;
+    case BleSpamAttackSamsungWatch:
+        app->delay_ms = 40;
+        break;
+    case BleSpamAttackXiaomi:
+        app->delay_ms = 70;
+        break;
+    case BleSpamAttackPairSpam:
+        app->delay_ms = 100;
+        break;
+    case BleSpamAttackPairSpamRickroll:
+        app->delay_ms = 100;
+        break;
+    case BleSpamAttackPairSpamCustom:
+        app->delay_ms = 100;
+        break;
+    default:
+        app->delay_ms = 100;
+        break;
+    }
     app->current_index = 0;
     app->current_device[0] = '\0';
 
