@@ -1,0 +1,160 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineSystem.cmake:200 (message)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    message: |
+      The target system is: Generic -  - 
+      The host system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: C:/Users/X1 Carbon/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc.exe 
+      Build flags: -mlongcalls;-fno-builtin-memcpy;-fno-builtin-memset;-fno-builtin-bzero;-fno-builtin-stpcpy;-fno-builtin-strncpy
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is GNU, found in:
+        C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/3.30.2/CompilerIdC/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: C:/Users/X1 Carbon/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32s3-elf-g++.exe 
+      Build flags: -mlongcalls;-fno-builtin-memcpy;-fno-builtin-memset;-fno-builtin-bzero;-fno-builtin-stpcpy;-fno-builtin-strncpy
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/3.30.2/CompilerIdCXX/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:1192 (message)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineASMCompiler.cmake:135 (CMAKE_DETERMINE_COMPILER_ID_VENDOR)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    message: |
+      Checking whether the ASM compiler is GNU using "--version" matched "(GNU assembler)|(GCC)|(Free Software Foundation)":
+      xtensa-esp-elf-gcc.exe (crosstool-NG esp-14.2.0_20241119) 14.2.0
+      Copyright (C) 2024 Free Software Foundation, Inc.
+      This is free software; see the source for copying conditions.  There is NO
+      warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-9rgeoj"
+      binary: "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-9rgeoj"
+    cmakeVariables:
+      CMAKE_C_FLAGS: "-mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake;C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/third_party"
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-9rgeoj'
+        
+        Run Build Command(s): C:/Espressif/tools/ninja/1.12.1/ninja.exe -v cmTC_16f7d
+        [1/2] C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\bin\\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy    -v -o CMakeFiles/cmTC_16f7d.dir/CMakeCCompilerABI.c.obj -c C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeCCompilerABI.c
+        FAILED: CMakeFiles/cmTC_16f7d.dir/CMakeCCompilerABI.c.obj 
+        C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\bin\\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy    -v -o CMakeFiles/cmTC_16f7d.dir/CMakeCCompilerABI.c.obj -c C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        COLLECT_GCC=C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\bin\\XT66A4~1.EXE
+        Target: xtensa-esp-elf
+        Configured with: /builds/idf/crosstool-NG/.build/xtensa-esp-elf/src/gcc/configure --build=x86_64-build_pc-linux-gnu --host=x86_64-host_w64-mingw32 --target=xtensa-esp-elf --prefix=/builds/idf/crosstool-NG/builds/xtensa-esp-elf --exec_prefix=/builds/idf/crosstool-NG/builds/xtensa-esp-elf --with-local-prefix=/builds/idf/crosstool-NG/builds/xtensa-esp-elf/xtensa-esp-elf --with-sysroot=/builds/idf/crosstool-NG/builds/xtensa-esp-elf/xtensa-esp-elf --with-native-system-header-dir=/include --with-newlib --enable-threads=no --disable-shared --with-pkgversion='crosstool-NG esp-14.2.0_20241119' --disable-__cxa_atexit --enable-cxx-flags=-ffunction-sections --disable-libgomp --disable-libmudflap --disable-libmpx --disable-libssp --disable-libquadmath --disable-libquadmath-support --disable-libstdcxx-verbose --with-gmp=/builds/idf/crosstool-NG/.build/xtensa-esp-elf/buildtools/complibs-host --with-mpfr=/builds/idf/crosstool-NG/.build/xtensa-esp-elf/buildtools/complibs-host --with-mpc=/builds/idf/crosstool-NG/.build/xtensa-esp-elf/buildtools/complibs-host --with-isl=/builds/idf/crosstool-NG/.build/xtensa-esp-elf/buildtools/complibs-host --enable-lto --enable-target-optspace --without-long-double-128 --disable-nls --enable-multiarch --enable-languages=c,c++ --disable-libstdcxx-verbose --enable-threads=posix --enable-gcov-custom-rtio --enable-libstdcxx-time=yes --with-gnu-ld
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (crosstool-NG esp-14.2.0_20241119) 
+        COLLECT_GCC_OPTIONS='-mdynconfig=xtensa_esp32s3.so' '-mlongcalls' '-fno-builtin-memcpy' '-fno-builtin-memset' '-fno-builtin-bzero' '-fno-builtin-stpcpy' '-fno-builtin-strncpy' '-v' '-o' 'CMakeFiles/cmTC_16f7d.dir/CMakeCCompilerABI.c.obj' '-c' '-dumpdir' 'CMakeFiles/cmTC_16f7d.dir/'
+         C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../libexec/gcc/xtensa-esp-elf/14.2.0/cc1.exe -quiet -v -imultilib esp32s3 -iprefix C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../lib/gcc/xtensa-esp-elf/14.2.0/ -isysroot C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../xtensa-esp-elf C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_16f7d.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mdynconfig=xtensa_esp32s3.so -mlongcalls -version -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy -o C:\\Users\\X1CARB~1\\AppData\\Local\\Temp\\cck6J3nd.s
+        GNU C17 (crosstool-NG esp-14.2.0_20241119) version 14.2.0 (xtensa-esp-elf)
+        	compiled by GNU C version 6.3.0 20170516, GMP version 6.2.1, MPFR version 4.2.1, MPC version 1.2.1, isl version isl-0.26-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring duplicate directory "C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/lib/gcc/../../lib/gcc/xtensa-esp-elf/14.2.0/include"
+        ignoring nonexistent directory "C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../xtensa-esp-elf/builds/idf/crosstool-NG/builds/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0/../../../../include"
+        ignoring duplicate directory "C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/lib/gcc/../../lib/gcc/xtensa-esp-elf/14.2.0/include-fixed"
+        ignoring duplicate directory "C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/lib/gcc/../../lib/gcc/xtensa-esp-elf/14.2.0/../../../../xtensa-esp-elf/include"
+        ignoring duplicate directory "C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../xtensa-esp-elf/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../lib/gcc/xtensa-esp-elf/14.2.0/include
+         C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../lib/gcc/xtensa-esp-elf/14.2.0/include-fixed
+         C:/Users/X1CARB~1/ESPRES~1/tools/XTENSA~2/ESP-14~1.0_2/XTENSA~1/bin/../lib/gcc/xtensa-esp-elf/14.2.0/../../../../xtensa-esp-elf/include
+        End of search list.\x0d
+        cc1.exe: fatal error: Both 'XTENSA_GNU_CONFIG' and "-dynconfig=" specified but pointed different files: "'C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\lib\\XTENSA~3.SO'" "'xtensa_esp32s3.so'"
+        compilation terminated.\x0d
+        ninja: build stopped: subcommand failed.
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:56 (try_compile)"
+      - "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)"
+      - "CMakeLists.txt:30 (project)"
+    checks:
+      - "Check for working C compiler: C:/Users/X1 Carbon/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc.exe"
+    directories:
+      source: "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor"
+      binary: "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor"
+    cmakeVariables:
+      CMAKE_C_FLAGS: "-mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake;C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/third_party"
+    buildResult:
+      variable: "CMAKE_C_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor'
+        
+        Run Build Command(s): C:/Espressif/tools/ninja/1.12.1/ninja.exe -v cmTC_d2aff
+        [1/2] C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\bin\\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy -o CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj -c "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor/testCCompiler.c"
+        FAILED: CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj 
+        C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\bin\\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy -o CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj -c "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor/testCCompiler.c"
+        cc1.exe: fatal error: Both 'XTENSA_GNU_CONFIG' and "-dynconfig=" specified but pointed different files: "'C:\\Users\\X1CARB~1\\ESPRES~1\\tools\\XTENSA~2\\ESP-14~1.0_2\\XTENSA~1\\lib\\XTENSA~3.SO'" "'xtensa_esp32s3.so'"
+        compilation terminated.\x0d
+        ninja: build stopped: subcommand failed.
+        
+      exitCode: 1
+...

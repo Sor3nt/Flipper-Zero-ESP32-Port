@@ -54,8 +54,6 @@ void furi_hal_init(void) {
     /* Initialize memory pools for DMA, PSRAM, and animation buffers */
     furi_memory_pool_init();
 
-    /* Initialize SPI communication optimization layer */
-
     furi_hal_rtc_init();
     furi_hal_version_init();
     furi_hal_power_init();

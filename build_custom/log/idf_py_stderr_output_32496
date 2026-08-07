@@ -1,0 +1,29 @@
+CMake Error at C:/Espressif/tools/tools/cmake/3.30.2/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:67 (message):
+  The C compiler
+
+    "C:/Users/X1 Carbon/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc.exe"
+
+  is not able to compile a simple test program.
+
+  It fails with the following output:
+
+    Change Dir: 'C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor'
+    
+    Run Build Command(s): C:/Espressif/tools/ninja/1.12.1/ninja.exe -v cmTC_d2aff
+    [1/2] C:\Users\X1CARB~1\ESPRES~1\tools\XTENSA~2\ESP-14~1.0_2\XTENSA~1\bin\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy -o CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj -c "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor/testCCompiler.c"
+    FAILED: CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj 
+    C:\Users\X1CARB~1\ESPRES~1\tools\XTENSA~2\ESP-14~1.0_2\XTENSA~1\bin\XT34AB~1.EXE   -mlongcalls  -fno-builtin-memcpy -fno-builtin-memset -fno-builtin-bzero -fno-builtin-stpcpy -fno-builtin-strncpy -o CMakeFiles/cmTC_d2aff.dir/testCCompiler.c.obj -c "C:/Users/X1 Carbon/Folder Baru/Flipper-Zero-ESP32-Port/build_custom/CMakeFiles/CMakeScratch/TryCompile-isunor/testCCompiler.c"
+    cc1.exe: fatal error: Both 'XTENSA_GNU_CONFIG' and "-dynconfig=" specified but pointed different files: "'C:\Users\X1CARB~1\ESPRES~1\tools\XTENSA~2\ESP-14~1.0_2\XTENSA~1\lib\XTENSA~3.SO'" "'xtensa_esp32s3.so'"
+    compilation terminated.
+    ninja: build stopped: subcommand failed.
+    
+    
+
+  
+
+  CMake will not be able to correctly generate this project.
+Call Stack (most recent call first):
+  C:/Espressif/frameworks/esp-idf-v5.4.1/tools/cmake/project.cmake:571 (__project)
+  CMakeLists.txt:30 (project)
+
+
