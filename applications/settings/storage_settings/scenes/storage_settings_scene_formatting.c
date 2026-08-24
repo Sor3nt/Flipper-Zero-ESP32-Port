@@ -1,6 +1,7 @@
 #include "../storage_settings.h"
 #include <notification/notification.h>
 #include <notification/notification_messages.h>
+#include <loader/loader.h>
 
 static const NotificationMessage message_green_165 = {
     .type = NotificationMessageTypeLedGreen,
@@ -50,16 +51,29 @@ void storage_settings_scene_formatting_on_enter(void* context) {
         dialog_ex_set_icon(dialog_ex, 0, 0, NULL);
         dialog_ex_set_text(
             dialog_ex, storage_error_get_desc(error), 64, 32, AlignCenter, AlignCenter);
+        dialog_ex_set_left_button_text(dialog_ex, "Finish");
     } else {
-        dialog_ex_set_icon(dialog_ex, 48, 6, &I_DolphinDone_80x58);
-        dialog_ex_set_header(dialog_ex, "Formatted", 5, 10, AlignLeft, AlignTop);
         NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
         notification_message(notification, &sequence_single_vibro);
         notification_message(notification, &sequence_set_green_255);
         notification_message(notification, &sequence_success);
         furi_record_close(RECORD_NOTIFICATION);
+
+        /* Karte ist frisch formatiert und leer -> anbieten, Firmware-/SD-Files
+         * ueber die WiFi-App nachzuladen. Yes -> Update-Flow, No -> zurueck. */
+        dialog_ex_set_icon(dialog_ex, 0, 0, NULL);
+        dialog_ex_set_header(
+            dialog_ex, "Load SD-Card files?", 64, 8, AlignCenter, AlignTop);
+        dialog_ex_set_text(
+            dialog_ex,
+            "Fetch firmware and\napp files now?",
+            64,
+            30,
+            AlignCenter,
+            AlignTop);
+        dialog_ex_set_left_button_text(dialog_ex, "No");
+        dialog_ex_set_right_button_text(dialog_ex, "Yes");
     }
-    dialog_ex_set_left_button_text(dialog_ex, "Finish");
 }
 
 bool storage_settings_scene_formatting_on_event(void* context, SceneManagerEvent event) {
@@ -78,6 +92,20 @@ bool storage_settings_scene_formatting_on_event(void* context, SceneManagerEvent
                     app->scene_manager, StorageSettingsStart);
             }
             break;
+        case DialogExResultRight: {
+            /* "Yes": in den kombinierten Firmware-/SD-Update-Flow der WiFi-App
+             * springen (Launch-Arg "update"), gleiches Muster wie der
+             * "Update Firmware"-Menuepunkt im Settings-Menue. Deferred-Launch:
+             * erst enqueuen, dann diese App beenden -> der Loader startet danach
+             * "wlan". */
+            Loader* loader = furi_record_open(RECORD_LOADER);
+            loader_start_detached_with_gui_error(loader, "wlan", "update");
+            furi_record_close(RECORD_LOADER);
+            scene_manager_stop(app->scene_manager);
+            view_dispatcher_stop(app->view_dispatcher);
+            consumed = true;
+            break;
+        }
         }
     } else if(event.type == SceneManagerEventTypeBack) {
         consumed = true;

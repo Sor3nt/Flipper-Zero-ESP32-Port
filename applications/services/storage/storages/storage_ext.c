@@ -213,8 +213,22 @@ FS_Error sd_format_card(StorageData* storage) {
     SDData* sd_data = storage->data;
     SDError error;
 
-    work_area = malloc(_MAX_SS);
-    error = f_mkfs(sd_data->path, FM_ANY, 0, work_area, _MAX_SS);
+    /* Work area for f_mkfs; must be at least FF_MAX_SS. A few sectors speed up
+     * FAT32 table creation on large cards without eating much RAM. */
+    const UINT work_area_size = _MAX_SS * 4;
+    work_area = malloc(work_area_size);
+    if(work_area == NULL) {
+        return FSE_INTERNAL;
+    }
+
+    /* Force FAT32 so cards that ship as exFAT (which this firmware cannot mount,
+     * FF_FS_EXFAT=0) become usable Flipper cards. Fall back to FAT/FAT16 only if
+     * the volume is too small for FAT32 (f_mkfs aborts). No FM_SFD -> keep an MBR
+     * partition table for maximum PC/card-reader compatibility. */
+    error = f_mkfs(sd_data->path, FM_FAT32, 0, work_area, work_area_size);
+    if(error == FR_MKFS_ABORTED) {
+        error = f_mkfs(sd_data->path, FM_FAT, 0, work_area, work_area_size);
+    }
     free(work_area);
 
     do {
