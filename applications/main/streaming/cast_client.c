@@ -532,6 +532,10 @@ bool cast_start(uint32_t ip, uint16_t port, const char* media_url, const char* m
     s_duration_ms = 0;
     s_cmd_play = s_cmd_pause = s_cmd_seek = s_cmd_load = false;
     s_run = true;
+    /* Publish "connecting" synchronously so the first UI tick after cast_start()
+     * doesn't observe the stale Idle state (from cast_stop) and bounce the
+     * player back to a "Play" prompt - the session task sets it again anyway. */
+    s_state = CastStateConnecting;
 
     s_stack = heap_caps_malloc(SESSION_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     s_task_buf = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

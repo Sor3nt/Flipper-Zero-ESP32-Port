@@ -17,6 +17,7 @@ extern const Icon I_js_script_10px;
 extern const Icon I_keyboard_10px;
 extern const Icon I_loading_10px;
 extern const Icon I_music_10px;
+extern const Icon I_video_10px;
 extern const Icon I_settings_10px;
 extern const Icon I_sub1_10px;
 extern const Icon I_subrem_10px;

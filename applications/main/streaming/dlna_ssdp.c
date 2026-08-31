@@ -5,6 +5,9 @@
 #include <lwip/sockets.h>
 #include <esp_log.h>
 #include <furi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -352,9 +355,9 @@ static void ssdp_scan_worker(void* arg) {
             }
         }
         elapsed += 250;
-        /* Re-send all search targets roughly every 1.2 s (multicast is lossy;
+        /* Re-send all search targets roughly every 0.8 s (multicast is lossy;
          * a renderer that missed the first burst may answer a later one). */
-        if(elapsed - last_query >= 1200) {
+        if(elapsed - last_query >= 800) {
             for(int q = 0; q < n_sts; q++) {
                 int ml = snprintf(
                     msearch, sizeof(msearch),
@@ -415,8 +418,38 @@ static void ssdp_scan_worker(void* arg) {
     ESP_LOGI(TAG, "ssdp scan done: %d renderer(s)", c->count);
 }
 
+/* SSDP's multicast-send path (IP_MULTICAST_IF) is stack-heavy: it needs ~32 KB,
+ * more than the shared 16 KB wlan_hal worker (which overflowed → stack panic).
+ * Run the scan on a temporary dedicated 32 KB task instead of bloating the
+ * permanent worker (that would re-eat internal DRAM). xTaskCreate's stack comes
+ * from the internal heap only for the scan's duration; the task frees itself
+ * (vTaskDelete) and we just wait for completion. */
+#define SSDP_SCAN_TASK_STACK 8192 /* words = 32 KB */
+
+typedef struct {
+    WlanHalWorkerFn fn;
+    void* arg;
+    SemaphoreHandle_t done;
+} SsdpScanTask;
+
+static void ssdp_scan_task_trampoline(void* p) {
+    SsdpScanTask* t = p;
+    t->fn(t->arg);
+    xSemaphoreGive(t->done);
+    vTaskDelete(NULL);
+}
+
 int dlna_ssdp_scan(DlnaDevice* out, int max, uint32_t timeout_ms) {
     SsdpCtx ctx = {.out = out, .max = max, .timeout_ms = timeout_ms, .count = 0};
-    if(!wlan_hal_run_in_worker(ssdp_scan_worker, &ctx)) return 0;
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    if(!done) return 0;
+    SsdpScanTask t = {.fn = ssdp_scan_worker, .arg = &ctx, .done = done};
+    if(xTaskCreate(ssdp_scan_task_trampoline, "SsdpScan", SSDP_SCAN_TASK_STACK, &t, 5, NULL) !=
+       pdPASS) {
+        vSemaphoreDelete(done);
+        return 0;
+    }
+    xSemaphoreTake(done, portMAX_DELAY);
+    vSemaphoreDelete(done);
     return ctx.count;
 }

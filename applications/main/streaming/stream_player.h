@@ -34,3 +34,6 @@ void stream_player_tick(StreamingApp* app);
 
 /* True if the current backend supports seeking (Cast/DLNA). */
 bool stream_player_seekable(StreamingApp* app);
+
+/* True while a Cast session is still launching on the TV (no media yet). */
+bool stream_player_is_connecting(StreamingApp* app);

@@ -61,6 +61,14 @@ const char* dlna_render_mime_for(const char* name) {
     if(!strcmp(ext, "wmv")) return "video/x-ms-wmv";
     if(!strcmp(ext, "flv")) return "video/x-flv";
     if(!strcmp(ext, "3gp")) return "video/3gpp";
+    /* Audio — needed for Cast/DLNA of MP3 (was falling through to octet-stream,
+     * which the Cast receiver launches for but then can't play). */
+    if(!strcmp(ext, "mp3")) return "audio/mpeg";
+    if(!strcmp(ext, "m4a")) return "audio/mp4";
+    if(!strcmp(ext, "aac")) return "audio/aac";
+    if(!strcmp(ext, "wav")) return "audio/wav";
+    if(!strcmp(ext, "flac")) return "audio/flac";
+    if(!strcmp(ext, "ogg") || !strcmp(ext, "oga")) return "audio/ogg";
     return "application/octet-stream";
 }
 

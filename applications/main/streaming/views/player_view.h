@@ -30,4 +30,5 @@ void player_view_update(
     uint32_t elapsed_ms,
     uint32_t duration_ms,
     uint8_t state,
-    bool seekable);
+    bool seekable,
+    bool buffering);

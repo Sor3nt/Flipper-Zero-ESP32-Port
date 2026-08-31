@@ -18,6 +18,7 @@ typedef struct {
     uint32_t duration_ms;
     uint8_t state; /* 0 idle, 1 playing, 2 paused */
     bool seekable;
+    bool buffering; /* Cast session still launching on the TV */
 } PlayerViewModel;
 
 static void format_mmss(uint32_t ms, char* out, size_t out_size) {
@@ -57,7 +58,10 @@ static void player_view_draw(Canvas* canvas, void* model) {
         canvas_draw_box(canvas, 3, bar_y + 1, fill, 4);
     }
 
-    const char* status = (m->state == 1) ? "Playing" : (m->state == 2) ? "Paused" : "Stopped";
+    const char* status = m->buffering       ? "Buffering..." :
+                         (m->state == 1)    ? "Playing" :
+                         (m->state == 2)    ? "Paused" :
+                                              "Stopped";
     canvas_draw_str(canvas, 2, 50, status);
 
     if(m->target[0]) {
@@ -68,11 +72,13 @@ static void player_view_draw(Canvas* canvas, void* model) {
         canvas_draw_str_aligned(canvas, 126, 50, AlignRight, AlignBottom, tgt);
     }
 
-    if(m->seekable) {
+    if(m->seekable && !m->buffering) {
         elements_button_left(canvas, "-5s");
         elements_button_right(canvas, "+5s");
     }
-    elements_button_center(canvas, m->state == 1 ? "Pause" : "Play");
+    if(!m->buffering) {
+        elements_button_center(canvas, m->state == 1 ? "Pause" : "Play");
+    }
 }
 
 static bool player_view_input(InputEvent* event, void* context) {
@@ -85,10 +91,10 @@ static bool player_view_input(InputEvent* event, void* context) {
     case InputKeyOk:
         if(v->callback) v->callback(PlayerViewEventPlayPause, v->callback_ctx);
         return true;
-    case InputKeyDown:
+    case InputKeyUp:
         if(v->callback) v->callback(PlayerViewEventSeekBack, v->callback_ctx);
         return true;
-    case InputKeyUp:
+    case InputKeyDown:
         if(v->callback) v->callback(PlayerViewEventSeekForward, v->callback_ctx);
         return true;
     case InputKeyBack:
@@ -134,7 +140,8 @@ void player_view_update(
     uint32_t elapsed_ms,
     uint32_t duration_ms,
     uint8_t state,
-    bool seekable) {
+    bool seekable,
+    bool buffering) {
     furi_assert(v);
     with_view_model(
         v->view,
@@ -148,6 +155,7 @@ void player_view_update(
             m->duration_ms = duration_ms;
             m->state = state;
             m->seekable = seekable;
+            m->buffering = buffering;
         },
         true);
 }

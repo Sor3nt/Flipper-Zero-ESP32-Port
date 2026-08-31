@@ -126,6 +126,9 @@ struct StreamingApp {
     char sel_name[STREAMING_NAME_MAX];
     MediaKind sel_kind;
 
+    /* message shown by scene_error (e.g. unsupported AirPlay encryption) */
+    char error_msg[64];
+
     /* playback engine (see stream_player.c) */
     PlayMode play_mode;
     PlaybackState playback;
@@ -134,6 +137,12 @@ struct StreamingApp {
     uint8_t volume;
     bool speaker_owned;       /* true while we hold the I2S speaker HAL */
     volatile bool audio_ended; /* set by the decoder EOF callback */
+
+    /* DLNA local progress fallback: many renderers accept Play but have no
+     * working GetPositionInfo. When the poll never returns a position, count
+     * elapsed time locally from the play start instead of showing 0:00. */
+    uint32_t dlna_play_tick;
+    bool dlna_pos_from_soap;
 
     /* async SOAP command in flight (DLNA path) */
     volatile bool cmd_busy;

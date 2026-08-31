@@ -37,6 +37,10 @@ bool mp3_decoder_play(const char* path);
 
 void mp3_decoder_pause(void);
 void mp3_decoder_resume(void);
+
+/* Seek to an absolute position (ms). No-op until the duration is known
+ * (after the first decoded frame). CBR byte estimate + frame re-sync. */
+void mp3_decoder_seek(uint32_t target_ms);
 void mp3_decoder_stop(void);
 
 bool mp3_decoder_is_playing(void);
@@ -45,5 +49,10 @@ bool mp3_decoder_is_paused(void);
 /* Position in milliseconds, updated by the decoder thread.
  * `out_duration_ms` is 0 if the duration is unknown. */
 void mp3_decoder_get_progress(uint32_t* out_elapsed_ms, uint32_t* out_duration_ms);
+
+/* Probe the MP3 duration (ms) straight from the file, without playing it.
+ * Returns 0 if unknown. Used for the DLNA/Cast progress bar, where the ESP
+ * only serves the file and never decodes it. */
+uint32_t mp3_decoder_probe_duration_ms(const char* path);
 
 #endif /* MP3_DECODER_H */

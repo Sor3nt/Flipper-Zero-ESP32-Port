@@ -984,6 +984,9 @@ const Icon I_js_script_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0
 const Icon I_keyboard_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_keyboard_10px};
 const Icon I_loading_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_loading_10px};
 const Icon I_music_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_music_10px};
+const uint8_t _I_video_10px_0[] = {0x00,0xff,0x03,0x01,0x02,0x09,0x02,0x19,0x02,0x39,0x02,0x39,0x02,0x19,0x02,0x09,0x02,0x01,0x02,0xff,0x03,};
+const uint8_t* const _I_video_10px[] = {_I_video_10px_0};
+const Icon I_video_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_video_10px};
 const Icon I_settings_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_settings_10px};
 const Icon I_sub1_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_sub1_10px};
 const Icon I_subrem_10px = {.width=10,.height=10,.frame_count=1,.frame_rate=0,.frames=_I_subrem_10px};

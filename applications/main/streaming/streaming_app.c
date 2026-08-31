@@ -5,6 +5,8 @@
 #include <storage/storage.h>
 #include <wifi.h>
 #include <wlan_app/views/wlan_lan_view.h>
+#include <string.h>
+#include <strings.h>
 
 #define TAG STREAMING_TAG
 
@@ -116,7 +118,27 @@ int32_t streaming_app(void* p) {
     FURI_LOG_I(TAG, "starting");
 
     StreamingApp* app = streaming_app_alloc();
-    scene_manager_next_scene(app->scene_manager, StreamingSceneBrowser);
+
+    const char* arg = (const char*)p;
+    if(arg && arg[0]) {
+        /* Launched with a file path (e.g. from the archive browser clicking an
+         * .mp3/.mp4). Skip the browser and open the action menu for that file. */
+        strncpy(app->sel_path, arg, sizeof(app->sel_path) - 1);
+        app->sel_path[sizeof(app->sel_path) - 1] = '\0';
+        const char* slash = strrchr(arg, '/');
+        const char* base = slash ? slash + 1 : arg;
+        strncpy(app->sel_name, base, sizeof(app->sel_name) - 1);
+        app->sel_name[sizeof(app->sel_name) - 1] = '\0';
+        size_t len = strlen(base);
+        app->sel_kind = MediaKindVideo;
+        if(len >= 4 && strcasecmp(base + len - 4, ".mp3") == 0) {
+            app->sel_kind = MediaKindAudio;
+        }
+        scene_manager_next_scene(app->scene_manager, StreamingSceneActionMenu);
+    } else {
+        scene_manager_next_scene(app->scene_manager, StreamingSceneBrowser);
+    }
+
     view_dispatcher_run(app->view_dispatcher);
     streaming_app_free(app);
 

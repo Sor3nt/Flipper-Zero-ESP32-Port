@@ -39,6 +39,8 @@ static const Icon* ArchiveItemIcons[] = {
     [ArchiveFileTypeUnknown] = &I_unknown_10px,
     [ArchiveFileTypeLoading] = &I_loading_10px,
     [ArchiveFileTypeJS] = &I_js_script_10px,
+    [ArchiveFileTypeMp3] = &I_music_10px,
+    [ArchiveFileTypeMp4] = &I_video_10px,
     [ArchiveFileTypeAppOrJs] = &I_unknown_10px,
 };
 

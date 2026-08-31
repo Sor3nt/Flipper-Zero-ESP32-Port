@@ -51,6 +51,7 @@ static TaskHandle_t s_task = NULL;
 static volatile bool s_running = false;
 static volatile bool s_task_done = false; /* task set this right before it deletes itself */
 static volatile int s_handshake = 0; /* 0=pending, 1=ok, -1=fail */
+static volatile bool s_was_airplay2 = false; /* last fail was an AirPlay 2 device */
 
 static uint32_t s_recv_ip = 0;
 static uint16_t s_rtsp_port = 0;
@@ -233,6 +234,17 @@ static bool rtsp_handshake(void) {
     snprintf(opt_hdr, sizeof(opt_hdr), "Apple-Challenge: %s\r\n", chal_b64);
     if(rtsp_transact("OPTIONS", "*", opt_hdr, NULL, resp, sizeof(resp)) != 200) return false;
 
+    /* AirPlay 2 receivers (AirTunes >= 200) advertise the classic RAOP verbs but
+     * don't accept the unencrypted SETUP — they hang or crash on it. Detect them
+     * from the OPTIONS "Server:" header and bail BEFORE sending SETUP (avoids
+     * crashing the receiver); the UI then shows a specific error. */
+    const char* srv = strstr(resp, "AirTunes/");
+    if(srv && atoi(srv + 9) >= 200) {
+        ESP_LOGW(TAG, "AirPlay 2 receiver (%.16s) — classic RAOP unsupported", srv);
+        s_was_airplay2 = true;
+        return false;
+    }
+
     /* ANNOUNCE with SDP (PCM L16, unencrypted) */
     char recv_str[16];
     ip_to_str(s_recv_ip, recv_str, sizeof(recv_str));
@@ -253,9 +265,11 @@ static bool rtsp_handshake(void) {
         return false;
 
     /* SETUP — advertise our control/timing ports, learn the receiver's ports */
+    /* No "interleaved=0-1" here: that's a TCP-transport artifact and confuses
+     * (or hangs) some receivers on a UDP transport. */
     snprintf(
         hdr, sizeof(hdr),
-        "Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;"
+        "Transport: RTP/AVP/UDP;unicast;mode=record;"
         "control_port=%d;timing_port=%d\r\n",
         RAOP_CTRL_PORT, RAOP_TIMING_PORT);
     if(rtsp_transact("SETUP", uri, hdr, NULL, resp, sizeof(resp)) != 200) return false;
@@ -600,8 +614,13 @@ static void raop_task(void* arg) {
 
 /* ---------------- public API ---------------- */
 
+bool airplay_raop_was_airplay2(void) {
+    return s_was_airplay2;
+}
+
 bool airplay_raop_start(uint32_t receiver_ip, uint16_t rtsp_port, uint32_t local_ip) {
     if(s_running) return true;
+    s_was_airplay2 = false;
 
     s_recv_ip = receiver_ip;
     s_rtsp_port = rtsp_port;

@@ -1,6 +1,8 @@
 #include "../streaming.h"
 #include "../stream_player.h"
+#include "../airplay_raop.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <strings.h>
 
@@ -48,15 +50,26 @@ static void player_refresh_view(StreamingApp* app) {
         app->elapsed_ms,
         app->duration_ms,
         state,
-        stream_player_seekable(app));
+        stream_player_seekable(app),
+        stream_player_is_connecting(app));
 }
 
 void streaming_scene_player_on_enter(void* context) {
     StreamingApp* app = context;
+
+    if(!stream_player_start(app) && app->play_mode == PlayModeAirplay) {
+        /* AirPlay handshake failed → show an error instead of a dead player.
+         * AirPlay 2 devices are rejected before SETUP (no receiver crash). */
+        snprintf(
+            app->error_msg, sizeof(app->error_msg), "%s",
+            airplay_raop_was_airplay2() ? "AirPlay 2 device\nis not supported" :
+                                          "AirPlay connection\nfailed");
+        scene_manager_next_scene(app->scene_manager, StreamingSceneError);
+        return;
+    }
+
     player_view_set_callback(app->player_view, player_cb, app);
     view_dispatcher_switch_to_view(app->view_dispatcher, StreamingViewPlayer);
-
-    stream_player_start(app);
     player_refresh_view(app);
 }
 
@@ -64,10 +77,14 @@ bool streaming_scene_player_on_event(void* context, SceneManagerEvent event) {
     StreamingApp* app = context;
 
     if(event.type == SceneManagerEventTypeBack) {
-        /* Back always returns to the file browser (skip the device-scan /
-         * action-menu / wifi scenes that lie between it and the player). */
-        scene_manager_search_and_switch_to_previous_scene(
-            app->scene_manager, StreamingSceneBrowser);
+        /* Back from the player returns to the file's action menu ("Play"/"Stream"),
+         * skipping the device-scan / wifi scenes in between. The action menu is in
+         * the stack for both the normal launch (browser below it) and the archive
+         * arg-launch (action menu is the root); from there Back exits naturally. */
+        if(!scene_manager_search_and_switch_to_previous_scene(
+               app->scene_manager, StreamingSceneActionMenu)) {
+            return false;
+        }
         return true;
     }
 

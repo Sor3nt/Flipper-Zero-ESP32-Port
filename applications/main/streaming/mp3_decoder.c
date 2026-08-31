@@ -43,6 +43,8 @@ typedef struct {
     volatile bool     paused;
     volatile bool     pause_req;
     volatile bool     resume_req;
+    volatile bool     seek_req;
+    volatile uint32_t seek_target_ms;
 
     Mp3DecoderEndedCallback ended_cb;
     void*                   ended_ctx;
@@ -127,6 +129,26 @@ static int32_t decoder_task(void* ctx) {
         /* Handle pause/resume signals via volatile bools. */
         if(d->pause_req)  { d->paused = true;  d->pause_req  = false; }
         if(d->resume_req) { d->paused = false; d->resume_req = false; }
+
+        /* Seek: jump to a byte offset estimated from the CBR duration, flush
+         * the sink so buffered audio from the old spot is dropped, and let the
+         * loop re-sync on the next frame header. Handled even while paused so
+         * the position updates immediately. */
+        if(d->seek_req) {
+            d->seek_req = false;
+            if(d->duration_ms > 0) {
+                uint64_t byte =
+                    (uint64_t)d->file_size * d->seek_target_ms / d->duration_ms;
+                if(byte >= d->file_size) byte = (d->file_size > 0) ? d->file_size - 1 : 0;
+                storage_file_seek(d->file, (uint32_t)byte, true);
+                d->file_pos   = byte;
+                d->read_left  = 0;
+                d->read_ptr   = d->read_buf;
+                d->eof        = false;
+                d->elapsed_ms = d->seek_target_ms;
+                mp3_sink_flush();
+            }
+        }
         if(d->paused) {
             furi_delay_ms(50);
             continue;
@@ -221,6 +243,50 @@ static int32_t decoder_task(void* ctx) {
 
 /* ------------- public API ------------- */
 
+uint32_t mp3_decoder_probe_duration_ms(const char* path) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    File* file = storage_file_alloc(storage);
+    HMP3Decoder h = NULL;
+    uint8_t* buf = NULL;
+    uint32_t dur = 0;
+
+    if(!storage_file_open(file, path, FSAM_READ, FSOM_OPEN_EXISTING)) goto out;
+    uint64_t fsize = storage_file_size(file);
+    h = MP3InitDecoder();
+    buf = malloc(READ_BUF_SIZE);
+    if(!h || !buf) goto out;
+
+    /* Skip an ID3v2 tag (syncsafe size in bytes 6..9) so it doesn't count
+     * toward the audio length and MP3FindSyncWord lands on a real frame. */
+    uint32_t id3 = 0;
+    uint8_t tag[10];
+    if(storage_file_read(file, tag, 10) == 10 && tag[0] == 'I' && tag[1] == 'D' &&
+       tag[2] == '3') {
+        id3 = 10 + (((uint32_t)(tag[6] & 0x7f) << 21) | ((uint32_t)(tag[7] & 0x7f) << 14) |
+                    ((uint32_t)(tag[8] & 0x7f) << 7) | (uint32_t)(tag[9] & 0x7f));
+    }
+    storage_file_seek(file, id3, true);
+
+    int n = storage_file_read(file, buf, READ_BUF_SIZE);
+    if(n <= 0) goto out;
+    int off = MP3FindSyncWord(buf, n);
+    if(off < 0) goto out;
+    MP3FrameInfo fi;
+    if(MP3GetNextFrameInfo(h, &fi, buf + off) == 0 && fi.bitrate > 0) {
+        /* Crude CBR estimate (file bytes / bitrate); VBR is off but fine for a
+         * progress bar. */
+        dur = (uint32_t)(((uint64_t)(fsize - id3) * 8 * 1000) / (uint64_t)fi.bitrate);
+    }
+
+out:
+    if(h) MP3FreeDecoder(h);
+    if(buf) free(buf);
+    storage_file_close(file);
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
+    return dur;
+}
+
 bool mp3_decoder_init(void) {
     if(g_dec) return true;
 
@@ -290,6 +356,7 @@ bool mp3_decoder_play(const char* path) {
     g_dec->paused      = false;
     g_dec->pause_req   = false;
     g_dec->resume_req  = false;
+    g_dec->seek_req    = false;
     g_dec->channels    = 2;
 
     g_dec->playing = true;
@@ -307,6 +374,16 @@ void mp3_decoder_pause(void) {
 void mp3_decoder_resume(void) {
     if(!g_dec) return;
     g_dec->resume_req = true;
+}
+
+void mp3_decoder_seek(uint32_t target_ms) {
+    if(!g_dec || !g_dec->playing) return;
+    /* Need the (CBR) duration to map time -> byte; known after the first
+     * decoded frame, i.e. once playback is actually running. */
+    if(g_dec->duration_ms == 0) return;
+    if(target_ms > g_dec->duration_ms) target_ms = g_dec->duration_ms;
+    g_dec->seek_target_ms = target_ms;
+    g_dec->seek_req = true;
 }
 
 void mp3_decoder_stop(void) {

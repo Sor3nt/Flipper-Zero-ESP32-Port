@@ -45,4 +45,9 @@ void airplay_raop_set_metadata(const char* title, uint32_t duration_ms);
 /* Playback position/duration (ms) → progress SET_PARAMETER (receiver scrubber). */
 void airplay_raop_set_progress(uint32_t elapsed_ms, uint32_t duration_ms);
 
+/* True if the last failed handshake was rejected because the receiver is an
+ * AirPlay 2 device (AirTunes >= 200) that doesn't support the classic
+ * unencrypted RAOP SETUP. Lets the UI show a specific error. */
+bool airplay_raop_was_airplay2(void);
+
 #endif /* AIRPLAY_RAOP_H */
