@@ -4,7 +4,7 @@
 #include "../wlan_html_inject.h"
 #include "../wlan_mitm_server.h"
 #include "../wlan_mitm_payloads.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 #include "scene_restoring.h"
 
 // Run-Scene des MiTM-Features (vormals "Live Creds"). Settings (Inject ein/aus,

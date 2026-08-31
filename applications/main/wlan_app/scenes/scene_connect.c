@@ -1,6 +1,6 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
-#include "../wlan_passwords.h"
+#include <wlan_hal.h>
+#include <wlan_passwords.h>
 
 #define CONNECT_MENU_HANDSHAKE 1
 #define CONNECT_MENU_DEAUTH    2

@@ -12,6 +12,13 @@ bool wlan_hal_start(void);
 /** Beende den WiFi-Stack und stelle BT wieder her. Idempotent. */
 void wlan_hal_stop(void);
 
+/** Steuert, ob wlan_hal_stop() den BT-Stack wiederherstellt. wlan_hal_start()
+ *  setzt dieses Flag automatisch auf true, wenn es BT beim Start abgeschaltet
+ *  hat (transiente WiFi-Nutzung → BT kommt beim Stop zurück). Der WiFi-Service
+ *  löscht es (false), sobald WiFi global/„sticky" wird (Lock-Menü „Enable WiFi"
+ *  oder erfolgreicher STA-Connect), damit BT dann bewusst aus bleibt. */
+void wlan_hal_set_bt_restore(bool restore);
+
 bool wlan_hal_is_started(void);
 
 /** Stellt nur den WLAN-Worker-Task + Command-Queue sicher, ohne den WiFi-
@@ -31,6 +38,13 @@ bool wlan_hal_connect(const char* ssid, const char* password, const uint8_t* bss
 void wlan_hal_disconnect(void);
 
 bool wlan_hal_is_connected(void);
+
+/** Füllt out mit dem AP, mit dem die STA aktuell verbunden ist (SSID, BSSID,
+ *  Channel, Authmode, RSSI via esp_wifi_sta_get_ap_info). Liefert false, wenn
+ *  nicht verbunden oder der Stack nicht läuft. Nützlich, um den UI-Zustand einer
+ *  neu gestarteten App aus einer bereits bestehenden (globalen) Verbindung zu
+ *  rekonstruieren. */
+bool wlan_hal_get_connected_ap(wifi_ap_record_t* out);
 
 bool wlan_hal_last_fail_is_auth(void);
 

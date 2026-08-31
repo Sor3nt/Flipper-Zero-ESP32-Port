@@ -1,5 +1,5 @@
 #include "wlan_webfs.h"
-#include "wlan_hal.h"
+#include <wlan_hal.h>
 
 #include <furi.h>
 #include <storage/storage.h>

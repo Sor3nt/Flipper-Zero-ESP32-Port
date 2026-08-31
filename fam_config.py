@@ -47,6 +47,7 @@ APPS = [
     "infrared",
     "lfrfid",
     "wlan",
+    "wifi",
     "nrf24",
     "ble_spam",
     "js_app",

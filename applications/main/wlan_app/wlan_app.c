@@ -1,8 +1,10 @@
 #include "wlan_app.h"
 #include "wlan_html_inject.h"
 #include "wlan_cred_sniff.h"
-#include "wlan_hal.h"
+#include <wlan_hal.h>
 #include "wlan_netcut.h"
+#include <wifi.h>
+#include <wlan_passwords.h>
 
 #include <esp_heap_caps.h> /* TEMP: heap diagnostics for the C6 OOM crash */
 
@@ -141,6 +143,24 @@ static WlanApp* wlan_app_alloc(void) {
     memset(&app->target_ap, 0, sizeof(app->target_ap));
     memset(app->password_input, 0, sizeof(app->password_input));
 
+    /* Globales WiFi bleibt über App-Grenzen verbunden. Ist die STA bereits
+     * verbunden (z.B. beim erneuten Öffnen der App), den UI-Zustand aus der
+     * laufenden Verbindung rekonstruieren, statt „Select Wifi" zu zeigen. */
+    wifi_ap_record_t cur_ap;
+    if(wlan_hal_is_connected() && wlan_hal_get_connected_ap(&cur_ap)) {
+        app->connected = true;
+        strncpy(
+            app->connected_ap.ssid,
+            (const char*)cur_ap.ssid,
+            sizeof(app->connected_ap.ssid) - 1);
+        memcpy(app->connected_ap.bssid, cur_ap.bssid, 6);
+        app->connected_ap.rssi = cur_ap.rssi;
+        app->connected_ap.channel = cur_ap.primary;
+        app->connected_ap.authmode = cur_ap.authmode;
+        app->connected_ap.is_open = (cur_ap.authmode == WIFI_AUTH_OPEN);
+        app->connected_ap.has_password = wlan_password_exists(app->connected_ap.ssid);
+    }
+
     app->attack_block_internet = false;
     app->attack_throttle = WlanAppThrottleOff;
 
@@ -219,7 +239,16 @@ static void wlan_app_free(WlanApp* app) {
         wlan_androidtv_free(app->androidtv);
         app->androidtv = NULL;
     }
-    wlan_hal_stop();
+    /* WiFi global aktiv (Lock-Menü „Enable WiFi" oder erfolgreicher STA-Connect)
+     * → Radio + Verbindung beim App-Verlassen NICHT abbauen, damit man verbunden
+     * bleibt. Nur transiente WiFi-Nutzung (Scan/Attack ohne globales WiFi) wird
+     * hier abgeräumt (stellt via wlan_hal ggf. BT wieder her). */
+    Wifi* wifi = furi_record_open(RECORD_WIFI);
+    bool wifi_global = wifi_is_enabled(wifi);
+    furi_record_close(RECORD_WIFI);
+    if(!wifi_global) {
+        wlan_hal_stop();
+    }
 
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSubmenu);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewWidget);

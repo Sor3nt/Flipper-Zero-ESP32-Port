@@ -1,5 +1,5 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>

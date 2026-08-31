@@ -6,7 +6,7 @@
  * list view; OK on a server continues to the login scene. */
 
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>

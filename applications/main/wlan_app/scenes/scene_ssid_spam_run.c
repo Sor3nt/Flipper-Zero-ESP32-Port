@@ -1,5 +1,5 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 
 static const char* mode_label(uint8_t mode) {
     switch(mode) {

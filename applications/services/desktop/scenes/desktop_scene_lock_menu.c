@@ -2,6 +2,7 @@
 #include <gui/scene_manager.h>
 
 #include <btshim.h>
+#include <wifi.h>
 
 #include "../desktop_i.h"
 #include "../views/desktop_view_lock_menu.h"
@@ -40,6 +41,13 @@ static void desktop_lock_menu_set_bt_enabled(bool enabled) {
     furi_record_close(RECORD_BT);
 }
 
+static bool desktop_lock_menu_wifi_enabled(void) {
+    Wifi* wifi = furi_record_open(RECORD_WIFI);
+    bool enabled = wifi_is_enabled(wifi);
+    furi_record_close(RECORD_WIFI);
+    return enabled;
+}
+
 /* Rebuild the menu from the live toggle states (used on enter and after a
  * toggle, so the Enable/Disable labels track reality). */
 static void desktop_scene_lock_menu_refresh(Desktop* desktop) {
@@ -47,7 +55,8 @@ static void desktop_scene_lock_menu_refresh(Desktop* desktop) {
         desktop->lock_menu,
         LOCK_MENU_USB_AVAILABLE,
         qflipper_bridge_is_active(),
-        desktop_lock_menu_bt_enabled());
+        desktop_lock_menu_bt_enabled(),
+        desktop_lock_menu_wifi_enabled());
 }
 
 void desktop_scene_lock_menu_on_enter(void* context) {
@@ -87,11 +96,41 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
 
-        case DesktopLockMenuEventBluetoothToggle:
-            desktop_lock_menu_set_bt_enabled(!desktop_lock_menu_bt_enabled());
+        case DesktopLockMenuEventBluetoothToggle: {
+            bool want_on = !desktop_lock_menu_bt_enabled();
+            if(want_on) {
+                /* Gegenseitiger Ausschluss (geteiltes Radio/RAM): erst WiFi global
+                 * aus (gibt Radio + RAM frei), dann den BLE-Stack real hochfahren.
+                 * bt_start_stack ist idempotent — bei bereits laufendem Stack ein
+                 * No-op; nach vorheriger WiFi-Nutzung war er abgebaut. */
+                Wifi* wifi = furi_record_open(RECORD_WIFI);
+                if(wifi_is_enabled(wifi)) wifi_disable(wifi);
+                furi_record_close(RECORD_WIFI);
+                Bt* bt = furi_record_open(RECORD_BT);
+                bt_start_stack(bt);
+                furi_record_close(RECORD_BT);
+            }
+            desktop_lock_menu_set_bt_enabled(want_on);
             desktop_scene_lock_menu_refresh(desktop);
             consumed = true;
             break;
+        }
+
+        case DesktopLockMenuEventWifiToggle: {
+            /* WiFi global toggeln. Enable schaltet BLE aus + persistiert, zieht das
+             * Radio hoch und reconnectet zum zuletzt genutzten Netz (siehe
+             * wifi_enable). Disable baut das Radio ab; BLE bleibt bewusst aus. */
+            Wifi* wifi = furi_record_open(RECORD_WIFI);
+            if(wifi_is_enabled(wifi)) {
+                wifi_disable(wifi);
+            } else {
+                wifi_enable(wifi);
+            }
+            furi_record_close(RECORD_WIFI);
+            desktop_scene_lock_menu_refresh(desktop);
+            consumed = true;
+            break;
+        }
 
         case DesktopLockMenuEventMeshClients:
             /* T-Embed ist immer Master; der Master-Mesh-Service läuft on-demand in

@@ -1,5 +1,5 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 #include <input/input.h>
 
 #include <esp_log.h>

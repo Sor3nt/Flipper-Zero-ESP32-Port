@@ -602,6 +602,18 @@ static void bt_handle_stop_stack(Bt* bt) {
 static void bt_handle_start_stack(Bt* bt) {
     FURI_LOG_I(TAG, "Starting BLE stack...");
 
+    /* Idempotent: läuft der Stack bereits (z.B. normaler Boot mit BT an),
+     * nicht doppelt initialisieren — nur Advertising gemäß Settings (re)aktivieren.
+     * Nötig, weil im WiFi-„sticky"-Modell das Lock-Menü „Enable Bluetooth" diesen
+     * Pfad IMMER aufruft, um einen zuvor durch WiFi abgebauten Stack real wieder
+     * hochzufahren. */
+    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED &&
+       esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED) {
+        FURI_LOG_I(TAG, "BLE stack already running");
+        if(bt->bt_settings.enabled) furi_hal_bt_start_advertising();
+        return;
+    }
+
     if(furi_hal_bt_start_radio_stack()) {
         bt_start_application(bt);
         if(bt->bt_settings.enabled) {
@@ -774,7 +786,23 @@ int32_t bt_srv(void* p) {
     UNUSED(p);
     Bt* bt = bt_alloc();
 
-    /* Load settings FIRST to know if BLE should be started */
+    /* RECORD_BT FRÜH anlegen (mit Default-Settings, Stack noch nicht gestartet):
+     * der namechanger-Startup-Hook wartet nur ~1.25s auf RECORD_BT — der
+     * SD-Wait unten würde die Record-Erzeugung sonst zu lange verzögern. */
+    furi_record_create(RECORD_BT, bt);
+
+    /* Auf den SD-Mount warten, BEVOR wir die Settings laden: dieser Service
+     * startet vor StorageSrv (order 45 vs 120), und Runtime-Saves landen in der
+     * SD-Datei (/ext). Läden wir vor dem Mount, bekämen wir nur die stale
+     * NVS-Kopie → BT würde beim Boot ggf. kurz anspringen und dann von WiFi
+     * wieder abgeschaltet. Bounded warten (~5s), dann aus der SD-Datei laden.
+     * Symmetrisch zu wifi_srv, siehe project_global_wifi_toggle. */
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    for(int i = 0; i < 50 && storage_sd_status(storage) != FSE_OK; i++) {
+        furi_delay_ms(100);
+    }
+    furi_record_close(RECORD_STORAGE);
+
     bt_settings_load(&bt->bt_settings);
 
     if(!furi_hal_bt_is_available()) {
@@ -796,8 +824,6 @@ int32_t bt_srv(void* p) {
     } else {
         FURI_LOG_I(TAG, "BT disabled in settings, skipping BLE stack init");
     }
-
-    furi_record_create(RECORD_BT, bt);
 
     FURI_LOG_I(TAG, "BtSrv ready (enabled=%d)", bt->bt_settings.enabled);
 

@@ -402,6 +402,10 @@ void wlan_hal_stop(void) {
     }
 }
 
+void wlan_hal_set_bt_restore(bool restore) {
+    s_bt_was_on = restore;
+}
+
 bool wlan_hal_is_started(void) {
     return s_started;
 }
@@ -435,6 +439,26 @@ void wlan_hal_disconnect(void) {
 
 bool wlan_hal_is_connected(void) {
     return s_wifi_connected;
+}
+
+typedef struct {
+    wifi_ap_record_t* out;
+    bool result;
+} WlanGetApArg;
+
+/* Läuft im wlan-Worker-Task: esp_wifi_sta_get_ap_info() ist ioctl-basiert und
+ * nutzt pthread-TLS des WiFi-Treibers — ein Aufruf aus einem FuriThread (z.B.
+ * der WiFi-App) crasht (LoadProhibited). Daher via wlan_hal_run_in_worker. */
+static void wlan_get_ap_worker(void* p) {
+    WlanGetApArg* a = p;
+    a->result = (esp_wifi_sta_get_ap_info(a->out) == ESP_OK);
+}
+
+bool wlan_hal_get_connected_ap(wifi_ap_record_t* out) {
+    if(!s_started || !s_wifi_connected || !out) return false;
+    WlanGetApArg arg = {.out = out, .result = false};
+    if(!wlan_hal_run_in_worker(wlan_get_ap_worker, &arg)) return false;
+    return arg.result;
 }
 
 bool wlan_hal_last_fail_is_auth(void) {

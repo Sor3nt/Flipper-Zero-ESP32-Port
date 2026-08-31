@@ -1,0 +1,9 @@
+App(
+    appid="wifi",
+    name="WifiSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="wifi_srv",
+    requires=["storage"],
+    stack_size=4 * 1024,
+    order=46,
+)

@@ -1,5 +1,5 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 
 // AirSnitch-Schritt 1: WiFi-Scan, damit der User das Zielnetz wählt. Reine
 // Beschriftung — wir verbinden uns NICHT mit dem Ziel (siehe scene_airsnitch_probe).

@@ -6,6 +6,9 @@
 #include <storage/storage.h>
 #include <nvs_flash.h>
 #include <nvs.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "SavedStruct"
 #define NVS_NAMESPACE "saved_struct"
@@ -258,51 +261,98 @@ static bool saved_struct_nvs_load(
     return result;
 }
 
+/* Argument für den NVS-Write-Helper-Task. */
+typedef struct {
+    const char* path;
+    const void* data;
+    size_t size;
+    uint8_t magic;
+    uint8_t version;
+    volatile bool result;
+    volatile bool done;
+} SavedStructNvsWriteCtx;
+
+/* Führt den eigentlichen NVS-Write aus — MUSS auf einem Task mit INTERNEM DRAM-
+ * Stack laufen (siehe saved_struct_nvs_save). nvs_commit schaltet den Flash-Cache
+ * ab; ein PSRAM-Stack (wie ihn die Furi-Service-Tasks haben) ist dann nicht mehr
+ * erreichbar → DoubleException/TG1WDT. Deshalb baut dieser Task Key und Blob
+ * lokal/intern auf, sodass während des Cache-disable nur internes RAM berührt
+ * wird. Siehe project_psram_stack_nvs_doubleexception. */
+static void saved_struct_nvs_write_task(void* p) {
+    SavedStructNvsWriteCtx* ctx = p;
+
+    char key[16];
+    path_to_nvs_key(ctx->path, key, sizeof(key));
+
+    SavedStructHeader header = {
+        .magic = ctx->magic,
+        .version = ctx->version,
+        .checksum = saved_struct_checksum(ctx->data, ctx->size),
+        .flags = 0,
+        .timestamp = 0,
+    };
+
+    size_t blob_size = sizeof(header) + ctx->size;
+    /* Blob MUSS internes DRAM sein — er wird von nvs_set_blob während des
+     * Flash-Writes (Cache aus) gelesen. */
+    uint8_t* blob = heap_caps_malloc(blob_size, MALLOC_CAP_INTERNAL);
+    bool result = false;
+    if(blob) {
+        memcpy(blob, &header, sizeof(header));
+        memcpy(blob + sizeof(header), ctx->data, ctx->size);
+
+        nvs_handle_t nvs;
+        if(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+            if(nvs_set_blob(nvs, key, blob, blob_size) == ESP_OK && nvs_commit(nvs) == ESP_OK) {
+                result = true;
+            }
+            nvs_close(nvs);
+        }
+        heap_caps_free(blob);
+    } else {
+        FURI_LOG_E(TAG, "Failed to allocate internal blob for NVS save");
+    }
+
+    ctx->result = result;
+    ctx->done = true;
+    vTaskDelete(NULL);
+}
+
 static bool saved_struct_nvs_save(
     const char* path,
     const void* data,
     size_t size,
     uint8_t magic,
     uint8_t version) {
-    char key[16];
-    path_to_nvs_key(path, key, sizeof(key));
+    FURI_LOG_W(TAG, "No SD card, saving \"%s\" to NVS", path);
 
-    FURI_LOG_W(TAG, "No SD card, saving \"%s\" to NVS key \"%s\"", path, key);
-
-    SavedStructHeader header = {
+    /* Den Write auf einen Task mit internem DRAM-Stack auslagern — plain
+     * xTaskCreate liefert hier einen internen Stack (kein SPIRAM_ALLOW_STACK),
+     * anders als die PSRAM-gestackten Furi-Service-Tasks, die den nvs_commit
+     * sonst mit DoubleException killen würden. */
+    SavedStructNvsWriteCtx ctx = {
+        .path = path,
+        .data = data,
+        .size = size,
         .magic = magic,
         .version = version,
-        .checksum = saved_struct_checksum(data, size),
-        .flags = 0,
-        .timestamp = 0,
+        .result = false,
+        .done = false,
     };
 
-    size_t blob_size = sizeof(header) + size;
-    uint8_t* blob = malloc(blob_size);
-    if(!blob) {
-        FURI_LOG_E(TAG, "Failed to allocate blob for save");
+    if(xTaskCreate(saved_struct_nvs_write_task, "nvs_wr", 3072, &ctx, 5, NULL) != pdPASS) {
+        FURI_LOG_E(TAG, "Failed to spawn NVS write task");
         return false;
     }
-    memcpy(blob, &header, sizeof(header));
-    memcpy(blob + sizeof(header), data, size);
 
-    nvs_handle_t nvs;
-    bool result = false;
-    if(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        if(nvs_set_blob(nvs, key, blob, blob_size) == ESP_OK) {
-            if(nvs_commit(nvs) == ESP_OK) {
-                result = true;
-            }
-        }
-        nvs_close(nvs);
+    while(!ctx.done) {
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 
-    free(blob);
-
-    if(!result) {
-        FURI_LOG_E(TAG, "NVS save failed for \"%s\"", key);
+    if(!ctx.result) {
+        FURI_LOG_E(TAG, "NVS save failed for \"%s\"", path);
     }
-    return result;
+    return ctx.result;
 }
 
 /* ---- Public API ---- */

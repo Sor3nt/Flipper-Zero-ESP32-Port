@@ -1,5 +1,5 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
+#include <wlan_hal.h>
 
 #define SSID_SPAM_CUSTOM_DONE 1
 

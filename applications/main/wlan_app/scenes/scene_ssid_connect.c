@@ -1,7 +1,8 @@
 #include "../wlan_app.h"
-#include "../wlan_hal.h"
-#include "../wlan_passwords.h"
+#include <wlan_hal.h>
+#include <wlan_passwords.h>
 #include "../wlan_netcut.h"
+#include <wifi.h>
 
 typedef enum {
     SsidConnectStateAskPassword = 0,
@@ -123,6 +124,11 @@ bool wlan_app_scene_ssid_connect_on_event(void* context, SceneManagerEvent event
             app->connected = true;
             app->target_selected = false;
             app->lan_scan_complete = false;
+            /* WiFi global/„sticky" machen: nach App-Verlassen verbunden bleiben,
+             * SSID für Auto-Reconnect merken, BLE bleibt aus. */
+            Wifi* wifi = furi_record_open(RECORD_WIFI);
+            wifi_mark_connected(wifi, app->connected_ap.ssid);
+            furi_record_close(RECORD_WIFI);
             if(app->webfs_flow) {
                 // Web-Filesystem over STA: serve on the fresh connection.
                 scene_manager_set_scene_state(

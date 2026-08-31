@@ -40,6 +40,7 @@ typedef enum {
     DesktopLockMenuEventQflipperToggle,
     DesktopLockMenuEventUsbStorage,
     DesktopLockMenuEventBluetoothToggle,
+    DesktopLockMenuEventWifiToggle,
     DesktopLockMenuEventMeshClients,
     DesktopLockMenuEventWebFs,
 

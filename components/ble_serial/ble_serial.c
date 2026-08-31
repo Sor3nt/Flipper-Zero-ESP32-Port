@@ -1153,6 +1153,7 @@ void ble_serial_free(BleSerial* serial) {
 }
 
 void ble_serial_reset_initialized(void) {
+    if(!serial_state.mutex) return; // BLE-Stack nicht initialisiert (BT aus)
     serial_lock_global();
     serial_state.initialized = false;
     serial_unlock_global();
@@ -1253,6 +1254,7 @@ void ble_serial_notify_buffer_is_empty(BleSerial* serial) {
 }
 
 bool ble_serial_start_advertising(void) {
+    if(!serial_state.mutex) return false; // BLE-Stack nicht initialisiert (BT aus)
     ESP_LOGI(TAG, "ble_serial_start_advertising called, active=%p", (void*)serial_state.active);
     bool accepted = false;
     serial_lock_global();
@@ -1269,6 +1271,7 @@ bool ble_serial_start_advertising(void) {
 }
 
 void ble_serial_stop_advertising(void) {
+    if(!serial_state.mutex) return; // BLE-Stack nicht initialisiert (BT aus)
     serial_lock_global();
     serial_state.advertising_requested = false;
     if(serial_state.advertising) {
@@ -1279,6 +1282,7 @@ void ble_serial_stop_advertising(void) {
 }
 
 void ble_serial_refresh_advertising(void) {
+    if(!serial_state.mutex) return; // BLE-Stack nicht initialisiert (BT aus)
     serial_lock_global();
     BleSerial* active = serial_state.active;
     if(!active) {
