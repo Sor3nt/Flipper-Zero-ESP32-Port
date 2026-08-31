@@ -1,0 +1,6 @@
+ADD_SCENE(streaming, browser, Browser)
+ADD_SCENE(streaming, action_menu, ActionMenu)
+ADD_SCENE(streaming, player, Player)
+ADD_SCENE(streaming, wifi_scan, WifiScan)
+ADD_SCENE(streaming, wifi_connect, WifiConnect)
+ADD_SCENE(streaming, device_scan, DeviceScan)

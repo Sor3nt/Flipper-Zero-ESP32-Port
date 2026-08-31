@@ -1,5 +1,6 @@
 #include "dlna_ssdp.h"
-#include "dlna_wifi.h"
+#include <esp_attr.h>
+#include <wlan_hal.h>
 
 #include <lwip/sockets.h>
 #include <esp_log.h>
@@ -235,7 +236,7 @@ static void ssdp_scan_worker(void* arg) {
         return;
     }
 
-    uint32_t own_ip = dlna_wifi_get_own_ip();
+    uint32_t own_ip = wlan_hal_get_own_ip();
 
     struct sockaddr_in local = {0};
     local.sin_family = AF_INET;
@@ -277,7 +278,7 @@ static void ssdp_scan_worker(void* arg) {
         "urn:schemas-upnp-org:service:AVTransport:1",
     };
     const int n_sts = (int)(sizeof(STS) / sizeof(STS[0]));
-    static char msearch[256]; /* off-stack; worker is serial */
+    static EXT_RAM_BSS_ATTR char msearch[256]; /* off-stack; worker is serial */
 
     /* Collect unique LOCATION URLs. */
     char (*locs)[128] = malloc(LOC_MAX * 128);
@@ -416,6 +417,6 @@ static void ssdp_scan_worker(void* arg) {
 
 int dlna_ssdp_scan(DlnaDevice* out, int max, uint32_t timeout_ms) {
     SsdpCtx ctx = {.out = out, .max = max, .timeout_ms = timeout_ms, .count = 0};
-    if(!dlna_wifi_run_in_worker(ssdp_scan_worker, &ctx)) return 0;
+    if(!wlan_hal_run_in_worker(ssdp_scan_worker, &ctx)) return 0;
     return ctx.count;
 }

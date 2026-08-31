@@ -9,7 +9,7 @@
  * friendly name and the AVTransport / RenderingControl SOAP control URLs.
  *
  * Exactly like airplay_mdns this only needs lwIP sockets and must run on the
- * WiFi worker task, so dlna_ssdp_scan() hops onto it via dlna_wifi_run_in_worker().
+ * WiFi worker task, so dlna_ssdp_scan() hops onto it via wlan_hal_run_in_worker().
  */
 
 #include <stdbool.h>
@@ -30,7 +30,7 @@ typedef struct {
 
 /* Discover DLNA MediaRenderers. Blocks up to ~timeout_ms collecting SSDP
  * replies, then fetches + parses each device description. Fills up to `max`
- * entries in `out`, returns the count found. Requires dlna_wifi_start() + a
+ * entries in `out`, returns the count found. Requires wlan_hal_start() + a
  * live STA connection. */
 int dlna_ssdp_scan(DlnaDevice* out, int max, uint32_t timeout_ms);
 

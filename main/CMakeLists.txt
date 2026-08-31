@@ -100,4 +100,13 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         )
         target_sources(${COMPONENT_LIB} PRIVATE $<TARGET_OBJECTS:${esp32_fam_target}>)
     endforeach()
+
+    # The Streaming app bundles former-FAP media modules (airplay_raop,
+    # dlna_render, cast_client, ...) that were built with relaxed warnings as
+    # FAPs. Their harmless snprintf format-truncation diagnostics stay
+    # non-fatal here instead of tripping -Werror.
+    if(TARGET esp32_fam_app_streaming)
+        target_compile_options(esp32_fam_app_streaming PRIVATE
+            -Wno-error=format-truncation -Wno-error=format-overflow)
+    endif()
 endif()

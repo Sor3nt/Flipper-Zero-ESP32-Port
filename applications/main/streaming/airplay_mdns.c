@@ -1,5 +1,5 @@
 #include "airplay_mdns.h"
-#include "airplay_wifi.h"
+#include <wlan_hal.h>
 
 #include <lwip/sockets.h>
 #include <esp_log.h>
@@ -204,7 +204,7 @@ static void mdns_scan_worker(void* arg) {
         return;
     }
 
-    uint32_t own_ip = airplay_wifi_get_own_ip();
+    uint32_t own_ip = wlan_hal_get_own_ip();
 
     /* Bind to the STA IP on an ephemeral port: the outgoing multicast query
      * leaves via the STA interface, and the unicast reply (we set the QU bit in
@@ -272,6 +272,6 @@ static void mdns_scan_worker(void* arg) {
 
 int airplay_mdns_scan(AirplayDevice* out, int max, uint32_t timeout_ms) {
     MdnsScanCtx ctx = {.out = out, .max = max, .timeout_ms = timeout_ms, .count = 0};
-    if(!airplay_wifi_run_in_worker(mdns_scan_worker, &ctx)) return 0;
+    if(!wlan_hal_run_in_worker(mdns_scan_worker, &ctx)) return 0;
     return ctx.count;
 }

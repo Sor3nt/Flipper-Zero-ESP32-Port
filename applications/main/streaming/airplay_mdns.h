@@ -6,7 +6,7 @@
  * There is no mDNS component compiled into this firmware, so this rolls its own
  * one-shot query over a UDP multicast socket (224.0.0.251:5353). It only needs
  * lwIP sockets — no extra dependency. All socket work must run on the WiFi
- * worker task, so airplay_mdns_scan() hops onto it via airplay_wifi_run_in_worker().
+ * worker task, so airplay_mdns_scan() hops onto it via wlan_hal_run_in_worker().
  *
  * The receiver's IP is taken from the source address of its reply packet (the
  * device answers from its own IP), which avoids having to chain PTR->SRV->A
@@ -30,7 +30,7 @@ typedef struct {
 
 /* Discover AirPlay (RAOP) receivers. Blocks up to ~timeout_ms while collecting
  * replies. Fills up to `max` entries in `out`, returns the count found.
- * Requires airplay_wifi_start() + a live STA connection. */
+ * Requires wlan_hal_start() + a live STA connection. */
 int airplay_mdns_scan(AirplayDevice* out, int max, uint32_t timeout_ms);
 
 #endif /* AIRPLAY_MDNS_H */

@@ -1,5 +1,4 @@
 #include "mp3_decoder.h"
-#include "mp3_player.h"
 #include "mp3_sink.h"
 
 #include <string.h>
@@ -9,7 +8,7 @@
 
 #include "lib/helix/mp3dec.h"
 
-#define TAG MP3_PLAYER_TAG
+#define TAG "Mp3Decoder"
 
 /* Raw input buffer holding bytes read from storage. Helix searches for the
  * sync word inside this window; 4 KB is comfortably larger than the largest

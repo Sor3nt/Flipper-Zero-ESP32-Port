@@ -1,4 +1,5 @@
 #include "dlna_render.h"
+#include <esp_attr.h>
 
 #include <lwip/sockets.h>
 #include <esp_log.h>
@@ -21,8 +22,8 @@
 
 /* ---- served-file state (guarded by mutex) ---- */
 static FuriMutex* s_file_mtx = NULL;
-static char s_file_path[256] = {0};
-static char s_url_name[128] = {0};
+static EXT_RAM_BSS_ATTR char s_file_path[256] = {0};
+static EXT_RAM_BSS_ATTR char s_url_name[128] = {0};
 
 /* ---- httpd task ---- */
 static TaskHandle_t s_httpd_task = NULL;
@@ -477,7 +478,7 @@ static bool soap_call(
     /* Big scratch off the stack: only the single WiFi worker task ever runs a
      * SOAP call (guarded by cmd_busy + the worker's serial command queue), so
      * static buffers are safe and keep the worker stack shallow. */
-    static char body[5120];
+    static EXT_RAM_BSS_ATTR char body[5120];
     int bn = snprintf(
         body, sizeof(body),
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
@@ -531,7 +532,7 @@ static bool soap_call(
         return false;
     }
 
-    static char rbuf[SOAP_RESP_BUF];
+    static EXT_RAM_BSS_ATTR char rbuf[SOAP_RESP_BUF];
     int total = 0;
     while(total < (int)sizeof(rbuf) - 1) {
         int n = lwip_recv(s, rbuf + total, sizeof(rbuf) - 1 - total, 0);
@@ -559,9 +560,9 @@ bool dlna_soap_set_and_play(const DlnaTarget* t, const char* media_url, const ch
      * generously: the URL is %-encoded (name ×3) and the whole DIDL is XML-
      * escaped a SECOND time into CurrentURIMetaData (each &lt; → &amp;lt; …),
      * which roughly doubles it — a 96-char name must never truncate here. */
-    static char didl[2048];
-    static char title_esc[512];
-    static char url_esc[512];
+    static EXT_RAM_BSS_ATTR char didl[2048];
+    static EXT_RAM_BSS_ATTR char title_esc[512];
+    static EXT_RAM_BSS_ATTR char url_esc[512];
     xml_escape(title ? title : "Video", title_esc, sizeof(title_esc));
     xml_escape(media_url, url_esc, sizeof(url_esc));
     /* Advertise the real content type (matches the HTTP Content-Type header) —
@@ -580,10 +581,10 @@ bool dlna_soap_set_and_play(const DlnaTarget* t, const char* media_url, const ch
         "</item></DIDL-Lite>",
         title_esc, mime, url_esc);
 
-    static char didl_esc[3072];
+    static EXT_RAM_BSS_ATTR char didl_esc[3072];
     xml_escape(didl, didl_esc, sizeof(didl_esc));
 
-    static char inner[4096];
+    static EXT_RAM_BSS_ATTR char inner[4096];
     snprintf(
         inner, sizeof(inner),
         "<CurrentURI>%s</CurrentURI><CurrentURIMetaData>%s</CurrentURIMetaData>",
@@ -626,7 +627,7 @@ static uint32_t hms_to_ms(const char* s) {
 }
 
 bool dlna_soap_get_position(const DlnaTarget* t, uint32_t* elapsed_ms, uint32_t* duration_ms) {
-    static char resp[SOAP_RESP_BUF];
+    static EXT_RAM_BSS_ATTR char resp[SOAP_RESP_BUF];
     if(!soap_call(
            t, t->av_control, "AVTransport", "GetPositionInfo", "", resp, sizeof(resp)))
         return false;

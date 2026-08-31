@@ -15,7 +15,7 @@
  *   2. Blocking SOAP calls (AVTransport / RenderingControl) to the chosen TV:
  *      SetAVTransportURI + Play/Pause/Stop/Seek + GetPositionInfo, plus an
  *      optional RenderingControl SetVolume. These MUST run on the WiFi worker
- *      task (dlna_wifi_run_in_worker) — they issue lwIP socket calls.
+ *      task (wlan_hal_run_in_worker) — they issue lwIP socket calls.
  *
  * All IPs are network byte order.
  */

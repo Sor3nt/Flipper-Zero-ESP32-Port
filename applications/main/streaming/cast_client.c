@@ -1,4 +1,5 @@
 #include "cast_client.h"
+#include <esp_attr.h>
 
 #include <lwip/sockets.h>
 #include <mbedtls/ssl.h>
@@ -45,10 +46,10 @@ static volatile CastState s_state = CastStateIdle;
 
 static uint32_t s_ip = 0;
 static uint16_t s_port = CAST_PORT;
-static char s_url[512];
-static char s_mime[48];
-static char s_title[96];
-static char s_transport[64]; /* app session transportId */
+static EXT_RAM_BSS_ATTR char s_url[512];
+static EXT_RAM_BSS_ATTR char s_mime[48];
+static EXT_RAM_BSS_ATTR char s_title[96];
+static EXT_RAM_BSS_ATTR char s_transport[64]; /* app session transportId */
 static int s_media_session = 0;
 static int s_req_id = 0;
 
@@ -288,7 +289,7 @@ static bool ssl_read_exact(uint8_t* buf, size_t n) {
 
 /* ---------------- CastMessage send / recv ---------------- */
 static bool cast_send(const char* ns, const char* dst, const char* payload) {
-    static uint8_t msg[TX_BUF];
+    static EXT_RAM_BSS_ATTR uint8_t msg[TX_BUF];
     Pb b = {msg, 0, sizeof(msg)};
     pb_uint(&b, 1, 0); /* protocol_version = CASTV2_1_0 */
     pb_str(&b, 2, SENDER_ID); /* source_id */
@@ -334,7 +335,7 @@ static bool send_launch(void) {
     return cast_send(NS_RECEIVER, DEFAULT_DEST, pl);
 }
 static bool send_load(void) {
-    static char pl[PAYLOAD_BUF];
+    static EXT_RAM_BSS_ATTR char pl[PAYLOAD_BUF];
     snprintf(
         pl, sizeof(pl),
         "{\"type\":\"LOAD\",\"requestId\":%d,\"autoplay\":true,\"currentTime\":0,"
@@ -396,8 +397,8 @@ static int cast_pump(void) {
     uint32_t l;
     int r = cast_recv(&l);
     if(r != 1) return r;
-    static char ns[80];
-    static char pl[RX_BUF];
+    static EXT_RAM_BSS_ATTR char ns[80];
+    static EXT_RAM_BSS_ATTR char pl[RX_BUF];
     const uint8_t* d;
     uint32_t dl;
     ns[0] = 0;

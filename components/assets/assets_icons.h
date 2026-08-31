@@ -182,6 +182,7 @@ extern const Icon A_Infrared_14;
 extern const Icon A_NFC_14;
 extern const Icon A_Plugins_14;
 extern const Icon A_Settings_14;
+extern const Icon A_Streaming_14;
 extern const Icon A_Sub1ghz_14;
 extern const Icon A_SubGHzRemote_14;
 extern const Icon A_U2F_14;

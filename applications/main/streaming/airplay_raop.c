@@ -1,5 +1,5 @@
 #include "airplay_raop.h"
-#include "airplay_wifi.h"
+#include <esp_attr.h>
 
 #include <lwip/sockets.h>
 #include <esp_timer.h>
@@ -29,15 +29,15 @@
 /* Big scratch buffers kept OFF the task stack (single sender task, no reentry).
  * Placed in the FAP's BSS (PSRAM) — lwIP copies into its own pbufs, so a PSRAM
  * source is fine, and it keeps the RAOP task stack small. */
-static char s_rtsp_req[RTSP_BUF];
+static EXT_RAM_BSS_ATTR char s_rtsp_req[RTSP_BUF];
 static int16_t s_pcmbuf[RAOP_FRAMES_PER_PKT * 2];
 /* RTP header (12) + uncompressed-ALAC frame (23-bit hdr + 352*32 + 3 END, byte
  * aligned ≈ 1412) with headroom. */
-static uint8_t s_pktbuf[12 + RAOP_FRAMES_PER_PKT * 4 + 32];
+static EXT_RAM_BSS_ATTR uint8_t s_pktbuf[12 + RAOP_FRAMES_PER_PKT * 4 + 32];
 static volatile bool s_volume_dirty = false;
 
 /* metadata / progress (sent to the receiver via SET_PARAMETER) */
-static char s_meta_title[96];
+static EXT_RAM_BSS_ATTR char s_meta_title[96];
 static volatile bool s_meta_dirty = false;
 static volatile uint32_t s_prog_elapsed_ms = 0;
 static volatile uint32_t s_prog_duration_ms = 0;
@@ -60,8 +60,8 @@ static uint8_t s_volume = 80;
 /* RTSP session state */
 static int s_rtsp_sock = -1;
 static int s_cseq = 0;
-static char s_session[64];
-static char s_client_instance[17];
+static EXT_RAM_BSS_ATTR char s_session[64];
+static EXT_RAM_BSS_ATTR char s_client_instance[17];
 static uint32_t s_session_id = 0;
 static uint16_t s_server_port = 0; /* receiver audio port */
 static uint16_t s_ctrl_port_remote = 0; /* receiver control port */

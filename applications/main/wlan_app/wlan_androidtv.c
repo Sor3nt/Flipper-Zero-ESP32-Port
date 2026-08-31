@@ -922,7 +922,14 @@ WlanAndroidTv* wlan_androidtv_alloc(void) {
 
     a->rxbuf = heap_caps_malloc(ATV_MSG_MAX, MALLOC_CAP_SPIRAM);
     a->txbuf = heap_caps_malloc(ATV_MSG_MAX, MALLOC_CAP_SPIRAM);
-    a->stack = heap_caps_malloc(ATV_WORKER_STACK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    /* Worker stack in PSRAM. The TLS handshake needs a deep (20 KB) stack, but
+     * the internal DRAM heap is too fragmented for a block that large once WiFi
+     * has been global/sticky since boot (the permanent wlan_hal worker + wifi
+     * service shape the heap early). This task only runs TLS + network I/O with
+     * no flash operations while active, so an external-RAM stack is safe here
+     * (CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY). The TCB stays in internal RAM
+     * — it is touched from ISR context and must not sit in PSRAM. */
+    a->stack = heap_caps_malloc(ATV_WORKER_STACK, MALLOC_CAP_SPIRAM);
     a->task_buf = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     a->cmd_queue = xQueueCreate(2, sizeof(AtvCmdType));
     a->key_queue = xQueueCreate(16, sizeof(int));

@@ -48,6 +48,7 @@ APPS = [
     "lfrfid",
     "wlan",
     "wifi",
+    "streaming",
     "nrf24",
     "ble_spam",
     "js_app",

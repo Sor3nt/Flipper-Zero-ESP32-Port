@@ -1,13 +1,12 @@
 App(
-    appid="mp3_player",
-    name="MP3 Player",
+    appid="streaming",
+    name="Streaming",
     apptype=FlipperAppType.MENUEXTERNAL,
-    entry_point="mp3_player_app",
-    requires=["gui"],
+    entry_point="streaming_app",
+    requires=["gui", "wifi"],
     stack_size=16 * 1024,
-    order=85,
-    icon="A_Plugins_14",
-    fap_icon="icon.png",
+    order=84,
+    icon="A_Streaming_14",
     fap_category="Media",
     fap_private_libs=[
         Lib(

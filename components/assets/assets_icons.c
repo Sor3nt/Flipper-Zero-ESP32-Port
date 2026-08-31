@@ -1149,6 +1149,9 @@ const Icon A_Infrared_14 = {.width=14,.height=14,.frame_count=6,.frame_rate=3,.f
 const Icon A_NFC_14 = {.width=14,.height=14,.frame_count=4,.frame_rate=3,.frames=_A_NFC_14};
 const Icon A_Plugins_14 = {.width=14,.height=14,.frame_count=9,.frame_rate=3,.frames=_A_Plugins_14};
 const Icon A_Settings_14 = {.width=14,.height=14,.frame_count=10,.frame_rate=3,.frames=_A_Settings_14};
+const uint8_t _A_Streaming_14_0[] = {0x00,0x00,0x00,0xfe,0x1f,0x02,0x10,0x0a,0x10,0x1a,0x10,0x2a,0x10,0x22,0x10,0x2a,0x10,0x1a,0x10,0x0a,0x10,0x02,0x10,0xfe,0x1f,0x00,0x00,0x00,0x00,};
+const uint8_t* const _A_Streaming_14[] = {_A_Streaming_14_0};
+const Icon A_Streaming_14 = {.width=14,.height=14,.frame_count=1,.frame_rate=1,.frames=_A_Streaming_14};
 const Icon A_Sub1ghz_14 = {.width=14,.height=14,.frame_count=6,.frame_rate=3,.frames=_A_Sub1ghz_14};
 const Icon A_SubGHzRemote_14 = {.width=14,.height=14,.frame_count=8,.frame_rate=4,.frames=_A_SubGHzRemote_14};
 const Icon A_U2F_14 = {.width=14,.height=14,.frame_count=4,.frame_rate=3,.frames=_A_U2F_14};
