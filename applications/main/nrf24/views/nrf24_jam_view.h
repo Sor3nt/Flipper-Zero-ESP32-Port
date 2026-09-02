@@ -27,9 +27,9 @@ typedef struct {
 
 typedef enum {
     Nrf24JamEventToggle = 1, /* OK: start / stop (or "Scan" when source unready) */
-    Nrf24JamEventSelectNext, /* Right: next selection within source */
-    Nrf24JamEventCycleSource, /* Down: next source type */
-    Nrf24JamEventConfig, /* Up / Left: open config editor */
+    Nrf24JamEventSelectNext, /* Right (held): sub-selection within source (WiFi AP / Activity mode) */
+    Nrf24JamEventCycleSource, /* Down: next target in the flat preset+source list (wraps) */
+    Nrf24JamEventConfig, /* Up / Left (held): open config editor */
     Nrf24JamEventRescan, /* OK-long: re-scan WiFi/Activity (else open config) */
 } Nrf24JamEvent;
 

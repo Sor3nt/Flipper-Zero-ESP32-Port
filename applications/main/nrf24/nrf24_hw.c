@@ -61,7 +61,9 @@
 static const GpioPin nrf24_ce = {.port = NULL, .pin = BOARD_PIN_NRF24_CE};
 
 void nrf24_hw_init(void) {
-    furi_hal_gpio_init_simple(&nrf24_ce, GpioModeOutputPushPull);
+    /* Match the nRF24_jammer FAP's CE pin setup exactly (PullUp + VeryHigh speed);
+     * harmless for a push-pull output but keeps us byte-identical to the FAP. */
+    furi_hal_gpio_init(&nrf24_ce, GpioModeOutputPushPull, GpioPullUp, GpioSpeedVeryHigh);
     furi_hal_gpio_write(&nrf24_ce, false);
 }
 
@@ -147,48 +149,48 @@ static uint8_t nrf24_rf_setup_byte(uint8_t data_rate, uint8_t pa_level, bool con
     return v;
 }
 
-void nrf24_hw_jammer_start_ex(uint8_t channel, uint8_t pa_level) {
-    /* Standby / CE low */
+/* set_tx_mode: standby → clear IRQs → PWR_UP, PRIM_RX=0 → CE high. Byte-for-byte
+ * the same as the nRF24_jammer FAP's nrf24_set_tx_mode(). */
+static void nrf24_hw_tx_mode(void) {
     furi_hal_gpio_write(&nrf24_ce, false);
+    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_TX_DS | NRF_STATUS_MAX_RT); /* 0x30 */
+    uint8_t config = nrf24_hw_read_reg(NRF_REG_CONFIG);
+    config &= ~NRF_CONFIG_PRIM_RX;
+    config |= NRF_CONFIG_PWR_UP;
+    nrf24_hw_write_reg(NRF_REG_CONFIG, config);
+    furi_hal_gpio_write(&nrf24_ce, true);
+}
 
-    /* Power up. Tpd2stby (~1.5 ms) must elapse before the oscillator/PLL is
-     * stable on a cold start; wait 5 ms like the RF24 library to be safe. */
-    nrf24_hw_write_reg(NRF_REG_CONFIG, NRF_CONFIG_PWR_UP);
+void nrf24_hw_jammer_start_ex(uint8_t channel, uint8_t pa_level) {
+    /* Exact replica of the nRF24_jammer FAP's nrf24_startConstCarrier(): a plain
+     * CONT_WAVE carrier with CE held high — NO REUSE_TX_PL keep-alive. The FAP
+     * radiates correctly on real nRF24L01+ modules relying only on CONT_WAVE, so
+     * we do the same. The carrier stays on while CE is high; retuning only writes
+     * RF_CH (see nrf24_hw_jammer_set_channel) and never touches CE. */
+
+    /* Bring up TX mode; Tpd2stby (~1.5 ms) + PLL settle on a cold start. */
+    nrf24_hw_tx_mode();
     esp_rom_delay_us(5000);
 
-    /* Continuous carrier @ 2 Mbps, configurable PA, PLL locked */
+    /* Tune, then arm the continuous wave. RF_SETUP = 2 Mbps | PA | CONT_WAVE |
+     * PLL_LOCK (power bits 2:1 from pa_level; 3=Max → 0b11, == FAP's level 6). */
+    nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
     nrf24_hw_write_reg(NRF_REG_RF_SETUP, nrf24_rf_setup_byte(1, pa_level, true));
 
-    /* The nRF24L01+ (P variant) only radiates the CONT_WAVE carrier while it is
-     * actually transmitting, so we load a dummy payload and keep re-sending it
-     * via REUSE_TX_PL. Without this the carrier is weak/absent on real +
-     * modules. Mirrors RF24::startConstCarrier(). */
+    /* Disable auto-ack and CRC, exactly like the FAP const-carrier path. */
     nrf24_hw_write_reg(NRF_REG_EN_AA, 0x00);
-    nrf24_hw_write_reg(NRF_REG_SETUP_RETR, 0x00);
-    nrf24_hw_write_reg(NRF_REG_SETUP_AW, 0x03); /* 5-byte address */
+    uint8_t config = nrf24_hw_read_reg(NRF_REG_CONFIG);
+    config &= ~NRF_CONFIG_EN_CRC;
+    nrf24_hw_write_reg(NRF_REG_CONFIG, config);
 
-    uint8_t dummy[32];
-    memset(dummy, 0xFF, sizeof(dummy));
-    nrf24_hw_write_buf(NRF_REG_TX_ADDR, dummy, 5);
-    nrf24_hw_cmd(NRF_CMD_FLUSH_TX);
-
+    /* Load a single dummy 0xFF payload (datasheet const-carrier procedure). */
     uint8_t tx[1 + 32];
     tx[0] = NRF_CMD_W_TX_PAYLOAD;
-    memcpy(&tx[1], dummy, 32);
+    memset(&tx[1], 0xFF, 32);
     furi_hal_spi_bus_tx(&furi_hal_spi_bus_handle_nrf24, tx, sizeof(tx), 100);
 
-    nrf24_hw_write_reg(NRF_REG_RF_CH, channel);
-
-    /* Settle PLL, transmit once, then enable payload reuse. */
-    esp_rom_delay_us(150);
-    furi_hal_gpio_write(&nrf24_ce, true);
-    esp_rom_delay_us(1000); /* let the first frame go out (datasheet: 1 ms) */
-
-    /* REUSE_TX_PL — toggle CE per RF24::reUseTX so the chip keeps re-sending. */
-    furi_hal_gpio_write(&nrf24_ce, false);
-    nrf24_hw_write_reg(NRF_REG_STATUS, NRF_STATUS_MAX_RT);
-    nrf24_hw_cmd(NRF_CMD_REUSE_TX_PL);
-    furi_hal_gpio_write(&nrf24_ce, true);
+    /* Re-assert TX mode → PWR_UP, PRIM_RX=0, CE high: carrier is now radiating. */
+    nrf24_hw_tx_mode();
 }
 
 void nrf24_hw_jammer_start(uint8_t channel) {

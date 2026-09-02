@@ -114,19 +114,22 @@ static bool nrf24_jam_input_callback(InputEvent* event, void* context) {
         }
         return false;
     case InputKeyUp:
-        if(event->type != InputTypeShort) return false;
-        view_dispatcher_send_custom_event(vd, Nrf24JamEventConfig);
-        return true;
-    case InputKeyLeft:
-        /* Left button = Config (same event as Up). */
+        /* Rotate left (CCW): open the config editor (same as held-Left). */
         if(event->type != InputTypeShort) return false;
         view_dispatcher_send_custom_event(vd, Nrf24JamEventConfig);
         return true;
     case InputKeyDown:
+        /* Rotate right (CW): next target in the flat preset+source list (wraps). */
         if(event->type != InputTypeShort) return false;
         view_dispatcher_send_custom_event(vd, Nrf24JamEventCycleSource);
         return true;
+    case InputKeyLeft:
+        /* Held encoder + rotate CCW = Config editor (same as Up). */
+        if(event->type != InputTypeShort) return false;
+        view_dispatcher_send_custom_event(vd, Nrf24JamEventConfig);
+        return true;
     case InputKeyRight:
+        /* Held encoder + rotate CW = sub-selection (WiFi AP / Activity mode). */
         if(event->type != InputTypeShort) return false;
         view_dispatcher_send_custom_event(vd, Nrf24JamEventSelectNext);
         return true;

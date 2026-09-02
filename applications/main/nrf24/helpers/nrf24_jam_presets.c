@@ -25,6 +25,14 @@ static const uint8_t CH_BLUETOOTH[] = {
     40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
     59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80};
 
+/* BT Classic 2 — EXACT replica of the nRF24_jammer FAP (W0rthlessS0ul) BT list.
+ * A curated, scattered 21-channel subset spanning the band (not the full 79).
+ * Fewer channels → each is revisited ~4x more often (closer to the ~625us BT
+ * hop slot), which is why the FAP beats a wide 79-channel smear. Order kept
+ * verbatim; jammed sequentially with zero dwell (see scene_jam FAP path). */
+static const uint8_t CH_BLUETOOTH2[] = {32, 34, 46, 48, 50, 52, 0,  1,  2,  4, 6,
+                                        8,  22, 24, 26, 28, 30, 74, 76, 78, 80};
+
 /* Wireless USB dongles. */
 static const uint8_t CH_USB[] = {40, 50, 60};
 
@@ -54,6 +62,8 @@ const char* nrf24_jam_preset_name(Nrf24JamPreset preset) {
         return "BLE Advertising";
     case Nrf24JamPresetBluetooth:
         return "BT Classic";
+    case Nrf24JamPresetBluetooth2:
+        return "BT Classic 2";
     case Nrf24JamPresetUsb:
         return "USB Dongles";
     case Nrf24JamPresetVideo:
@@ -81,6 +91,8 @@ const char* nrf24_jam_preset_short(Nrf24JamPreset preset) {
         return "BLE Adv";
     case Nrf24JamPresetBluetooth:
         return "BT Classic";
+    case Nrf24JamPresetBluetooth2:
+        return "BT Cls 2";
     case Nrf24JamPresetUsb:
         return "USB Dongle";
     case Nrf24JamPresetVideo:
@@ -110,6 +122,9 @@ const uint8_t* nrf24_jam_preset_channels(Nrf24JamPreset preset, size_t* count) {
     case Nrf24JamPresetBluetooth:
         *count = ARRAY_COUNT(CH_BLUETOOTH);
         return CH_BLUETOOTH;
+    case Nrf24JamPresetBluetooth2:
+        *count = ARRAY_COUNT(CH_BLUETOOTH2);
+        return CH_BLUETOOTH2;
     case Nrf24JamPresetUsb:
         *count = ARRAY_COUNT(CH_USB);
         return CH_USB;
@@ -141,6 +156,8 @@ uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset) {
     case Nrf24JamPresetWifi: /* fixed AP channels (1/6/11) */
     case Nrf24JamPresetZigbee: /* fixed channels */
         return 300;
+    case Nrf24JamPresetBluetooth2: /* FAP replica — engine runs it zero-dwell */
+        return 20;
     case Nrf24JamPresetBluetooth:
     case Nrf24JamPresetBle:
     case Nrf24JamPresetFull:

@@ -162,7 +162,40 @@ static int32_t jam_worker(void* context) {
             jam_teardown(ctx);
         }
 
-        if(ctx->active && cfg->strategy == Nrf24StrategyAfh) {
+        /* BT Classic 2 = exact replica of the nRF24_jammer FAP jam_bluetooth
+         * (LIST mode): continuous carrier (brought up above) + tight loop that
+         * only retunes RF_CH across the curated 21-channel list, ZERO dwell and
+         * a per-write bus acquire/release (no 30 ms batch hold → no long
+         * un-jammed gaps). Fewer channels + zero dwell give a per-channel
+         * revisit near the ~625 us BT hop slot, unlike our wide 79-ch smear. */
+        bool fap_bt = app->jam.source == Nrf24SourceProtocol &&
+                      app->jam.protocol == Nrf24JamPresetBluetooth2 &&
+                      cfg->strategy == Nrf24StrategyCw;
+
+        if(ctx->active && fap_bt) {
+            /* Exact replica of the FAP jam_bluetooth() loop AND its UI behaviour:
+             * retune RF_CH across the curated list forever with ZERO dwell — and,
+             * like the FAP (which never calls view_port_update while is_running),
+             * DO NOT redraw the screen while jamming. On the T-Embed the nRF24 SCK
+             * (GPIO11) is physically shared with the LCD clock, so every redraw
+             * would lock the SPI bus and park the carrier on one channel for a
+             * whole LCD frame. Keeping the screen static hands the entire bus to
+             * the hop, matching the FAP's band coverage. The screen keeps whatever
+             * it showed when "Run" was pressed until the loop exits (stop / pause /
+             * config change), where the shared view-update below refreshes once. */
+            while(!ctx->stop && ctx->desired_running && !ctx->dirty) {
+                cur_ch = chbuf[hop_index % chcount];
+                nrf24_hw_acquire();
+                nrf24_hw_jammer_set_channel(cur_ch);
+                nrf24_hw_release();
+                hop_index++;
+                hops++;
+                if(hop_index >= chcount) {
+                    hop_index = 0;
+                    sweeps++;
+                }
+            }
+        } else if(ctx->active && cfg->strategy == Nrf24StrategyAfh) {
             /* AFH exhaustion: park a strong CW carrier on one channel long
              * enough (dwell read as MILLISECONDS) for the victim's adaptive
              * hopping to classify it bad, then step to the next — sequentially,
@@ -348,9 +381,9 @@ bool nrf24_app_scene_jam_on_event(void* context, SceneManagerEvent event) {
         g_ctx->dirty = true;
         return true;
     case Nrf24JamEventCycleSource:
-        /* Just switch source type; scanning happens on demand via the Scan
-         * button (jam_should_scan), not automatically on cycle. */
-        nrf24_source_cycle_type(app);
+        /* Rotate CW: next target in the flat preset+source list (wraps). Scanning
+         * happens on demand via the Scan button (jam_should_scan), not on step. */
+        nrf24_source_step(app, +1);
         g_ctx->dirty = true;
         return true;
     case Nrf24JamEventConfig:

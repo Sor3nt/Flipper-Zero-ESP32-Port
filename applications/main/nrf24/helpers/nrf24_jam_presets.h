@@ -13,6 +13,7 @@ typedef enum {
     Nrf24JamPresetBle, /* BLE data channels */
     Nrf24JamPresetBleAdv, /* BLE advertising ch 37/38/39 */
     Nrf24JamPresetBluetooth, /* BT classic FHSS 2..80 */
+    Nrf24JamPresetBluetooth2, /* BT classic — exact nRF24_jammer FAP replica (21-ch list, zero-dwell CW) */
     Nrf24JamPresetUsb, /* wireless USB dongles */
     Nrf24JamPresetVideo, /* video / FPV (upper ISM) */
     Nrf24JamPresetRc, /* RC controllers (low channels) */
