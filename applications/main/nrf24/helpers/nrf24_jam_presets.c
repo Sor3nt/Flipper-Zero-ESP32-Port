@@ -138,15 +138,23 @@ uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset) {
     case Nrf24JamPresetUsb: /* 3 channels */
     case Nrf24JamPresetVideo: /* 3 channels */
         return 1000;
-    case Nrf24JamPresetWifi:
-    case Nrf24JamPresetBle:
-    case Nrf24JamPresetZigbee:
+    case Nrf24JamPresetWifi: /* fixed AP channels (1/6/11) */
+    case Nrf24JamPresetZigbee: /* fixed channels */
         return 300;
-    case Nrf24JamPresetFull:
     case Nrf24JamPresetBluetooth:
+    case Nrf24JamPresetBle:
+    case Nrf24JamPresetFull:
     case Nrf24JamPresetDrone:
     default:
-        return 200; /* fast sweep across many channels */
+        /* Wide/hopping targets (BT-Classic AFH ~1600 hops/s, BLE data hopping,
+         * FHSS drones): a very short dwell keeps the PLL below its ~130us re-lock
+         * time on purpose → the carrier chirps/smears across the whole band
+         * instead of cleanly parking on one channel and leaving the other ~78
+         * open. This is Bruce's zero-dwell smear, which blankets a fast hopper
+         * far better than clean per-channel parks. (The narrow fixed-channel
+         * presets above keep a long dwell — there clean parks concentrate more
+         * energy on the few channels that matter.) */
+        return 30;
     }
 }
 
@@ -163,9 +171,20 @@ uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset) {
 }
 
 uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset) {
-    /* CW presets walk their handful of channels sequentially (no point shuffling
-     * 3 channels); the Turbo sweeps randomise to spread collisions. */
-    return nrf24_jam_preset_default_strategy(preset) == Nrf24StrategyCw ? 0 : 1;
+    switch(preset) {
+    case Nrf24JamPresetBluetooth:
+    case Nrf24JamPresetBle:
+    case Nrf24JamPresetFull:
+    case Nrf24JamPresetDrone:
+        /* Wide smear presets: random hop spreads the chirp uniformly across the
+         * band. Sequential-ascending would let the slewing PLL chronically lag
+         * and weight the energy toward the low end of the band. */
+        return 1;
+    default:
+        /* Narrow fixed-channel presets walk their handful of channels
+         * sequentially — nothing to gain from shuffling 3-4 channels. */
+        return 0;
+    }
 }
 
 uint8_t nrf24_jam_preset_next_channel(Nrf24JamPreset preset, uint32_t* hop_index) {

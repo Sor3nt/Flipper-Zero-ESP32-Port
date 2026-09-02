@@ -8,7 +8,7 @@
 
 #define NRF24_JAM_CFG_PATH    INT_PATH(".nrf24jam.cfg")
 #define NRF24_JAM_CFG_MAGIC   (0x4E) /* 'N' — unused by other settings */
-#define NRF24_JAM_CFG_VERSION (5) /* v5: default strategy CW for all presets (Bruce match), was Turbo */
+#define NRF24_JAM_CFG_VERSION (6) /* v6: wide presets -> short-dwell smear + random hop, was 200us/seq */
 
 /* Persisted blob: WiFi/Activity get one slot each, while the Protocol source
  * keeps a separate slot per preset (each protocol has its own optimal strategy:

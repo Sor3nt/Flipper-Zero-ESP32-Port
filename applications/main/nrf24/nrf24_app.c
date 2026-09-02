@@ -84,6 +84,18 @@ static Nrf24App* nrf24_app_alloc(void) {
     app->mj_script_path = furi_string_alloc();
     app->mj_auto_mode = false;
 
+    /* WiFi pausieren: der (default breitband) 2.4-GHz-Jammer stört die eigene
+     * WiFi-STA massiv (Beacon-Timeout → Reconnect-Churn). War WiFi global an,
+     * merken und abschalten; nrf24_app_free reaktiviert es. Die WiFi-Jam-Quelle
+     * nutzt ihren eigenen esp_wifi-Scan-Lifecycle und ist davon unberührt. */
+    app->wifi_was_paused = false;
+    Wifi* wifi = furi_record_open(RECORD_WIFI);
+    if(wifi_is_enabled(wifi)) {
+        app->wifi_was_paused = true;
+        wifi_disable(wifi);
+    }
+    furi_record_close(RECORD_WIFI);
+
     return app;
 }
 
@@ -114,6 +126,13 @@ static void nrf24_app_free(Nrf24App* app) {
     if(app->mj_script_path) {
         furi_string_free(app->mj_script_path);
         app->mj_script_path = NULL;
+    }
+
+    /* WiFi wiederherstellen, falls wir es beim Start pausiert haben. */
+    if(app->wifi_was_paused) {
+        Wifi* wifi = furi_record_open(RECORD_WIFI);
+        wifi_enable(wifi);
+        furi_record_close(RECORD_WIFI);
     }
 
     scene_manager_free(app->scene_manager);

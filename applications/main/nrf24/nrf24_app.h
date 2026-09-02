@@ -10,6 +10,7 @@
 #include <dialogs/dialogs.h>
 #include <storage/storage.h>
 #include <esp_wifi.h>
+#include <wifi.h>
 
 #include "views/nrf24_spectrum_view.h"
 #include "views/nrf24_jam_view.h"
@@ -65,4 +66,9 @@ typedef struct Nrf24App {
     int8_t mj_selected_target; /* -1 = none */
     FuriString* mj_script_path;
     bool mj_auto_mode;
+
+    /* WiFi war beim App-Start global aktiv → wir haben es pausiert (der
+     * breitband 2.4-GHz-Jammer schießt sonst die eigene STA-Verbindung ab)
+     * und reaktivieren es beim Verlassen. */
+    bool wifi_was_paused;
 } Nrf24App;

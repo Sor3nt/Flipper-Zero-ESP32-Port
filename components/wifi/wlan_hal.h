@@ -76,6 +76,14 @@ void wlan_hal_set_promiscuous(bool enable, wifi_promiscuous_cb_t cb);
  *  esp_wifi_80211_tx(). Frame-Länge bis 64 Bytes. */
 bool wlan_hal_send_raw(const uint8_t* data, uint16_t len);
 
+/** Direkter roher 802.11-TX auf dem STA-Interface mit Retry bei vollem TX-Ring
+ *  (ESP_ERR_NO_MEM, bis zu 3 Versuche mit je 1 Tick Pause). Anders als
+ *  wlan_hal_send_raw() läuft dies NICHT über den wlan-Worker, sondern direkt im
+ *  aufrufenden Task — für High-Rate-Deauth-Bursts, die den Queue-Roundtrip nicht
+ *  vertragen. Nur aus einem echten FreeRTOS-Task mit aktivem Promiscuous
+ *  aufrufen. true = Frame ging in den TX-Ring. */
+bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len);
+
 /** Generischer Worker-Hook: ruft fn(arg) im wlan-Worker-Task auf und blockt
  *  bis er fertig ist. Nötig für Code, der esp_wifi_*-APIs vom Worker aus
  *  treiben muss (z.B. Evil Portal: SoftAP-Init, Verify-Connect). */

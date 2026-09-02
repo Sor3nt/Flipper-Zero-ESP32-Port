@@ -59,6 +59,6 @@ uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset);
 uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset);
 
 /* Live-tuning bounds / step for the dwell time. */
-#define NRF24_JAM_DWELL_MIN_US 100
+#define NRF24_JAM_DWELL_MIN_US 20
 #define NRF24_JAM_DWELL_MAX_US 5000
 #define NRF24_JAM_DWELL_STEP_US 100

@@ -120,6 +120,8 @@ static int32_t jam_worker(void* context) {
     bool built = false;
     uint32_t start_tick = 0;
     uint32_t last_view_tick = 0;
+    uint32_t last_cps_hops = 0; /* Hops beim letzten View-Update (Momentanraten-Basis) */
+    uint32_t last_cps = 0; /* geglättete c/s (EWMA) */
 
     while(!ctx->stop) {
         bool want = ctx->desired_running;
@@ -153,6 +155,9 @@ static int32_t jam_worker(void* context) {
             ctx->active = true;
             ctx->active_strategy = cfg->strategy;
             start_tick = furi_get_tick();
+            last_view_tick = start_tick;
+            last_cps_hops = hops;
+            last_cps = 0;
         } else if(!want && ctx->active) {
             jam_teardown(ctx);
         }
@@ -218,13 +223,24 @@ static int32_t jam_worker(void* context) {
 
         uint32_t now = furi_get_tick();
         if(now - last_view_tick >= pdMS_TO_TICKS(150)) {
+            uint32_t d_tick = now - last_view_tick;
             last_view_tick = now;
             uint32_t elapsed_ms = 0;
             uint32_t cps = 0;
             if(ctx->active) {
                 uint32_t et = now - start_tick;
                 elapsed_ms = (tick_hz == 1000) ? et : (uint32_t)((uint64_t)et * 1000 / tick_hz);
-                if(elapsed_ms > 300) cps = (uint32_t)((uint64_t)hops * 1000 / elapsed_ms);
+                /* Momentanrate: Hops seit dem letzten Update / Intervalldauer. Ein
+                 * kumulativer Schnitt (hops/elapsed) würde vom überhöhten ersten
+                 * Sample nach unten konvergieren statt konstant zu bleiben; leichte
+                 * EWMA glättet Jitter durch Batch-Grenzen und LCD-Refresh. */
+                uint32_t d_ms =
+                    (tick_hz == 1000) ? d_tick : (uint32_t)((uint64_t)d_tick * 1000 / tick_hz);
+                uint32_t d_hops = hops - last_cps_hops;
+                uint32_t inst = d_ms > 0 ? (uint32_t)((uint64_t)d_hops * 1000 / d_ms) : 0;
+                cps = last_cps ? (last_cps * 3 + inst) / 4 : inst;
+                last_cps = cps;
+                last_cps_hops = hops;
             }
             uint8_t ch = cur_ch;
             uint32_t s = sweeps;
@@ -242,6 +258,7 @@ static int32_t jam_worker(void* context) {
                 },
                 true);
         }
+
 
         furi_delay_ms(ctx->active ? 1 : 10);
     }

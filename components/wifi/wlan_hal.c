@@ -535,6 +535,19 @@ bool wlan_hal_send_raw(const uint8_t* data, uint16_t len) {
     return xQueueSend(s_cmd_queue, &cmd, 0) == pdTRUE;
 }
 
+bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len) {
+    // Direkter TX aus dem aufrufenden Task (NICHT über den Worker-Queue-
+    // Roundtrip wie wlan_hal_send_raw) — für High-Rate-Deauth-Bursts. Bei
+    // vollem TX-Ring (ESP_ERR_NO_MEM) kurz warten und erneut versuchen, sonst
+    // gehen im Burst still Frames verloren. en_sys_seq=true → HW füllt die Seq.
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, data, len, true);
+    for(int i = 0; err == ESP_ERR_NO_MEM && i < 3; i++) {
+        vTaskDelay(1); // TX-Ring drainen lassen
+        err = esp_wifi_80211_tx(WIFI_IF_STA, data, len, true);
+    }
+    return err == ESP_OK;
+}
+
 bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg) {
     if(!fn) return false;
     // Lazy-init the worker queue + task. Evil Portal is entered directly from
