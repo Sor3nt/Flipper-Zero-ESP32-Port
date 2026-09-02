@@ -8,10 +8,12 @@
 void nrf24_jam_state_init(Nrf24JamState* st) {
     memset(st, 0, sizeof(*st));
     st->source = Nrf24SourceProtocol;
-    /* Default to BLE advertising (ch 37/38/39): only 3 channels but the ones
-     * every BLE device uses for discovery/connection setup — concentrating all
-     * energy there is what makes BLE jamming actually bite. */
-    st->protocol = Nrf24JamPresetBleAdv;
+    /* Default to BT Classic (nRF ch 2..80 = the whole 2402–2480 MHz BT/BLE band).
+     * Combined with the CW default strategy this is Bruce's "Bluetooth" mode: a
+     * continuous carrier swept lucklessly across the entire band, which is what
+     * actually disrupts real devices. The narrow BLE-Adv preset (3 channels) is
+     * still selectable but only covers 1/3 of each advertising channel over time. */
+    st->protocol = Nrf24JamPresetBluetooth;
     /* wifi/activity start unscanned; everything else zeroed. */
 }
 

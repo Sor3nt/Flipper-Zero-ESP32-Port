@@ -151,18 +151,15 @@ uint16_t nrf24_jam_preset_default_dwell_us(Nrf24JamPreset preset) {
 }
 
 uint8_t nrf24_jam_preset_default_strategy(Nrf24JamPreset preset) {
-    switch(preset) {
-    case Nrf24JamPresetBleAdv: /* 3 fixed channels */
-    case Nrf24JamPresetRc: /* 4 channels */
-    case Nrf24JamPresetUsb: /* 3 channels */
-    case Nrf24JamPresetVideo: /* 3 channels */
-        /* Few channels → a continuous carrier parked on each is strongest (it is
-         * exactly what makes the FAP's BLE-advertising jam so effective). */
-        return Nrf24StrategyCw;
-    default:
-        /* Wide sweeps / FHSS → Turbo packet collisions across the band. */
-        return Nrf24StrategyTurbo;
-    }
+    (void)preset;
+    /* Match Bruce's nrf_jammer, which jams EVERY mode with a single continuous
+     * carrier (RF24::startConstCarrier) that never switches off — it only
+     * retunes across the mode's channels. A parked/sweeping CW tone saturates
+     * the victim's AGC far more effectively than discrete garbage packets, so
+     * data flooding (Flood/Turbo) is a much weaker jam in practice. Every preset
+     * therefore defaults to CW; users can still pick Flood/Turbo/AFH per preset
+     * in the config editor. */
+    return Nrf24StrategyCw;
 }
 
 uint8_t nrf24_jam_preset_default_hop(Nrf24JamPreset preset) {
