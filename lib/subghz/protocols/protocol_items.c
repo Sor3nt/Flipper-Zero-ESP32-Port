@@ -31,7 +31,8 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_ditec_gol4,    &subghz_protocol_keyfinder,
     &tpms_protocol_schrader_gg4, &tpms_protocol_ford,
     &tpms_protocol_renault,      &tpms_protocol_citroen,
-    &tpms_protocol_pmv107j,
+    &tpms_protocol_pmv107j,         &subghz_protocol_holtek_ht6p20b,
+    &subghz_protocol_agilize_key_pro,
 };
 
 const SubGhzProtocolRegistry subghz_protocol_registry = {
