@@ -63,4 +63,6 @@
 #include "tpms_renault.h"
 #include "tpms_citroen.h"
 #include "tpms_pmv107j.h"
+#include "holtek_ht6p20b.h"
+#include "agilize_key_pro.h"
 
