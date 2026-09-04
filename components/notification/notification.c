@@ -788,6 +788,23 @@ int32_t notification_srv(void* p) {
 
     furi_record_create(RECORD_NOTIFICATION, app);
 
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    for(int i = 0; i < 50 && storage_sd_status(storage) != FSE_OK; i++) {
+        furi_delay_ms(100);
+    }
+    furi_record_close(RECORD_STORAGE);
+
+    if(notification_load_settings(app)) {
+        notification_apply_led_color(app);
+        notification_apply_ui_color(app);
+        notification_message(app, &sequence_display_backlight_on);
+        if(app->settings.night_shift != 1.0f) {
+            night_shift_timer_start(app);
+        } else {
+            night_shift_timer_stop(app);
+        }
+    }
+
     NotificationAppMessage message;
     while(true) {
         furi_check(furi_message_queue_get(app->queue, &message, FuriWaitForever) == FuriStatusOk);
