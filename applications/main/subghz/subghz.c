@@ -194,6 +194,13 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
             subghz->view_dispatcher,
             SubGhzViewIdFrequencyAnalyzer,
             subghz_frequency_analyzer_get_view(subghz->subghz_frequency_analyzer));
+
+        // RF Spectrum (swept-RSSI spectrum + waterfall)
+        subghz->subghz_spectrum = subghz_spectrum_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdSpectrum,
+            subghz_spectrum_get_view(subghz->subghz_spectrum));
     }
     // Read RAW
     subghz->subghz_read_raw = subghz_read_raw_alloc(alloc_for_tx_only);
@@ -354,6 +361,10 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // Frequency Analyzer
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdFrequencyAnalyzer);
         subghz_frequency_analyzer_free(subghz->subghz_frequency_analyzer);
+
+        // RF Spectrum
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdSpectrum);
+        subghz_spectrum_free(subghz->subghz_spectrum);
     }
     if(!alloc_for_tx_only) {
         // SubBrute Bruteforcer
