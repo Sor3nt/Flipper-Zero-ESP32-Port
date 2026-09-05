@@ -47,13 +47,15 @@ static void webfs_info_render(WlanApp* app, bool ok) {
 
 /* Stop happens in on_exit; return to the entry scene. */
 static void webfs_info_leave(WlanApp* app) {
-    if(!scene_manager_search_and_switch_to_previous_scene(
-           app->scene_manager, WlanAppSceneWebFsMenu)) {
-        if(!scene_manager_search_and_switch_to_previous_scene(
-               app->scene_manager, WlanAppSceneMain)) {
-            scene_manager_previous_scene(app->scene_manager);
-        }
-    }
+    if(scene_manager_search_and_switch_to_previous_scene(
+           app->scene_manager, WlanAppSceneWebFsMenu))
+        return;
+    if(scene_manager_search_and_switch_to_previous_scene(
+           app->scene_manager, WlanAppSceneMain))
+        return;
+
+    scene_manager_stop(app->scene_manager);
+    view_dispatcher_stop(app->view_dispatcher);
 }
 
 void wlan_app_scene_webfs_info_on_enter(void* context) {
