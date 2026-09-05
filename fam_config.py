@@ -48,6 +48,7 @@ APPS = [
     "lfrfid",
     "wlan",
     "wifi",
+    "ota_updater",
     "streaming",
     "nrf24",
     "ble_spam",

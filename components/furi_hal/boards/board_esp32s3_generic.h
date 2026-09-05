@@ -13,3 +13,5 @@
 /* Override identity so logs and version strings show the generic name */
 #undef BOARD_NAME
 #define BOARD_NAME "ESP32-S3 Generic"
+/* Kurz-ID = Release-Ordner unter https://sor3nt.github.io/release/<BOARD_ID>/latest */
+#define BOARD_ID          "esp32s3_generic"

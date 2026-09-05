@@ -7,5 +7,5 @@ idf_component_register(
         "rpc_gui.c"
         "rpc_property.c"
     INCLUDE_DIRS "."
-    REQUIRES furi furi_hal toolbox storage nanopb flipper_protobuf notification btshim datetime gui loader input assets
+    REQUIRES furi furi_hal toolbox storage nanopb flipper_protobuf notification btshim datetime gui loader input assets fw_ota
 )

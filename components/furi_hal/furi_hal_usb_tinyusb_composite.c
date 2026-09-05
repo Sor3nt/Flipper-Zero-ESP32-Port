@@ -276,6 +276,20 @@ void furi_hal_usb_composite_restore_serial_jtag(void) {
     usb_serial_jtag_ll_phy_enable_pad(true);
 }
 
+size_t furi_hal_usb_serial_jtag_read(uint8_t* buf, size_t len) {
+    if(s_installed || !buf || !len) return 0;
+    if(!usb_serial_jtag_ll_rxfifo_data_available()) return 0;
+    return usb_serial_jtag_ll_read_rxfifo(buf, (uint32_t)len);
+}
+
+size_t furi_hal_usb_serial_jtag_write(const uint8_t* buf, size_t len) {
+    if(s_installed || !buf || !len) return 0;
+    if(!usb_serial_jtag_ll_txfifo_writable()) return 0;
+    size_t n = usb_serial_jtag_ll_write_txfifo(buf, (uint32_t)len);
+    usb_serial_jtag_ll_txfifo_flush();
+    return n;
+}
+
 #else /* !ESP32-S3 / S2 */
 
 bool furi_hal_usb_composite_install(
@@ -299,6 +313,18 @@ bool furi_hal_usb_composite_uninstall(void) {
 }
 
 void furi_hal_usb_composite_restore_serial_jtag(void) {
+}
+
+size_t furi_hal_usb_serial_jtag_read(uint8_t* buf, size_t len) {
+    (void)buf;
+    (void)len;
+    return 0;
+}
+
+size_t furi_hal_usb_serial_jtag_write(const uint8_t* buf, size_t len) {
+    (void)buf;
+    (void)len;
+    return 0;
 }
 
 #endif

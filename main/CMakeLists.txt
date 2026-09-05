@@ -32,7 +32,7 @@ endif()
 idf_component_register(
     SRCS "app_main.c" "${ESP32_FAM_REGISTRY_C}"
     INCLUDE_DIRS "."
-    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim wifi app_update libsmb2
+    REQUIRES furi furi_hal input notification gui locale storage loader desktop btshim wifi app_update fw_ota libsmb2
     LDFRAGMENTS "main.lf"
 )
 
@@ -43,6 +43,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
 
     set(ESP32_FAM_PORTED_COMPONENT_LIBS
         idf::app_update
+        idf::fw_ota
         idf::archive
         idf::assets
         idf::ble_hid

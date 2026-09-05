@@ -9,22 +9,19 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_http_client.h>
-#include <esp_ota_ops.h>
-#include <esp_partition.h>
-#include <esp_heap_caps.h>
+#include <fw_ota/fw_ota.h>
 
 #define FW_UPDATE_TAG "WlanFwUpdate"
 // Muss mit dem Release-Layout übereinstimmen (siehe auch wlan_sd_update.c).
 #define FW_BASE_URL "https://sor3nt.github.io/release/t-embed/latest"
 #define FW_VERSION_URL FW_BASE_URL "/version.txt"
 #define FW_BIN_URL FW_BASE_URL "/furi_esp32.bin"
-// Eigene FW-Marker-Datei (getrennt von /ext/version.txt, die der SD-Sync
-// verwaltet): spiegelt die laufende FW-Version auf die SD. Autoritativ fuer
-// "FW aktuell?" ist FURI_ESP32_VERSION (toolbox/fw_version.h) — der Marker ist
-// nur Fallback/Info (siehe fw_check_task).
-#define FW_MARKER "/ext/.fw_version"
-#define FW_LOCAL_DIR "/ext/update"
-#define FW_LOCAL_BIN FW_LOCAL_DIR "/furi_esp32.bin"
+// FW-Marker (/ext/.fw_version) und Staging-Pfad (/ext/update/furi_esp32.bin)
+// kommen aus fw_ota.h — derselbe Ort, den auch der RPC-/qT-Embed-Updater nutzt.
+// Autoritativ fuer "FW aktuell?" ist FURI_ESP32_VERSION (toolbox/fw_version.h),
+// der Marker ist nur Fallback/Info (siehe fw_check_task).
+#define FW_LOCAL_DIR FW_OTA_STAGE_DIR
+#define FW_LOCAL_BIN FW_OTA_STAGE_BIN
 #define FW_CHUNK 8192
 #define FW_MAX_RETRY 4
 
@@ -106,30 +103,6 @@ static bool fw_http_get_text(const char* url, char* out, size_t out_sz) {
     return ok;
 }
 
-static bool fw_read_local_version(char* out, size_t out_sz) {
-    Storage* st = furi_record_open(RECORD_STORAGE);
-    File* f = storage_file_alloc(st);
-    bool ok = false;
-    if(storage_file_open(f, FW_MARKER, FSAM_READ, FSOM_OPEN_EXISTING)) {
-        size_t r = storage_file_read(f, out, out_sz - 1);
-        out[r] = '\0';
-        ok = true;
-    }
-    storage_file_close(f);
-    storage_file_free(f);
-    furi_record_close(RECORD_STORAGE);
-    return ok;
-}
-
-static void fw_write_local_version(Storage* storage, const char* version) {
-    File* f = storage_file_alloc(storage);
-    if(storage_file_open(f, FW_MARKER, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
-        storage_file_write(f, version, strlen(version));
-        storage_file_close(f);
-    }
-    storage_file_free(f);
-}
-
 // ---------------------------------------------------------------------------
 // Check-Task
 // ---------------------------------------------------------------------------
@@ -169,8 +142,7 @@ static void fw_check_task(void* arg) {
     // stimmt nach jedem OTA automatisch und ueberlebt einen SD-Kartentausch.
     // Der Marker auf der SD ist nur Fallback: er faengt den Update-Loop ab,
     // falls ein Release-Binary eine abweichende einkompilierte Version traegt.
-    bool have_local = fw_read_local_version(local, sizeof(local));
-    fw_trim(local);
+    bool have_local = fw_ota_marker_read(local, sizeof(local));
 
     bool up_to_date = remote[0] != '\0' && (strcmp(remote, FURI_ESP32_VERSION) == 0 ||
                                             (have_local && strcmp(remote, local) == 0));
@@ -286,8 +258,17 @@ static void fw_download_task(void* arg) {
 }
 
 // ---------------------------------------------------------------------------
-// Flash-Task (esp_ota)
+// Flash-Task (esp_ota) — Kern liegt in components/fw_ota (geteilt mit dem
+// RPC-/qT-Embed-Updater). Laeuft hier in einem xTaskCreate-Task mit internem
+// DRAM-Stack (siehe fw_ota.h).
 // ---------------------------------------------------------------------------
+
+static void fw_flash_progress(uint32_t done, uint32_t total, void* ctx) {
+    WlanFwUpdate* u = ctx;
+    u->bytes_total = total;
+    u->bytes_done = done;
+    u->percent = total ? (uint8_t)((uint64_t)done * 100u / total) : 0;
+}
 
 static void fw_flash_task(void* arg) {
     WlanFwUpdate* u = arg;
@@ -296,107 +277,18 @@ static void fw_flash_task(void* arg) {
     u->bytes_done = 0;
     u->speed_kbps = 0;
 
-    const esp_partition_t* next = esp_ota_get_next_update_partition(NULL);
-    if(!next) {
-        fw_fail(u, "OTA not supported (no ota slot)");
-        fw_finish(u);
-        return;
-    }
-
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    FileInfo fi;
-    if(storage_common_stat(storage, FW_LOCAL_BIN, &fi) != FSE_OK || fi.size == 0) {
-        furi_record_close(RECORD_STORAGE);
-        fw_fail(u, "firmware file missing");
-        fw_finish(u);
-        return;
-    }
-    u->bytes_total = (uint32_t)fi.size;
-
-    File* f = storage_file_alloc(storage);
-    esp_ota_handle_t handle = 0;
-    uint8_t* chunk = NULL;
-    bool ok = false;
-
-    do {
-        if(!storage_file_open(f, FW_LOCAL_BIN, FSAM_READ, FSOM_OPEN_EXISTING)) {
-            fw_fail(u, "open bin failed");
-            break;
-        }
-        // esp_ota_begin löscht die Zielpartition (kann einige Sekunden dauern).
-        esp_err_t e = esp_ota_begin(next, fi.size, &handle);
-        if(e != ESP_OK) {
-            fw_fail(u, "esp_ota_begin failed");
-            handle = 0;
-            break;
-        }
-        // Quellpuffer MUSS in internem DRAM liegen: esp_ota_write schreibt Flash
-        // mit kurzzeitig deaktiviertem MSPI-Cache — ein PSRAM-Puffer als Quelle
-        // ginge über den Bounce-Buffer-Pfad, der auf dieser HW heikel ist.
-        chunk = heap_caps_malloc(FW_CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if(!chunk) {
-            fw_fail(u, "out of memory");
-            break;
-        }
-
-        ok = true;
-        uint32_t written = 0;
-        while(written < fi.size) {
-            size_t want = (fi.size - written) > FW_CHUNK ? FW_CHUNK : (size_t)(fi.size - written);
-            size_t r = storage_file_read(f, chunk, want);
-            if(r == 0) {
-                fw_fail(u, "read error");
-                ok = false;
-                break;
-            }
-            e = esp_ota_write(handle, chunk, r);
-            if(e != ESP_OK) {
-                fw_fail(u, "esp_ota_write failed");
-                ok = false;
-                break;
-            }
-            written += (uint32_t)r;
-            u->bytes_done = written;
-            u->percent = (uint8_t)((uint64_t)written * 100u / fi.size);
-        }
-    } while(0);
-
-    if(chunk) free(chunk);
-    if(f) {
-        storage_file_close(f);
-        storage_file_free(f);
-    }
-
-    if(ok && handle) {
-        esp_err_t e = esp_ota_end(handle); // validiert das Image
-        handle = 0;
-        if(e != ESP_OK) {
-            fw_fail(u, "image validation failed");
-            ok = false;
-        } else {
-            e = esp_ota_set_boot_partition(next);
-            if(e != ESP_OK) {
-                fw_fail(u, "set boot partition failed");
-                ok = false;
-            }
-        }
-    } else if(handle) {
-        esp_ota_abort(handle);
-        handle = 0;
-    }
-
-    if(ok) {
+    char err[64] = {0};
+    if(fw_ota_flash_file(FW_LOCAL_BIN, fw_flash_progress, u, err, sizeof(err))) {
         // FW-Marker /ext/.fw_version auf die neue Version setzen, damit nach dem
         // Reboot die FW als aktuell erkannt wird (SD-Version bleibt getrennt).
         if(u->remote_version[0]) {
-            fw_write_local_version(storage, u->remote_version);
+            fw_ota_marker_write(u->remote_version);
         }
         u->percent = 100;
         u->phase = FwUpdateDone;
-        FURI_LOG_I(FW_UPDATE_TAG, "flashed to %s, boot set", next->label);
+    } else {
+        fw_fail(u, err[0] ? err : "flash failed");
     }
-
-    furi_record_close(RECORD_STORAGE);
     fw_finish(u);
 }
 
@@ -405,16 +297,7 @@ static void fw_flash_task(void* arg) {
 // ---------------------------------------------------------------------------
 
 void wlan_fw_update_sync_marker(void) {
-    // Marker auf die laufende FW-Version ziehen (nur schreiben, wenn er fehlt
-    // oder abweicht — kein Flash-/SD-Write bei jedem App-Start).
-    char cur[32] = {0};
-    bool have = fw_read_local_version(cur, sizeof(cur));
-    fw_trim(cur);
-    if(have && strcmp(cur, FURI_ESP32_VERSION) == 0) return;
-
-    Storage* st = furi_record_open(RECORD_STORAGE);
-    fw_write_local_version(st, FURI_ESP32_VERSION);
-    furi_record_close(RECORD_STORAGE);
+    fw_ota_marker_sync();
 }
 
 WlanFwUpdate* wlan_fw_update_alloc(void) {

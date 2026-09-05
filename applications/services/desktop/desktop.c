@@ -18,10 +18,18 @@
 #include "helpers/mesh_config.h"
 #include "helpers/mesh_service.h"
 #include "helpers/mesh_capture.h"
+#include "helpers/qflipper_bridge.h"
+#include <furi_hal_usb_tinyusb_composite.h>
+#include "helpers/qflipper_usj_cmd.h"
+#include <fw_ota/fw_ota.h>
 
 #include "furi_hal_power.h"
 
 #define TAG "Desktop"
+/* Verzoegerung fuer den qFlipper-Bridge-Resume nach einem OTA-Reboot. */
+#define QFLIPPER_RESUME_DELAY_MS 5000
+/* Poll-Intervall fuer das "qflipper"-Kommando auf der USJ-Konsole. */
+#define QFLIPPER_USJ_POLL_MS 100
 
 /* ─── Mesh helpers (Phase 1) ─────────────────────────────────────────────
  * desktop_mesh_event_cb wird vom Mesh-Service-Worker-Task aufgerufen. Wir
@@ -119,6 +127,8 @@ static void desktop_mesh_on_result(Desktop* desktop) {
 static void desktop_auto_lock_arm(Desktop*);
 static void desktop_auto_lock_inhibit(Desktop*);
 static void desktop_start_auto_lock_timer(Desktop*);
+static void desktop_qflipper_resume_timer_callback(void* context);
+static void desktop_qflipper_usj_timer_callback(void* context);
 static void desktop_apply_settings(Desktop*);
 
 static void desktop_loader_callback(const void* message, void* context) {
@@ -293,6 +303,32 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         /* Overlay-Timer abgelaufen → auf allen Mesh-Views ausblenden. */
         desktop_mesh_set_overlay_all(desktop, NULL);
 
+    } else if(event == DesktopGlobalQflipperStop) {
+        /* Auto-off der Bridge (Host weg): derselbe Pfad wie "Disable qFlipper"
+         * im Lock-Menue — Bridge stoppen, Composite abbauen, PHY zurueck zu USJ. */
+        if(qflipper_bridge_is_active()) {
+            FURI_LOG_I(TAG, "Host disconnected — leaving qFlipper mode");
+            qflipper_bridge_stop();
+            furi_hal_usb_composite_uninstall();
+            desktop_scene_lock_menu_refresh(desktop);
+        }
+
+    } else if(event == DesktopGlobalQflipperStart) {
+        /* Laeuft auf dem Desktop-Thread mit fertig hochgefahrenem System —
+         * exakt der Pfad des Lock-Menue-Toggles "Enable qFlipper". Quelle:
+         * OTA-Resume-Timer oder "qflipper"-Kommando von qT-Embed (USJ). */
+        if(qflipper_bridge_is_active()) {
+            FURI_LOG_D(TAG, "qFlipper bridge already active");
+        } else {
+            FURI_LOG_I(TAG, "Starting qFlipper bridge (host request / OTA resume)");
+            if(!qflipper_bridge_start()) {
+                FURI_LOG_W(TAG, "qFlipper bridge start failed (no USB-OTG on this board?)");
+            }
+            /* Falls das Lock-Menue gerade offen ist: Label "Enable" → "Disable qFlipper"
+             * nachziehen (die View liest den Zustand sonst nur beim Betreten). */
+            desktop_scene_lock_menu_refresh(desktop);
+        }
+
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
     }
@@ -326,6 +362,29 @@ static void desktop_auto_lock_timer_callback(void* context) {
     furi_assert(context);
     Desktop* desktop = context;
     view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalAutoLock);
+}
+
+static void desktop_qflipper_resume_timer_callback(void* context) {
+    furi_assert(context);
+    Desktop* desktop = context;
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalQflipperStart);
+}
+
+/* Alle 100 ms den USJ-RX-FIFO auf das "qflipper"-Kommando von qT-Embed pruefen
+ * (nur solange das Composite nicht installiert ist — sonst liefert der HAL 0). */
+/* Aus dem Bridge-Thread: nur Event posten, der Stop laeuft auf dem Desktop-Thread. */
+static void desktop_qflipper_auto_off_callback(void* context) {
+    furi_assert(context);
+    Desktop* desktop = context;
+    view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalQflipperStop);
+}
+
+static void desktop_qflipper_usj_timer_callback(void* context) {
+    furi_assert(context);
+    Desktop* desktop = context;
+    if(qflipper_usj_cmd_poll()) {
+        view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalQflipperStart);
+    }
 }
 
 static void desktop_start_auto_lock_timer(Desktop* desktop) {
@@ -545,6 +604,11 @@ static Desktop* desktop_alloc(void) {
 
     desktop->auto_lock_timer =
         furi_timer_alloc(desktop_auto_lock_timer_callback, FuriTimerTypeOnce, desktop);
+    desktop->qflipper_resume_timer =
+        furi_timer_alloc(desktop_qflipper_resume_timer_callback, FuriTimerTypeOnce, desktop);
+    desktop->qflipper_usj_timer =
+        furi_timer_alloc(desktop_qflipper_usj_timer_callback, FuriTimerTypePeriodic, desktop);
+    qflipper_bridge_set_auto_off_callback(desktop_qflipper_auto_off_callback, desktop);
 
     desktop->status_pubsub = furi_pubsub_alloc();
 
@@ -726,6 +790,24 @@ int32_t desktop_srv(void* p) {
     if(desktop->app_running && animation_manager_is_animation_loaded(desktop->animation_manager)) {
         animation_manager_unload_and_stall_animation(desktop->animation_manager);
     }
+
+    /* OTA-Update per qT-Embed (USB-RPC): der OTA-Updater setzt vor dem
+     * esp_restart() ein RTC-NOINIT-Flag, damit die qFlipper-Bridge einmalig
+     * wieder hochkommt und der Host das Geraet nach dem Neustart wiederfindet.
+     * Der Start laeuft NICHT direkt hier im Boot, sondern verzoegert ueber
+     * Timer → DesktopGlobalQflipperStart auf dem Desktop-Thread: ein Start
+     * mitten im Boot brachte ein enumeriertes Composite mit totem CDC (kein
+     * Prompt, jeder Host-Zugriff liess das Geraet vom USB verschwinden). Die
+     * Verzoegerung liegt weit unter dem 5-Minuten-Timeout von qT-Embed.
+     * Boot-Default bleibt USB-Serial-JTAG (esptool-Flashen ohne BOOT+RESET). */
+    if(fw_ota_take_resume_qflipper()) {
+        FURI_LOG_I(TAG, "qFlipper resume requested, starting bridge in %u ms", (unsigned)QFLIPPER_RESUME_DELAY_MS);
+        furi_timer_start(desktop->qflipper_resume_timer, furi_ms_to_ticks(QFLIPPER_RESUME_DELAY_MS));
+    }
+
+    /* qT-Embed kann die Bridge ueber die USB-Serial-JTAG-Konsole anfordern
+     * ("qflipper\n"), siehe helpers/qflipper_usj_cmd.h. */
+    furi_timer_start(desktop->qflipper_usj_timer, furi_ms_to_ticks(QFLIPPER_USJ_POLL_MS));
 
     view_dispatcher_run(desktop->view_dispatcher);
 

@@ -33,5 +33,20 @@ if(_xt_ar AND _xt_objcopy AND EXISTS "${_wifi_lib}")
     endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# App-Descriptor-Version (esp_app_desc_t.version) aus der zentralen Port-Version
+# in components/toolbox/fw_version.h. Damit traegt jede furi_esp32.bin ihre
+# Versionsnummer im Image-Header (Offset 0x30) — qT-Embed liest sie vor dem
+# Flashen, der OTA-Updater schreibt sie nach dem Flashen in /ext/.fw_version.
+# Ohne PROJECT_VER wuerde ESP-IDF "git describe" eintragen.
+# ---------------------------------------------------------------------------
+file(STRINGS "${CMAKE_SOURCE_DIR}/components/toolbox/fw_version.h" _furi_ver_line
+    REGEX "^#define[ \t]+FURI_ESP32_VERSION[ \t]+\"")
+string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PROJECT_VER "${_furi_ver_line}")
+if(NOT PROJECT_VER)
+    message(FATAL_ERROR "FURI_ESP32_VERSION not found in components/toolbox/fw_version.h")
+endif()
+message(STATUS "Firmware version (PROJECT_VER): ${PROJECT_VER}")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(furi_esp32)

@@ -18,6 +18,8 @@
 
 /* ---- Board metadata ---- */
 #define BOARD_NAME        "LilyGo T-Embed CC1101"
+/* Kurz-ID = Release-Ordner unter https://sor3nt.github.io/release/<BOARD_ID>/latest */
+#define BOARD_ID          "t-embed"
 #define BOARD_TARGET      "esp32s3"
 
 /* ---- Hardware Button / Encoder Pins ---- */

@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +57,17 @@ bool furi_hal_usb_composite_uninstall(void);
  * Idempotent. No-op on boards without USB-OTG (non ESP32-S3/S2).
  */
 void furi_hal_usb_composite_restore_serial_jtag(void);
+
+
+/** USB-Serial-JTAG-Konsole (nur solange das Composite NICHT installiert ist):
+ *  rohe Bytes aus dem RX-FIFO lesen bzw. in den TX-FIFO schreiben, ohne den
+ *  IDF-Treiber zu installieren (der wuerde nach dem PHY-Wechsel zum OTG-
+ *  Composite jeden Log-Write blockieren). Liefert die Anzahl der Bytes;
+ *  0 wenn nichts anliegt, das Composite aktiv ist oder der Chip kein USJ hat.
+ *  Genutzt vom Desktop fuer das "qflipper"-Kommando, mit dem qT-Embed die
+ *  Bridge automatisch einschaltet. */
+size_t furi_hal_usb_serial_jtag_read(uint8_t* buf, size_t len);
+size_t furi_hal_usb_serial_jtag_write(const uint8_t* buf, size_t len);
 
 #ifdef __cplusplus
 }

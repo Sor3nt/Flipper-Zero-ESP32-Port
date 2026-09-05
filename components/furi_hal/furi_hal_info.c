@@ -1,15 +1,44 @@
 #include "furi_hal_info.h"
 
 #include <furi.h>
+#include <string.h>
+#include <stdio.h>
 #include <version.h>
 #include <protobuf_version.h>
 
 #include "furi_hal_version.h"
 #include "furi_hal_bt.h"
+#include "boards/board.h"
+
+#include <toolbox/fw_version.h>
+#include <esp_ota_ops.h>
+#include <esp_app_desc.h>
 
 void furi_hal_info_get_api_version(uint16_t* major, uint16_t* minor) {
     if(major) *major = 0;
     if(minor) *minor = 1;
+}
+
+/* OTA-Infos werden einmalig beim Boot ermittelt: esp_ota_get_running_partition()
+ * (spi_flash_cache2phys + Partitions-Iteration) und esp_partition_find sind auf
+ * dem schmalen RPC-Worker-Stack zu tief — der erste qT-Embed-Test hat das Geraet
+ * genau an dieser Stelle per Stack-Overflow neu gestartet. */
+static char s_ota_partition[17] = "?";
+static const char* s_ota_supported = "false";
+static char s_ota_build[40] = "";
+
+void furi_hal_info_init(void) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if(running) {
+        strncpy(s_ota_partition, running->label, sizeof(s_ota_partition) - 1);
+        s_ota_partition[sizeof(s_ota_partition) - 1] = '\0';
+    }
+    s_ota_supported = esp_ota_get_next_update_partition(NULL) ? "true" : "false";
+
+    const esp_app_desc_t* app_desc = esp_app_get_description();
+    if(app_desc) {
+        snprintf(s_ota_build, sizeof(s_ota_build), "%s %s", app_desc->date, app_desc->time);
+    }
 }
 
 void furi_hal_info_get(PropertyValueCallback out, char sep, void* context) {
@@ -94,6 +123,23 @@ void furi_hal_info_get(PropertyValueCallback out, char sep, void* context) {
         property_value_out(&property_context, NULL, 2, "firmware", "origin.fork", "unleashed");
         property_value_out(&property_context, NULL, 2, "firmware", "origin.git", "");
     }
+
+    /* ESP32-Port: eigene Versions-/OTA-Infos fuer qT-Embed (Update-Check).
+     * "firmware.version" oben bleibt die emulierte Flipper-Basisversion fuer
+     * FAP-/qFlipper-Kompatibilitaet; die Port-Version lebt hier. Unbekannte
+     * Keys ignoriert das originale qFlipper. */
+    property_value_out(&property_context, NULL, 3, "firmware", "esp32", "version", FURI_ESP32_VERSION);
+    property_value_out(&property_context, NULL, 3, "firmware", "esp32", "name", FURI_ESP32_VERSION_NAME);
+    property_value_out(&property_context, NULL, 3, "firmware", "esp32", "board", BOARD_ID);
+    property_value_out(
+        &property_context, NULL, 3, "firmware", "esp32", "chip", furi_hal_version_get_model_code());
+    /* Aus dem Boot-Cache (furi_hal_info_init) — hier keine esp_ota-Aufrufe! */
+    if(s_ota_build[0]) {
+        property_value_out(&property_context, NULL, 3, "firmware", "esp32", "build", s_ota_build);
+    }
+    property_value_out(&property_context, NULL, 3, "firmware", "esp32", "partition", s_ota_partition);
+    /* OTA moeglich = inaktiver ota_x-Slot vorhanden (Dual-OTA-Layout). */
+    property_value_out(&property_context, NULL, 3, "firmware", "esp32", "ota", s_ota_supported);
 
     /* Radio/BLE information */
     property_value_out(&property_context, NULL, 2, "radio", "alive", "true");

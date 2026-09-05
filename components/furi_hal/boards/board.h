@@ -22,6 +22,9 @@
 #ifndef BOARD_NAME
 #error "Board header must define BOARD_NAME"
 #endif
+#ifndef BOARD_ID
+#define BOARD_ID "unknown"
+#endif
 #ifndef BOARD_PIN_LCD_MOSI
 #error "Board header must define LCD pins"
 #endif

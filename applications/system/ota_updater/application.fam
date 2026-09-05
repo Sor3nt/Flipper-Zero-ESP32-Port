@@ -1,0 +1,9 @@
+App(
+    appid="ota_updater",
+    name="OTA Updater",
+    apptype=FlipperAppType.SYSTEM,
+    entry_point="ota_updater_app",
+    requires=["gui", "storage", "notification"],
+    stack_size=4 * 1024,
+    order=10,
+)

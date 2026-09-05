@@ -74,6 +74,7 @@ typedef struct {
     bool connected;       /* DTR state */
     bool session_open;    /* RPC session active */
     bool rpc_mode;        /* false = CLI handshake, true = piping protobuf */
+    bool auto_off_armed;  /* host was connected and dropped DTR — grace period running */
     volatile bool exiting; /* stop() requested — bail out of any blocking loop */
 
     /* CLI handshake line buffer (qFlipper sends "start_rpc_session\r") */
@@ -86,6 +87,8 @@ typedef struct {
 
 /* Single-instance background bridge. */
 static UsbRpcSrv* s_bridge = NULL;
+static QflipperBridgeAutoOffCallback s_auto_off_cb = NULL;
+static void* s_auto_off_ctx = NULL;
 
 #if QFLIPPER_HAVE_COMPOSITE
 
@@ -265,7 +268,20 @@ static void qflipper_cli_rx(UsbRpcSrv* srv) {
 static void qflipper_bridge_run(UsbRpcSrv* srv) {
     UsbRpcEvent ev;
     while(true) {
-        if(furi_message_queue_get(srv->event_q, &ev, FuriWaitForever) != FuriStatusOk) {
+        /* While the host is gone after a session, wait with a timeout: if nothing
+         * happens within the grace period, ask the desktop to leave qFlipper mode. */
+        uint32_t wait = srv->auto_off_armed ? furi_ms_to_ticks(QFLIPPER_BRIDGE_AUTO_OFF_MS) :
+                                              FuriWaitForever;
+        FuriStatus st = furi_message_queue_get(srv->event_q, &ev, wait);
+        if(st == FuriStatusErrorTimeout) {
+            if(srv->auto_off_armed && !srv->connected && !srv->exiting) {
+                srv->auto_off_armed = false;
+                FURI_LOG_I(TAG, "host gone for %u ms — leaving qFlipper mode", (unsigned)QFLIPPER_BRIDGE_AUTO_OFF_MS);
+                if(s_auto_off_cb) s_auto_off_cb(s_auto_off_ctx);
+            }
+            continue;
+        }
+        if(st != FuriStatusOk) {
             continue;
         }
 
@@ -274,6 +290,7 @@ static void qflipper_bridge_run(UsbRpcSrv* srv) {
             return;
 
         case UsbRpcEventConnected:
+            srv->auto_off_armed = false;
             if(srv->connected) break;
             srv->connected = true;
             srv->rpc_mode = false;
@@ -287,6 +304,7 @@ static void qflipper_bridge_run(UsbRpcSrv* srv) {
             srv->connected = false;
             srv->rpc_mode = false;
             srv->cli_len = 0;
+            srv->auto_off_armed = true;
             FURI_LOG_I(TAG, "DTR down — closing RPC session");
             usb_rpc_session_close(srv);
             break;
@@ -333,6 +351,7 @@ bool qflipper_bridge_start(void) {
     srv->connected = false;
     srv->session_open = false;
     srv->rpc_mode = false;
+    srv->auto_off_armed = false;
     srv->exiting = false;
     srv->cli_len = 0;
 
@@ -391,4 +410,9 @@ void qflipper_bridge_stop(void) {
 
 bool qflipper_bridge_is_active(void) {
     return s_bridge != NULL;
+}
+
+void qflipper_bridge_set_auto_off_callback(QflipperBridgeAutoOffCallback callback, void* context) {
+    s_auto_off_cb = callback;
+    s_auto_off_ctx = context;
 }

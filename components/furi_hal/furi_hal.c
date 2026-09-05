@@ -51,6 +51,7 @@ void furi_hal_init(void) {
 
     furi_hal_rtc_init();
     furi_hal_version_init();
+    furi_hal_info_init();
     furi_hal_power_init();
     furi_hal_crypto_init();
     furi_hal_subghz_init();

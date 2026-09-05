@@ -50,7 +50,7 @@ static bool desktop_lock_menu_wifi_enabled(void) {
 
 /* Rebuild the menu from the live toggle states (used on enter and after a
  * toggle, so the Enable/Disable labels track reality). */
-static void desktop_scene_lock_menu_refresh(Desktop* desktop) {
+void desktop_scene_lock_menu_refresh(Desktop* desktop) {
     desktop_lock_menu_set_states(
         desktop->lock_menu,
         LOCK_MENU_USB_AVAILABLE,
