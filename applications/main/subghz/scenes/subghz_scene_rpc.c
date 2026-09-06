@@ -150,17 +150,36 @@ bool subghz_scene_rpc_on_event(void* context, SceneManagerEvent event) {
             rpc_system_app_confirm(subghz->rpc_ctx, result);
         }
     } else if(event.type == SceneManagerEventTypeTick) {
-        // if hardware TX finished then stop TX correctly
-        if(subghz_devices_is_async_complete_tx(subghz->txrx->radio_device)) {
-            bool result = false;
-            if(state == SubGhzRpcStateTx) {
+        // Only act while we are actually transmitting. On this port
+        // furi_hal_subghz's async_tx_complete flag is initialised to true and
+        // reads true whenever no TX is running, so without this Tx-state guard
+        // every tick would reset the scene state Loaded -> Idle (clobbering the
+        // state set on file load) and the RPC button press -- which requires the
+        // Loaded state -- would never start a transmission. It also previously
+        // caused a crash: rpc_system_app_confirm() with no pending command
+        // (last_command_id == 0) trips a furi_check.
+        if(state == SubGhzRpcStateTx) {
+            if(subghz_devices_is_async_complete_tx(subghz->txrx->radio_device) &&
+               !subghz_block_generic_global.endless_tx) {
+                // hardware TX finished -> stop TX correctly
                 subghz_txrx_stop(subghz->txrx);
                 subghz_blink_stop(subghz);
-                result = true;
+                scene_manager_set_scene_state(
+                    subghz->scene_manager, SubGhzSceneRpc, SubGhzRpcStateIdle);
+            } else if(
+                subghz_block_generic_global.endless_tx &&
+                (subghz_get_load_type_file(subghz) == SubGhzLoadTypeFileRaw) &&
+                subghz_devices_is_async_complete_tx(subghz->txrx->radio_device)) {
+                // For RAW files, restart TX while endless TX is enabled.
+                if(subghz_txrx_tx_start(subghz->txrx, subghz_txrx_get_fff_data(subghz->txrx)) !=
+                   SubGhzTxRxStartTxStateOk) {
+                    subghz_block_generic_global.endless_tx = false;
+                    subghz_txrx_stop(subghz->txrx);
+                    subghz_blink_stop(subghz);
+                    scene_manager_set_scene_state(
+                        subghz->scene_manager, SubGhzSceneRpc, SubGhzRpcStateIdle);
+                }
             }
-            scene_manager_set_scene_state(
-                subghz->scene_manager, SubGhzSceneRpc, SubGhzRpcStateIdle);
-            rpc_system_app_confirm(subghz->rpc_ctx, result);
         }
     }
     return consumed;
