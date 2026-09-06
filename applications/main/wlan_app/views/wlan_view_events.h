@@ -62,6 +62,8 @@ typedef enum {
     WlanAppCustomEventUpdateSdFinished = 202,
 
     WlanAppCustomEventSmartDeauthToggle = 210,
+    WlanAppCustomEventSmartDeauthChannelUp = 211,
+    WlanAppCustomEventSmartDeauthChannelDown = 212,
 
     WlanAppCustomEventAirSnitchProbeDone = 220,
 

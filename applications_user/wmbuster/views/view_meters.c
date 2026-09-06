@@ -8,7 +8,6 @@
 #include "../drivers/engine/driver.h"
 #include "../subghz/wmbus_worker.h"
 #include "scan_canvas.h"
-#include <furi_hal_light.h>
 #include <furi_hal_resources.h>
 #include <stdio.h>
 #include <string.h>
@@ -258,5 +257,5 @@ void wmbus_view_meters_exit(void* ctx) {
     WmbusApp* app = ctx;
     app->on_meters_view = false;
     /* Worker keeps running across navigation; only the LED/notification
-     * cue is gated by the led_active flag in wmbus_app.c. */
+     * cue is gated by the scan_active flag in wmbus_app.c. */
 }

@@ -28,6 +28,7 @@
 #include "views/wlan_handshake_view.h"
 #include "views/wlan_handshake_channel_view.h"
 #include "views/wlan_deauther_view.h"
+#include "views/wlan_smart_deauth_view.h"
 #include "views/wlan_sniffer_view.h"
 #include "views/wlan_evil_portal_view.h"
 #include "views/wlan_evil_portal_captured_view.h"
@@ -56,6 +57,7 @@ typedef enum {
     WlanAppViewHandshake,
     WlanAppViewHandshakeChannel,
     WlanAppViewDeauther,
+    WlanAppViewSmartDeauth,
     WlanAppViewSniffer,
     WlanAppViewEvilPortal,
     WlanAppViewEvilPortalCaptured,
@@ -140,6 +142,7 @@ struct WlanApp {
     View* view_handshake;
     View* view_handshake_channel;
     View* view_deauther;
+    View* view_smart_deauth;
     View* view_sniffer;
     WlanSnifferView* sniffer_view_obj;
     View* view_evil_portal;

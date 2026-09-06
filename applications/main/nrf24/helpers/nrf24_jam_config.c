@@ -156,28 +156,31 @@ const char* nrf24_jam_strategy_label_long(uint8_t strategy) {
 const char* nrf24_jam_pa_label(uint8_t pa) {
     switch(pa) {
     case Nrf24Pa_Min:
-        return "MIN";
+        return "V.Low";
     case Nrf24Pa_Low:
-        return "LOW";
+        return "Low";
     case Nrf24Pa_High:
-        return "HIGH";
+        return "Med";
     case Nrf24Pa_Max:
-        return "MAX";
+        return "High";
     default:
         return "?";
     }
 }
 
+/* Relative strength labels for the 4 fixed chip steps (Min=-18 .. Max=0 dBm).
+ * Absolute dBm is intentionally not shown: the real output depends on the
+ * installed module's fixed PA gain, which the firmware cannot know. */
 const char* nrf24_jam_pa_label_long(uint8_t pa) {
     switch(pa) {
     case Nrf24Pa_Min:
-        return "MIN -18dBm";
+        return "Very Low";
     case Nrf24Pa_Low:
-        return "LOW -12dBm";
+        return "Low";
     case Nrf24Pa_High:
-        return "HIGH -6dBm";
+        return "Medium";
     case Nrf24Pa_Max:
-        return "MAX 0dBm";
+        return "High";
     default:
         return "?";
     }

@@ -7,7 +7,6 @@
 #include <furi.h>
 #include <furi_hal.h>
 #include <furi_hal_subghz.h>
-#include <furi_hal_light.h>
 #include <furi_hal_resources.h>
 #include <lib/subghz/devices/devices.h>
 #include <lib/subghz/devices/preset.h>

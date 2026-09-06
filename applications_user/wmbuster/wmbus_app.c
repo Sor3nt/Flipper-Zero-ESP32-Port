@@ -18,7 +18,6 @@
 #include "views/detail_canvas.h"
 #include "views/about_canvas.h"
 
-#include <furi_hal_light.h>
 #include <furi_hal_resources.h>
 #include <lib/subghz/devices/devices.h>
 
@@ -77,8 +76,8 @@ static void about_exit(void* ctx) { (void)ctx; }
 
 static void start_enter(void* ctx) {
     WmbusApp* app = ctx;
-    /* Keep the worker alive across navigation; only the LED is gated by
-     * scene so the user has a visual cue of whether scanning is active. */
+    /* Keep the worker alive across navigation; the scan-active flag is
+     * cleared here so the per-telegram beep/haptic only fires on scan views. */
     wmbus_scanning_indicator_off(app);
     submenu_reset(app->submenu);
     submenu_set_header(app->submenu, WMBUS_APP_NAME);
@@ -193,8 +192,7 @@ WmbusApp* wmbus_app_alloc(void) {
 
 void wmbus_app_free(WmbusApp* app) {
     if(!app) return;
-    /* Make sure the LED is off and the radio is parked before we free
-     * anything — leaving the cyan blink on after exit was a visible bug. */
+    /* Park the radio before we free anything. */
     wmbus_scanning_stop(app);
     wmbus_worker_free(app->worker);
 
@@ -229,39 +227,29 @@ void wmbus_app_free(WmbusApp* app) {
     free(app);
 }
 
-/* Scanning helpers: LED is the user-visible "actively listening"
- * indicator and is gated on scene; the worker stays running across
- * scenes so re-entering Scan is instant. */
-
-static void led_on(WmbusApp* app) {
-    if(app->led_active) return;
-    furi_hal_light_blink_start(LightGreen | LightBlue, 0xC0, 25, 100);
-    app->led_active = true;
-}
-
-static void led_off(WmbusApp* app) {
-    if(!app->led_active) return;
-    furi_hal_light_blink_stop();
-    furi_hal_light_set(LightGreen | LightBlue, 0);
-    app->led_active = false;
-}
+/* Scanning helpers: scan_active tracks whether we are on a scan view. The
+ * worker stays running across scenes so re-entering Scan is instant, and the
+ * per-telegram beep/haptic is gated on this flag. There is deliberately no
+ * RGB-LED handling here: the WS2812 ring on this port is owned by the
+ * notification service (driven from the user's ambient color), so the app
+ * must not touch it; the on-screen UI is the scanning cue. */
 
 void wmbus_scanning_start(WmbusApp* app) {
     if(app->worker && !wmbus_worker_is_running(app->worker)) {
         wmbus_worker_start(app->worker, app->settings.mode);
     }
-    led_on(app);
+    app->scan_active = true;
 }
 
 void wmbus_scanning_stop(WmbusApp* app) {
-    led_off(app);
+    app->scan_active = false;
     if(app->worker && wmbus_worker_is_running(app->worker)) {
         wmbus_worker_stop(app->worker);
     }
 }
 
-void wmbus_scanning_indicator_off(WmbusApp* app) { led_off(app); }
-void wmbus_scanning_indicator_on (WmbusApp* app) { led_on(app); }
+void wmbus_scanning_indicator_off(WmbusApp* app) { app->scan_active = false; }
+void wmbus_scanning_indicator_on (WmbusApp* app) { app->scan_active = true; }
 
 /* ------------- Telegram callback (worker thread) ------------- */
 
@@ -514,7 +502,7 @@ void wmbus_app_on_telegram(WmbusApp* app, const uint8_t* fr, size_t len, int8_t 
     app->telegram_seq++;
 
     /* Beep+haptic per telegram, throttled to 800 ms, only on scan views. */
-    if(app->led_active) {
+    if(app->scan_active) {
         static uint32_t last_alert_tick = 0;
         uint32_t now = furi_get_tick();
         if((uint32_t)(now - last_alert_tick) >= 800) {

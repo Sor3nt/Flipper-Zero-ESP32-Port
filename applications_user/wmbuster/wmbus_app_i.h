@@ -164,7 +164,7 @@ struct WmbusApp {
 
     WmbusWorker*       worker;
     FuriMutex*         lock;
-    bool               led_active;     /* set while cyan blink is running */
+    bool               scan_active;    /* true while on a scan view (gates per-telegram beep/haptic) */
     bool               on_meters_view; /* tick callback rebuilds list while true */
     uint32_t           telegram_seq;   /* incremented per accepted telegram */
     uint32_t           last_shown_seq; /* what UI last drew */
@@ -202,9 +202,8 @@ void wmbus_app_on_telegram(
 void wmbus_scanning_start(WmbusApp* app);
 void wmbus_scanning_stop(WmbusApp* app);
 
-/* LED-only control: pause/resume the scan LED without touching the radio
- * worker. Used by views that are not scan-related (Root, Settings) so the
- * user gets a clear visual cue of "are we listening?" without churning
- * CC1101 state. */
+/* Scan-active flag control without touching the radio worker. Used by views
+ * that are not scan-related (Root, Settings) to gate the per-telegram
+ * beep/haptic without churning CC1101 state. */
 void wmbus_scanning_indicator_off(WmbusApp* app);
 void wmbus_scanning_indicator_on (WmbusApp* app);

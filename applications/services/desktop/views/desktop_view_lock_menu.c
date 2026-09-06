@@ -38,13 +38,6 @@ static void lock_menu_scroll_to(uint8_t idx) {
 static void lock_menu_build_items(bool usb_available, bool qflipper_on, bool bt_on, bool wifi_on) {
     s_item_count = 0;
 
-    if(usb_available) {
-        s_items[s_item_count++] = (LockMenuItem){
-            qflipper_on ? "Disable qFlipper" : "Enable qFlipper",
-            DesktopLockMenuEventQflipperToggle};
-        s_items[s_item_count++] = (LockMenuItem){"USB-Storage", DesktopLockMenuEventUsbStorage};
-    }
-
     s_items[s_item_count++] = (LockMenuItem){
         bt_on ? "Disable Bluetooth" : "Enable Bluetooth", DesktopLockMenuEventBluetoothToggle};
 
@@ -52,13 +45,20 @@ static void lock_menu_build_items(bool usb_available, bool qflipper_on, bool bt_
     s_items[s_item_count++] = (LockMenuItem){
         wifi_on ? "Disable WiFi" : "Enable WiFi", DesktopLockMenuEventWifiToggle};
 
-    /* Mesh: der T-Embed ist immer Master — kein Mode-Toggle, "Mesh Clients"
-     * (Discovery/Pair) ist immer verfügbar. */
-    s_items[s_item_count++] = (LockMenuItem){"Mesh Clients", DesktopLockMenuEventMeshClients};
+    if(usb_available) {
+        s_items[s_item_count++] = (LockMenuItem){
+            qflipper_on ? "Disable qFlipper" : "Enable qFlipper",
+            DesktopLockMenuEventQflipperToggle};
+        s_items[s_item_count++] = (LockMenuItem){"USB-Storage", DesktopLockMenuEventUsbStorage};
+    }
 
     /* Web-Filesystem: SoftAP + HTTP file server for the SD; board-independent
      * (WiFi is on every target). */
     s_items[s_item_count++] = (LockMenuItem){"Web-Filesystem", DesktopLockMenuEventWebFs};
+
+    /* Mesh: der T-Embed ist immer Master — kein Mode-Toggle, "Mesh Clients"
+     * (Discovery/Pair) ist immer verfügbar. */
+    s_items[s_item_count++] = (LockMenuItem){"Mesh Clients", DesktopLockMenuEventMeshClients};
 }
 
 void desktop_lock_menu_set_callback(

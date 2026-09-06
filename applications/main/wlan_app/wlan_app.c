@@ -84,6 +84,11 @@ static WlanApp* wlan_app_alloc(void) {
     view_set_context(app->view_deauther, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, WlanAppViewDeauther, app->view_deauther);
 
+    app->view_smart_deauth = wlan_smart_deauth_view_alloc();
+    view_set_context(app->view_smart_deauth, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, WlanAppViewSmartDeauth, app->view_smart_deauth);
+
     app->sniffer_view_obj = wlan_sniffer_view_alloc();
     app->view_sniffer = wlan_sniffer_view_get_view(app->sniffer_view_obj);
     view_dispatcher_add_view(app->view_dispatcher, WlanAppViewSniffer, app->view_sniffer);
@@ -262,6 +267,7 @@ static void wlan_app_free(WlanApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewHandshake);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewHandshakeChannel);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewDeauther);
+    view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSmartDeauth);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSniffer);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortal);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortalCaptured);
@@ -282,6 +288,7 @@ static void wlan_app_free(WlanApp* app) {
     wlan_handshake_view_free(app->view_handshake);
     wlan_handshake_channel_view_free(app->view_handshake_channel);
     wlan_deauther_view_free(app->view_deauther);
+    wlan_smart_deauth_view_free(app->view_smart_deauth);
     wlan_sniffer_view_free(app->sniffer_view_obj);
     wlan_evil_portal_view_free(app->evil_portal_view_obj);
     wlan_evil_portal_captured_view_free(app->evil_portal_captured_view_obj);
