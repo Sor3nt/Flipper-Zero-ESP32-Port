@@ -691,7 +691,6 @@ static void serial_gatts_event_handler(
             }
             serial_unlock(serial);
 
-            uint16_t new_bytes_ready = 0;
             if(cb) {
                 SerialServiceEvent ev = {
                     .event = SerialServiceEventTypeDataReceived,
@@ -700,16 +699,15 @@ static void serial_gatts_event_handler(
                         .size = param->write.len,
                     },
                 };
-                new_bytes_ready = cb(ev, ctx);
-            }
-
-            /* Update internal flow tracking.
-             * Don't send a notification here — STM32 only sends flow
-             * notifications via notify_buffer_is_empty callback. */
-            if(new_bytes_ready > 0) {
-                serial_lock(serial);
-                serial->bytes_ready = new_bytes_ready;
-                serial_unlock(serial);
+                /* The callback's return value (free space in the intermediate
+                 * rx_stream) MUST NOT be written back into bytes_ready. STM32
+                 * flow control only decrements bytes_ready on RX and refills it
+                 * to buff_size from notify_buffer_is_empty() once it hits 0.
+                 * Overwriting bytes_ready with the (near-full) rx_stream space
+                 * kept it from ever reaching 0, so no further flow-control
+                 * notification was sent and the client stalled after ~2*buff_size
+                 * bytes. rx_stream is sized == buff_size, so it can't overflow. */
+                (void)cb(ev, ctx);
             }
 
             if(!param->write.is_prep) {
