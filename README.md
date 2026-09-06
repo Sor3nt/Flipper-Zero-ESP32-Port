@@ -39,7 +39,20 @@ The easiest way is the **web flasher** — no toolchain required, just a Chrome/
 
 **[Flash via Browser](https://sor3nt.github.io/interface.html)**
 
-Connect your board, click flash, done. After flashing, copy the contents of [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/download/v1.1.6/sdcard.zip) onto a FAT32 SD card and insert it — most apps need files there to function.
+Connect your board, click flash, done. After flashing, copy the contents of [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/latest/download/sdcard.zip) onto a FAT32 SD card and insert it — most apps need files there to function.
+
+## Firmware Update
+
+Since **v2.0.0** the T-Embed can update itself — no PC toolchain or re-flashing required:
+
+- **Over WiFi (OTA):** *Settings → Update Firmware* checks the release server for a newer build,
+  downloads and installs it in the background, then reboots. It also keeps your SD card files in sync.
+- **Over USB:** use the **[qT-Embed](https://github.com/Sor3nt/qT-Embed)** desktop companion (a
+  qFlipper-style app for this port) to stream the display, manage SD files and flash firmware over
+  USB — including a *Full flash* option (bootloader + partition table + firmware) to recover a device.
+
+> Requires the dual-OTA partition layout. A device on the old single-app layout has to be flashed
+> once via the web flasher (or qT-Embed's *Full flash*) before wireless OTA updates work.
 
 ## Apps
 
@@ -50,10 +63,12 @@ External CC1101 receiver/transmitter for 433–868 MHz signals.
 - Receive & decode
 - Read RAW: capture unknown waveforms to `.sub` files for later analysis
 - Frequency analyzer with sweep & live RSSI
+- **RF Spectrum Analyzer** — colorful, HackRF-style live spectrum view
 - Hopper: scan all preset bands during receive
 - Transmit saved files; manual signal creation (frequency, modulation, protocol, key/serial/counter)
 - Brute force / sub-brute attack with manufacturer dictionary
 - Playlist for sequential transmit
+- **More protocols** — added KeeLoq variants (ERREKA, PUJOL, AERF, SIMPLE_JCM), Agilize Key Pro and Holtek HT6P20B
 - **TPMS decoding** — tire-pressure sensors: Schrader GG4, Citroën, Ford, Renault, Toyota (PMV107J) and a generic decoder; dedicated info view with editable sensor data
 - **Limitation:** AES-encrypted manufacturer keystores (`keeloq_mfcodes`, `nice_flor_s`, `alutech_at_4n`) are not decryptable on this port — only the plain-text `keeloq_mfcodes_user` works for Keeloq decoding.
 
@@ -65,7 +80,8 @@ Full WiFi pentest toolkit.
 - **Scanner** — SSID, BSSID, channel, RSSI, auth mode
 - **Connect** — auto-detect WPA/WPA2/WPA3, password input or saved password lookup (`/ext/wifi/<ssid>.txt`)
 - **Deauther** — SSID-mode (single AP) or Channel-mode (all on channel)
-- **Sniffer** — capture packets to PCAP
+- **Smart Deauth** — targeted, station-aware deauthentication
+- **Sniffer** — capture packets to PCAP (saved to `/ext/wifi/`)
 - **Handshake capture** — record EAPOL 4-way handshakes, optionally with deauth trigger
 - **AirSnitch** — auto-bruteforce target with password list
 - **Beacon Spam** — Funny SSIDs / Rickroll / Random / Custom
@@ -79,6 +95,10 @@ Full WiFi pentest toolkit.
   - Pause/Resume of the AP from the run screen
   - Captured creds saved to `/ext/wifi/evil_portal/<ssid>_creds.csv`
   - **Internet bridge** *(new)* — optional STA uplink with NAPT + DNS forwarding so victims get real internet behind the portal; iOS captive-portal "Success" handling; uplink SSID/password configured in-app
+- **Web-Filesystem** — HTTP file server for the SD card; open it in a browser (device hotspot *or* your existing WiFi) to upload, download, rename and delete files, with drag & drop for whole folders
+- **SMB Browser** — browse and download from SMB2/3 network shares (Windows / macOS / NAS) straight to the SD card; guest or password login
+- **Android TV Remote** — control any Android / Google TV (Sony, NVIDIA Shield, Xiaomi Mi Box, Chromecast, …): scan → pair once with the on-screen PIN → on-screen remote (D-Pad, volume, media, power)
+- **Global toggle** — WiFi is now an on/off switch like Bluetooth (from the lock menu); the connection persists across apps and reconnects automatically after a reboot
 
 #### Mesh / Buddy *(ESP-NOW)*
 Pair cheap headless ESP32 boards (**buddies**) to the T-Embed (**master**) over ESP-NOW to offload WiFi capture and run remote actions.
@@ -126,7 +146,7 @@ RMT-based TX + RX.
 
 
 #### Passy *(FAP)*
-Biometric passport (MRTD) reader — reads and displays data groups from ePassports over NFC. Shipped as a prebuilt FAP in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/download/v1.1.5/sdcard.zip).
+Biometric passport (MRTD) reader — reads and displays data groups from ePassports over NFC. Shipped as a prebuilt FAP in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/latest/download/sdcard.zip).
 
 #### TagTinker *(FAP)*
 Infrared ESL (Electronic Shelf Label) research toolkit. Transmits custom images/text to graphics tags via IR. RLE streaming, Android companion app for image editing, monochrome + accent-color support.
@@ -149,6 +169,8 @@ The desktop lock menu doubles as the central system control panel (board-depende
 - **qFlipper** — enable the qFlipper desktop bridge (VID/PID spoof + CDC RPC) so the official qFlipper app can connect *(USB-OTG boards)*
 - **USB Storage** — expose the SD card as a USB mass-storage device *(USB-OTG boards)*
 - **Bluetooth** — toggle BLE on/off
+- **WiFi** — toggle WiFi on/off (mutually exclusive with Bluetooth; reconnects to the last network automatically)
+- **Web-Filesystem** — start the SD-card web file server *(see WiFi above)*
 - **Mesh Clients** — buddy discovery & control *(see Mesh / Buddy above)*
 
 #### Archive
@@ -158,6 +180,14 @@ SD-card file browser with tabs per media type: Favorites, Sub-GHz, NFC, LF-RFID,
 mJS-based JavaScript runtime for user scripts in `/ext/apps/Scripts/*.js`.
 - **Available modules:** `gui` (loading/menu/dialogs/text+byte input/popup/file picker/widget), `notification`, `math`, `storage`, `event_loop`, `subghz`, `infrared`, `badusb`, `blebeacon`
 - **Excluded on this port** *(need HAL porting)*: `js_serial`, `js_gpio`, `js_i2c`, `js_spi`
+
+### 🎵 Media
+
+#### Streaming
+Unified music & video player (replaces the old separate MP3/Video apps). Browse `.mp3` and `.mp4`
+files from `/ext/apps_data/medien`.
+- **Music** — play locally through the speaker, or stream to **AirPlay** speakers
+- **Cast to your network** — **Chromecast / Google Cast** and **DLNA** devices, including TVs (music & video)
 
 ### 🎮 Games
 
@@ -169,6 +199,9 @@ Classic snake game.
 
 ### ⚙ Settings & General
 Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notification, power, storage, system info, factory reset. Animated dolphin desktop on idle. File-pack manifest at `/ext/Manifest` (qFlipper-style asset list — its presence suppresses the "No DB" boot animation).
+- **Update Firmware** — wireless OTA firmware + SD-card update *(see [Firmware Update](#firmware-update) above)*
+- **Interface** — customize the main menu and its layout
+- **Spoofing** — change the device name and the shell/terminal color
 
 ## SD Card Layout
 
@@ -191,7 +224,7 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/wifi/evil_portal/login_template/` | Custom captive-portal templates (no verify) |
 | `/ext/wifi/evil_portal/router_template/` | Custom captive-portal templates (with WLAN verify) |
 
-A complete starter kit is in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/download/v1.1.5/sdcard.zip) — extract it onto a FAT32 SD.
+A complete starter kit is in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/latest/download/sdcard.zip) — extract it onto a FAT32 SD.
 
 ## Building
 
