@@ -92,6 +92,11 @@ void furi_hal_light_init(void) {
      * latches this pin LOW with gpio_hold so the backlight stays off in deep
      * sleep; the latch survives the deep-sleep wake reset, so we must clear it
      * here before LEDC can drive the pin again. No-op on a cold boot. */
+    
+    int bl_pin = gpio_lcd_bl.pin;
+    if (bl_pin >= GPIO_NUM_MAX) {
+        ESP_LOGW(TAG, "Backlight pin not valid (gpio=%d), skipping LEDC init", bl_pin);
+    } else {
     gpio_hold_dis((gpio_num_t)gpio_lcd_bl.pin);
 
     /* Configure LEDC timer for backlight PWM */
@@ -117,7 +122,8 @@ void furi_hal_light_init(void) {
     ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
 
     ESP_LOGI(TAG, "Backlight PWM initialized on GPIO%d", gpio_lcd_bl.pin);
-
+}
+    
 #ifdef BOARD_PIN_WS2812_DATA
     furi_hal_light_ws2812_init();
 #endif
