@@ -1,0 +1,120 @@
+# Target-specific overrides for ESP32-S3 boards (e.g. LilyGo T-Embed CC1101)
+# These are merged ON TOP OF sdkconfig.defaults when building with:
+#   idf.py -B build_s3 set-target esp32s3
+#   idf.py -B build_s3 -DFLIPPER_BOARD=lilygo_t_embed_cc1101 build
+
+# Flash: T-Embed CC1101 has 16MB
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# Dual-OTA partition table for the 16 MB flash (self-update). See partitions_ota_16mb.csv.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_16mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_16mb.csv"
+
+# ESP32-S3 is dual-core Xtensa — keep unicore for Furi compatibility
+CONFIG_FREERTOS_UNICORE=y
+
+# BLE: Use legacy 4.2 advertising (5.0 extended adv not seen by all phones)
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+# CONFIG_BT_BLE_50_FEATURES_SUPPORTED is not set
+# Allocate Bluedroid host buffers (GATT/HCI/ACL) from PSRAM first, so internal
+# RAM stays free for the BLE controller's DMA TX buffers. Without this, starting
+# a RAM-heavy app (e.g. Sub-GHz: 61 decoders + presets) while screen-streaming
+# over BLE RPC exhausts internal RAM -> controller "BLE_INIT: Malloc failed" ->
+# TX stall -> GATT timeout -> disconnect.
+CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
+
+# Don't cache PHY calibration in NVS. With BT buffers in PSRAM (above), the NVS
+# flash-write that phy_init does on boot ("Saving new calibration data") briefly
+# stalls the shared flash/PSRAM MSPI cache; a BLE controller ISR touching a
+# PSRAM-resident buffer in that window deadlocks in wait-for-intr -> the 300 ms
+# interrupt watchdog fires (TG1WDT_SYS_RST) -> intermittent boot loop. Disabling
+# the NVS store removes that flash-write entirely; the PHY is (re)calibrated on
+# every boot instead (a few ms, no RF quality loss).
+# CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE is not set
+
+# Same class of bug as the PHY-cal store above: the WiFi NVS store issues
+# flash-writes at runtime that stall the shared flash/PSRAM MSPI cache. The SMB
+# browser runs long libsmb2 crypto (NTLMSSP) out of flash/PSRAM; a WiFi NVS
+# flash-write in that window panics it ("Cache disabled but cached memory region
+# accessed", crash in NTOWFv2). Disabling the WiFi NVS store removes the last
+# runtime flash-writer (app settings already go to SD via saved_struct). WiFi
+# still works; it just re-reads config each boot instead of caching it in NVS.
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+
+# PSRAM: T-Embed CC1101 has 8MB PSRAM
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Allow malloc to fall back to PSRAM when internal RAM is exhausted
+CONFIG_SPIRAM_USE_MALLOC=y
+# Allocations <= 1024 bytes stay in internal RAM (DMA, TCB, stack); larger ones
+# fall to PSRAM. Lowered from 4096: Sub-GHz alloc'd ~25KB of small (<4096B) chunks
+# into internal RAM, dropping it to ~1.5KB free and starving the BLE controller's
+# TX buffers. With 1024 those chunks go to the abundant (5MB) PSRAM instead.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+# Reserve 64KB internal RAM for DMA/stacks/TCBs
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Allow task stacks in PSRAM (needed for large apps)
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+# Enable code execution from PSRAM (needed for FAP dynamic loading)
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+# Allow .bss to live in PSRAM. Auto-maps lwip/net80211/pp/bt BSS to SPIRAM,
+# and exposes the `extram_bss` linker scheme for our own mappings (see main/main.lf).
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# NFC needs 3DES (felica, mf_ultralight)
+CONFIG_MBEDTLS_DES_C=y
+
+# TinyUSB (USB HID for BadUSB + CDC for RPC + MSC for SD-Card USB-Stick)
+# Composite descriptor lives in components/furi_hal/furi_hal_usb_tinyusb_composite.c
+CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_HID_BUFSIZE=16
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_MSC_ENABLED=y
+# 4 KiB MSC FIFO → 8 sectors/transfer. Higher = faster, but pulls from internal RAM.
+CONFIG_TINYUSB_MSC_BUFSIZE=4096
+CONFIG_TINYUSB_MIDI_ENABLED=n
+CONFIG_TINYUSB_NCM_ENABLED=n
+CONFIG_TINYUSB_DEBUG_LEVEL=1
+
+# esp_http_server: increase header / URI limits for Evil Portal so smartphones
+# with large cookie sets don't trip the 431 "Request Header Fields Too Large" error.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_HTTPD_MAX_URI_LEN=2048
+
+# Live-Credential-Dissektor parst im tcpip_thread → etwas mehr Stack-Reserve.
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
+
+# lwIP: bump max sockets from default 10 → 16 so evil_portal httpd can use
+# max_open_sockets=13 (10 was leaving only 7 for the HTTP server, which Windows
+# clients exhaust instantly with background traffic — Steam, Discord, NCSI,
+# WPAD all phone home in parallel and cause ERR_CONNECTION_RESET in browser
+# captive-portal probes).
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# lwIP: enable IP forwarding + IPv4 NAPT so esp_netif_napt_enable() actually
+# routes packets between the rogue AP and the upstream STA after Evil Portal
+# Bridge activates. Without these flags napt_enable() returns OK but no packets
+# are forwarded — clients on the AP get DHCP+DNS but cannot reach the internet.
+# L2_TO_L3_COPY is required by NAPT for the inter-interface packet copy.
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+CONFIG_LWIP_L2_TO_L3_COPY=y
+
+# Experiment: flash auto-suspend so the cache stays serviceable during flash
+# writes (would make PSRAM task stacks safe). Needs verified flash-chip support;
+# our chip is mfr 0x46 (no-name) so this is a test.
+CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+CONFIG_ESP_LCD_RGB_PANEL=n
+CONFIG_ESP_LCD=n
+CONFIG_NFC_ENABLED=n
+CONFIG_NFC_SUPPORT=n
+
+CONFIG_LED_ENABLED=n
+CONFIG_FURI_HAL_LIGHT_ENABLED=n
+CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE=n
+CONFIG_ESP_WIFI_NVS_ENABLED=n
