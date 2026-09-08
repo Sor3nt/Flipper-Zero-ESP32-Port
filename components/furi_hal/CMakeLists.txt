@@ -29,7 +29,6 @@ set(FURI_HAL_SRCS
     "furi_hal_light.c"
     "furi_hal_vibro.c"
     "furi_hal_speaker.c"
-    "furi_hal_display.c"
     "furi_hal_spi_bus.c"
     "furi_hal_spi.c"
     "furi_hal_subghz.c"
@@ -43,6 +42,14 @@ set(FURI_HAL_SRCS
     "furi_hal_bq25896.c"
     "fatfs_compat.c"
 )
+
+#OLED MOD
+if(FLIPPER_BOARD STREQUAL "thormini")
+    list(APPEND FURI_HAL_SRCS "furi_hal_display_sh1106.c")
+else()
+     list(APPEND FURI_HAL_SRCS "furi_hal_display.c")
+endif()
+
 
 set(FURI_HAL_REQUIRES
     furi toolbox input driver esp_lcd fatfs sdmmc datetime
