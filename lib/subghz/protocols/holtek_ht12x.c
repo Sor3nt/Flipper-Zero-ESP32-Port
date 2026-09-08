@@ -126,8 +126,6 @@ static bool
         instance->encoder.size_upload = size_upload;
     }
 
-    //Send header
-    instance->encoder.upload[index++] = level_duration_make(false, (uint32_t)instance->te * 36);
     //Send start bit
     instance->encoder.upload[index++] = level_duration_make(true, (uint32_t)instance->te);
     //Send key data
@@ -144,6 +142,14 @@ static bool
                 level_duration_make(true, (uint32_t)instance->te * 2);
         }
     }
+    //Send header (sync) at the END of the frame, not at the beginning.
+    //The async TX middleware drops a leading low level (the line is already low
+    //before TX starts), which would cost the first frame its sync period, and a
+    //frame ending on a high level is never terminated for the decoder. Both
+    //together leave only one usable frame out of the three repeats, while the
+    //decoder needs two identical ones. Emitting the sync last keeps the on-air
+    //sequence identical but makes every repeat a complete frame.
+    instance->encoder.upload[index++] = level_duration_make(false, (uint32_t)instance->te * 36);
     return true;
 }
 
