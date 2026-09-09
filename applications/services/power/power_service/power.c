@@ -426,9 +426,14 @@ static void power_start_auto_poweroff_timer(Power* power) {
 
 //stop furi timer for autopoweroff
 static void power_stop_auto_poweroff_timer(Power* power) {
-    if(furi_timer_is_running(power->auto_poweroff_timer)) {
-        furi_timer_stop(power->auto_poweroff_timer);
-    }
+    // Stop unconditionally. Do NOT guard with furi_timer_is_running(): that maps
+    // to xTimerIsTimerActive(), which returns an OBSOLETE state while a queued
+    // start command is still pending in the FreeRTOS timer-service queue (see the
+    // warning in timer.h). When an app is launched right after the timer was
+    // armed, is_running() still read 0, so stop was skipped and the timer fired
+    // mid-app (auto power-off during e.g. SubGHz Read). Stopping an already
+    // stopped timer is a harmless no-op.
+    furi_timer_stop(power->auto_poweroff_timer);
 }
 
 static uint32_t power_is_running_auto_poweroff_timer(Power* power) {
@@ -452,9 +457,28 @@ static void power_auto_poweroff_timer_callback(void* context) {
     if(furi_hal_power_is_charging()) {
         FURI_LOG_D(TAG, "We dont auto_power_off until battery is charging");
         power_start_auto_poweroff_timer(power);
-    } else {
-        power_off(power);
+        return;
     }
+
+    // Dont poweroff while an application is running. Some apps (e.g. SubGHz
+    // Read) sit idle waiting for signals without any key presses, so the
+    // input-driven timer never gets reset and eventually fires mid-app. The
+    // Loader-event based app_running flag is supposed to disarm the timer on
+    // app start, but can miss it, so re-check the loader lock directly here as
+    // the source of truth and simply re-arm instead of shutting down.
+    Loader* loader = furi_record_open(RECORD_LOADER);
+    const bool app_running = loader_is_locked(loader);
+    furi_record_close(RECORD_LOADER);
+    if(app_running) {
+        FURI_LOG_W(
+            TAG,
+            "auto-poweroff fired while an app is running (flag=%d), re-arming instead",
+            power->app_running);
+        power_start_auto_poweroff_timer(power);
+        return;
+    }
+
+    power_off(power);
 }
 
 //start|restart timer and events subscription and callbacks for input events (we restart timer when user press keys)
