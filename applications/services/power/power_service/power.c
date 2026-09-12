@@ -363,10 +363,15 @@ void power_trigger_ui_update(Power* power) {
 }
 
 static void power_handle_shutdown(Power* power) {
-    UNUSED(power);
-    furi_hal_power_off();
-    /* furi_hal_power_off() should not return (enters deep sleep).
-     * If it does, halt as fallback. */
+    if(power->settings.off_mode == PowerOffModePowerOff) {
+        /* Real power-off (charger ship mode on battery, deep-sleep fallback on USB) */
+        furi_hal_power_off();
+    } else {
+        /* Default: ESP32 deep sleep */
+        furi_hal_power_shutdown();
+    }
+    /* Neither returns normally (deep sleep / battery cut).
+     * If one does, halt as fallback. */
     furi_halt("Power off failed");
 }
 

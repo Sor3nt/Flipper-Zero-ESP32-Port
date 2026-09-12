@@ -399,23 +399,16 @@ bool furi_hal_power_is_charging_done(void) {
     return furi_hal_power_is_charging() && (furi_hal_power_get_pct() >= 100);
 }
 
-void furi_hal_power_shutdown(void) {
+/* Shared teardown before either deep sleep or a real power-off: wait for the
+ * button to be released (so we don't immediately re-wake), then kill the
+ * display and peripheral power rail. */
+static void furi_hal_power_prepare_shutdown(void) {
     /* Wait for button release to avoid immediate wakeup */
     while(gpio_get_level((gpio_num_t)BOARD_PIN_BUTTON_BOOT) == 0) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     vTaskDelay(pdMS_TO_TICKS(200)); /* debounce */
 
-    /* Backlight + panel off.
-     *
-     * Deliberately NO gpio_hold_en() / gpio_deep_sleep_hold_en() here. Holding
-     * digital IOs across deep sleep makes esp_deep_sleep_start() run
-     * esp_sleep_isolate_digital_gpio(), which assert-fails with "the stack of the
-     * task calling esp_deep_sleep_start must be in internal ram" — and the
-     * power-service FuriThread stack lives in PSRAM (SPIRAM_ALLOW_STACK_EXTERNAL
-     * + SPIRAM_MALLOC_ALWAYSINTERNAL=1024 pushes the 4 KB stack external). That
-     * assert panicked (reset_reason=4) and rebooted on every power-off. Without
-     * the hold, the isolation step is skipped and deep sleep starts cleanly. */
 #ifdef BOARD_PIN_LCD_BL
     furi_hal_display_set_backlight(0);
 #endif
@@ -425,6 +418,19 @@ void furi_hal_power_shutdown(void) {
 #ifdef BOARD_PIN_PWR_EN
     gpio_set_level((gpio_num_t)BOARD_PIN_PWR_EN, 0);
 #endif
+}
+
+/* Enter ESP32 deep sleep, waking on the BOOT/encoder button. The RTC domain
+ * stays powered (~µA draw); this is not a true power cut. Does not return. */
+static void furi_hal_power_enter_deep_sleep(void) {
+    /* Deliberately NO gpio_hold_en() / gpio_deep_sleep_hold_en() here. Holding
+     * digital IOs across deep sleep makes esp_deep_sleep_start() run
+     * esp_sleep_isolate_digital_gpio(), which assert-fails with "the stack of the
+     * task calling esp_deep_sleep_start must be in internal ram" — and the
+     * power-service FuriThread stack lives in PSRAM (SPIRAM_ALLOW_STACK_EXTERNAL
+     * + SPIRAM_MALLOC_ALWAYSINTERNAL=1024 pushes the 4 KB stack external). That
+     * assert panicked (reset_reason=4) and rebooted on every power-off. Without
+     * the hold, the isolation step is skipped and deep sleep starts cleanly. */
 
     /* Wake on the BOOT/encoder button (GPIO0, active low). Its external
      * boot-strapping pull-up keeps it HIGH across deep sleep, so it does not
@@ -456,8 +462,28 @@ void furi_hal_power_shutdown(void) {
     esp_deep_sleep_start();
 }
 
+/* Deep-sleep power-off (default mode). */
+void furi_hal_power_shutdown(void) {
+    furi_hal_power_prepare_shutdown();
+    furi_hal_power_enter_deep_sleep();
+}
+
+/* Real power-off: put the BQ25896 charger into ship mode (BATFET off), which
+ * physically disconnects the battery -> 0 draw, wakes only via USB plug or the
+ * charger's /QON button. Only possible on battery: with USB attached the
+ * charger keeps SYS powered, so we fall back to deep sleep. If there is no
+ * charger at all (or the write fails) we also fall back to deep sleep. */
 void furi_hal_power_off(void) {
-    furi_hal_power_shutdown();
+    furi_hal_power_prepare_shutdown();
+
+    if(furi_hal_bq25896_is_present() && !furi_hal_bq25896_is_vbus_present()) {
+        furi_hal_bq25896_poweroff();
+        /* BATFET cut is near-instant; give it a moment. Should not return. */
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    /* Fallback: on USB, no battery path, or BATFET failed -> deep sleep. */
+    furi_hal_power_enter_deep_sleep();
 }
 
 FURI_NORETURN void furi_hal_power_reset(void) {
