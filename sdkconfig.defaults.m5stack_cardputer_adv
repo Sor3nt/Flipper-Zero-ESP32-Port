@@ -1,0 +1,191 @@
+# =============================================================================
+# M5Stack Cardputer-ADV Optimized Configuration
+# =============================================================================
+
+# Flash Configuration
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# Partition table: override the auto-applied sdkconfig.defaults.esp32s3 16 MB
+# multiboot layout. Cardputer-ADV has 8 MB flash and no dual-boot, so use the
+# single-app (6 MB factory) table that fits 8 MB.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_singleapp_large.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp_large.csv"
+
+# =============================================================================
+# PSRAM Configuration
+# The Cardputer-ADV (ESP32-S3FN8) has NO PSRAM, so SPIRAM stays disabled. This
+# leaves ~200 KB of internal heap: built-in apps run, but external FAPs that load
+# code into PSRAM (doom, wolf3d, etc.) cannot run on this hardware.
+# =============================================================================
+CONFIG_SPIRAM=n
+
+# Force 3.3V for Flash
+CONFIG_BOOTLOADER_VDDSDIO_BOOST_3_3V=y
+
+# =============================================================================
+# FreeRTOS Configuration (STABLE UNICORE)
+# =============================================================================
+CONFIG_FREERTOS_UNICORE=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_OPTIMIZED_SCHEDULER=y
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048
+
+# =============================================================================
+# CPU Configuration
+# =============================================================================
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
+# Task Stack Sizes (Reduced for SRAM saving)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=3072
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=2048
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=2048
+
+# =============================================================================
+# Heap Configuration
+# =============================================================================
+CONFIG_HEAP_POISONING_DISABLED=y
+CONFIG_HEAP_TRACING_OFF=y
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=y
+CONFIG_ESP_SYSTEM_ABORT_ON_ALLOC_FAILURE=n
+
+# =============================================================================
+# WiFi Configuration (Reduced buffers for SRAM saving)
+# =============================================================================
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
+CONFIG_ESP_WIFI_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_AMSDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_IRAM_OPT=y
+CONFIG_ESP_WIFI_RX_IRAM_OPT=y
+CONFIG_ESP_WIFI_TASK_STACK_SIZE=2560
+
+# =============================================================================
+# LWIP Configuration (Reduced parameters for SRAM saving)
+# =============================================================================
+# 4 was too few for the Evil Portal: DHCPS + tcpip use ~3 internally, leaving 1,
+# so httpd_start rejected its socket request (ESP_ERR_INVALID_ARG). 8 leaves room
+# for a small httpd (4) + the DNS-hijack socket. Each extra socket is cheap.
+CONFIG_LWIP_MAX_SOCKETS=8
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=8
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=4
+CONFIG_LWIP_TCP_MSS=1436
+CONFIG_LWIP_TCP_WND_DEFAULT=5760
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=2560
+CONFIG_LWIP_TCPIP_CORE_LOCKING=y
+
+# =============================================================================
+# Bluetooth Configuration
+# =============================================================================
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLE_ENABLED=y
+CONFIG_BT_BLE_SCAN_DUPL=y
+CONFIG_BT_BLE_SCAN_DUPL_TYPE_DATA_DEVICE=y
+# Scan dedup cache: 20 entries (default=50). Each entry ~30 bytes.
+# We are advertising-only (not scanning), so a smaller table is fine.
+CONFIG_BT_BLE_SCAN_DUPL_CACHE_SIZE=20
+# GATT server attributes: keep at default 20 (Serial+DIS+BAS fit within this).
+CONFIG_BT_GATT_MAX_SR_ATTRIBUTES=20
+# GATTC characteristic cache: trim from default 40, only need a few
+# for BLE serial. Saves ~360 bytes.
+CONFIG_BT_GATTC_MAX_CACHE_CHAR=10
+# BTU task stack: 4096 (trimmed upstream default is 4352). An earlier 3072
+# experiment overflowed during first connect: BTU serves the phone's GATT
+# discovery WHILE SMP pairing runs (we request encryption at connect), and
+# with canary-only overflow checking that corrupts the heap → lockup instead
+# of a clean panic.
+CONFIG_BT_BTU_TASK_STACK_SIZE=4096
+# BTC (Bluetooth core) task stack: keep at 3072.
+# 2560 causes overflow during BLE stack toggle in ble_spam.
+CONFIG_BT_BTC_TASK_STACK_SIZE=3072
+# Disable BLE mesh (not used) — prevents mesh task/buffer allocation.
+# CONFIG_BT_MESH is not set
+# --- BLE memory footprint (no-PSRAM: shrink to what we actually use) ---
+# Single-peripheral device: one phone connection + advertising, at most a scan
+# for BLE Walk. IDF defaults reserve for 6 controller activities and 4 host ACL
+# connections; those buffers are the "BLE_INIT: Malloc failed" that aborts stack
+# bringup on the tight heap (GATTS_CreateService / BTU_StartUp OOM). Cut to need.
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
+CONFIG_BT_CTRL_BLE_MAX_ACT_EFF=3
+CONFIG_BT_ACL_CONNECTIONS=2
+
+# =============================================================================
+# Newlib / C Runtime Configuration
+# =============================================================================
+# Nano printf saves ~8 KB IRAM; we don't use %f in hot paths.
+CONFIG_NEWLIB_NANO_FORMAT=y
+
+# =============================================================================
+# Compiler Optimization
+# =============================================================================
+# Optimize for size over speed (-Os instead of -O2).
+# Reduces IRAM usage, freeing it for the heap.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# CONFIG_COMPILER_OPTIMIZATION_PERF is not set
+
+# =============================================================================
+# RMT (Infrared) Configuration
+# =============================================================================
+CONFIG_RMT_ISR_IRAM_SAFE=y
+CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
+CONFIG_RMT_ENABLE_DEBUG_LOG=n
+
+# =============================================================================
+# Logging & Console Configuration (FREE GPIO 43/44)
+# =============================================================================
+# Select internal USB Serial JTAG for console
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+
+# =============================================================================
+# TinyUSB Configuration
+# Console uses USB-Serial-JTAG (above), but the base firmware's USB stack
+# (furi_hal_usb_cdc.c / composite device) requires TinyUSB CDC at compile time,
+# so keep CDC enabled. The OTG composite is only installed lazily.
+# =============================================================================
+CONFIG_TINYUSB_HID_COUNT=3
+CONFIG_TINYUSB_DESC_BOS_ENABLED=y
+CONFIG_TINYUSB_HID_BUFSIZE=64
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+
+# =============================================================================
+# Watchdog Configuration
+# =============================================================================
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=800
+CONFIG_ESP_INT_WDT_CHECK_CPU1=n
+
+# BLE host: NimBLE instead of Bluedroid (no-PSRAM: ~half the RAM).
+# NimBLE is a Kconfig choice; selecting it deselects Bluedroid.
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
+# keep the controller adv-report buffers trimmed
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20
+CONFIG_BT_CTRL_BLE_MAX_ACT=2
+
+
+# Panic coredump to a flash partition (reliable crash backtrace on a board where USB-JTAG serial capture is flaky)
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
