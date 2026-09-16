@@ -21,6 +21,11 @@ extern "C" {
  * view_port.c), so touch is treated like HARDWARE everywhere except that one
  * encoder-specific remap. */
 #define INPUT_SEQUENCE_SOURCE_TOUCH    (2u)
+/* Physical keyboard (M5Stack Cardputer ADV matrix keyboard, M5Stick S3 two-button
+ * map). Treated like HARDWARE for encoder/orientation remapping; the tag lets
+ * receivers identify keyboard-sourced events, e.g. printable characters published
+ * as InputTypeText. */
+#define INPUT_SEQUENCE_SOURCE_KEYBOARD (3u)
 
 /** Input Keys */
 typedef enum {
@@ -42,6 +47,7 @@ typedef enum {
     InputTypeShort, /**< Short event, emitted after InputTypeRelease done within INPUT_LONG_PRESS interval */
     InputTypeLong, /**< Long event, emitted after INPUT_LONG_PRESS_COUNTS interval, asynchronous to InputTypeRelease  */
     InputTypeRepeat, /**< Repeat event, emitted with INPUT_LONG_PRESS_COUNTS period after InputTypeLong event */
+    InputTypeText, /**< Printable character from a physical keyboard (Cardputer ADV). The ASCII value is carried in InputEvent.key; ignored by views that don't handle text. */
     InputTypeMAX, /**< Special value for exceptional */
 } InputType;
 
