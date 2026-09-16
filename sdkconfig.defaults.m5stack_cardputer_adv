@@ -74,17 +74,10 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=4
 CONFIG_LWIP_TCP_WND_DEFAULT=5760
 
 # =============================================================================
-# Bluetooth — NimBLE (same as the other ESP32-S3 boards; NOT Bluedroid).
+# Bluetooth — inherited from the base sdkconfig.defaults (Bluedroid), like every
+# other board. Do NOT enable NimBLE here: this port's ble_hid/ble_serial use the
+# Bluedroid API (esp_bt_defs.h), so switching the host stack breaks the build.
 # =============================================================================
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
-CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
-CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
-CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
 
 # =============================================================================
 # Newlib / compiler
