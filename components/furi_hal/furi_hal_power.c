@@ -44,6 +44,32 @@ static esp_pm_lock_handle_t furi_hal_power_freq_lock = NULL;
  * peripheral/RMT locks, the WiFi/BT drivers' own locks). */
 static esp_pm_lock_handle_t furi_hal_power_no_ls_lock = NULL;
 static bool furi_hal_power_ls_allowed = false;
+
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+/* Optional light-sleep instrumentation. Enable CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+ * to compile it in; the exit callback runs in IDLE-task context and just bumps
+ * these counters, which furi_hal_power_get_light_sleep_stats() exposes. */
+static volatile uint32_t furi_hal_power_ls_count = 0;
+static volatile uint64_t furi_hal_power_ls_total_us = 0;
+static volatile uint32_t furi_hal_power_ls_wake_timer = 0;
+static volatile uint32_t furi_hal_power_ls_wake_gpio = 0;
+static volatile uint32_t furi_hal_power_ls_wake_other = 0;
+
+static esp_err_t furi_hal_power_ls_exit_cb(int64_t sleep_time_us, void* arg) {
+    UNUSED(arg);
+    furi_hal_power_ls_count++;
+    if(sleep_time_us > 0) furi_hal_power_ls_total_us += (uint64_t)sleep_time_us;
+    switch(esp_sleep_get_wakeup_cause()) {
+    case ESP_SLEEP_WAKEUP_TIMER: furi_hal_power_ls_wake_timer++; break;
+    case ESP_SLEEP_WAKEUP_GPIO:  furi_hal_power_ls_wake_gpio++;  break;
+    default:                     furi_hal_power_ls_wake_other++; break;
+    }
+    return ESP_OK;
+}
+static esp_pm_sleep_cbs_register_config_t furi_hal_power_ls_cbs = {
+    .exit_cb = furi_hal_power_ls_exit_cb,
+};
+#endif
 #endif
 
 #define FURI_HAL_POWER_USB_PRESENT_THRESHOLD_V  (4.6f)
@@ -334,6 +360,9 @@ void furi_hal_power_init(void) {
         } else {
             esp_pm_lock_acquire(furi_hal_power_no_ls_lock);
         }
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+        esp_pm_light_sleep_register_cbs(&furi_hal_power_ls_cbs);
+#endif
         ESP_LOGI(TAG, "DFS 80-160 MHz + gated light sleep enabled");
     }
 #endif
@@ -447,6 +476,18 @@ void furi_hal_power_allow_light_sleep(bool allow) {
     (void)allow;
 #endif
 }
+
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+void furi_hal_power_get_light_sleep_stats(FuriHalPowerLightSleepStats* out) {
+    if(!out) return;
+    out->sleep_count = furi_hal_power_ls_count;
+    out->total_sleep_us = furi_hal_power_ls_total_us;
+    out->wake_timer = furi_hal_power_ls_wake_timer;
+    out->wake_gpio = furi_hal_power_ls_wake_gpio;
+    out->wake_other = furi_hal_power_ls_wake_other;
+    out->allowed = furi_hal_power_ls_allowed;
+}
+#endif
 
 void furi_hal_power_sleep(void) {
     vTaskDelay(pdMS_TO_TICKS(1));
