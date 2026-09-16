@@ -14,7 +14,7 @@
 
 // Contract assertion
 _Static_assert(InputKeyMAX == 6, "InputKeyMAX");
-_Static_assert(InputTypeMAX == 5, "InputTypeMAX");
+_Static_assert(InputTypeMAX == 6, "InputTypeMAX"); /* +InputTypeText (Cardputer keyboard); no PB mapping, not sent over RPC */
 
 _Static_assert(InputKeyUp == (int32_t)PB_Gui_InputKey_UP, "InputKeyUp != PB_Gui_InputKey_UP");
 _Static_assert(
