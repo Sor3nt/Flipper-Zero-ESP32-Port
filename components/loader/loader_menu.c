@@ -11,6 +11,7 @@
 #include <toolbox/path.h>
 #include <archive/helpers/archive_favorites.h>
 #include <esp_rom_sys.h>
+#include <stdio.h>
 
 #include "loader.h"
 #include "loader_menu.h"
@@ -116,6 +117,7 @@ typedef enum {
     LoaderMenuViewAdd,
     LoaderMenuViewAddMain,
     LoaderMenuViewRemove,
+    LoaderMenuViewReorder,
 } LoaderMenuView;
 
 typedef enum {
@@ -164,12 +166,19 @@ typedef struct {
     Submenu* add_menu;
     Submenu* add_main_menu;
     Submenu* remove_menu;
+    Submenu* reorder_menu;
     FuriString* browser_path;
 
     MenuCustom custom;
     LoaderMenuEntry entries[LOADER_MENU_MAX_ENTRIES];
     size_t entries_count;
     LoaderMenuFapSlot faps[LOADER_MENU_MAX_FAPS];
+
+    /* Reorder screen working state: a copy of the visible entries (minus
+     * Settings, which always stays pinned last) being rearranged. */
+    LoaderMenuEntry reorder_entries[LOADER_MENU_MAX_ENTRIES];
+    size_t reorder_count;
+    int32_t reorder_picked; // -1 = nothing grabbed
 } LoaderMenuApp;
 
 static void loader_menu_start(const char* name) {
@@ -185,6 +194,7 @@ static void loader_menu_switch_to_view(LoaderMenuApp* app, LoaderMenuView view) 
 static void loader_menu_build_remove(LoaderMenuApp* app);
 static void loader_menu_build_add_menu(LoaderMenuApp* app);
 static void loader_menu_build_add_main(LoaderMenuApp* app);
+static void loader_menu_build_reorder(LoaderMenuApp* app);
 
 /* ---------------------------------------------------------------- */
 /* Primary menu (entries table + dispatch callback)                  */
@@ -225,8 +235,8 @@ static size_t loader_menu_entries_add(LoaderMenuApp* app, LoaderMenuEntryKind ki
     return app->entries_count++;
 }
 
-static const char* loader_menu_entries_label(const LoaderMenuApp* app, size_t pos) {
-    const LoaderMenuEntry* entry = &app->entries[pos];
+static const char*
+    loader_menu_entry_label(const LoaderMenuApp* app, const LoaderMenuEntry* entry) {
     switch(entry->kind) {
     case LoaderMenuEntryKindApplications:
         return LOADER_APPLICATIONS_NAME;
@@ -244,8 +254,7 @@ static const char* loader_menu_entries_label(const LoaderMenuApp* app, size_t po
     return "";
 }
 
-static const Icon* loader_menu_entries_icon(const LoaderMenuApp* app, size_t pos) {
-    const LoaderMenuEntry* entry = &app->entries[pos];
+static const Icon* loader_menu_entry_icon(const LoaderMenuApp* app, const LoaderMenuEntry* entry) {
     switch(entry->kind) {
     case LoaderMenuEntryKindApplications:
         return &A_Plugins_14;
@@ -261,6 +270,35 @@ static const Icon* loader_menu_entries_icon(const LoaderMenuApp* app, size_t pos
         return &A_Settings_14;
     }
     return NULL;
+}
+
+/* Canonical, unique identifier for an entry -- the same string used for
+ * hide/show elsewhere (appid / .fap path / literal name) -- used as the key
+ * for persisting and re-applying a user-defined menu order. */
+static const char* loader_menu_entry_key(const LoaderMenuApp* app, const LoaderMenuEntry* entry) {
+    switch(entry->kind) {
+    case LoaderMenuEntryKindApplications:
+        return LOADER_APPLICATIONS_NAME;
+    case LoaderMenuEntryKindInternal:
+        return FLIPPER_APPS[entry->index].appid;
+    case LoaderMenuEntryKindExternal:
+        return FLIPPER_EXTERNAL_APPS[entry->index].path;
+    case LoaderMenuEntryKindInternalAdded:
+        return FLIPPER_SYSTEM_APPS[entry->index].appid;
+    case LoaderMenuEntryKindFap:
+        return furi_string_get_cstr(app->faps[entry->index].path);
+    case LoaderMenuEntryKindSettings:
+        return "Settings";
+    }
+    return "";
+}
+
+static const char* loader_menu_entries_label(const LoaderMenuApp* app, size_t pos) {
+    return loader_menu_entry_label(app, &app->entries[pos]);
+}
+
+static const Icon* loader_menu_entries_icon(const LoaderMenuApp* app, size_t pos) {
+    return loader_menu_entry_icon(app, &app->entries[pos]);
 }
 
 /* Load a .fap's display name and 10x10 icon into a persistent slot. */
@@ -372,6 +410,36 @@ static void loader_menu_build_menu(LoaderMenuApp* app) {
         const char* path = furi_string_get_cstr(app->custom.added_fap[i]);
         loader_menu_fap_slot_load(app, i, path);
         loader_menu_entries_add(app, LoaderMenuEntryKindFap, (uint32_t)i);
+    }
+
+    /* Apply the user's custom ordering (if any) to everything built so far,
+     * before Settings gets appended below (Settings always stays pinned
+     * last, unaffected by reordering). Known keys move to the position
+     * implied by custom.order; anything not listed (e.g. a newly installed
+     * app) keeps its default relative order, appended after the known ones. */
+    if(app->custom.order_count > 0 && app->entries_count > 0) {
+        LoaderMenuEntry reordered[LOADER_MENU_MAX_ENTRIES];
+        bool placed[LOADER_MENU_MAX_ENTRIES] = {false};
+        size_t reordered_count = 0;
+
+        for(size_t i = 0; i < app->custom.order_count; ++i) {
+            const char* key = furi_string_get_cstr(app->custom.order[i]);
+            for(size_t j = 0; j < app->entries_count; ++j) {
+                if(placed[j]) continue;
+                if(strcmp(loader_menu_entry_key(app, &app->entries[j]), key) == 0) {
+                    reordered[reordered_count++] = app->entries[j];
+                    placed[j] = true;
+                    break;
+                }
+            }
+        }
+        for(size_t j = 0; j < app->entries_count; ++j) {
+            if(!placed[j]) {
+                reordered[reordered_count++] = app->entries[j];
+            }
+        }
+        memcpy(app->entries, reordered, sizeof(LoaderMenuEntry) * reordered_count);
+        app->entries_count = reordered_count;
     }
 
     if((FLIPPER_EXTSETTINGS_APPS_COUNT > 0) || (FLIPPER_SETTINGS_APPS_COUNT > 0)) {
@@ -519,6 +587,9 @@ static void loader_menu_main_menu_enter(void* context, uint32_t index) {
     } else if(index == 2) {
         loader_menu_build_remove(app);
         loader_menu_switch_to_view(app, LoaderMenuViewRemove);
+    } else if(index == 3) {
+        loader_menu_build_reorder(app);
+        loader_menu_switch_to_view(app, LoaderMenuViewReorder);
     }
 }
 
@@ -541,6 +612,7 @@ static void loader_menu_build_interface_main(LoaderMenuApp* app) {
 
     variable_item_list_add(app->interface_main_list, "Add Item", 0, NULL, app);
     variable_item_list_add(app->interface_main_list, "Remove Item", 0, NULL, app);
+    variable_item_list_add(app->interface_main_list, "Reorder Items", 0, NULL, app);
     variable_item_list_set_enter_callback(app->interface_main_list, loader_menu_main_menu_enter, app);
 }
 
@@ -684,12 +756,28 @@ static void loader_menu_build_interface_status(LoaderMenuApp* app) {
 static void loader_menu_add_main_callback(void* context, uint32_t index);
 static void loader_menu_add_external_callback(void* context, uint32_t index);
 static void loader_menu_add_menu_main_callback(void* context, uint32_t index);
+static void loader_menu_add_apps_callback(void* context, uint32_t index);
 
 static void loader_menu_build_add_menu(LoaderMenuApp* app) {
     submenu_reset(app->add_menu);
     submenu_set_header(app->add_menu, "Add Menu Item:");
     submenu_add_item(app->add_menu, "Main App", 0, loader_menu_add_menu_main_callback, app);
     submenu_add_item(app->add_menu, "External App", 1, loader_menu_add_external_callback, app);
+}
+
+/* "Apps" entry (in the Main App list): unhide the built-in FAP-browser
+ * pseudo-entry directly -- there's only one of it, so it doesn't need its
+ * own sub-screen. */
+static void loader_menu_add_apps_callback(void* context, uint32_t index) {
+    UNUSED(index);
+    LoaderMenuApp* app = context;
+    if(!menu_custom_unhide(&app->custom, LOADER_APPLICATIONS_NAME)) return;
+
+    menu_custom_save(&app->custom);
+    loader_menu_build_menu(app);
+    loader_menu_build_add_main(app);
+    loader_menu_build_remove(app);
+    loader_menu_switch_to_view(app, LoaderMenuViewPrimary);
 }
 
 /* "Main App" entry: switch to the built-in apps picker (Add Main view). */
@@ -722,6 +810,16 @@ static bool loader_menu_add_main_skip(const char* appid) {
 static void loader_menu_build_add_main(LoaderMenuApp* app) {
     submenu_reset(app->add_main_menu);
     submenu_set_header(app->add_main_menu, "Main App");
+
+    bool apps_visible = !menu_custom_is_hidden(&app->custom, LOADER_APPLICATIONS_NAME);
+    submenu_add_lockable_item(
+        app->add_main_menu,
+        "Apps",
+        UINT32_MAX,
+        loader_menu_add_apps_callback,
+        app,
+        apps_visible,
+        "Already in menu");
 
     for(size_t i = 0; i < FLIPPER_APPS_COUNT; ++i) {
         if(loader_menu_add_main_skip(FLIPPER_APPS[i].appid)) {
@@ -885,6 +983,90 @@ void loader_menu_build_remove(LoaderMenuApp* app) {
 }
 
 /* ---------------------------------------------------------------- */
+/* Reorder Items view                                                 */
+/* ---------------------------------------------------------------- */
+
+static void loader_menu_reorder_callback(void* context, uint32_t index);
+
+/* Persist the current reorder_entries[] order and apply it to the primary
+ * menu immediately (matches how Remove/Add commit on every action rather
+ * than waiting for the user to back out). */
+static void loader_menu_reorder_persist(LoaderMenuApp* app) {
+    const char* keys[LOADER_MENU_MAX_ENTRIES];
+    for(size_t i = 0; i < app->reorder_count; ++i) {
+        keys[i] = loader_menu_entry_key(app, &app->reorder_entries[i]);
+    }
+    menu_custom_set_order(&app->custom, keys, app->reorder_count);
+    menu_custom_save(&app->custom);
+    loader_menu_build_menu(app);
+}
+
+static void loader_menu_reorder_render(LoaderMenuApp* app) {
+    uint32_t cursor = app->reorder_picked >= 0 ? (uint32_t)app->reorder_picked
+                                                : submenu_get_selected_item(app->reorder_menu);
+    submenu_reset(app->reorder_menu);
+    submenu_set_header(
+        app->reorder_menu,
+        app->reorder_picked >= 0 ? "OK: drop here" : "OK: grab an item");
+
+    char label[48];
+    for(size_t i = 0; i < app->reorder_count; ++i) {
+        const char* name = loader_menu_entry_label(app, &app->reorder_entries[i]);
+        if((int32_t)i == app->reorder_picked) {
+            snprintf(label, sizeof(label), "> %s", name);
+        } else {
+            snprintf(label, sizeof(label), "%s", name);
+        }
+        submenu_add_item(app->reorder_menu, label, (uint32_t)i, loader_menu_reorder_callback, app);
+    }
+    if(app->reorder_count > 0) {
+        submenu_set_selected_item(
+            app->reorder_menu, cursor < app->reorder_count ? cursor : 0);
+    }
+}
+
+static void loader_menu_reorder_callback(void* context, uint32_t index) {
+    LoaderMenuApp* app = context;
+    if(app->reorder_picked < 0) {
+        // Nothing grabbed yet: grab this row.
+        app->reorder_picked = (int32_t)index;
+    } else if((int32_t)index == app->reorder_picked) {
+        // Pressed OK on the already-grabbed row: drop it in place.
+        app->reorder_picked = -1;
+    } else {
+        // Move the grabbed entry here, shifting everything between.
+        LoaderMenuEntry picked = app->reorder_entries[app->reorder_picked];
+        if(index > (uint32_t)app->reorder_picked) {
+            for(uint32_t i = (uint32_t)app->reorder_picked; i < index; ++i) {
+                app->reorder_entries[i] = app->reorder_entries[i + 1];
+            }
+        } else {
+            for(uint32_t i = (uint32_t)app->reorder_picked; i > index; --i) {
+                app->reorder_entries[i] = app->reorder_entries[i - 1];
+            }
+        }
+        app->reorder_entries[index] = picked;
+        app->reorder_picked = -1;
+        loader_menu_reorder_persist(app);
+    }
+    loader_menu_reorder_render(app);
+}
+
+void loader_menu_build_reorder(LoaderMenuApp* app) {
+    app->reorder_count = 0;
+    for(size_t i = 0; i < app->entries_count; ++i) {
+        if(app->entries[i].kind == LoaderMenuEntryKindSettings) {
+            continue; // Settings always stays last, not reorderable
+        }
+        if(app->reorder_count < LOADER_MENU_MAX_ENTRIES) {
+            app->reorder_entries[app->reorder_count++] = app->entries[i];
+        }
+    }
+    app->reorder_picked = -1;
+    loader_menu_reorder_render(app);
+}
+
+/* ---------------------------------------------------------------- */
 /* Back navigation                                                   */
 /* ---------------------------------------------------------------- */
 
@@ -932,6 +1114,7 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     app->add_menu = submenu_alloc();
     app->add_main_menu = submenu_alloc();
     app->remove_menu = submenu_alloc();
+    app->reorder_menu = submenu_alloc();
     app->browser_path = furi_string_alloc();
 
     for(size_t i = 0; i < LOADER_MENU_MAX_FAPS; ++i) {
@@ -949,6 +1132,7 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     loader_menu_build_add_menu(app);
     loader_menu_build_add_main(app);
     loader_menu_build_remove(app);
+    loader_menu_build_reorder(app);
 
     // Primary menu
     View* primary_view = menu_get_view(app->primary_menu);
@@ -1004,6 +1188,12 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     view_set_previous_callback(remove_view, loader_menu_switch_to_interface);
     view_dispatcher_add_view(app->view_dispatcher, LoaderMenuViewRemove, remove_view);
 
+    // Reorder menu
+    View* reorder_view = submenu_get_view(app->reorder_menu);
+    view_set_context(reorder_view, app->reorder_menu);
+    view_set_previous_callback(reorder_view, loader_menu_switch_to_interface);
+    view_dispatcher_add_view(app->view_dispatcher, LoaderMenuViewReorder, reorder_view);
+
     view_dispatcher_switch_to_view(
         app->view_dispatcher,
         loader_menu->settings_first ? LoaderMenuViewSettings : LoaderMenuViewPrimary);
@@ -1021,6 +1211,7 @@ static void loader_menu_app_free(LoaderMenuApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewAdd);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewAddMain);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewRemove);
+    view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewReorder);
     view_dispatcher_free(app->view_dispatcher);
 
     menu_free(app->primary_menu);
@@ -1032,6 +1223,7 @@ static void loader_menu_app_free(LoaderMenuApp* app) {
     submenu_free(app->add_menu);
     submenu_free(app->add_main_menu);
     submenu_free(app->remove_menu);
+    submenu_free(app->reorder_menu);
 
     menu_custom_free(&app->custom);
     for(size_t i = 0; i < LOADER_MENU_MAX_FAPS; ++i) {

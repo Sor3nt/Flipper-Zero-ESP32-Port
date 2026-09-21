@@ -110,14 +110,14 @@ CONFIG_LWIP_L2_TO_L3_COPY=y
 # our chip is mfr 0x46 (no-name) so this is a test.
 CONFIG_SPI_FLASH_AUTO_SUSPEND=y
 
-# Power management: dynamic frequency scaling (80-160 MHz DFS) plus gated
-# automatic light sleep, both configured at runtime in furi_hal_power_init.
-# See furi_hal_power.c. Note: IDF auto-loads this file after sdkconfig.defaults
-# for the esp32s3 target.
-CONFIG_PM_ENABLE=y
-
-# Aggressive idle power: automatic light sleep (gated at runtime by a
-# NO_LIGHT_SLEEP lock so it only engages screen-off on battery). Tickless idle
-# lets IDF step the FreeRTOS tick across sleep so there's no clock drift.
-CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
-CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048
+# Console: use the native USB-Serial-JTAG peripheral instead of UART0. On
+# ESP32-S3, UART0's default pins are GPIO43/44 -- the same pins boards in this
+# repo expose as their Grove/RFID header (BOARD_PIN_RFID_TX/RX on T-Embed,
+# also reused by the BW16 app). With UART0 as the console, its constant log
+# traffic drives those pins and corrupts anything else wired there.
+# USB-Serial-JTAG was already enabled as a secondary console (reachable over
+# the same USB port), so making it primary loses nothing and frees GPIO43/44
+# entirely.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

@@ -24,12 +24,32 @@
 /* ---- Configuration ---- */
 
 #if BOARD_HAS_IR
-#define IR_TX_GPIO  BOARD_PIN_IR_TX
-#define IR_RX_GPIO  BOARD_PIN_IR_RX
+#define IR_TX_GPIO_INTERNAL BOARD_PIN_IR_TX
+#define IR_RX_GPIO_INTERNAL BOARD_PIN_IR_RX
 #else
-#define IR_TX_GPIO  GPIO_NUM_NC
-#define IR_RX_GPIO  GPIO_NUM_NC
+#define IR_TX_GPIO_INTERNAL GPIO_NUM_NC
+#define IR_RX_GPIO_INTERNAL GPIO_NUM_NC
 #endif
+
+/* External IR module pins. Boards without a dedicated pin for one fall back
+ * to the corresponding internal pin, so selecting "External" in the app is a
+ * harmless no-op there instead of a compile error. */
+#ifdef BOARD_PIN_IR_TX_EXT
+#define IR_TX_GPIO_EXTERNAL BOARD_PIN_IR_TX_EXT
+#else
+#define IR_TX_GPIO_EXTERNAL IR_TX_GPIO_INTERNAL
+#endif
+
+#ifdef BOARD_PIN_IR_RX_EXT
+#define IR_RX_GPIO_EXTERNAL BOARD_PIN_IR_RX_EXT
+#else
+#define IR_RX_GPIO_EXTERNAL IR_RX_GPIO_INTERNAL
+#endif
+
+/* Pin actually used for the next/current TX/RX session; switched by
+ * furi_hal_infrared_set_tx_output() / furi_hal_infrared_set_rx_input(). */
+static int ir_tx_gpio_active = IR_TX_GPIO_INTERNAL;
+static int ir_rx_gpio_active = IR_RX_GPIO_INTERNAL;
 
 #define IR_RMT_RX_MEM_BLOCK_SYMBOLS 128
 #define IR_RMT_RX_RESOLUTION_HZ     1000000 /* 1 MHz = 1 us per tick */
@@ -173,12 +193,18 @@ void furi_hal_infrared_async_rx_start(void) {
     return;
 #endif
 
+    /* Fully reset the pin before handing it to RMT. Pins that default to a
+     * special IOMUX function at boot (e.g. GPIO43/44 = U0TXD/U0RXD on
+     * ESP32-S3) can retain pull-up/down and function-select state that the
+     * RMT driver's own gpio_func_sel() doesn't clear. */
+    gpio_reset_pin((gpio_num_t)ir_rx_gpio_active);
+
     /* Configure RMT RX channel */
     rmt_rx_channel_config_t rx_chan_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = IR_RMT_RX_RESOLUTION_HZ,
         .mem_block_symbols = IR_RMT_RX_MEM_BLOCK_SYMBOLS,
-        .gpio_num = IR_RX_GPIO,
+        .gpio_num = ir_rx_gpio_active,
         .flags = {
             .invert_in = true, /* IR receiver module output is active-low */
             .with_dma = false,
@@ -447,13 +473,17 @@ void furi_hal_infrared_async_tx_start(uint32_t freq, float duty_cycle) {
     ir_tx.carrier_freq = freq;
     ir_tx.duty_cycle = duty_cycle;
 
+    /* Fully reset the pin before handing it to RMT -- see the matching
+     * comment in furi_hal_infrared_async_rx_start(). */
+    gpio_reset_pin((gpio_num_t)ir_tx_gpio_active);
+
     /* Create RMT TX channel with carrier modulation */
     rmt_tx_channel_config_t tx_chan_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = IR_RMT_TX_RESOLUTION_HZ,
         .mem_block_symbols = 64,
         .trans_queue_depth = 4,
-        .gpio_num = IR_TX_GPIO,
+        .gpio_num = ir_tx_gpio_active,
         .flags = {
             .invert_out = false,
             .with_dma = false,
@@ -538,11 +568,44 @@ bool furi_hal_infrared_is_busy(void) {
 }
 
 FuriHalInfraredTxPin furi_hal_infrared_detect_tx_output(void) {
-    /* ESP32 boards only have internal IR TX */
+    /* No external-module detection circuit on ESP32 boards -- default to
+     * internal; the user can still pick External explicitly in settings. */
     return FuriHalInfraredTxPinInternal;
 }
 
 void furi_hal_infrared_set_tx_output(FuriHalInfraredTxPin tx_pin) {
-    /* Only internal pin supported, ignore */
-    (void)tx_pin;
+    furi_check(ir_state == InfraredStateIdle);
+    switch(tx_pin) {
+    case FuriHalInfraredTxPinExtPA7:
+        ir_tx_gpio_active = IR_TX_GPIO_EXTERNAL;
+        break;
+    case FuriHalInfraredTxPinInternal:
+    default:
+        ir_tx_gpio_active = IR_TX_GPIO_INTERNAL;
+        break;
+    }
+    /* Also reset the pin we just switched AWAY from. A previous RMT session
+     * on it left the GPIO matrix routed to that pin; without resetting it,
+     * its pad can keep carrying the RMT output signal alongside (or instead
+     * of) the newly selected pin. */
+    gpio_reset_pin(
+        (gpio_num_t)(ir_tx_gpio_active == IR_TX_GPIO_INTERNAL ? IR_TX_GPIO_EXTERNAL
+                                                                : IR_TX_GPIO_INTERNAL));
+}
+
+void furi_hal_infrared_set_rx_input(FuriHalInfraredRxPin rx_pin) {
+    furi_check(ir_state == InfraredStateIdle);
+    switch(rx_pin) {
+    case FuriHalInfraredRxPinExternal:
+        ir_rx_gpio_active = IR_RX_GPIO_EXTERNAL;
+        break;
+    case FuriHalInfraredRxPinInternal:
+    default:
+        ir_rx_gpio_active = IR_RX_GPIO_INTERNAL;
+        break;
+    }
+    /* See the matching comment in furi_hal_infrared_set_tx_output(). */
+    gpio_reset_pin(
+        (gpio_num_t)(ir_rx_gpio_active == IR_RX_GPIO_INTERNAL ? IR_RX_GPIO_EXTERNAL
+                                                                : IR_RX_GPIO_INTERNAL));
 }

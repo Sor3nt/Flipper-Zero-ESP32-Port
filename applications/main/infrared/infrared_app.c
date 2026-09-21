@@ -498,6 +498,11 @@ void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin) {
     infrared->app_state.tx_pin = tx_pin;
 }
 
+void infrared_set_rx_pin(InfraredApp* infrared, FuriHalInfraredRxPin rx_pin) {
+    furi_hal_infrared_set_rx_input(rx_pin);
+    infrared->app_state.rx_pin = rx_pin;
+}
+
 void infrared_enable_otg(InfraredApp* infrared, bool enable) {
     Power* power = furi_record_open(RECORD_POWER);
 
@@ -524,12 +529,14 @@ static void infrared_load_settings(InfraredApp* infrared) {
     if(settings.tx_pin < FuriHalInfraredTxPinMax) {
         infrared_enable_otg(infrared, settings.otg_enabled);
     }
+    infrared_set_rx_pin(infrared, settings.rx_pin);
 }
 
 void infrared_save_settings(InfraredApp* infrared) {
     InfraredSettings settings = {
         .tx_pin = infrared->app_state.tx_pin,
         .otg_enabled = infrared->app_state.is_otg_enabled,
+        .rx_pin = infrared->app_state.rx_pin,
     };
 
     if(!saved_struct_save(
@@ -635,6 +642,7 @@ int32_t infrared_app(void* p) {
 
     infrared_set_tx_pin(infrared, FuriHalInfraredTxPinInternal);
     infrared_enable_otg(infrared, false);
+    infrared_set_rx_pin(infrared, FuriHalInfraredRxPinInternal);
     infrared_free(infrared);
 
     return 0;

@@ -1,9 +1,13 @@
-build*/
+build/
+build_t_embed/
+build_test/
+build_s3/
 .cache/
 .idea/
 __pycache__/
 sdkconfig.old
 .DS_Store
+build_waveshare_c6/
 .vscode/settings.json
 
 # Local-dev tooling (not for upstream)

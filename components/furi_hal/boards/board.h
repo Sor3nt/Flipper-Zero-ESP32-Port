@@ -25,7 +25,6 @@
 #ifndef BOARD_ID
 #define BOARD_ID "unknown"
 #endif
-#if !defined(BOARD_DISPLAY_SH1106) && !defined(BOARD_DISPLAY_SSD1306) && \
-    !defined(BOARD_PIN_LCD_MOSI)
-#error "Board header must define a supported display and its pins"
+#ifndef BOARD_PIN_LCD_MOSI
+#error "Board header must define LCD pins"
 #endif

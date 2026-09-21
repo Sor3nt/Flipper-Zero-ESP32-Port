@@ -21,13 +21,56 @@ fi
 
 # Source ESP-IDF for toolchain access. Honor ESP_IDF_DIR if set; fall back to
 # the canonical ~/esp/esp-idf path; finally try the Windows default install.
-if [ -z "$IDF_PATH" ]; then
+#
+# On Windows, export.sh's activate.py emits a bare, unquoted
+# ". C:\Users\...\activate_xxx" line (and Windows-backslash paths generally)
+# meant for cmd/PowerShell; eval-ing that under Git Bash mangles every
+# backslash (an unquoted "\U" etc. just drops the backslash), so the
+# activation silently fails to put the toolchain on PATH. Rather than fight
+# that pipeline, build the PATH by hand from the same ~/.espressif/tools
+# layout export.sh itself would read, using forward slashes throughout
+# (Windows accepts both).
+esp_idf_dir_win() {
     if [ -n "$ESP_IDF_DIR" ] && [ -f "$ESP_IDF_DIR/export.sh" ]; then
-        . "$ESP_IDF_DIR/export.sh" >/dev/null 2>&1
+        echo "$ESP_IDF_DIR"
     elif [ -f "$HOME/esp/esp-idf/export.sh" ]; then
-        . "$HOME/esp/esp-idf/export.sh" >/dev/null 2>&1
+        echo "$HOME/esp/esp-idf"
     elif [ -f "/c/Espressif/frameworks/esp-idf-v5.4.1/export.sh" ]; then
-        . "/c/Espressif/frameworks/esp-idf-v5.4.1/export.sh" >/dev/null 2>&1
+        echo "/c/Espressif/frameworks/esp-idf-v5.4.1"
+    fi
+}
+
+if [ -z "$IDF_PATH" ]; then
+    if [ -n "$MSYSTEM" ] || [ -n "$WINDIR" ]; then
+        _idf_dir="$(esp_idf_dir_win)"
+        _tools="$HOME/.espressif/tools"
+        if [ -n "$_idf_dir" ] && [ -d "$_tools" ]; then
+            export IDF_PATH="$_idf_dir"
+            # Each tool lives at .../tools/<tool>/<version-dir>/.../bin — glob
+            # the single version dir present rather than hardcoding it.
+            for bin in \
+                "$_tools"/xtensa-esp-elf/*/xtensa-esp-elf/bin \
+                "$_tools"/xtensa-esp-elf-gdb/*/xtensa-esp-elf-gdb/bin \
+                "$_tools"/riscv32-esp-elf/*/riscv32-esp-elf/bin \
+                "$_tools"/riscv32-esp-elf-gdb/*/riscv32-esp-elf-gdb/bin \
+                "$_tools"/esp32ulp-elf/*/esp32ulp-elf/bin \
+                "$_tools"/cmake/*/bin \
+                "$_tools"/ninja/* \
+                "$_tools"/idf-exe/* \
+                "$_tools"/ccache/*/ccache-*-windows-x86_64 \
+                "$_tools"/dfu-util/*/dfu-util-*-win64 \
+                "$_tools"/openocd-esp32/*/openocd-esp32/bin \
+                "$HOME"/.espressif/python_env/idf*_env/Scripts \
+                "$_idf_dir"/tools
+            do
+                [ -d "$bin" ] && PATH="$bin:$PATH"
+            done
+            export PATH
+        fi
+    fi
+    if [ -z "$IDF_PATH" ]; then
+        _idf_dir="$(esp_idf_dir_win)"
+        [ -n "$_idf_dir" ] && . "$_idf_dir/export.sh" >/dev/null 2>&1
     fi
 fi
 
@@ -502,7 +545,11 @@ build_for_target() {
     # Compile C sources
     local -a OBJECTS=()
     for src in "${C_SOURCES[@]}"; do
-        local obj="$BUILD_DIR/$(echo "$src" | sed 's|/|_|g' | sed 's|\.c$|.o|')"
+        # Flatten to one filename per source. Defends against stray "\" too:
+        # tools that resolve paths via Python's os.path.relpath() emit "\" on
+        # Windows, which would otherwise survive as a literal (nonexistent)
+        # subdirectory separator here.
+        local obj="$BUILD_DIR/$(echo "$src" | sed 's|[/\\]|_|g' | sed 's|\.c$|.o|')"
         OBJECTS+=("$obj")
 
         "$CC" "${COMMON_CFLAGS[@]}" "${TARGET_CFLAGS[@]}" \
@@ -513,7 +560,7 @@ build_for_target() {
 
     # Compile C++ sources
     for src in "${CXX_SOURCES[@]}"; do
-        local obj="$BUILD_DIR/$(echo "$src" | sed 's|/|_|g' | sed 's|\.cpp$|.o|')"
+        local obj="$BUILD_DIR/$(echo "$src" | sed 's|[/\\]|_|g' | sed 's|\.cpp$|.o|')"
         OBJECTS+=("$obj")
 
         "$CXX" "${COMMON_CXXFLAGS[@]}" "${TARGET_CFLAGS[@]}" \
@@ -563,6 +610,15 @@ build_for_target() {
     python3 "$PROJECT_DIR/tools/check_fap_symbols.py" "$API_FILE" "$BUILD_DIR/undef_syms.txt" || true
 
     echo "  ✓ $OUTPUT ($SIZE bytes, $SECTIONS sections)"
+
+    # Auto-copy the built .fap to Downloads for easy grabbing — but not for
+    # embedded-plugin sub-builds (FAP_OUTPUT_NAME set), those aren't real FAPs.
+    if [ -z "$FAP_OUTPUT_NAME" ]; then
+        local DL_DIR="/c/Users/User/Downloads/Flipper FAPs"
+        mkdir -p "$DL_DIR" 2>/dev/null
+        cp "$OUTPUT" "$DL_DIR/$FAP_FILENAME" 2>/dev/null \
+            && echo "  → copied to Downloads/Flipper FAPs/$FAP_FILENAME"
+    fi
 }
 
 # ── Main: build for all targets ─────────────────────────────────────

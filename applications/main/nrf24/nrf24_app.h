@@ -44,7 +44,7 @@ typedef struct Nrf24App {
     DialogsApp* dialogs;
     Storage* storage;
 
-    View* spectrum_view;
+    Nrf24Spectrum* spectrum;
     View* jam_view; /* unified jam engine */
     View* scan_view; /* activity-scan progress */
     View* mj_scan_view;

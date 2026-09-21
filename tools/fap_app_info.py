@@ -62,25 +62,33 @@ def _walk_sources(root):
                 yield os.path.join(dirpath, fn)
 
 
+def _relpath(path, app_dir):
+    # buildFap.sh flattens object filenames by replacing "/" with "_";
+    # os.path.relpath() uses the platform separator, which is "\" on
+    # Windows, so normalize to "/" here or those backslash segments survive
+    # as literal (nonexistent) subdirectories.
+    return os.path.relpath(path, app_dir).replace(os.sep, "/")
+
+
 def _match(app_dir, pattern):
     """Return app-dir-relative source files matching one fbt source pattern."""
     full = os.path.join(app_dir, pattern)
     out = []
     if os.path.isdir(full):
         for m in _walk_sources(full):
-            out.append(os.path.relpath(m, app_dir))
+            out.append(_relpath(m, app_dir))
     elif "/" not in pattern:
         # bare filename (maybe wildcard): match by basename anywhere in the tree
         for m in _walk_sources(app_dir):
             if fnmatch.fnmatch(os.path.basename(m), pattern):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(_relpath(m, app_dir))
     else:
         for m in glob.glob(full, recursive=True):
             if os.path.isdir(m):
                 for f in _walk_sources(m):
-                    out.append(os.path.relpath(f, app_dir))
+                    out.append(_relpath(f, app_dir))
             elif os.path.isfile(m) and m.endswith(_SRC_EXTS):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(_relpath(m, app_dir))
     return out
 
 
@@ -102,6 +110,12 @@ def _resolve(app_dir, patterns):
 
 
 def main():
+    # buildFap.sh reads our output line-by-line with bash's `read` via
+    # IFS=$'\t'. On Windows, Python's text-mode stdout translates "\n" to
+    # "\r\n"; `read` splits on the LF but leaves the CR attached to the last
+    # field, which then silently fails string/path comparisons downstream
+    # (e.g. `find -path` never matching). Force LF-only output.
+    sys.stdout.reconfigure(newline="\n")
     if len(sys.argv) != 2:
         sys.stderr.write("usage: fap_app_info.py <app_dir>\n")
         return 2

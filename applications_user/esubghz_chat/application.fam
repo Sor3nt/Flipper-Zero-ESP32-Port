@@ -1,0 +1,20 @@
+App(
+    appid="esubghz_chat",
+    name="Enhanced Sub-Ghz Chat",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="esubghz_chat",
+    requires=[
+        "gui",
+        "subghz",
+    ],
+    stack_size=8 * 1024,
+    sources=["*.c", "crypto/*.c", "helpers/*.c", "scenes/*.c"],
+    fap_category="Sub-GHz",
+    fap_icon="assets/chat_10px.png",
+    fap_icon_assets="assets",
+    fap_icon_assets_symbol="esubghz_chat",
+    fap_author="twisted-pear",
+    fap_weburl="https://github.com/twisted-pear/esubghz_chat",
+    fap_version="1.6",
+    fap_description="Sub-GHz chat with optional AES-256-GCM encryption. Ported from twisted-pear/esubghz_chat (GPL-3.0); NFC key sharing dropped (unsupported NFC stack on this port).",
+)

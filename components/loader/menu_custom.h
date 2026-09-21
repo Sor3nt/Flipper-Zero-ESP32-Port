@@ -19,6 +19,13 @@ typedef struct {
 
     FuriString* added_internal[MENU_CUSTOM_MAX_ITEMS];
     size_t added_internal_count;
+
+    /* User-defined main menu ordering: a list of entry keys (appid / .fap
+     * path / "Applications") in the order the user wants them shown. Entries
+     * not listed here keep their default relative order, appended after the
+     * known ones. */
+    FuriString* order[MENU_CUSTOM_MAX_ITEMS];
+    size_t order_count;
 } MenuCustom;
 
 /* Load/Save przy pomocy Storage. Load nie tworzy pliku, gdy nie istnieje. */
@@ -37,6 +44,9 @@ bool menu_custom_add_fap(MenuCustom* custom, const char* fap_path);
 bool menu_custom_remove_fap(MenuCustom* custom, const char* fap_path);
 bool menu_custom_add_internal(MenuCustom* custom, const char* app_id);
 bool menu_custom_remove_internal(MenuCustom* custom, const char* app_id);
+
+/* Replace the saved menu order wholesale with `keys` (in order). */
+void menu_custom_set_order(MenuCustom* custom, const char* const* keys, size_t count);
 
 #ifdef __cplusplus
 }

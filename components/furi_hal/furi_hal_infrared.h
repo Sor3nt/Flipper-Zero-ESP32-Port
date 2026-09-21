@@ -23,6 +23,12 @@ typedef enum {
 } FuriHalInfraredTxPin;
 
 typedef enum {
+    FuriHalInfraredRxPinInternal,
+    FuriHalInfraredRxPinExternal,
+    FuriHalInfraredRxPinMax,
+} FuriHalInfraredRxPin;
+
+typedef enum {
     FuriHalInfraredTxGetDataStateOk, /**< New data obtained */
     FuriHalInfraredTxGetDataStateDone, /**< New data obtained, and this is end of package */
     FuriHalInfraredTxGetDataStateLastDone, /**< New data obtained, and this is end of package and no more data available */
@@ -160,6 +166,12 @@ FuriHalInfraredTxPin furi_hal_infrared_detect_tx_output(void);
  * @param[in]   tx_pin  pin to be used for signal transmission.
  */
 void furi_hal_infrared_set_tx_output(FuriHalInfraredTxPin tx_pin);
+
+/** Set which pin will be used to receive infrared signals.
+ *
+ * @param[in]   rx_pin  pin to be used for signal reception.
+ */
+void furi_hal_infrared_set_rx_input(FuriHalInfraredRxPin rx_pin);
 
 #ifdef __cplusplus
 }

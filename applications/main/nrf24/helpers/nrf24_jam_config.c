@@ -168,19 +168,21 @@ const char* nrf24_jam_pa_label(uint8_t pa) {
     }
 }
 
-/* Relative strength labels for the 4 fixed chip steps (Min=-18 .. Max=0 dBm).
- * Absolute dBm is intentionally not shown: the real output depends on the
- * installed module's fixed PA gain, which the firmware cannot know. */
+/* Chip-level PA_LEVEL steps are -18/-12/-6/0 dBm; effective output adds the
+ * installed module's fixed PA gain on top, which the firmware can't know in
+ * general -- but this rig's module is a known quantity (E01-2G4M27SX,
+ * ~27dBm effective at chip 0dBm, i.e. ~27dB of gain), so show real numbers
+ * offset the same way as the Bruce Jammer's config screen. */
 const char* nrf24_jam_pa_label_long(uint8_t pa) {
     switch(pa) {
     case Nrf24Pa_Min:
-        return "Very Low";
+        return "Very Low (~9dBm)";
     case Nrf24Pa_Low:
-        return "Low";
+        return "Low (~15dBm)";
     case Nrf24Pa_High:
-        return "Medium";
+        return "Medium (~21dBm)";
     case Nrf24Pa_Max:
-        return "High";
+        return "High (~27dBm)";
     default:
         return "?";
     }

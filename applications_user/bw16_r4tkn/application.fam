@@ -1,0 +1,12 @@
+App(
+    appid="bw16_r4tkn",
+    name="BW16",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="bw16_r4tkn_app",
+    stack_size=4096,
+    fap_icon="icon.png",
+    fap_libs=["assets"],
+    fap_category="GPIO",
+    fap_author="port of @r4tkn BW16 tool",
+    fap_version="1.0",
+)

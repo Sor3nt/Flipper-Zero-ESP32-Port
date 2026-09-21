@@ -162,18 +162,27 @@ uint8_t cc1101_write_fifo(const FuriHalSpiBusHandle* handle, const uint8_t* data
 }
 
 uint8_t cc1101_read_fifo(const FuriHalSpiBusHandle* handle, uint8_t* data, uint8_t* size) {
-    uint8_t buff_trx[2];
+    /* Single continuous burst transaction (command + length prefix + up to
+     * 64 payload bytes) instead of two separate SPI calls. This port's SPI
+     * layer (furi_hal_spi_bus_trx -> spi_device_polling_transmit) toggles
+     * chip-select per call with no manual hold in between, unlike real
+     * Flipper hardware's driver -- so a second, separate transaction here
+     * broke CC1101's continuous burst-read context: the chip would just
+     * echo its status byte on every subsequent clock instead of real FIFO
+     * data. Confirmed on hardware: RX packets came back as N identical
+     * bytes (the repeated status byte) instead of the actual payload. */
+    uint8_t buff_trx[1 + 1 + 64] = {0};
     buff_trx[0] = CC1101_FIFO | CC1101_READ | CC1101_BURST;
 
-    cc1101_spi_trx(handle, buff_trx, buff_trx, 2);
+    cc1101_spi_trx(handle, buff_trx, buff_trx, sizeof(buff_trx));
 
     // Check that the packet is placed in the receive buffer
-    if(buff_trx[1] > 64) {
-        *size = 64;
-    } else {
-        *size = buff_trx[1];
+    uint8_t len = buff_trx[1];
+    if(len > 64) {
+        len = 64;
     }
-    furi_hal_spi_bus_trx(handle, NULL, data, *size, CC1101_TIMEOUT);
+    *size = len;
+    memcpy(data, &buff_trx[2], len);
 
     return *size;
 }

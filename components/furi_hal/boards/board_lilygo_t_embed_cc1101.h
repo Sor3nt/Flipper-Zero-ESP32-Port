@@ -103,6 +103,14 @@
 /* ---- IR ---- */
 #define BOARD_PIN_IR_TX         2       /* IR_EN */
 #define BOARD_PIN_IR_RX         1       /* IR_RX */
+/* External IR module ("Signal Output/Input: External" in the Infrared app).
+ * No spare pins exist, so this reuses the Grove/RFID header (same pins the
+ * BW16 R4TKN app and RDM6300 reader use) -- fine since only one peripheral is
+ * ever active on it at a time. Confirmed working on real hardware: driving
+ * these pins directly (bypassing the Internal/External switch entirely) lit
+ * up an external IR module. */
+#define BOARD_PIN_IR_TX_EXT     43      /* Grove/RFID TX, shared */
+#define BOARD_PIN_IR_RX_EXT     44      /* Grove/RFID RX, shared */
 
 /* ---- NFC / PN532 (via I2C) ---- */
 #define BOARD_PIN_NFC_SCL       18

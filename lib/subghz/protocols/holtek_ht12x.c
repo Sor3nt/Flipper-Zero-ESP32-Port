@@ -14,24 +14,6 @@
 
 #define TAG "SubGhzProtocolHoltekHt12x"
 
-/* Length of the sync (pilot) low period, in te units, per the HT12X frame layout.
- * Kept at the datasheet value: this is what the receiver expects, and a recorded remote
- * measures in the same ballpark (~12700 us at te=306). Do not shorten it to dodge the
- * CAME 12bit decoder - that decoder shares the same on-air bit encoding and reporting
- * "CAME" instead of "Holtek" is cosmetic, while a short sync can cost a real HT12D lock. */
-#define HOLTEK_HT12X_SYNC_TE 36
-
-/* Clamp the result into the decoder's own header window (te_short*28 +- te_delta*20 =
- * 4960..12960 us). Without the upper bound a te >= 360 makes 36*te overshoot 12960, so the
- * firmware could no longer decode its own transmission. */
-#define HOLTEK_HT12X_SYNC_MIN_US 5200
-#define HOLTEK_HT12X_SYNC_MAX_US 12500
-
-/* An HT12D only asserts VT after several consecutive identical words, so the generic
- * default of 3 can leave a real receiver just below its threshold - a recorded remote
- * sends dozens of frames per key press. */
-#define HOLTEK_HT12X_REPEAT 10
-
 #define DIP_PATTERN "%c%c%c%c%c%c%c%c"
 #define CNT_TO_DIP(dip)                                                                     \
     (dip & 0x0080 ? '0' : '1'), (dip & 0x0040 ? '0' : '1'), (dip & 0x0020 ? '0' : '1'),     \
@@ -112,7 +94,7 @@ void* subghz_protocol_encoder_holtek_th12x_alloc(SubGhzEnvironment* environment)
     instance->base.protocol = &subghz_protocol_holtek_th12x;
     instance->generic.protocol_name = instance->base.protocol->name;
 
-    instance->encoder.repeat = HOLTEK_HT12X_REPEAT;
+    instance->encoder.repeat = 3;
     instance->encoder.size_upload = 128;
     instance->encoder.upload = malloc(instance->encoder.size_upload * sizeof(LevelDuration));
     instance->encoder.is_running = false;
@@ -144,6 +126,8 @@ static bool
         instance->encoder.size_upload = size_upload;
     }
 
+    //Send header
+    instance->encoder.upload[index++] = level_duration_make(false, (uint32_t)instance->te * 36);
     //Send start bit
     instance->encoder.upload[index++] = level_duration_make(true, (uint32_t)instance->te);
     //Send key data
@@ -160,17 +144,6 @@ static bool
                 level_duration_make(true, (uint32_t)instance->te * 2);
         }
     }
-    //Send header (sync) at the END of the frame, not at the beginning.
-    //The async TX middleware drops a leading low level (the line is already low
-    //before TX starts), which would cost the first frame its sync period, and a
-    //frame ending on a high level is never terminated for the decoder. Both
-    //together leave only one usable frame out of the three repeats, while the
-    //decoder needs two identical ones. Emitting the sync last keeps the on-air
-    //sequence identical but makes every repeat a complete frame.
-    uint32_t sync_duration = (uint32_t)instance->te * HOLTEK_HT12X_SYNC_TE;
-    if(sync_duration < HOLTEK_HT12X_SYNC_MIN_US) sync_duration = HOLTEK_HT12X_SYNC_MIN_US;
-    if(sync_duration > HOLTEK_HT12X_SYNC_MAX_US) sync_duration = HOLTEK_HT12X_SYNC_MAX_US;
-    instance->encoder.upload[index++] = level_duration_make(false, sync_duration);
     return true;
 }
 

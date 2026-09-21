@@ -22,7 +22,7 @@ typedef enum {
     Nrf24Pa_Min = 0, /* -18 dBm */
     Nrf24Pa_Low, /* -12 dBm */
     Nrf24Pa_High, /* -6 dBm */
-    Nrf24Pa_Max, /*  0 dBm (≈+20 dBm with PA+LNA module) */
+    Nrf24Pa_Max, /*  0 dBm (≈+27 dBm with this rig's E01-2G4M27SX PA+LNA module) */
     Nrf24Pa_Count,
 } Nrf24JamPa;
 

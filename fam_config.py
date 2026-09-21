@@ -78,6 +78,7 @@ APPS = [
     "js_infrared",
     "js_blebeacon",
     # js_serial, js_gpio, js_i2c, js_spi excluded - need HAL porting
+    # bw16_r4tkn is built as a standalone FAP (buildFap.sh), not baked into firmware
 ]
 
 # Boards without NFC / IR hardware – exclude the corresponding apps

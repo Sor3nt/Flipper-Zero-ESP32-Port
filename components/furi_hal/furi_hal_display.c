@@ -77,7 +77,6 @@ static uint16_t bg_color;
 #define STRIPE_HEIGHT 8
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
-static bool panel_is_asleep = false; /* guards the sleep/wake pair */
 static uint16_t* rgb565_buf = NULL; // STRIPE_HEIGHT lines only
 static SemaphoreHandle_t lcd_flush_done = NULL;
 static uint8_t x_scale_lut[SCALED_WIDTH];
@@ -359,39 +358,15 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
 }
 
 void furi_hal_display_set_backlight(uint8_t brightness) {
-    /* brightness 0 means "screen off" here, so pair it with panel sleep; GRAM
-     * is retained, so waking shows the last frame with no re-init. */
-    if(brightness == 0) {
-        furi_hal_light_set(LightBacklight, 0);
-        furi_hal_display_sleep();
-    } else {
-        furi_hal_display_wakeup();
-        furi_hal_light_set(LightBacklight, brightness);
-    }
+    furi_hal_light_set(LightBacklight, brightness);
 }
 
 void furi_hal_display_sleep(void) {
-    if(!panel_handle || panel_is_asleep) return;
+    if(!panel_handle) return;
     furi_hal_spi_bus_lock();
-    /* DISPOFF blanks output; SLPIN also stops the oscillator/DC-DC. GRAM kept. */
+    /* SLPIN: stop the panel's internal oscillator/booster to cut idle current */
     esp_lcd_panel_disp_on_off(panel_handle, false);
-    esp_lcd_panel_disp_sleep(panel_handle, true);
     furi_hal_spi_bus_unlock();
-    panel_is_asleep = true;
-}
-
-void furi_hal_display_wakeup(void) {
-    if(!panel_handle || !panel_is_asleep) return;
-    furi_hal_spi_bus_lock();
-    /* SLPOUT (driver waits ~100 ms to settle) then DISPON. */
-    esp_lcd_panel_disp_sleep(panel_handle, false);
-    esp_lcd_panel_disp_on_off(panel_handle, true);
-    furi_hal_spi_bus_unlock();
-    panel_is_asleep = false;
-}
-
-bool furi_hal_display_is_asleep(void) {
-    return panel_is_asleep;
 }
 
 uint16_t furi_hal_display_get_h_res(void) {

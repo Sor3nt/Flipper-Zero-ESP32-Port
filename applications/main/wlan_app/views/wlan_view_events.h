@@ -86,9 +86,4 @@ typedef enum {
 
     WlanAppCustomEventAndroidTvPinDone = 260,
     WlanAppCustomEventAndroidTvRetry = 261,
-
-    WlanAppCustomEventAirPrintStop = 270,
-    WlanAppCustomEventAirPrintConfig = 271,
-    WlanAppCustomEventAirPrintNameDone = 272,
-    WlanAppCustomEventAirPrintHijackScanDone = 273,
 } WlanAppCustomEvent;

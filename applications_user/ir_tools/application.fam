@@ -1,0 +1,12 @@
+App(
+    appid="ir_tools",
+    name="IR Tools",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="ir_tools_app",
+    stack_size=2 * 1024,
+    fap_icon="icon.png",
+    fap_category="Infrared",
+    fap_author="original, ESP32 port",
+    fap_description="Continuous-carrier IR signal generator and a receive-side carrier-frequency finder.",
+    fap_version="1.0",
+)

@@ -6,23 +6,16 @@
 
 #define TAG "PowerSettings"
 
-#define POWER_SETTINGS_VER_1 (1) // Oldest version number
-#define POWER_SETTINGS_VER_2 (2) // Previous version number
-#define POWER_SETTINGS_VER   (3) // New version number
+#define POWER_SETTINGS_VER_1 (1) // Previous version number
+#define POWER_SETTINGS_VER   (2) // New version number
 
 #define POWER_SETTINGS_PATH     INT_PATH(POWER_SETTINGS_FILE_NAME)
 #define POWER_SETTINGS_MAGIC_V1 (0x19)
-#define POWER_SETTINGS_MAGIC_V2 (0x21)
-#define POWER_SETTINGS_MAGIC    (0x22)
+#define POWER_SETTINGS_MAGIC    (0x21)
 
 typedef struct {
     uint32_t auto_poweroff_delay_ms;
-} PowerSettingsV1;
-
-typedef struct {
-    uint32_t auto_poweroff_delay_ms;
-    uint8_t charge_supress_percent;
-} PowerSettingsV2;
+} PowerSettingsPrevious;
 
 void power_settings_load(PowerSettings* settings) {
     furi_assert(settings);
@@ -42,38 +35,23 @@ void power_settings_load(PowerSettings* settings) {
                 POWER_SETTINGS_MAGIC,
                 POWER_SETTINGS_VER);
 
-            // if config previous version - load it and manual set new settings to initial value
-        } else if(version == POWER_SETTINGS_VER_2) {
-            PowerSettingsV2 previous = {0};
-
-            success = saved_struct_load(
-                POWER_SETTINGS_PATH,
-                &previous,
-                sizeof(PowerSettingsV2),
-                POWER_SETTINGS_MAGIC_V2,
-                POWER_SETTINGS_VER_2);
-            // new settings initialization
-            if(success) {
-                settings->auto_poweroff_delay_ms = previous.auto_poweroff_delay_ms;
-                settings->charge_supress_percent = previous.charge_supress_percent;
-                settings->off_mode = PowerOffModeDeepSleep;
-            }
-
+            // if config previous version - load it and manual set new settings to inital value
         } else if(version == POWER_SETTINGS_VER_1) {
-            PowerSettingsV1 previous = {0};
+            PowerSettingsPrevious* settings_previous = malloc(sizeof(PowerSettingsPrevious));
 
             success = saved_struct_load(
                 POWER_SETTINGS_PATH,
-                &previous,
-                sizeof(PowerSettingsV1),
+                settings_previous,
+                sizeof(PowerSettingsPrevious),
                 POWER_SETTINGS_MAGIC_V1,
                 POWER_SETTINGS_VER_1);
             // new settings initialization
             if(success) {
-                settings->auto_poweroff_delay_ms = previous.auto_poweroff_delay_ms;
+                settings->auto_poweroff_delay_ms = settings_previous->auto_poweroff_delay_ms;
                 settings->charge_supress_percent = 0;
-                settings->off_mode = PowerOffModeDeepSleep;
             }
+
+            free(settings_previous);
         }
 
     } while(false);

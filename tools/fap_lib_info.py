@@ -31,6 +31,12 @@ class _AnyEnum:
 
 
 def main():
+    # buildFap.sh reads our output line-by-line with bash's `read` via
+    # IFS=$'\t'. On Windows, Python's text-mode stdout translates "\n" to
+    # "\r\n"; `read` splits on the LF but leaves the CR attached to the last
+    # field, which then silently fails string/path comparisons downstream
+    # (e.g. `find -path` never matching). Force LF-only output.
+    sys.stdout.reconfigure(newline="\n")
     if len(sys.argv) != 2:
         sys.stderr.write("usage: fap_lib_info.py <app_dir>\n")
         return 2
@@ -81,7 +87,11 @@ def main():
         for pat in lib["sources"]:
             matches = sorted(glob.glob(os.path.join(lib_root, pat)))
             for m in matches:
-                rel = os.path.relpath(m, app_dir)
+                # buildFap.sh flattens object filenames by replacing "/" with
+                # "_"; os.path.relpath() uses the platform separator, which is
+                # "\" on Windows, so normalize to "/" here or those backslash
+                # segments survive as literal (nonexistent) subdirectories.
+                rel = os.path.relpath(m, app_dir).replace(os.sep, "/")
                 out.append(f"SOURCE\t{rel}")
         for d in lib["cdefines"]:
             out.append(f"CDEFINE\t{d}")

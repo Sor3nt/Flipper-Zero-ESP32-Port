@@ -756,7 +756,7 @@ static void render_menu_icons(Canvas* canvas, MenuType menu) {
         case MENU_BLE: canvas_draw_icon(canvas, 0, 0, &I_ble_jammer); break;
         case MENU_ZIGBEE: canvas_draw_icon(canvas, 0, 0, &I_zigbee_jammer); break;
         case MENU_MISC: canvas_draw_icon(canvas, 0, 0, &I_misc_jammer); break;
-        case MENU_SETTINGS: canvas_draw_icon(canvas, 0, 0, &I_settings); break;
+        case MENU_SETTINGS: canvas_draw_icon(canvas, 0, 0, &I_settings_menu); break;
         case MENU_COUNT:
         default:
             break;

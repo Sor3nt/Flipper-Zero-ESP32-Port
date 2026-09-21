@@ -51,9 +51,9 @@ static Nrf24App* nrf24_app_alloc(void) {
         Nrf24ViewJamConfig,
         variable_item_list_get_view(app->var_item_list));
 
-    app->spectrum_view = nrf24_spectrum_view_alloc();
-    view_set_context(app->spectrum_view, app->view_dispatcher);
-    view_dispatcher_add_view(app->view_dispatcher, Nrf24ViewSpectrum, app->spectrum_view);
+    app->spectrum = nrf24_spectrum_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher, Nrf24ViewSpectrum, nrf24_spectrum_get_view(app->spectrum));
 
     app->jam_view = nrf24_jam_view_alloc();
     view_set_context(app->jam_view, app->view_dispatcher);
@@ -112,7 +112,7 @@ static void nrf24_app_free(Nrf24App* app) {
     submenu_free(app->submenu);
     widget_free(app->widget);
     variable_item_list_free(app->var_item_list);
-    nrf24_spectrum_view_free(app->spectrum_view);
+    nrf24_spectrum_free(app->spectrum);
     nrf24_jam_view_free(app->jam_view);
     nrf24_scan_view_free(app->scan_view);
     nrf24_mj_scan_view_free(app->mj_scan_view);

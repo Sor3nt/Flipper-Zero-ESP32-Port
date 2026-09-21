@@ -33,6 +33,11 @@ void menu_custom_load(MenuCustom* custom) {
                     custom->added_internal[custom->added_internal_count++] =
                         furi_string_alloc_set(furi_string_get_cstr(line) + 1);
                 }
+            } else if(furi_string_start_with(line, ">")) {
+                if(custom->order_count < MENU_CUSTOM_MAX_ITEMS) {
+                    custom->order[custom->order_count++] =
+                        furi_string_alloc_set(furi_string_get_cstr(line) + 1);
+                }
             }
         }
         furi_string_free(line);
@@ -60,6 +65,9 @@ void menu_custom_save(const MenuCustom* custom) {
         }
         for(size_t i = 0; i < custom->added_fap_count; ++i) {
             stream_write_format(stream, "+%s\n", furi_string_get_cstr(custom->added_fap[i]));
+        }
+        for(size_t i = 0; i < custom->order_count; ++i) {
+            stream_write_format(stream, ">%s\n", furi_string_get_cstr(custom->order[i]));
         }
     } else {
         FURI_LOG_E(TAG, "Failed to open %s for write", MENU_CUSTOM_PATH);
@@ -155,6 +163,17 @@ bool menu_custom_remove_internal(MenuCustom* custom, const char* app_id) {
     return false;
 }
 
+void menu_custom_set_order(MenuCustom* custom, const char* const* keys, size_t count) {
+    furi_check(custom);
+    for(size_t i = 0; i < custom->order_count; ++i) {
+        furi_string_free(custom->order[i]);
+    }
+    custom->order_count = 0;
+    for(size_t i = 0; i < count && custom->order_count < MENU_CUSTOM_MAX_ITEMS; ++i) {
+        custom->order[custom->order_count++] = furi_string_alloc_set(keys[i]);
+    }
+}
+
 /* Zwolnienie wszystkich alokowanych stringow (wolne w menu_custom_free). */
 void menu_custom_free(MenuCustom* custom) {
     if(!custom) return;
@@ -166,6 +185,9 @@ void menu_custom_free(MenuCustom* custom) {
     }
     for(size_t i = 0; i < custom->added_internal_count; ++i) {
         furi_string_free(custom->added_internal[i]);
+    }
+    for(size_t i = 0; i < custom->order_count; ++i) {
+        furi_string_free(custom->order[i]);
     }
     memset(custom, 0, sizeof(MenuCustom));
 }

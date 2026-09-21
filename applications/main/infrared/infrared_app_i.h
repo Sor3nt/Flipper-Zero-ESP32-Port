@@ -92,6 +92,7 @@ typedef struct {
     int32_t prev_button_index; /**< Previous button index (move source). */
     uint32_t last_transmit_time; /**< Lat time a signal was transmitted. */
     FuriHalInfraredTxPin tx_pin;
+    FuriHalInfraredRxPin rx_pin;
 } InfraredAppState;
 
 /**
@@ -307,6 +308,14 @@ void infrared_show_error_message(const InfraredApp* infrared, const char* fmt, .
  * @param[in] tx_pin pin to be used for signal transmission.
  */
 void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin);
+
+/**
+ * @brief Set which pin will be used to receive infrared signals.
+ *
+ * @param[in] infrared pointer to the application instance.
+ * @param[in] rx_pin pin to be used for signal reception.
+ */
+void infrared_set_rx_pin(InfraredApp* infrared, FuriHalInfraredRxPin rx_pin);
 
 /**
  * @brief Enable or disable 5V at the GPIO pin 1.

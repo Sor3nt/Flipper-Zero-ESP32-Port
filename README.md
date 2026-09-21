@@ -283,20 +283,6 @@ Boards: `t_embed` (default), `esp32s3`, `waveshare_c6` (or `waveshare_c6_1.9`), 
 ./buildFap.sh applications/main/my_app
 ```
 
-### Debug: light-sleep telemetry
-
-Idle light sleep (screen off, on battery) is gated at runtime and runs silently.
-To measure it, build with `CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y` (menuconfig, or add
-it to `sdkconfig.defaults.esp32s3`). The input service then logs a line every 5s:
-
-```
-lightsleep: allow=1 count=1234 slept=48000ms/50000ms (96%) wake[t=1230 g=4 o=0]
-```
-
-Counters persist while the device stays powered, so idling on battery and then
-reconnecting USB reports the sleep accumulated during the battery window. Leave
-the option off for normal builds; it adds a small always-on callback.
-
 ## Porting Approach
 
 This port preserves the original Flipper Zero architecture as closely as possible:

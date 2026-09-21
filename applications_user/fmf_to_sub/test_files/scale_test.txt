@@ -1,0 +1,1 @@
+ScaleTest:d=4,o=4,b=120:4c,4d,4e,4f,4g,4a,4b,8c5,8c5,4p,4c5,4b,4a,4g,4f#,4e,4d,4c

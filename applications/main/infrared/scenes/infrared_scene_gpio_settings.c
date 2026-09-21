@@ -2,13 +2,18 @@
 
 static const char* infrared_scene_gpio_settings_pin_text[] = {
     "Flipper",
-    "2 (A7)",
+    "GPIO43",
     "Detect",
 };
 
 static const char* infrared_scene_gpio_settings_otg_text[] = {
     "OFF",
     "ON",
+};
+
+static const char* infrared_scene_gpio_settings_rx_pin_text[] = {
+    "Flipper",
+    "GPIO44",
 };
 
 static void infrared_scene_gpio_settings_pin_change_callback(VariableItem* item) {
@@ -31,6 +36,16 @@ static void infrared_scene_gpio_settings_otg_change_callback(VariableItem* item)
         infrared_custom_event_pack(InfraredCustomEventTypeGpioOtgChanged, index));
 }
 
+static void infrared_scene_gpio_settings_rx_pin_change_callback(VariableItem* item) {
+    InfraredApp* infrared = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, infrared_scene_gpio_settings_rx_pin_text[index]);
+    view_dispatcher_send_custom_event(
+        infrared->view_dispatcher,
+        infrared_custom_event_pack(InfraredCustomEventTypeGpioRxPinChanged, index));
+}
+
 static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
     VariableItemList* var_item_list = infrared->var_item_list;
     VariableItem* item;
@@ -49,7 +64,7 @@ static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
 
     item = variable_item_list_add(
         var_item_list,
-        "5V on GPIO",
+        "3.3V on GPIO",
         COUNT_OF(infrared_scene_gpio_settings_otg_text),
         infrared_scene_gpio_settings_otg_change_callback,
         infrared);
@@ -64,6 +79,18 @@ static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
         variable_item_set_current_value_index(item, 0);
         variable_item_set_current_value_text(item, "Auto");
     }
+
+    item = variable_item_list_add(
+        var_item_list,
+        "Signal Input",
+        COUNT_OF(infrared_scene_gpio_settings_rx_pin_text),
+        infrared_scene_gpio_settings_rx_pin_change_callback,
+        infrared);
+
+    value_index = infrared->app_state.rx_pin;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(
+        item, infrared_scene_gpio_settings_rx_pin_text[value_index]);
 }
 
 void infrared_scene_gpio_settings_on_enter(void* context) {
@@ -87,6 +114,8 @@ bool infrared_scene_gpio_settings_on_event(void* context, SceneManagerEvent even
             infrared_scene_gpio_settings_init(infrared);
         } else if(custom_event_type == InfraredCustomEventTypeGpioOtgChanged) {
             infrared_enable_otg(infrared, custom_event_value);
+        } else if(custom_event_type == InfraredCustomEventTypeGpioRxPinChanged) {
+            infrared_set_rx_pin(infrared, custom_event_value);
         }
 
         consumed = true;
