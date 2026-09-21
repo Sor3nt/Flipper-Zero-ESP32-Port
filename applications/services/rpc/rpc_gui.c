@@ -205,8 +205,11 @@ static void
     RpcSession* session = rpc_gui->session;
     furi_assert(session);
 
+    /* Only the PB-mapped input types (Press..Repeat, i.e. < InputTypeText) are valid
+     * over RPC. InputTypeText is keyboard-local and carries an ASCII char in .key,
+     * not an InputKey, so it must not be injected from a remote client. */
     bool is_valid = (request->content.gui_send_input_event_request.key < (int32_t)InputKeyMAX) &&
-                    (request->content.gui_send_input_event_request.type < (int32_t)InputTypeMAX);
+                    (request->content.gui_send_input_event_request.type < (int32_t)InputTypeText);
 
     if(!is_valid) {
         rpc_send_and_release_empty(
@@ -260,6 +263,11 @@ static void rpc_system_gui_virtual_display_input_callback(InputEvent* event, voi
     furi_assert(event->key < InputKeyMAX);
     furi_assert(event->type < InputTypeMAX);
     furi_assert(context);
+
+    /* InputTypeText (physical-keyboard character) has no PB_Gui_InputType mapping,
+     * so it can't be represented in a virtual-display input event. Drop it instead
+     * of forwarding an out-of-range enum to the app. */
+    if(event->type >= InputTypeText) return;
 
     RpcGuiSystem* rpc_gui = context;
     RpcSession* session = rpc_gui->session;
