@@ -17,6 +17,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_bt.h>
 #include <esp_bt_defs.h>
@@ -850,22 +851,10 @@ static void serial_gatts_event_handler(
 
 /* ---- BLE stack init (shared with ble_hid, idempotent) ---- */
 
-static esp_err_t serial_stack_init_once(void) {
-    esp_err_t err = ESP_OK;
-
-    if(!serial_state.mutex) {
-        serial_state.mutex = xSemaphoreCreateMutex();
-        if(!serial_state.mutex) return ESP_ERR_NO_MEM;
-    }
-
-    serial_lock_global();
-    if(serial_state.initialized) {
-        serial_unlock_global();
-        return ESP_OK;
-    }
-    serial_unlock_global();
-
-    err = nvs_flash_init();
+/* Controller + Bluedroid bring-up. Body unchanged; only pulled out so it can run
+ * off the caller's thread (see serial_stack_init_once). */
+static esp_err_t serial_stack_bringup(void) {
+    esp_err_t err = nvs_flash_init();
     if(err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
@@ -888,6 +877,50 @@ static esp_err_t serial_stack_init_once(void) {
 
     err = esp_bluedroid_enable();
     if(err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
+
+    return ESP_OK;
+}
+
+/* esp_bt_controller_init pulls in the WiFi coexistence adapter, which does a
+ * pthread thread-local-storage lookup. furi threads reuse FreeRTOS TLS slot 0
+ * for their FuriThread pointer (only one slot is configured), so that lookup
+ * faults (LoadProhibited) on a furi thread. Run the bring-up on a plain task,
+ * whose slot 0 is clean. */
+static esp_err_t serial_bringup_err;
+static SemaphoreHandle_t serial_bringup_done;
+
+static void serial_bringup_task(void* arg) {
+    (void)arg;
+    serial_bringup_err = serial_stack_bringup();
+    xSemaphoreGive(serial_bringup_done);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t serial_stack_init_once(void) {
+    if(!serial_state.mutex) {
+        serial_state.mutex = xSemaphoreCreateMutex();
+        if(!serial_state.mutex) return ESP_ERR_NO_MEM;
+    }
+
+    serial_lock_global();
+    if(serial_state.initialized) {
+        serial_unlock_global();
+        return ESP_OK;
+    }
+    serial_unlock_global();
+
+    serial_bringup_done = xSemaphoreCreateBinary();
+    if(!serial_bringup_done) return ESP_ERR_NO_MEM;
+    serial_bringup_err = ESP_FAIL;
+    if(xTaskCreate(serial_bringup_task, "ble_bringup", 8192, NULL, 5, NULL) != pdPASS) {
+        vSemaphoreDelete(serial_bringup_done);
+        serial_bringup_done = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(serial_bringup_done, portMAX_DELAY);
+    vSemaphoreDelete(serial_bringup_done);
+    serial_bringup_done = NULL;
+    if(serial_bringup_err != ESP_OK) return serial_bringup_err;
 
     serial_lock_global();
     serial_state.initialized = true;
