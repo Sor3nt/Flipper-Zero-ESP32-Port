@@ -38,6 +38,8 @@ set(FURI_HAL_SRCS
     "furi_hal_touch.c"
     "furi_hal_infrared.c"
     "furi_hal_rfid.c"
+    "furi_hal_shared_pins.c"
+    "furi_hal_bw16_guard.c"
     "furi_hal_bq27220.c"
     "furi_hal_bq25896.c"
     "fatfs_compat.c"

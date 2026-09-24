@@ -11,6 +11,7 @@ APP_SOURCE_OVERRIDES = {
     "storage": "applications",
 }
 
+# bw16_r4tkn remains a standalone FAP, built with buildFap.sh.
 APPS = [
     "input",
     "notification",

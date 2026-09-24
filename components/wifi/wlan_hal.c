@@ -7,6 +7,8 @@
 #include <esp_sntp.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -36,6 +38,7 @@ typedef enum {
 
 typedef struct {
     WlanCmdType type;
+    bool survey_owned;
     union {
         struct {
             wifi_scan_config_t* config;
@@ -76,6 +79,35 @@ typedef struct {
 
 static bool s_sntp_started = false;
 static bool s_started = false;
+static bool s_survey_active = false;
+static bool s_radio_transition = false;
+static bool s_survey_bt_restore = false;
+static const char* s_survey_status = "RADIO READY";
+static struct {
+    bool started, suspended, reconnect, bt_restore, auth_failed, valid;
+    wifi_config_t config;
+    esp_err_t error;
+} s_survey_saved;
+
+const char* wlan_hal_survey_status(void) {
+    return __atomic_load_n(&s_survey_status, __ATOMIC_ACQUIRE);
+}
+static void survey_status(const char* status) {
+    __atomic_store_n(&s_survey_status, status, __ATOMIC_RELEASE);
+    ESP_LOGI(TAG, "survey: %s", status);
+}
+
+static bool survey_active(void) {
+    return __atomic_load_n(&s_survey_active, __ATOMIC_ACQUIRE);
+}
+static bool radio_lock(void) {
+    bool expected = false;
+    return __atomic_compare_exchange_n(
+        &s_radio_transition, &expected, true, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+static void radio_unlock(void) {
+    __atomic_store_n(&s_radio_transition, false, __ATOMIC_RELEASE);
+}
 static bool s_bt_was_on = false;
 static bool s_netif_inited = false;
 static esp_netif_t* s_netif_sta = NULL;
@@ -121,7 +153,7 @@ static void wlan_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         s_wifi_connected = false;
         s_own_ip = 0;
         s_own_netmask = 0;
-        if(s_wifi_auto_reconnect) {
+        if(s_wifi_auto_reconnect && !survey_active()) {
             esp_wifi_connect();
         }
     } else if(event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
@@ -150,6 +182,20 @@ static void wlan_worker_fn(void* arg) {
     WlanCmd cmd;
     while(1) {
         if(xQueueReceive(s_cmd_queue, &cmd, portMAX_DELAY) != pdTRUE) continue;
+
+        /* Also reject commands queued immediately before acquisition. Never
+         * execute another app's connection, active scan or transmit callback
+         * while an external passive survey owns the radio. */
+        if(survey_active() && !cmd.survey_owned) {
+            if(cmd.type == WCMD_SEND_ETH_RAW) free(cmd.send_eth.buf);
+            if(cmd.type == WCMD_SCAN) {
+                *cmd.scan.out_count = 0;
+                *cmd.scan.out_records = NULL;
+            }
+            if(cmd.result) *cmd.result = false;
+            if(cmd.done) *cmd.done = true;
+            continue;
+        }
 
         bool ok = true;
         esp_err_t err;
@@ -363,20 +409,22 @@ static void wlan_send_cmd_sync(WlanCmd* cmd) {
     }
 }
 
-bool wlan_hal_start(void) {
+static bool wlan_start_owned(bool survey) {
     if(s_started) return true;
 
-    Bt* bt = furi_record_open(RECORD_BT);
-    s_bt_was_on = bt_is_enabled(bt);
-    if(s_bt_was_on) {
-        bt_stop_stack(bt);
+    if(!survey) {
+        Bt* bt = furi_record_open(RECORD_BT);
+        s_bt_was_on = bt_is_enabled(bt);
+        if(s_bt_was_on) bt_stop_stack(bt);
+        furi_record_close(RECORD_BT);
+    } else {
+        s_bt_was_on = false; /* Survey owns separate restoration state. */
     }
-    furi_record_close(RECORD_BT);
 
     if(!wlan_ensure_worker()) return false;
 
     volatile bool result = false;
-    WlanCmd cmd = {.type = WCMD_INIT_START, .result = &result};
+    WlanCmd cmd = {.type = WCMD_INIT_START, .survey_owned = survey, .result = &result};
     wlan_send_cmd_sync(&cmd);
 
     if(result) {
@@ -386,9 +434,9 @@ bool wlan_hal_start(void) {
     return result;
 }
 
-void wlan_hal_stop(void) {
+static void wlan_stop_owned(bool survey) {
     if(s_started) {
-        WlanCmd cmd = {.type = WCMD_STOP_DEINIT};
+        WlanCmd cmd = {.type = WCMD_STOP_DEINIT, .survey_owned = survey};
         wlan_send_cmd_sync(&cmd);
         s_started = false;
         ESP_LOGI(TAG, "WiFi stopped");
@@ -402,7 +450,144 @@ void wlan_hal_stop(void) {
     }
 }
 
+bool wlan_hal_start(void) {
+    if(!radio_lock()) return false;
+    bool ok = !survey_active() && wlan_start_owned(false);
+    if(!ok && !survey_active() && s_bt_was_on) wlan_stop_owned(false);
+    radio_unlock();
+    return ok;
+}
+
+void wlan_hal_stop(void) {
+    if(!radio_lock()) return;
+    if(!survey_active()) wlan_stop_owned(false);
+    radio_unlock();
+}
+
+/* Both callbacks run on the existing non-Furi WLAN worker, where the IDF
+ * driver's TLS is valid. Do not copy saved credentials into app memory/logs. */
+static void survey_save_station(void* unused) {
+    UNUSED(unused);
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    s_survey_saved.error = esp_wifi_get_mode(&mode);
+    if(s_survey_saved.error != ESP_OK || mode != WIFI_MODE_STA) return;
+    s_survey_saved.error = esp_wifi_get_config(WIFI_IF_STA, &s_survey_saved.config);
+    s_survey_saved.valid = s_survey_saved.error == ESP_OK;
+}
+static void survey_restore_station(void* unused) {
+    UNUSED(unused);
+    s_survey_saved.error = esp_wifi_set_config(WIFI_IF_STA, &s_survey_saved.config);
+    s_auth_fail_latched = s_survey_saved.auth_failed;
+    s_wifi_auto_reconnect = s_survey_saved.reconnect;
+    if(s_survey_saved.error == ESP_OK && s_survey_saved.reconnect)
+        s_survey_saved.error = esp_wifi_connect();
+}
+static bool survey_restore_owned(void) {
+    bool ok = true;
+    if(s_survey_saved.suspended) {
+        survey_status("RESTORING WI-FI");
+        ok = wlan_start_owned(true);
+        if(ok && s_survey_saved.valid)
+            ok = wlan_hal_survey_run(survey_restore_station, NULL) && s_survey_saved.error == ESP_OK;
+        s_bt_was_on = s_survey_saved.bt_restore;
+    } else if(s_survey_bt_restore) {
+        survey_status("RESTORING BLUETOOTH");
+        Bt* bt = furi_record_open(RECORD_BT);
+        bt_start_stack(bt);
+        furi_record_close(RECORD_BT);
+        ok = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED;
+    }
+    memset(&s_survey_saved, 0, sizeof(s_survey_saved));
+    s_survey_bt_restore = false;
+    return ok;
+}
+bool wlan_hal_survey_begin(bool wifi) {
+    if(!radio_lock()) { survey_status("RADIO IS CHANGING"); return false; }
+    if(survey_active() || wlan_hal_beacon_spam_is_running() || wlan_hal_evil_portal_is_running()) {
+        survey_status("OTHER RADIO APP ACTIVE");
+        radio_unlock(); return false;
+    }
+    __atomic_store_n(&s_survey_active, true, __ATOMIC_RELEASE);
+    memset(&s_survey_saved, 0, sizeof(s_survey_saved));
+    s_survey_saved.started = s_started;
+    s_survey_saved.bt_restore = s_bt_was_on;
+    s_survey_saved.reconnect = s_wifi_connected || s_wifi_auto_reconnect;
+    s_survey_saved.auth_failed = s_auth_fail_latched;
+    s_survey_bt_restore = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED;
+    bool ok = true;
+    const char* failure = "RADIO START FAILED";
+    if(s_started) {
+        survey_status("SAVING WI-FI STATE");
+        ok = wlan_hal_survey_run(survey_save_station, NULL) && s_survey_saved.valid;
+        failure = "OTHER WI-FI MODE ACTIVE";
+        if(ok) {
+            survey_status("DISCONNECTING WI-FI");
+            s_bt_was_on = false;
+            wlan_stop_owned(true);
+            s_survey_saved.suspended = true;
+        }
+    }
+    if(ok) {
+        survey_status("RELEASING BLUETOOTH");
+        /* Let the Bluetooth service release its own profile and controller;
+         * the advertising icon alone does not tell us whether they exist. */
+        Bt* bt = furi_record_open(RECORD_BT);
+        bt_stop_stack(bt);
+        furi_record_close(RECORD_BT);
+        ok = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE &&
+             esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED;
+        failure = "BLUETOOTH STOP FAILED";
+    }
+    if(ok) {
+        survey_status("ALLOCATING RADIO WORKER");
+        ok = wlan_ensure_worker();
+        failure = "RADIO MEMORY LOW";
+    }
+    if(ok && wifi) {
+        survey_status("STARTING PASSIVE WI-FI");
+        ok = wlan_start_owned(true);
+        failure = "WI-FI INIT FAILED";
+    }
+    if(!ok) {
+        /* If capture was refused, the old radio is still untouched. */
+        if(!s_survey_saved.started || s_survey_saved.suspended) {
+            wlan_stop_owned(true);
+            if(!survey_restore_owned()) failure = "RADIO RESTORE FAILED";
+        } else {
+            memset(&s_survey_saved, 0, sizeof(s_survey_saved));
+            s_survey_bt_restore = false;
+        }
+        __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
+        survey_status(failure);
+    } else survey_status("PASSIVE RADIO READY");
+    radio_unlock();
+    return ok;
+}
+
+bool wlan_hal_survey_run(WlanHalWorkerFn fn, void* arg) {
+    if(!fn || !survey_active() || !s_cmd_queue) return false;
+    volatile bool result = false;
+    WlanCmd cmd = {.type = WCMD_RUN_FN, .survey_owned = true,
+        .run_fn = {.fn = fn, .arg = arg}, .result = &result};
+    wlan_send_cmd_sync(&cmd);
+    return result;
+}
+
+void wlan_hal_survey_end(void) {
+    /* Only the owning application calls end, after its worker has stopped. */
+    while(!radio_lock()) furi_delay_ms(1);
+    if(survey_active()) {
+        survey_status("STOPPING SURVEY RADIO");
+        wlan_stop_owned(true);
+        bool restored = survey_restore_owned();
+        __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
+        survey_status(restored ? "RADIO RESTORED" : "RADIO RESTORE FAILED");
+    }
+    radio_unlock();
+}
+
 void wlan_hal_set_bt_restore(bool restore) {
+    if(survey_active()) return;
     s_bt_was_on = restore;
 }
 
@@ -411,6 +596,7 @@ bool wlan_hal_is_started(void) {
 }
 
 bool wlan_hal_connect(const char* ssid, const char* password, const uint8_t* bssid, uint8_t channel) {
+    if(survey_active()) return false;
     if(!s_started || !ssid) return false;
 
     WlanCmd cmd = {.type = WCMD_CONNECT};
@@ -536,6 +722,7 @@ bool wlan_hal_send_raw(const uint8_t* data, uint16_t len) {
 }
 
 bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len) {
+    if(survey_active()) return false;
     // Direkter TX aus dem aufrufenden Task (NICHT über den Worker-Queue-
     // Roundtrip wie wlan_hal_send_raw) — für High-Rate-Deauth-Bursts. Bei
     // vollem TX-Ring (ESP_ERR_NO_MEM) kurz warten und erneut versuchen, sonst
@@ -549,14 +736,15 @@ bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len) {
 }
 
 bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg) {
-    if(!fn) return false;
+    if(!fn || survey_active()) return false;
     // Lazy-init the worker queue + task. Evil Portal is entered directly from
     // the menu without going through wlan_hal_start (no STA scan), so the
     // worker may not exist yet. Safe to call repeatedly; no-ops if already up.
     if(!wlan_ensure_worker()) return false;
-    WlanCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}};
+    volatile bool result = false;
+    WlanCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}, .result = &result};
     wlan_send_cmd_sync(&cmd);
-    return true;
+    return result;
 }
 
 void wlan_hal_scan(wifi_ap_record_t** out_records, uint16_t* out_count, uint16_t max_count) {
@@ -711,6 +899,7 @@ static void beacon_spam_task(void* param) {
 }
 
 void wlan_hal_beacon_spam_start(WlanHalBeaconMode mode, const char* base_ssid) {
+    if(survey_active()) return;
     if(s_beacon_active || s_beacon_task) return;
     if(!s_started) {
         if(!wlan_hal_start()) return;

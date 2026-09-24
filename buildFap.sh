@@ -149,7 +149,6 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/wear_levelling/include"
     -I"$IDF/sdmmc/include"
     -I"$IDF/nvs_flash/include"
-    -I"$IDF/bt/include/esp32c3/include"
     -I"$IDF/bt/host/bluedroid/api/include/api"
     -I"$IDF/lwip/include"
     -I"$IDF/lwip/lwip/src/include"
@@ -157,7 +156,10 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/lwip/port/freertos/include"
     -I"$IDF/lwip/port/esp32xx/include"
     -I"$IDF/esp_wifi/include"
+    -I"$IDF/esp_wifi/include/local"
     -I"$IDF/esp_netif/include"
+    -I"$IDF/esp_http_client/include"
+    -I"$IDF/mbedtls/esp_crt_bundle/include"
     -I"$IDF/driver/deprecated"
     -I"$IDF/driver/i2c/include"
     -I"$IDF/esp_driver_i2s/include"
@@ -264,6 +266,10 @@ build_for_target() {
 
     TARGET_INCLUDES+=(-I"$PROJECT_DIR/$FW_BUILD_DIR/config")
     TARGET_INCLUDES+=(-I"$IDF/esp_hw_support/include/soc/$IDF_TARGET")
+    # Match IDF 5.4's bt/CMakeLists.txt: S3 shares the C3-family public header.
+    local BT_HEADER_TARGET="$IDF_TARGET"
+    if [ "$IDF_TARGET" = "esp32s3" ]; then BT_HEADER_TARGET="esp32c3"; fi
+    TARGET_INCLUDES+=(-I"$IDF/bt/include/$BT_HEADER_TARGET/include")
 
     if [ "$IDF_TARGET" = "esp32s3" ]; then
         # -mlongcalls: allow calls beyond the ±512KB direct-call range (needed as

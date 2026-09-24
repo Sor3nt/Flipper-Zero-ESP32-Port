@@ -1,0 +1,14 @@
+App(
+    appid="wardriver",
+    name="Wardriver",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="wardriver_app",
+    requires=["gui", "storage", "dialogs"],
+    stack_size=16 * 1024,
+    fap_category="Tools",
+    fap_version="1.3.2",
+    fap_icon="wardriver_icon.pbm",
+    fap_description="Passive Wi-Fi and BLE survey with optional UART GPS",
+    fap_author="Sor3nt port contributors",
+    sources=["*.c"],
+)
