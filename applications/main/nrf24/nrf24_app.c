@@ -148,8 +148,15 @@ static void nrf24_app_free(Nrf24App* app) {
     free(app);
 }
 
+#include <furi_hal_shared_pins.h>
+
 int32_t nrf24_app(void* args) {
     UNUSED(args);
+    static const char owner;
+    if(!furi_hal_shared_pins_acquire(&owner)) {
+        FURI_LOG_E("Nrf24", "Shared pins busy (BW16/RFID)");
+        return -1;
+    }
 
     Nrf24App* app = nrf24_app_alloc();
 
@@ -157,5 +164,6 @@ int32_t nrf24_app(void* args) {
     view_dispatcher_run(app->view_dispatcher);
 
     nrf24_app_free(app);
+    furi_hal_shared_pins_release(&owner);
     return 0;
 }

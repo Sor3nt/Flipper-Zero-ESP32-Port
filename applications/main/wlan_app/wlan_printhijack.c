@@ -20,6 +20,7 @@
 #include <lwip/netif.h>
 #include <lwip/tcpip.h>
 #include <esp_netif.h>
+#include <esp_netif_net_stack.h>
 
 #define TAG "PrintHijack"
 

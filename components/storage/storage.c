@@ -497,12 +497,17 @@ bool storage_file_sync(File* file) {
     }
 
     storage_sd_bus_lock();
-    fflush(file->handle);
+    int result = fflush(file->handle);
+    int saved_errno = result ? errno : 0;
     int fd = fileno(file->handle);
-    fsync(fd);
+    if(result == 0 && fsync(fd) != 0) {
+        result = -1;
+        saved_errno = errno;
+    }
     storage_sd_bus_unlock();
-    file->error_id = FSE_OK;
-    return true;
+    file->internal_error = saved_errno;
+    file->error_id = result == 0 ? FSE_OK : storage_errno_to_fserror(saved_errno ? saved_errno : EIO);
+    return result == 0;
 }
 
 bool storage_file_eof(File* file) {

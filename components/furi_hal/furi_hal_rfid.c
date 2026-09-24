@@ -14,6 +14,7 @@
  */
 
 #include "furi_hal_rfid.h"
+#include "furi_hal_shared_pins.h"
 #include <furi.h>
 #include <esp_log.h>
 
@@ -180,9 +181,16 @@ static int32_t rfid_reader_thread(void* arg) {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    uart_param_config(BOARD_RFID_UART_NUM, &uart_cfg);
-    uart_set_pin(BOARD_RFID_UART_NUM, BOARD_PIN_RFID_TX, BOARD_PIN_RFID_RX, -1, -1);
-    uart_driver_install(BOARD_RFID_UART_NUM, RDM_BUF_SIZE, 0, 0, NULL, 0);
+    /* Install before touching configuration. Never reconfigure/delete an owner. */
+    bool installed = false;
+    if(!furi_hal_shared_pins_acquire(&s_reader_thread)) goto busy;
+    if(uart_is_driver_installed(BOARD_RFID_UART_NUM)) goto release;
+    if(uart_driver_install(BOARD_RFID_UART_NUM, RDM_BUF_SIZE, 0, 0, NULL, 0) != ESP_OK)
+        goto release;
+    installed = true;
+    if(uart_param_config(BOARD_RFID_UART_NUM, &uart_cfg) != ESP_OK ||
+       uart_set_pin(BOARD_RFID_UART_NUM, BOARD_PIN_RFID_TX, BOARD_PIN_RFID_RX, -1, -1) != ESP_OK)
+        goto release;
 
     uint8_t byte_buf[RDM_PKT_SIZE];
     size_t pkt_pos = 0;
@@ -227,7 +235,12 @@ static int32_t rfid_reader_thread(void* arg) {
         }
     }
 
-    uart_driver_delete(BOARD_RFID_UART_NUM);
+release:
+    if(installed) uart_driver_delete(BOARD_RFID_UART_NUM);
+    furi_hal_shared_pins_release(&s_reader_thread);
+busy:
+    /* Keep s_reading set until stop joins/frees this thread, even after failure. */
+    ESP_LOGI(TAG, "RFID UART session ended (busy/setup error or stop)");
     ESP_LOGI(TAG, "RFID reader thread stopped");
     return 0;
 }

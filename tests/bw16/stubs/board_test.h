@@ -1,0 +1,6 @@
+#define BOARD_NAME "Test T-Embed"
+#define BOARD_PIN_LCD_MOSI 9
+#define BOARD_PIN_RFID_TX 43
+#define BOARD_PIN_RFID_RX 44
+#define BOARD_PIN_NRF24_CE 43
+#define BOARD_PIN_NRF24_CSN 44
