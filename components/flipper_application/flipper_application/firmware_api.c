@@ -856,6 +856,7 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0x909815e6, .address = (uint32_t)esp_http_client_get_status_code }, /* esp_http_client_get_status_code */
     { .hash = 0x9101c4f1, .address = (uint32_t)furi_hal_bw16_guard_open }, /* furi_hal_bw16_guard_open */
     { .hash = 0x9103bea4, .address = (uint32_t)furi_hal_bw16_guard_scan }, /* furi_hal_bw16_guard_scan */
+    { .hash = 0x9103c8c9, .address = (uint32_t)furi_hal_bw16_guard_send }, /* furi_hal_bw16_guard_send */
     { .hash = 0x9107569d, .address = (uint32_t)strtok_r }, /* strtok_r */
     { .hash = 0x9159da67, .address = (uint32_t)furi_semaphore_acquire }, /* furi_semaphore_acquire */
     { .hash = 0x9162b0c3, .address = (uint32_t)mf_classic_alloc }, /* mf_classic_alloc */

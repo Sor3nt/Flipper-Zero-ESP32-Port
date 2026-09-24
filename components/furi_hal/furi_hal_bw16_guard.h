@@ -1,9 +1,10 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <esp_err.h>
 
-/* T-Embed only: UART TX=44/NRF CSN, RX=43/NRF CE. No radio TX commands.
+/* T-Embed only: UART TX=44/NRF CSN, RX=43/NRF CE.
  * Same task must call every operation. Hold the shared-pin lease and snapshot.
  * BW16 signal wires MUST be absent during open/close and boot/reset. */
 typedef struct {
@@ -19,6 +20,9 @@ esp_err_t furi_hal_bw16_guard_ready(FuriHalBw16Guard* guard);
 /* Send only SCAN\n; exclude all hardware SPI traffic until TX is idle HIGH.
  * On failure disconnect the UART output and park CSN HIGH before unlocking. */
 esp_err_t furi_hal_bw16_guard_scan(FuriHalBw16Guard* guard);
+/* Send one bounded ASCII command line through the same SPI exclusion guard.
+ * Firmware version 3 export: the FAP must not fall back to unguarded UART TX. */
+esp_err_t furi_hal_bw16_guard_send(FuriHalBw16Guard* guard, const char* line, size_t size);
 /* Signal wires must be disconnected. Parks both pins before removing the SPI
  * device; leaves NRF powered down and restores other CONFIG bits. Caller then
  * deletes the UART driver and restores GPIOs. */

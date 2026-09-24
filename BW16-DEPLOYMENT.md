@@ -1,14 +1,18 @@
-# BW16 Scan and Wardriver for T-Embed CC1101 Plus
+# BW16 R4TKN and Wardriver for T-Embed CC1101 Plus
 
 This integration provides two standalone ESP32-S3 FAPs and their required firmware
-API exports. BW16 Scan controls R4TKN network scanning over UART. Wardriver surveys
+API exports. BW16 R4TKN controls the public v4 UART operations described in
+[BW16-CONTROLS.md](BW16-CONTROLS.md). Wardriver surveys
 Wi-Fi/BLE using the ESP32's own radios, with local CSV logs and offline OUI names.
 Wardriver does not use BW16 or BW15 as a radio backend.
 
 The BW16 work builds on the companion-app proposal in
 [PR #114](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/pull/114) by
 @Adam-neeeds-help and the R4TKN firmware by @rusyln. The unrelated external-IR
-change is not included. BW16 commands are restricted to `SCAN`.
+change is not included. The controller supports scanning, station/client lists,
+confirmed station/client/all-AP deauthentication, and acknowledged STOP. Active
+operations require hold-to-confirm; the host requests STOP after 30 seconds.
+Missing start/stop acknowledgements are reported, not treated as success.
 
 ## Build matching firmware and apps
 
@@ -90,22 +94,25 @@ validation on the Plus hardware.
 
 ```sh
 python tests/bw16/run.py
+python tests/bw16/test_ui.py
 python tests/host/run_wardriver_tests.py
 ```
 
 On Windows use `python tests/bw16/run.py --zig C:/path/to/zig.exe` and set `ZIG_CC`
-to that executable for Wardriver tests. Windows uses native mocks without
+to that executable for UI and Wardriver tests. Windows uses native mocks without
 ASan/UBSan; Linux GCC checks retain sanitizers. Covered areas include framing,
-malformed records, UART errors, GPIO restoration, NRF guard behavior, radio
+malformed records, indexed lists, START/STOP deadlines, actual controller UI,
+UART errors, GPIO restoration, NRF guard behavior, radio
 lifecycle, startup allocation failures, CSV/NMEA/OUI parsing and storage errors.
 Upload checks use mocked HTTP only.
 
 Hardware acceptance remains outstanding:
 
 1. Boot with BW16 signal wires disconnected; verify the display, encoder and SD.
-2. Open BW16 Scan, hold OK to prepare, and connect only after the ready prompt.
+2. Open BW16 R4TKN, hold OK to prepare, and connect only after the ready prompt.
 3. Scan and confirm known networks plus a received `SCAN_DONE`; with no module,
-   verify the timeout. No deauthentication or beacon flooding is part of testing.
+   verify the timeout. Check Station list and Observe clients on a known AP.
+   No deauthentication or beacon flooding is part of hardware testing.
 4. Back, unplug both signal wires, then hold OK to exit. Repeat and check normal
    display, SD, CC1101 reception and NRF receive operation.
 5. Open Wardriver with GPS OFF, start surveying, verify observations and offline

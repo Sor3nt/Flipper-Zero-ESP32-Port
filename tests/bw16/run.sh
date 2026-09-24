@@ -19,3 +19,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
     -Itests/bw16/stubs -Icomponents/furi_hal '-DBOARD_INCLUDE="board_test.h"' \
     tests/bw16/test_guard.c components/furi_hal/furi_hal_bw16_guard.c -o "$out/test_guard"
 "$out/test_guard"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$app" \
+    tests/bw16/test_control.c "$app/bw16_control.c" "$app/bw16_protocol.c" -o "$out/test_control"
+"$out/test_control"
+python3 tests/bw16/test_ui.py

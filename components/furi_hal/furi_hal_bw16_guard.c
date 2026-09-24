@@ -112,15 +112,22 @@ esp_err_t furi_hal_bw16_guard_ready(FuriHalBw16Guard* g) {
 }
 
 esp_err_t furi_hal_bw16_guard_scan(FuriHalBw16Guard* g) {
+    return furi_hal_bw16_guard_send(g, "SCAN\n", 5);
+}
+
+esp_err_t furi_hal_bw16_guard_send(FuriHalBw16Guard* g, const char* line, size_t size) {
+    if(!line || size < 2 || size > 48 || line[size - 1] != '\n') return ESP_ERR_INVALID_ARG;
+    for(size_t i = 0; i + 1 < size; ++i)
+        if((unsigned char)line[i] < 32 || (unsigned char)line[i] > 126) return ESP_ERR_INVALID_ARG;
     if(!g || !g->ready || g->failed || !furi_hal_shared_pins_is_saved(g->owner))
         return ESP_ERR_INVALID_STATE;
     esp_err_t err = take(g);
     if(err != ESP_OK) return err;
-    int written = uart_write_bytes(UART_NUM_1, "SCAN\n", 5);
+    int written = uart_write_bytes(UART_NUM_1, line, size);
     /* A short write can still start TX, so ALWAYS drain or park before giving
      * SPI back. The hardware arbiter keeps LCD, SD and CC1101 clocks stopped. */
     err = uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(250));
-    if(err == ESP_OK && written != 5) err = ESP_FAIL;
+    if(err == ESP_OK && written != (int)size) err = ESP_FAIL;
     if(err == ESP_OK && !gpio_get_level(44)) err = ESP_ERR_INVALID_STATE;
     if(err != ESP_OK) {
         park(44, 1);
@@ -162,5 +169,8 @@ esp_err_t furi_hal_bw16_guard_open(FuriHalBw16Guard* g, const void* owner) {
 }
 esp_err_t furi_hal_bw16_guard_ready(FuriHalBw16Guard* g) { (void)g; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t furi_hal_bw16_guard_scan(FuriHalBw16Guard* g) { (void)g; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t furi_hal_bw16_guard_send(FuriHalBw16Guard* g, const char* line, size_t size) {
+    (void)g; (void)line; (void)size; return ESP_ERR_NOT_SUPPORTED;
+}
 esp_err_t furi_hal_bw16_guard_close(FuriHalBw16Guard* g) { (void)g; return ESP_ERR_NOT_SUPPORTED; }
 #endif

@@ -64,9 +64,9 @@ esp_err_t spi_device_polling_transmit(void* d,spi_transaction_t* t) {
     return ESP_OK;
 }
 int uart_write_bytes(int n,const void* bytes,size_t length) {
-    assert(n==1 && length==5 && !memcmp(bytes,"SCAN\n",5));
+    assert(n==1 && length>=2 && length<=48 && ((const char*)bytes)[length-1]=='\n');
     assert(global_lock && bus_lock && uart_route && !(reg_config&2));
-    ++writes;level[44]=0;return mode==6?2:5;
+    ++writes;level[44]=0;return mode==6?1:(int)length;
 }
 esp_err_t uart_wait_tx_done(int n,unsigned timeout) {
     assert(n==1 && timeout==250 && global_lock && bus_lock);++waits;
@@ -102,6 +102,12 @@ int main(void) {
     /* Unsolicited replies toggle CE; power-down and CSN HIGH keep NRF inactive. */
     level[43]=1;assert(!(reg_config&2) && level[44]);
     assert(furi_hal_bw16_guard_scan(&g)==ESP_OK && writes==1 && waits==1 && !bus_lock);
+    assert(furi_hal_bw16_guard_send(&g,"STOP\n",5)==ESP_OK && writes==2);
+    assert(furi_hal_bw16_guard_send(&g,"LIST_CLIENTS 49\n",17)==ESP_ERR_INVALID_ARG && writes==2);
+    assert(furi_hal_bw16_guard_send(&g,"LIST_CLIENTS 49\n",16)==ESP_OK && writes==3);
+    assert(furi_hal_bw16_guard_send(&g,"SCAN\nSTOP\n",10)==ESP_ERR_INVALID_ARG && writes==3);
+    assert(furi_hal_bw16_guard_send(&g,NULL,5)==ESP_ERR_INVALID_ARG && writes==3);
+    assert(furi_hal_bw16_guard_send(&g,"SCAN",4)==ESP_ERR_INVALID_ARG && writes==3);
     level[43]=0;assert(furi_hal_bw16_guard_close(&g)==ESP_OK && reg_config==0x0c);
     for(int f=6;f<=7;++f) {
         reset();g=open_ready();mode=f;

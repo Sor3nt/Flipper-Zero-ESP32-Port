@@ -8,10 +8,10 @@ os.chdir(root)
 out=root/'build_host_bw16'
 out.mkdir(exist_ok=True)
 env=os.environ.copy()
-env['ZIG_GLOBAL_CACHE_DIR']=str(out/'zig-cache')
+env.setdefault('ZIG_GLOBAL_CACHE_DIR',str(out/'zig-cache'))
 compiler=[a.zig,'cc'] if a.zig else [shutil.which('cc') or 'cc']
 app=root/'applications_user/bw16_r4tkn'
-for name in ['protocol','uart','pins','guard']:
+for name in ['protocol','uart','pins','guard','control']:
     exe=out/('test_'+name+('.exe' if os.name=='nt' else ''))
     args=compiler+['-std=c11','-Wall','-Wextra','-Werror','-g','-I'+str(app)]
     if os.name!='nt': args+=['-fsanitize=address,undefined']
@@ -20,5 +20,6 @@ for name in ['protocol','uart','pins','guard']:
     if name in ['pins','guard']:
         args+=['-DBOARD_INCLUDE="board_test.h"']
         source=root/('components/furi_hal/furi_hal_shared_pins.c' if name=='pins' else 'components/furi_hal/furi_hal_bw16_guard.c')
-    subprocess.run(args+[f'tests/bw16/test_{name}.c',str(source),'-o',str(exe)],env=env,check=True)
+    extra=[str(app/'bw16_protocol.c')] if name=='control' else []
+    subprocess.run(args+[f'tests/bw16/test_{name}.c',str(source),*extra,'-o',str(exe)],env=env,check=True)
     subprocess.run([str(exe)],check=True)

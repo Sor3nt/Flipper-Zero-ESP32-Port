@@ -25,3 +25,7 @@ esp_err_t uart_set_pin(int n,int tx,int rx,int rts,int cts);
 esp_err_t uart_flush_input(int n);
 int uart_write_bytes(int n,const void* p,size_t len);
 esp_err_t uart_wait_tx_done(int n,unsigned timeout);
+typedef enum { UART_DATA, UART_FIFO_OVF, UART_BUFFER_FULL, UART_FRAME_ERR, UART_PARITY_ERR, UART_BREAK } uart_event_type_t;
+typedef struct { uart_event_type_t type; } uart_event_t;
+esp_err_t uart_get_buffered_data_len(int n,size_t* size);
+int uart_read_bytes(int n,void* data,size_t size,unsigned timeout);
