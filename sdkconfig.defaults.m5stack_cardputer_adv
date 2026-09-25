@@ -1,0 +1,124 @@
+# =============================================================================
+# M5Stack Cardputer ADV configuration (ESP32-S3FN8: 8 MB flash, NO PSRAM).
+# Modelled on the M5Stick S3 profile but with PSRAM disabled and tighter WiFi/LWIP
+# buffers, since without PSRAM internal RAM is the constraint. NimBLE only.
+# =============================================================================
+
+# Flash: 8 MB
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# Partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_singleapp_large.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp_large.csv"
+
+# =============================================================================
+# PSRAM — DISABLED. The Cardputer ADV (ESP32-S3FN8) has no PSRAM, so malloc lives
+# entirely in internal RAM; WiFi/LWIP buffers below are trimmed to fit.
+# =============================================================================
+CONFIG_SPIRAM=n
+
+CONFIG_BOOTLOADER_VDDSDIO_BOOST_3_3V=y
+
+# =============================================================================
+# FreeRTOS
+# =============================================================================
+CONFIG_FREERTOS_UNICORE=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_OPTIMIZED_SCHEDULER=y
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048
+
+# =============================================================================
+# CPU
+# =============================================================================
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=3072
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=2048
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=2048
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=y
+
+# =============================================================================
+# Heap
+# =============================================================================
+CONFIG_HEAP_POISONING_DISABLED=y
+CONFIG_HEAP_TRACING_OFF=y
+CONFIG_ESP_SYSTEM_ABORT_ON_ALLOC_FAILURE=n
+
+# =============================================================================
+# WiFi — no PSRAM, so keep buffers small to conserve internal RAM.
+# =============================================================================
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
+CONFIG_ESP_WIFI_IRAM_OPT=y
+CONFIG_ESP_WIFI_RX_IRAM_OPT=y
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMSDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_TASK_STACK_SIZE=2560
+
+# =============================================================================
+# LWIP — trimmed for no-PSRAM.
+# =============================================================================
+CONFIG_LWIP_MAX_SOCKETS=8
+CONFIG_LWIP_TCPIP_CORE_LOCKING=y
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=8
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=2560
+CONFIG_LWIP_TCP_MSS=1436
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=4
+CONFIG_LWIP_TCP_WND_DEFAULT=5760
+
+# =============================================================================
+# Bluetooth — inherited from the base sdkconfig.defaults (Bluedroid), like every
+# other board. Do NOT enable NimBLE here: this port's ble_hid/ble_serial use the
+# Bluedroid API (esp_bt_defs.h), so switching the host stack breaks the build.
+# =============================================================================
+
+# =============================================================================
+# Newlib / compiler
+# =============================================================================
+CONFIG_NEWLIB_NANO_FORMAT=y
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# =============================================================================
+# RMT (Infrared)
+# =============================================================================
+CONFIG_RMT_ISR_IRAM_SAFE=y
+CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
+
+# =============================================================================
+# Console: native USB-Serial-JTAG
+# =============================================================================
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# =============================================================================
+# TinyUSB (base firmware's USB CDC stack needs this at compile time)
+# =============================================================================
+CONFIG_TINYUSB_HID_COUNT=3
+CONFIG_TINYUSB_DESC_BOS_ENABLED=y
+CONFIG_TINYUSB_HID_BUFSIZE=64
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+
+# =============================================================================
+# Watchdog
+# =============================================================================
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=800
+CONFIG_ESP_INT_WDT_CHECK_CPU1=n
+
+# Panic coredump to flash (reliable backtrace)
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y

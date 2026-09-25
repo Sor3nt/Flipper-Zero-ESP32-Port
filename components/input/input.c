@@ -47,6 +47,8 @@ const char* input_get_type_name(InputType type) {
         return "Long";
     case InputTypeRepeat:
         return "Repeat";
+    case InputTypeText:
+        return "Text";
     default:
         return "Unknown";
     }
