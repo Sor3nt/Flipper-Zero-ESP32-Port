@@ -1,0 +1,2 @@
+#define U1RXD_IN_IDX 18
+#define SIG_GPIO_OUT_IDX 256

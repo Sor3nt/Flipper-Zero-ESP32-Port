@@ -90,6 +90,12 @@ uint16_t furi_hal_display_get_v_res(void);
  */
 esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void);
 
+/** Synchronous native RGB565 stripe. Caller owns GUI direct draw. Takes the
+ * shared SPI lock and drains DMA before returning, so the buffer can be reused.
+ * Pixels use the same byte-swapped RGB565 order as existing native renderers. */
+bool furi_hal_display_draw_rgb565(
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* pixels);
+
 #ifdef __cplusplus
 }
 #endif

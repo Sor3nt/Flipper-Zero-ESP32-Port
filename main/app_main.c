@@ -5,6 +5,7 @@
 
 #include <esp_log.h>
 #include <esp_rom_uart.h>
+#include <esp_system.h>
 
 static const char* TAG = "Main";
 
@@ -115,6 +116,13 @@ static void furi_log_esp_callback(const uint8_t* data, size_t size, void* contex
 
 void app_main(void) {
     ESP_LOGI(TAG, "Starting Furi Core on ESP32...");
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    esp_reset_reason_t reset_reason = esp_reset_reason();
+    ESP_LOGI(TAG, "Plus SD recovery 1.3.2; reset reason=%d", (int)reset_reason);
+    if(reset_reason == ESP_RST_BROWNOUT) {
+        ESP_LOGW(TAG, "Supply brownout reset detected; SD recovery cannot correct low supply voltage");
+    }
+#endif
 
     // ESP-IDF: Scheduler is already running!
     furi_init();

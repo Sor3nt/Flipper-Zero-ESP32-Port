@@ -1,0 +1,36 @@
+menu "External UART header"
+    config T_EMBED_EXTERNAL_UART
+        bool "Reserve T-Embed GPIO43/44 for external UART"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            Reserve the UART header for GPS or a UART BW16 module.
+            BW16 on I2C can coexist with GPS on this separate UART header.
+            Park GPIO43/44 as pulled-up inputs at boot instead of NRF outputs.
+            Use only when the NRF is electrically absent from these pins.
+            Select the USB Serial/JTAG console to keep logs off UART TX43.
+endmenu
+
+menu "T-Embed BW16 I2C"
+    config T_EMBED_BW16_I2C
+        bool "Enable BW16 on the shared GPIO8/18 I2C bus"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            Enable the BW16 I2C firmware at address 0x42 using the existing
+            100 kHz power/NFC bus. Does not use or reconfigure GPIO43/44.
+            Non-NRF boards may also reserve UART43/44 for GPS. On CC1101
+            Plus, keep external UART disabled because NRF owns CE43/CSN44.
+endmenu
+
+menu "T-Embed Plus SD recovery"
+    config T_EMBED_PLUS_SD_RECOVERY
+        bool "Enable Plus shared-SPI startup and SD recovery"
+        depends on IDF_TARGET_ESP32S3 && T_EMBED_BW16_I2C && !T_EMBED_EXTERNAL_UART
+        default n
+        help
+            Opt-in for the separate T-Embed CC1101 Plus recovery build.
+            Initialize the SD card before display/radio SPI traffic, cleanly
+            retry failed SD initialization and recover failed startup mounts.
+            Does not switch power rails or disable brownout protection.
+endmenu

@@ -152,7 +152,7 @@ def main():
     out = []
     if not trivial:
         for rel in _resolve(app_dir, sources):
-            out.append(f"APPSOURCE\t{rel}")
+            out.append(f"APPSOURCE\t{rel.replace(chr(92), chr(47))}")
 
     # cdefines are emitted whenever the override triggers, so the main app builds
     # with the same feature flags fbt would pass (e.g. PROTOPIRATE_PROTOCOL_RX_ONLY).
@@ -177,7 +177,7 @@ def main():
             continue
         out.append(f"PLUGIN\t{appid}\t{ep}")
         for rel in _resolve(app_dir, a.get("sources", []) or []):
-            out.append(f"PLUGINSRC\t{appid}\t{rel}")
+            out.append(f"PLUGINSRC\t{appid}\t{rel.replace(chr(92), chr(47))}")
         for d in a.get("cdefines", []) or []:
             out.append(f"PLUGINDEF\t{appid}\t{str(d).replace(chr(92) + chr(34), chr(34))}")
 

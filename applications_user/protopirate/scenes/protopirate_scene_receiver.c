@@ -51,28 +51,12 @@ static void protopirate_scene_receiver_callback(
 
     FURI_LOG_I(TAG, "=== SIGNAL DECODED (%s) ===", decoder_base->protocol->name);
 
-    uint16_t count_before = protopirate_history_get_item(app->txrx->history);
+    /* Commit the new record and its pending flags as one history operation.
+     * Only the event loop updates the view, avoiding history -> view lock order. */
+    protopirate_history_lock(app->txrx->history);
     bool added =
         protopirate_history_add_to_history(app->txrx->history, decoder_base, app->txrx->preset);
-
     if(added) {
-        notification_message(app->notifications, &sequence_semi_success);
-
-        FURI_LOG_I(
-            TAG,
-            "Added to history, total items: %u",
-            protopirate_history_get_item(app->txrx->history));
-
-        uint16_t count_after = protopirate_history_get_item(app->txrx->history);
-
-        if(count_after > count_before) {
-            protopirate_view_receiver_append_menu_row_from_history(
-                app->protopirate_receiver, app->txrx->history, count_after - 1);
-        }
-
-        uint16_t last_index = protopirate_history_get_item(app->txrx->history) - 1;
-        protopirate_view_receiver_set_idx_menu(app->protopirate_receiver, last_index);
-
         uint16_t new_idx = protopirate_history_get_item(app->txrx->history) - 1;
         if(app->auto_save) {
             protopirate_history_mark_auto_save_pending(app->txrx->history, new_idx);
@@ -80,7 +64,11 @@ static void protopirate_scene_receiver_callback(
         if(app->check_saved) {
             protopirate_history_mark_saved_match_pending(app->txrx->history, new_idx);
         }
+    }
+    protopirate_history_unlock(app->txrx->history);
 
+    if(added) {
+        notification_message(app->notifications, &sequence_semi_success);
         view_dispatcher_send_custom_event(
             app->view_dispatcher, ProtoPirateCustomEventSceneReceiverUpdate);
     } else {
@@ -342,10 +330,15 @@ bool protopirate_scene_receiver_on_event(void* context, SceneManagerEvent event)
             consumed = true;
             break;
 
-        case ProtoPirateCustomEventSceneReceiverUpdate:
+        case ProtoPirateCustomEventSceneReceiverUpdate: {
+            protopirate_view_receiver_sync_menu_from_history(
+                app->protopirate_receiver, app->txrx->history);
+            uint16_t count = protopirate_history_get_item(app->txrx->history);
+            protopirate_view_receiver_set_idx_menu(app->protopirate_receiver, count ? count - 1 : 0);
             protopirate_scene_receiver_update_statusbar(app);
             consumed = true;
             break;
+        }
 
         case ProtoPirateCustomEventViewReceiverOK: {
             uint16_t idx = protopirate_view_receiver_get_idx_menu(app->protopirate_receiver);

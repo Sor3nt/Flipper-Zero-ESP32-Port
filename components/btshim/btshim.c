@@ -562,7 +562,11 @@ static void bt_handle_reload_keys_settings(Bt* bt) {
 static void bt_handle_stop_stack(Bt* bt) {
     FURI_LOG_I(TAG, "Stopping BLE stack...");
 
-    if(bt->status == BtStatusOff) {
+    /* Advertising/connection status is not controller ownership. A disabled
+     * UI toggle or a failed advertising start can leave both stacks allocated. */
+    if(!bt->current_profile &&
+       esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED &&
+       esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
         FURI_LOG_I(TAG, "BLE stack already off");
         return;
     }
@@ -576,18 +580,20 @@ static void bt_handle_stop_stack(Bt* bt) {
     }
 
     // Only deinit if stack was actually initialized
-    if(esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+    if(esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED) {
         esp_bluedroid_disable();
         furi_delay_ms(50);
+    }
+    if(esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_INITIALIZED) {
         esp_bluedroid_deinit();
         furi_delay_ms(50);
     }
 
-    if(esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE) {
+    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
         esp_bt_controller_disable();
         furi_delay_ms(50);
     }
-    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
+    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED) {
         esp_bt_controller_deinit();
         furi_delay_ms(50);
     }

@@ -40,6 +40,7 @@ APPS = [
     "clock",
     "bad_usb",
     "subghz",
+    "rf_waterfall",
     "cli_subghz",
     "subghz_load_dangerous_settings",
     "passport",
@@ -105,7 +106,7 @@ if _board in _boards_without_ir:
     APPS = [a for a in APPS if a not in ("infrared", "js_infrared")]
 
 if _board in _boards_without_subghz:
-    APPS = [a for a in APPS if a not in ("subghz", "cli_subghz", "subghz_load_dangerous_settings", "js_subghz")]
+    APPS = [a for a in APPS if a not in ("subghz", "rf_waterfall", "cli_subghz", "subghz_load_dangerous_settings", "js_subghz")]
 
 if _board in _boards_without_nrf24:
     APPS = [a for a in APPS if a != "nrf24"]

@@ -90,6 +90,22 @@ bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len);
 typedef void (*WlanHalWorkerFn)(void* arg);
 bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg);
 
+/** Exclusive, temporary radio use by passive external survey applications.
+ * Temporarily disconnects/suspends an existing STA connection and restores
+ * its configuration/state on end. Persistent user settings are not changed.
+ * Refuses active SoftAP/portal/transmit backends and a second survey owner.
+ * Wi-Fi initialization and driver work use Sor3nt's existing worker.
+ * Call end only after app callbacks have been unregistered and drained.
+ * With wifi=false, the caller may run its own passive BLE scan while the
+ * normal Bluetooth profile is suspended. Stop that scan/stack before end.
+ * These calls must not be made from the GUI or a radio callback.
+ */
+bool wlan_hal_survey_begin(bool wifi);
+bool wlan_hal_survey_run(WlanHalWorkerFn fn, void* arg);
+void wlan_hal_survey_end(void);
+/** Nonblocking progress/error text, safe to read while begin/end is waiting. */
+const char* wlan_hal_survey_status(void);
+
 /** Beacon-Spam-Modi für wlan_hal_beacon_spam_start(). */
 typedef enum {
     WlanHalBeaconModeFunny,

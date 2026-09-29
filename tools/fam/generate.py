@@ -82,7 +82,7 @@ def parse_manifest(manifest_path: Path) -> list[FlipperApplication]:
         "app_manifest_path": str(manifest_path),
     }
     try:
-        with manifest_path.open("rt", encoding="utf-8") as manifest_file:
+        with manifest_path.open("rt", encoding="utf-8-sig") as manifest_file:
             exec(manifest_file.read(), namespace)
     except Exception as exc:
         raise FlipperManifestException(f"Failed parsing manifest '{manifest_path}': {exc}") from exc

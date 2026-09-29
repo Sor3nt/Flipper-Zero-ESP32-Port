@@ -1,0 +1,25 @@
+{
+  "url": "https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A20%5D%5Bmaxsize%3A33554432%5D%5Bbbox%3A40.739034%2C-74.007712%2C40.774966%2C-73.960288%5D%3Bway%5Bhighway%5D%5Bhighway%21~%22%5E%28construction%7Cproposed%29%24%22%5D%2840.752508%2C-73.989928%2C40.761492%2C-73.978072%29-%3E.c%3B.c%20out%20body%20geom%2840.739034%2C-74.007712%2C40.774966%2C-73.960288%29%20qt%20160%3B.c%20out%20count%3Bway%5Bhighway%5D%5Bhighway%21~%22%5E%28construction%7Cproposed%29%24%22%5D%3B%28._%3B%20-%20.c%3B%29%3Bout%20body%20geom%2840.739034%2C-74.007712%2C40.774966%2C-73.960288%29%20qt%2080%3Bout%20count%3B%28way%5Bnatural%3Dwater%5D%3Bway%5Bwaterway~%22%5E%28river%7Cstream%7Ccanal%29%24%22%5D%3Bway%5Bleisure%3Dpark%5D%3Bway%5Blanduse~%22%5E%28forest%7Cgrass%29%24%22%5D%3B%29%3Bout%20body%20geom%2840.739034%2C-74.007712%2C40.774966%2C-73.960288%29%20qt%2016%3Bout%20count%3B",
+  "bounds": [
+    40.739034,
+    -74.007712,
+    40.774966,
+    -73.960288
+  ],
+  "zoom": 15,
+  "retrieved_utc": "2026-09-28T20:59:47.489271+00:00",
+  "http_status": 200,
+  "headers": {
+    "Date": "Mon, 28 Sep 2026 20:59:52 GMT",
+    "Server": "Apache/2.4.68 (Debian)",
+    "Vary": "Accept-Encoding",
+    "Connection": "close",
+    "Transfer-Encoding": "chunked",
+    "Content-Type": "application/json"
+  },
+  "bytes": 225690,
+  "elapsed_seconds": 3.08,
+  "sha256": "4566a5addd5c50b5e76986f82a79007f97b078b3d67cb28e32e556798e09a866",
+  "license": "OpenStreetMap contributors, ODbL 1.0; https://www.openstreetmap.org/copyright",
+  "purpose": "Neutral public Manhattan maximum-detail-area stress request; never user location/data"
+}

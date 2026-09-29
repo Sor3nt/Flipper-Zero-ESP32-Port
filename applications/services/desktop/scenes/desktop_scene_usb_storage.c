@@ -49,6 +49,21 @@ static bool desktop_usb_storage_enter(Desktop* desktop, const char** error_msg) 
     Storage* storage = desktop->storage;
 
     /* 1) Unmount on the storage-service side — closes any open file handles. */
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    FS_Error sd_status = storage_sd_status(storage);
+    s_sd_was_mounted = (sd_status == FSE_OK);
+    if(sd_status != FSE_NOT_READY) {
+        /* Even a failed startup mount can have a pending automatic retry.
+         * Cancel it through the storage task before exposing raw SD access;
+         * merely checking whether MSC is already active leaves a race. */
+        FS_Error err = storage_sd_unmount(storage);
+        if(err != FSE_OK) {
+            *error_msg = "SD is busy or cannot unmount";
+            return false;
+        }
+        s_sd_was_mounted = true; /* Restore normal mounting when USB exits. */
+    }
+#else
     s_sd_was_mounted = (storage_sd_status(storage) == FSE_OK);
     if(s_sd_was_mounted) {
         FS_Error err = storage_sd_unmount(storage);
@@ -56,6 +71,7 @@ static bool desktop_usb_storage_enter(Desktop* desktop, const char** error_msg) 
             FURI_LOG_W(TAG, "storage_sd_unmount returned %d (continuing)", err);
         }
     }
+#endif
 
     /* 2) Release FATFS in the HAL but keep sdmmc_card_t alive for MSC. */
     if(!furi_hal_sd_release_fatfs()) {
