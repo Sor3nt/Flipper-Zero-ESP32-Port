@@ -10,6 +10,7 @@ message(STATUS "Flipper board: ${FLIPPER_BOARD}")
 
 set(FURI_HAL_SRCS
     "furi_hal.c"
+    "furi_hal_bw16_i2c.c"
     "furi_hal_cortex.c"
     "furi_hal_memory.c"
     "furi_hal_rtc.c"

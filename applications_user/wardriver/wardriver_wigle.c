@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #define WIGLE_URL "https://api.wigle.net/api/v2/file/upload"
+#define WDG_URL "https://wdgwars.pl/api/upload-csv"
 typedef struct {
     WardWigleUpload* job;
     File* file;
@@ -24,11 +25,11 @@ static void report(Transfer* t,const char* stage) {
 }
 static bool cancelled(Transfer* t) {
     if(t->job->cancelled && t->job->cancelled(t->job->context)) {
-        strcpy(t->job->result,t->requested?"Cancelled; check WiGLE before retry":"Upload cancelled");
+        strcpy(t->job->result,t->requested?"Cancelled; check account before retry":"Upload cancelled");
         t->job->uncertain=t->requested; return true;
     }
     if(esp_timer_get_time()>t->deadline) {
-        strcpy(t->job->result,"Timed out; check WiGLE before retry");
+        strcpy(t->job->result,"Timed out; check account before retry");
         t->job->uncertain=t->requested; return true;
     }
     return false;
@@ -37,7 +38,7 @@ static bool write_all(Transfer* t,const char* data,size_t length) {
     while(length) {
         if(cancelled(t)) return false;
         int n=esp_http_client_write(t->http,data,(int)length);
-        if(n<=0 || n>(int)length) { strcpy(t->job->result,"Send failed; check WiGLE before retry"); t->job->uncertain=true; return false; }
+        if(n<=0 || n>(int)length) { strcpy(t->job->result,"Send failed; check account before retry"); t->job->uncertain=true; return false; }
         data+=n; length-=n;
     }
     return true;
@@ -46,28 +47,31 @@ static bool write_all(Transfer* t,const char* data,size_t length) {
  * TLS slot 0 is occupied. No new radio initialization or connection happens here. */
 static void transfer(void* context) {
     Transfer* t=context; WardWigleUpload* job=t->job;
+    bool wdg=job->service==WardUploadWdgWars;
     if(cancelled(t)) return;
     if(!wlan_hal_is_connected()) { strcpy(job->result,"Connect Sor3nt Wi-Fi first"); return; }
     esp_http_client_config_t cfg={
-        .url=WIGLE_URL,.method=HTTP_METHOD_POST,.transport_type=HTTP_TRANSPORT_OVER_SSL,
+        .url=wdg?WDG_URL:WIGLE_URL,.method=HTTP_METHOD_POST,.transport_type=HTTP_TRANSPORT_OVER_SSL,
         .timeout_ms=10000,.buffer_size=2048,.buffer_size_tx=1024,
         .crt_bundle_attach=esp_crt_bundle_attach,.skip_cert_common_name_check=false,
         .disable_auto_redirect=true,.keep_alive_enable=false,
-        .username=job->credentials.name,.password=job->credentials.token,.auth_type=HTTP_AUTH_TYPE_BASIC,
-        .user_agent="Sor3nt-Wardriver/1.3",
+        .username=wdg?NULL:job->credentials.name,.password=wdg?NULL:job->credentials.token,
+        .auth_type=wdg?HTTP_AUTH_TYPE_NONE:HTTP_AUTH_TYPE_BASIC,
+        .user_agent="Sor3nt-Wardriver/1.5",
     };
     t->http=esp_http_client_init(&cfg);
     if(!t->http) { strcpy(job->result,"HTTP allocation failed"); return; }
     char content_type[100]; snprintf(content_type,sizeof(content_type),"multipart/form-data; boundary=%s",t->boundary);
     if(esp_http_client_set_header(t->http,"Content-Type",content_type)!=ESP_OK ||
-       esp_http_client_set_header(t->http,"Accept","application/json")!=ESP_OK) {
+       esp_http_client_set_header(t->http,"Accept","application/json")!=ESP_OK ||
+       (wdg && esp_http_client_set_header(t->http,"X-API-Key",job->credentials.token)!=ESP_OK)) {
         strcpy(job->result,"HTTP setup failed"); goto done;
     }
-    report(t,"CONNECTING TO WIGLE");
+    report(t,wdg?"CONNECTING TO WDGWARS":"CONNECTING TO WIGLE");
     int length=(int)(strlen(t->prefix)+t->size+strlen(t->suffix));
     t->requested=true; /* open can send headers before reporting a transport failure */
     if(esp_http_client_open(t->http,length)!=ESP_OK) {
-        strcpy(job->result,"TLS/network error; check Wi-Fi/time"); goto done;
+        strcpy(job->result,"TLS/network error; check Wi-Fi/time"); job->uncertain=true; goto done;
     }
     if(!write_all(t,t->prefix,strlen(t->prefix))) goto done;
     while(t->sent<t->size) {
@@ -75,58 +79,93 @@ static void transfer(void* context) {
         size_t want=t->size-t->sent; if(want>sizeof(t->buffer)) want=sizeof(t->buffer);
         size_t n=storage_file_read(t->file,t->buffer,want);
         if(n!=want || storage_file_get_error(t->file)!=FSE_OK) {
-            strcpy(job->result,"SD read failed; check WiGLE before retry"); job->uncertain=true; goto done;
+            strcpy(job->result,"SD read failed; check account before retry"); job->uncertain=true; goto done;
         }
         if(!write_all(t,t->buffer,n)) goto done;
         t->sent+=(uint32_t)n; report(t,"UPLOADING CSV");
     }
     if(!write_all(t,t->suffix,strlen(t->suffix))) goto done;
-    report(t,"WAITING FOR WIGLE");
+    report(t,wdg?"WAITING FOR WDGWARS":"WAITING FOR WIGLE");
     if(cancelled(t)) goto done;
     if(esp_http_client_fetch_headers(t->http)<0) {
-        strcpy(job->result,"No response; check WiGLE before retry"); job->uncertain=true; goto done;
+        strcpy(job->result,"No response; check account before retry"); job->uncertain=true; goto done;
     }
     int status=esp_http_client_get_status_code(t->http);
     if(status==401 || status==403) { strcpy(job->result,"API credentials rejected"); goto done; }
-    if(status==429) { strcpy(job->result,"WiGLE rate limit; retry later"); goto done; }
+    if(status==429) { strcpy(job->result,"Rate limit; retry later"); goto done; }
+    if(status==413) { strcpy(job->result,"Server file limit; use shorter session"); goto done; }
     if(status<200 || status>=300) {
-        snprintf(job->result,sizeof(job->result),"WiGLE HTTP %d; check account",status); job->uncertain=status>=500; goto done;
+        snprintf(job->result,sizeof(job->result),"%s HTTP %d; check account",wdg?"WDGWars":"WiGLE",status); job->uncertain=status>=500; goto done;
     }
     size_t used=0;
     for(;;) {
         if(cancelled(t)) goto done;
-        if(used==sizeof(t->response)-1) { strcpy(job->result,"Large response; check WiGLE account"); job->uncertain=true; goto done; }
+        if(used==sizeof(t->response)-1) { strcpy(job->result,"Large response; check account"); job->uncertain=true; goto done; }
         int n=esp_http_client_read(t->http,t->response+used,(int)(sizeof(t->response)-1-used));
-        if(n<0) { strcpy(job->result,"Response lost; check WiGLE account"); job->uncertain=true; goto done; }
+        if(n<0) { strcpy(job->result,"Response lost; check account"); job->uncertain=true; goto done; }
         if(!n) break;
         used+=(size_t)n;
     }
     bool success=false,warning=false;
-    if(!wardriver_wigle_response(t->response,used,&success,&warning)) {
-        strcpy(job->result,"Unknown response; check WiGLE account"); job->uncertain=true;
+    if(!(wdg?wardriver_wdg_response(t->response,used,&success,&warning):
+        wardriver_wigle_response(t->response,used,&success,&warning))) {
+        strcpy(job->result,"Unknown response; check account"); job->uncertain=true;
     } else if(success) {
         job->accepted=true;
-        strcpy(job->result,warning?"Accepted; check WiGLE warning":"Accepted by WiGLE");
-    } else strcpy(job->result,"WiGLE rejected file; check account");
+        strcpy(job->result,warning?"Accepted; check account warning":wdg?"Accepted by WDGWars":"Accepted by WiGLE");
+    } else strcpy(job->result,"Server rejected file; check account");
 done:
     esp_http_client_close(t->http); esp_http_client_cleanup(t->http); t->http=NULL;
+}
+void wardriver_upload_both(WardWigleUpload* wigle,WardWigleUpload* wdg) {
+    wigle->accepted=wdg->accepted=false;
+    wigle->uncertain=wdg->uncertain=false;
+    strcpy(wigle->result,"Not sent"); strcpy(wdg->result,"Not sent");
+    wigle->service=WardUploadWigle; wdg->service=WardUploadWdgWars;
+    /* Validate both credentials before sending anything to either account. */
+    if(!wigle->credentials.name[0] || !wigle->credentials.token[0] ||
+       !wardriver_wigle_value_valid(wigle->credentials.name,true) ||
+       !wardriver_wigle_value_valid(wigle->credentials.token,false)) {
+        strcpy(wigle->result,"Set WiGLE API Name and Token"); return;
+    }
+    if(!wardriver_wdg_key_valid(wdg->credentials.token)) {
+        strcpy(wdg->result,"Set WDGWars API Key"); return;
+    }
+    if(strcmp(wigle->path,wdg->path) || !wardriver_wigle_path_valid(wigle->path)) {
+        strcpy(wigle->result,"Select one GPS CSV for both"); return;
+    }
+    if(wigle->progress) wigle->progress(wigle->context,"1/2: WIGLE",0);
+    wardriver_wigle_upload(wigle);
+    if((wigle->cancelled && wigle->cancelled(wigle->context)) ||
+       (wdg->cancelled && wdg->cancelled(wdg->context))) {
+        strcpy(wdg->result,"Not sent - batch cancelled"); return;
+    }
+    if(wdg->progress) wdg->progress(wdg->context,"2/2: WDGWARS",0);
+    wardriver_wigle_upload(wdg);
 }
 void wardriver_wigle_upload(WardWigleUpload* job) {
     job->accepted=false; job->uncertain=false;
     strcpy(job->result,"Upload not started");
-    if(!*job->credentials.name || !*job->credentials.token ||
-       !wardriver_wigle_value_valid(job->credentials.name,true) || !wardriver_wigle_value_valid(job->credentials.token,false)) {
+    bool wdg=job->service==WardUploadWdgWars;
+    if(job->service!=WardUploadWigle && !wdg) { strcpy(job->result,"Unknown upload service"); return; }
+    if(wdg && !wardriver_wdg_key_valid(job->credentials.token)) {
+        strcpy(job->result,"Set WDGWars key (64 hex characters)"); return;
+    }
+    if(!wdg && (!*job->credentials.name || !*job->credentials.token ||
+       !wardriver_wigle_value_valid(job->credentials.name,true) || !wardriver_wigle_value_valid(job->credentials.token,false))) {
         strcpy(job->result,"Set API Name and API Token"); return;
     }
     if(!wardriver_wigle_path_valid(job->path)) { strcpy(job->result,"Select a wardrive WiGLE CSV"); return; }
     if(!wlan_hal_is_connected()) { strcpy(job->result,"Connect Sor3nt Wi-Fi first"); return; }
     Transfer* t=calloc(1,sizeof(*t)); if(!t) { strcpy(job->result,"Not enough upload memory"); return; }
-    t->job=job; t->deadline=esp_timer_get_time()+180LL*1000000;
+    t->job=job; t->deadline=esp_timer_get_time()+(wdg?600LL:180LL)*1000000;
     Storage* s=furi_record_open(RECORD_STORAGE);
     t->file=storage_file_alloc(s); bool opened=t->file && storage_file_open(t->file,job->path,FSAM_READ,FSOM_OPEN_EXISTING);
     if(!opened) { strcpy(job->result,"Cannot open selected CSV"); goto done; }
     uint64_t size=storage_file_size(t->file);
-    if(!size || size>WARD_WIGLE_MAX_FILE) { strcpy(job->result,"CSV empty or exceeds 16 MiB"); goto done; }
+    if(!size || size>(wdg?WARD_WDG_MAX_FILE:WARD_WIGLE_MAX_FILE)) {
+        strcpy(job->result,wdg?"CSV empty or exceeds 40 MiB":"CSV empty or exceeds 16 MiB"); goto done;
+    }
     t->size=(uint32_t)size; report(t,"CHECKING GPS CSV");
     WardWigleCsv csv={0}; uint32_t checked=0;
     while(checked<t->size) {

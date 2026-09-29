@@ -11,6 +11,16 @@
 
 A port of the [Flipper Zero](https://flipperzero.one/) firmware to ESP32-based development boards. This project brings the Flipper Zero UI, services, and application framework to affordable ESP32 hardware — no Flipper Zero required.
 
+## T-Embed feature profiles in this branch
+
+The custom **Lilygo T-embed cc1101** (non-NRF) and **Lily T-embed cc1101 plus**
+(NRF) profiles include BW16 I2C with PCAP capture, the existing Wardriver,
+standalone online/offline WDGWars Map, RF Waterfall and the ProtoPirate RX fix.
+See the [feature list and source builds](T-EMBED-FEATURES.md) and
+[complete wiring, power-off, flashing and SD instructions](T-EMBED-BW16-SETUP.md).
+These branch profiles are not a claim that the upstream web flasher already
+ships this feature set. Hardware acceptance of the integrated builds is pending.
+
 ## Discord
 
 Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for support and announcements.

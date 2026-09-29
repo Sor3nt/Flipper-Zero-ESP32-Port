@@ -1,6 +1,9 @@
 #include <fatfs.h>
 #include <furi_hal.h>
 #include <furi_hal_sd.h>
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+#include <furi_hal_usb_msc.h>
+#endif
 
 #include "sd_notify.h"
 #include "storage_ext.h"
@@ -21,7 +24,22 @@ typedef struct {
     FATFS* fs;
     const char* path;
     bool sd_was_present;
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    uint8_t recovery_left;
+    uint32_t recovery_at;
+    bool recovery_attempt;
+#endif
 } SDData;
+
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+#define SD_RECOVERY_ATTEMPTS 6
+#define SD_RECOVERY_INTERVAL_MS 5000
+
+static bool sd_recovery_status(StorageStatus status) {
+    return status == StorageStatusNotMounted || status == StorageStatusNotAccessible ||
+           status == StorageStatusErrorInternal;
+}
+#endif
 
 static FS_Error storage_ext_parse_error(SDError error);
 
@@ -33,6 +51,10 @@ static bool sd_mount_card_internal(StorageData* storage, bool notify) {
     uint8_t bsp_result;
     SDData* sd_data = storage->data;
 
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    if(sd_data->recovery_attempt) counter = 1;
+#endif
+
     while(result == false && counter > 0 && furi_hal_sd_is_present()) {
         if(notify) {
             NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
@@ -40,7 +62,11 @@ static bool sd_mount_card_internal(StorageData* storage, bool notify) {
             furi_record_close(RECORD_NOTIFICATION);
         }
 
-        if((counter % 2) == 0) {
+        if(
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+            sd_data->recovery_attempt ||
+#endif
+            (counter % 2) == 0) {
             // power reset sd card
             bsp_result = furi_hal_sd_init(true);
         } else {
@@ -58,7 +84,11 @@ static bool sd_mount_card_internal(StorageData* storage, bool notify) {
                 FATFS* fs;
                 uint32_t free_clusters;
 
-                status = f_getfree(sd_data->path, &free_clusters, &fs);
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+                // A recognized missing filesystem is not a transient card failure.
+                if(status == FR_OK)
+#endif
+                    status = f_getfree(sd_data->path, &free_clusters, &fs);
 #endif
 
                 if(status == FR_OK || status == FR_NO_FILESYSTEM) {
@@ -84,7 +114,10 @@ static bool sd_mount_card_internal(StorageData* storage, bool notify) {
         }
 
         if(!result) {
-            furi_delay_ms(1000);
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+            if(!sd_data->recovery_attempt)
+#endif
+                furi_delay_ms(1000);
             FURI_LOG_E(
                 TAG, "init cycle %d, error: %s", counter, storage_data_status_text(storage));
             counter--;
@@ -158,16 +191,28 @@ FS_Error sd_unmount_card(StorageData* storage) {
     SDData* sd_data = storage->data;
     SDError error;
 
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    // Explicit eject also cancels recovery if detaching fails. Do not advertise
+    // an unmounted volume (or allow USB handoff) until FatFs releases it.
+    sd_data->recovery_left = 0;
+    error = f_mount(0, sd_data->path, 0);
+    if(error == FR_OK) storage->status = StorageStatusNotReady;
+#else
     storage->status = StorageStatusNotReady;
     error = FR_DISK_ERR;
 
     // TODO FL-3522: do i need to close the files?
     f_mount(0, sd_data->path, 0);
+#endif
 
     return storage_ext_parse_error(error);
 }
 
 FS_Error sd_mount_card(StorageData* storage, bool notify) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    // A manual mount starts a fresh user operation, not a continuation of recovery.
+    ((SDData*)storage->data)->recovery_left = 0;
+#endif
     sd_mount_card_internal(storage, notify);
     FS_Error error;
 
@@ -205,6 +250,9 @@ FS_Error sd_mount_card(StorageData* storage, bool notify) {
 }
 
 FS_Error sd_format_card(StorageData* storage) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    ((SDData*)storage->data)->recovery_left = 0;
+#endif
 #ifdef FURI_RAM_EXEC
     UNUSED(storage);
     return FSE_NOT_READY;
@@ -337,6 +385,13 @@ static void storage_ext_tick_internal(StorageData* storage, bool notify) {
             sd_data->sd_was_present = false;
             sd_mount_card(storage, notify);
 
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+            if(sd_recovery_status(storage->status)) {
+                sd_data->recovery_left = SD_RECOVERY_ATTEMPTS;
+                sd_data->recovery_at = furi_get_tick();
+            }
+#endif
+
             if(!furi_hal_sd_is_present()) {
                 FURI_LOG_I(TAG, "card removed while mounting");
                 sd_unmount_card(storage);
@@ -356,6 +411,35 @@ static void storage_ext_tick_internal(StorageData* storage, bool notify) {
             }
         }
     }
+
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    if(sd_data->recovery_left) {
+        if(!sd_recovery_status(storage->status)) {
+            sd_data->recovery_left = 0;
+        } else if(!sd_data->sd_was_present && !furi_hal_usb_msc_is_active() &&
+                  storage_open_files_count(storage) == 0 &&
+                  (uint32_t)(furi_get_tick() - sd_data->recovery_at) >=
+                      furi_ms_to_ticks(SD_RECOVERY_INTERVAL_MS)) {
+            // The storage task serializes this with file operations. Retry once, with
+            // no wait animation, formatting, or internal-directory deletion.
+            --sd_data->recovery_left;
+            sd_data->recovery_attempt = true;
+            sd_mount_card_internal(storage, false);
+            sd_data->recovery_attempt = false;
+            if(!furi_hal_sd_is_present()) {
+                sd_unmount_card(storage);
+                sd_data->sd_was_present = true;
+            }
+            sd_data->recovery_at = furi_get_tick();
+            if(!sd_recovery_status(storage->status)) sd_data->recovery_left = 0;
+            FURI_LOG_I(
+                TAG,
+                "SD recovery: %s (%u retries left)",
+                storage_data_status_text(storage),
+                sd_data->recovery_left);
+        }
+    }
+#endif
 }
 
 static void storage_ext_tick(StorageData* storage) {
@@ -737,6 +821,11 @@ void storage_ext_init(StorageData* storage) {
     sd_data->fs = &fatfs_object;
     sd_data->path = "0:/";
     sd_data->sd_was_present = true;
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    sd_data->recovery_left = 0;
+    sd_data->recovery_at = 0;
+    sd_data->recovery_attempt = false;
+#endif
 
     storage->data = sd_data;
     storage->api.tick = storage_ext_tick;

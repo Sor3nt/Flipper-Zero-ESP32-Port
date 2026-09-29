@@ -6,7 +6,7 @@ typedef struct Storage Storage;
 typedef struct File File;
 enum { FSAM_WRITE,FSOM_CREATE_NEW,FSAM_READ,FSOM_OPEN_EXISTING,FSOM_CREATE_ALWAYS };
 typedef struct { unsigned unused; } FileInfo;
-enum { FSE_OK, FSE_NOT_EXIST };
+enum { FSE_OK, FSE_NOT_EXIST, FSE_INTERNAL };
 typedef int FS_Error;
 FS_Error storage_file_get_error(File* file);
 uint64_t storage_file_size(File* file);

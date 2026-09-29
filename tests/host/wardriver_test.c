@@ -1,5 +1,6 @@
 #include "wardriver_nmea.h"
 #include "wardriver_detect.h"
+#include "wardriver_monitor.h"
 #include "wardriver_types.h"
 #include "wardriver_csv.h"
 #include <stdio.h>
@@ -88,6 +89,141 @@ static void detection_tests(void) {
     o=(WardriverObservation){0}; CHECK(wardriver_detect_beacon(beacon,68,&o)); CHECK(o.mac[0]==0xAB);
     CHECK(!wardriver_detect_beacon(beacon,69,&o)); CHECK(!wardriver_detect_beacon(beacon,67,&o));
 }
+static WardriverObservation ble(const uint8_t* data,size_t size) {
+    WardriverObservation o={.mode=WardriverBle,.random_address=true};
+    CHECK(wardriver_detect_ble(data,size,&o)); return o;
+}
+static void classifier_tests(void) {
+    uint8_t tag[31]={30,0xFF,0x4C,0,0x12,0x19,0x10};
+    for(unsigned battery=0;battery<4;++battery) {
+        tag[6]=(uint8_t)(0x10|(battery<<6));
+        WardriverObservation o=ble(tag,sizeof(tag));
+        CHECK(o.hints&WardriverHintAirTag); CHECK(o.confidence==WardConfidenceHigh);
+        CHECK(!strcmp(wardriver_device_label(o.primary_hint),"AirTag"));
+    }
+    uint8_t nearby[]={7,0xFF,0x4C,0,0x12,2,0x10,0};
+    CHECK(ble(nearby,sizeof(nearby)).hints&WardriverHintAirTag);
+    nearby[6]=0x20; CHECK(!(ble(nearby,sizeof(nearby)).hints&WardriverHintAirTag));
+    CHECK(ble(nearby,sizeof(nearby)).hints&WardriverHintTracker);
+    nearby[6]=0x30; CHECK(ble(nearby,sizeof(nearby)).hints&WardriverHintAirPods);
+    nearby[6]=0; CHECK(!(ble(nearby,sizeof(nearby)).hints&WARDRIVER_NOTABLE_HINTS));
+    tag[4]=7; CHECK(!(ble(tag,sizeof(tag)).hints&WardriverHintAirTag)); /* Pairing is not uniquely AirTag. */
+    tag[4]=0x12; tag[5]=0x19; tag[0]=7;
+    CHECK(!(ble(tag,8).hints&WardriverHintAirTag)); /* Truncated inner payload. */
+    uint8_t fake[]={9,0x09,'X',0x1E,0xFF,0x4C,0,0x12,0x19,'X'};
+    CHECK(!(ble(fake,sizeof(fake)).hints&WardriverHintAirTag));
+    const struct { uint16_t uuid; uint32_t flag; } cases[]={
+        {0xFD5A,WardriverHintSmartTag},{0xFEED,WardriverHintTile},{0xFEEC,WardriverHintTile},
+        {0xFD84,WardriverHintChipolo},{0xFD44,WardriverHintFindMy},{0xFD5F,WardriverHintGlasses},
+        {0x3081,WardriverHintFlipper},{0x3082,WardriverHintFlipper},{0x3083,WardriverHintFlipper},
+        {0x3100,WardriverHintRaven},{0x3200,WardriverHintRaven},{0x3300,WardriverHintRaven},
+        {0x3400,WardriverHintRaven},{0x3500,WardriverHintRaven},{0x1101,WardriverHintSkimmer}};
+    for(unsigned i=0;i<sizeof(cases)/sizeof(*cases);++i) {
+        uint8_t a[]={3,3,(uint8_t)cases[i].uuid,(uint8_t)(cases[i].uuid>>8)};
+        CHECK(ble(a,sizeof(a)).hints&cases[i].flag);
+    }
+    uint8_t company[]={3,0xFF,0xAB,1}; CHECK(ble(company,4).hints&WardriverHintMeta);
+    CHECK(ble(company,4).confidence==WardConfidenceLow);
+    company[2]=0x29; company[3]=0x0E; CHECK(ble(company,4).hints&WardriverHintFlipper);
+    company[2]=0xBA; company[3]=0x0F; CHECK(!ble(company,4).hints);
+    uint8_t google[26]={25,0x16,0xAA,0xFE,0x40};
+    CHECK(ble(google,26).hints&WardriverHintGoogle);
+    google[4]=0x41; CHECK(ble(google,26).hints&WardriverHintGoogle);
+    google[0]=3; CHECK(!ble(google,4).hints);
+    google[0]=23; google[4]=0; CHECK(ble(google,24).hints&WardriverHintEddystone);
+    CHECK(!(ble(google,24).hints&WardriverHintTracker));
+    uint8_t ib[27]={26,0xFF,0x4C,0,2,21}; CHECK(ble(ib,27).hints&WardriverHintIBeacon);
+    CHECK(!(ble(ib,27).hints&WardriverHintAirTag));
+    ib[0]=25; CHECK(!(ble(ib,26).hints&WardriverHintIBeacon));
+    const struct { uint8_t mac[3]; uint32_t flag; } vendors[]={
+        {{0xB4,0x1E,0x52},WardriverHintFlock},{{0,0x25,0xDF},WardriverHintAxon},
+        {{0xAC,0x9F,0xC3},WardriverHintRing},{{0xE0,0xA7,0},WardriverHintCamera},
+        {{0,0xBF,0x15},WardriverHintAlpr}};
+    for(unsigned i=0;i<sizeof(vendors)/sizeof(*vendors);++i) {
+        WardriverObservation o={.mode=WardriverWifi}; memcpy(o.mac,vendors[i].mac,3);
+        wardriver_detect_wifi(&o); CHECK(o.hints&vendors[i].flag); CHECK(o.evidence==WardEvidenceOui);
+        o=(WardriverObservation){.mode=WardriverBle,.random_address=true}; memcpy(o.mac,vendors[i].mac,3);
+        CHECK(wardriver_detect_ble(NULL,0,&o)); CHECK(!o.hints);
+    }
+    WardriverObservation o={.mac={0x24,0x0A,0xC4},.mode=WardriverWifi};
+    wardriver_detect_wifi(&o); CHECK(!o.hints); /* Ordinary ESP32 is not Flock. */
+    o=(WardriverObservation){.mac={0,0x0E,0x58},.mode=WardriverWifi};
+    wardriver_detect_wifi(&o); CHECK(!o.hints); /* Sonos is not ALPR. */
+    strcpy(o.ssid,"My AirTag WiFi"); wardriver_detect_wifi(&o); CHECK(!o.hints);
+    strcpy(o.ssid,"Pineapple_1234"); wardriver_detect_wifi(&o); CHECK(o.hints&WardriverHintPineapple);
+    o=(WardriverObservation){.mode=WardriverWifi}; strcpy(o.ssid,"AB4-12345"); wardriver_detect_wifi(&o); CHECK(o.hints&WardriverHintAxon);
+    o=ble(nearby,sizeof(nearby)); CHECK(!wardriver_filter_match(&o,0,WardConfidenceNone));
+    o=ble(ib,sizeof(ib)-1); CHECK(!wardriver_filter_match(&o,5,WardConfidenceNone));
+    ib[0]=26; o=ble(ib,sizeof(ib)); CHECK(wardriver_filter_match(&o,5,WardConfidenceHigh));
+    CHECK(!wardriver_filter_match(&o,0,WardConfidenceNone));
+}
+static void put32(uint8_t* p,int32_t value) {
+    for(unsigned i=0;i<4;++i) p[i]=(uint8_t)((uint32_t)value>>(i*8));
+}
+static void rid_tests(void) {
+    uint8_t p[25]={0x12,0x20}; put32(p+5,481173000); put32(p+9,115167000); p[15]=0xD0; p[16]=7;
+    WardriverObservation o={0}; CHECK(wardriver_detect_remote_id(p,25,&o));
+    CHECK((o.rid.fields&(WardRidPosition|WardRidAltitude))==(WardRidPosition|WardRidAltitude));
+    CHECK(o.rid.latitude==481173000 && o.rid.altitude==2000);
+    WardriverNetwork entries[4]={0}; WardriverTable t={.entries=entries,.capacity=4}; WardriverGpsData gps={0}; bool fresh;
+    o.seen_ms=100; WardriverNetwork* n=wardriver_table_observe(&t,&o,1,&gps,&fresh);
+    p[0]=0x42; p[1]=1; put32(p+2,480000000); put32(p+6,110000000);
+    o=(WardriverObservation){.seen_ms=200}; CHECK(wardriver_detect_remote_id(p,25,&o));
+    CHECK(wardriver_table_observe(&t,&o,2,&gps,&fresh)==n);
+    CHECK((n->observation.rid.fields&(WardRidPosition|WardRidOperator))==(WardRidPosition|WardRidOperator));
+    CHECK(n->rid_location_ms==100 && n->rid_operator_ms==200);
+    memset(p,0,sizeof(p)); p[0]=0x12;
+    o=(WardriverObservation){.seen_ms=300}; CHECK(wardriver_detect_remote_id(p,25,&o));
+    wardriver_table_observe(&t,&o,3,&gps,&fresh);
+    CHECK(!(n->observation.rid.fields&(WardRidPosition|WardRidAltitude))); /* Unknown clears old fix. */
+    CHECK(n->observation.rid.fields&WardRidOperator);
+    put32(p+5,910000000); o=(WardriverObservation){0}; CHECK(!wardriver_detect_remote_id(p,25,&o)); CHECK(!o.hints);
+}
+static size_t make_beacon(uint8_t* f,uint8_t mac,bool encrypted,const char* ssid) {
+    memset(f,0,128); f[0]=0x80; f[16]=0xAC; f[21]=mac; f[34]=encrypted?0x10:0;
+    size_t n=strlen(ssid); f[37]=(uint8_t)n; memcpy(f+38,ssid,n); return 38+n;
+}
+static void monitor_tests(void) {
+    WardriverMonitor m={0}; WardriverObservation o={.auth=255}; uint8_t f[128];
+    size_t n=make_beacon(f,1,true,"Office"); CHECK(!wardriver_monitor_frame(&m,f,n,1,&o));
+    n=make_beacon(f,2,true,"Office"); CHECK(!wardriver_monitor_frame(&m,f,n,2,&o)); /* Mesh */
+    n=make_beacon(f,3,false,"Other"); CHECK(!wardriver_monitor_frame(&m,f,n,3,&o));
+    n=make_beacon(f,3,false,"Office"); CHECK(wardriver_monitor_frame(&m,f,n,4,&o));
+    CHECK(o.hints&WardriverHintEvilTwin); CHECK(!wardriver_monitor_frame(&m,f,n,5,&o));
+    memset(&m,0,sizeof(m)); CHECK(!wardriver_monitor_frame(&m,f,n,6,&o)); /* New session clears APs. */
+    memset(f,0,sizeof(f)); f[0]=0xC0; f[10]=0xAC; f[15]=1;
+    for(unsigned i=0;i<5;++i) { f[22]=(uint8_t)(i<<4); CHECK(!wardriver_monitor_frame(&m,f,26,100+i,&o)); }
+    f[22]=0x50; CHECK(wardriver_monitor_frame(&m,f,26,105,&o)); CHECK(o.hints&WardriverHintDeauth);
+    CHECK(!wardriver_monitor_frame(&m,f,26,106,&o));
+    memset(&m,0,sizeof(m));
+    for(unsigned i=0;i<12;++i) { f[1]=8; CHECK(!wardriver_monitor_frame(&m,f,26,100+i,&o)); } /* Retry duplicates. */
+    memset(&m,0,sizeof(m)); f[1]=0;
+    for(unsigned i=0;i<6;++i) { f[15]=(uint8_t)i; CHECK(!wardriver_monitor_frame(&m,f,26,200+i,&o)); } /* Independent senders. */
+    memset(&m,0,sizeof(m));
+    for(unsigned i=0;i<6;++i) { f[22]=(uint8_t)(i<<4); bool hit=wardriver_monitor_frame(&m,f,26,UINT32_MAX-2+i,&o); CHECK(hit==(i==5)); }
+    n=make_beacon(f,1,true,"test"); f[n++]=222; const char* json="{\"name\":\"pet\",\"pwnd_tot\":1}";
+    f[n++]=(uint8_t)strlen(json); memcpy(f+n,json,strlen(json)); n+=strlen(json);
+    o=(WardriverObservation){0}; CHECK(wardriver_detect_beacon(f,n,&o)); CHECK(o.hints&WardriverHintPwnagotchi);
+}
+static void repeated_detection_test(void) {
+    WardriverNetwork entries[8]; WardriverGpsData gps={0}; bool fresh;
+    const uint8_t long_tag[31]={30,0xFF,0x4C,0,0x12,0x19,0x10};
+    const uint8_t short_tag[]={7,0xFF,0x4C,0,0x12,2,0x10,0};
+    for(unsigned session=0;session<8;++session) {
+        memset(entries,0,sizeof(entries)); WardriverTable t={.entries=entries,.capacity=8};
+        for(unsigned i=0;i<5;++i) {
+            WardriverObservation o=ble(session%2?short_tag:long_tag,session%2?sizeof(short_tag):sizeof(long_tag));
+            memcpy(o.mac,"\xCC\x01\x02\x03\x04\x05",6);
+            WardriverNetwork* n=wardriver_table_observe(&t,&o,100+i,&gps,&fresh);
+            CHECK(n && fresh==(i==0) && t.notable_count==1 && t.count==1);
+            o.hints=o.primary_hint=0; o.confidence=WardConfidenceNone; o.evidence=WardEvidenceNone;
+            wardriver_table_observe(&t,&o,200+i,&gps,&fresh);
+            CHECK(n->observation.hints&WardriverHintAirTag); CHECK(t.notable_count==1);
+        }
+        WardriverObservation rotated=ble(short_tag,sizeof(short_tag)); rotated.mac[0]=0xDD;
+        CHECK(wardriver_table_observe(&t,&rotated,300,&gps,&fresh) && fresh && t.notable_count==2);
+    }
+}
 static void table_csv_tests(void) {
     WardriverNetwork entries[2]={0}; WardriverTable t={.entries=entries,.capacity=2}; bool fresh;
     WardriverGpsData gps={0}; WardriverObservation o={.mode=WardriverWifi,.mac={0,1,2,3,4,5},.rssi=-70};
@@ -143,6 +279,6 @@ static void combined_counts_test(void) {
     CHECK(fresh && t.notable_count==2 && t.ble_count==2 && t.count==3);
 }
 int main(void) {
-    gps_tests(); detection_tests(); table_csv_tests(); combined_counts_test(); fuzz_inputs();
+    gps_tests(); detection_tests(); classifier_tests(); rid_tests(); monitor_tests(); repeated_detection_test(); table_csv_tests(); combined_counts_test(); fuzz_inputs();
     printf("PASS: %u checks; 50,000 malformed-input iterations\n",checks); return 0;
 }

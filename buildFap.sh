@@ -232,7 +232,7 @@ build_for_target() {
     local BOARD="$1"
     local IDF_TARGET="$2"
     local TOOLCHAIN="$3"
-    local FW_BUILD_DIR="$4"
+    local FW_BUILD_DIR="${FAP_FW_BUILD_DIR:-$4}"
 
     local CC="${TOOLCHAIN}-gcc"
     local CXX="${TOOLCHAIN}-g++"
@@ -409,7 +409,7 @@ build_for_target() {
     local -a FAM_SOURCES=()
     if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_SINGLE_SOURCE" ] && [ -f "$APP_DIR/application.fam" ]; then
         local APP_INFO
-        APP_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null || true)
+        APP_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | tr -d '\r' || true)
         while IFS=$'\t' read -r kind val; do
             case "$kind" in
                 APPSOURCE)  [ -n "$val" ] && FAM_SOURCES+=("$APP_DIR/$val") ;;
@@ -578,6 +578,7 @@ echo "╚═══════════════════════�
 
 for target_line in "${TARGETS[@]}"; do
     read -r BOARD IDF_TARGET TOOLCHAIN FW_BUILD_DIR <<< "$target_line"
+    [ -n "$FAP_BOARD" ] && [ "$BOARD" != "$FAP_BOARD" ] && continue
     build_for_target "$BOARD" "$IDF_TARGET" "$TOOLCHAIN" "$FW_BUILD_DIR"
 done
 
@@ -589,7 +590,7 @@ done
 # recurse. Output goes to <appid>_assets/plugins/ for deployment to the SD at
 # /ext/apps_assets/<mainappid>/plugins/.
 if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_OUTPUT_NAME" ] && [ -f "$APP_DIR/application.fam" ]; then
-    PLUGIN_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | grep '^PLUGIN' || true)
+    PLUGIN_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | tr -d '\r' | grep '^PLUGIN' || true)
     if [ -n "$PLUGIN_INFO" ]; then
         echo ""
         echo "━━━ Embedded plugins (fal_embedded) ━━━"
@@ -603,8 +604,7 @@ if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_OUTPUT_NAME" ] && [ -f "$APP_DIR/applicat
             FAP_STACK_OVERRIDE=0 \
             FAP_OUTPUT_NAME="${APP_ID}_assets/plugins/${_p_id}.fal" \
             FAP_CDEFINES="$_p_defs" \
-            "$SCRIPT_DIR/buildFap.sh" "$APP_DIR" 2>&1 \
-                | grep -E '✓|error:|fatal error:|missing API symbols' | sed 's/^/    /' || true
+            bash "$SCRIPT_DIR/buildFap.sh" "$APP_DIR"
         }
         while IFS=$'\t' read -r kind a b; do
             case "$kind" in

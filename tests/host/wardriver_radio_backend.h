@@ -2,6 +2,7 @@
  * It checks lifecycle/arguments and injects events; it does not model RF. */
 #include "wardriver_wifi.h"
 #include "wardriver_detect.h"
+#include "wardriver_monitor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ enum { ESP_BLUEDROID_STATUS_UNINITIALIZED,ESP_BLUEDROID_STATUS_INITIALIZED,ESP_B
 enum { BLE_ADDR_TYPE_PUBLIC,BLE_ADDR_TYPE_RANDOM,BLE_ADDR_TYPE_RPA_RANDOM };
 enum { ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT,ESP_GAP_BLE_SCAN_START_COMPLETE_EVT,ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT,ESP_GAP_BLE_SCAN_RESULT_EVT };
 #define ESP_GAP_SEARCH_INQ_RES_EVT 1
+#define ESP_GAP_SEARCH_INQ_CMPL_EVT 2
 #define ESP_BT_STATUS_SUCCESS 0
 #define ESP_BT_MODE_BLE 1
 #define BLE_SCAN_TYPE_PASSIVE 0
@@ -108,7 +110,7 @@ static esp_err_t esp_bluedroid_disable(void) { CHECK(host==2); host=1; return ES
 static esp_err_t esp_bluedroid_deinit(void) { CHECK(host==1); host=0; ble_handler=NULL; return ESP_OK; }
 static esp_err_t esp_ble_gap_register_callback(void (*fn)(esp_gap_ble_cb_event_t,esp_ble_gap_cb_param_t*)) { CHECK(fn); ble_handler=fn; return ESP_OK; }
 static esp_err_t esp_ble_gap_set_scan_params(const esp_ble_scan_params_t* p) {
-    CHECK(p->scan_type==BLE_SCAN_TYPE_PASSIVE && p->scan_window<=p->scan_interval);
+    CHECK(p->scan_type==BLE_SCAN_TYPE_PASSIVE && p->scan_window<=p->scan_interval && p->scan_duplicate==BLE_SCAN_DUPLICATE_DISABLE);
     /* Completions are delivered explicitly by tests, including reordered cases. */
     return ESP_OK;
 }

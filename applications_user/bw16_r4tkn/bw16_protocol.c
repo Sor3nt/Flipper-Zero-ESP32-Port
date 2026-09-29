@@ -71,6 +71,7 @@ Bw16LineKind bw16_parse(const char* line, Bw16Ap* ap) {
     for(size_t i = 0; i < ssid_len; ++i) {
         unsigned char c = (unsigned char)start[i];
         if(c < 32 || c == 127) return Bw16Malformed;
+        ap->raw_ssid[i] = (char)c;
         ap->ssid[i] = c < 127 ? (char)c : '?'; /* Canvas has an ASCII font. */
     }
     ap->channel = (unsigned)channel;

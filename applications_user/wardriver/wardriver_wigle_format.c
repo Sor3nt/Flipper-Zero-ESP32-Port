@@ -3,6 +3,14 @@
 #include <stdlib.h>
 
 void wardriver_wigle_erase(void* p,size_t n) { volatile unsigned char* b=p; while(n--) *b++=0; }
+bool wardriver_wdg_key_valid(const char* key) {
+    if(!key) return false;
+    for(size_t i=0;i<64;++i) {
+        char c=key[i];
+        if(!((c>='0' && c<='9') || (c>='a' && c<='f') || (c>='A' && c<='F'))) return false;
+    }
+    return key[64]==0;
+}
 bool wardriver_wigle_value_valid(const char* text,bool name) {
     size_t limit=name?WARD_WIGLE_NAME_SIZE:WARD_WIGLE_TOKEN_SIZE;
     for(size_t i=0;i<limit;++i) {
@@ -57,6 +65,7 @@ static bool field(WardWigleCsv* c,bool row_end) {
     c->length=0; c->after_quote=false; return true;
 }
 bool wardriver_wigle_csv_feed(WardWigleCsv* c,const char* data,size_t n) {
+    static const char metadata_prefix[]="WigleWifi-1.6,";
     static const char header[]="MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type";
     if(c->error) return false;
     for(size_t i=0;i<n;++i) {
@@ -65,7 +74,7 @@ bool wardriver_wigle_csv_feed(WardWigleCsv* c,const char* data,size_t n) {
             if(ch=='\n') {
                 if(c->length && c->cell[c->length-1]=='\r') --c->length;
                 c->cell[c->length]=0;
-                if(!c->header?strncmp(c->cell,"WigleWifi-1.6,",14)!=0:strcmp(c->cell,header)!=0) goto bad;
+                if(!c->header?strncmp(c->cell,metadata_prefix,sizeof(metadata_prefix)-1)!=0:strcmp(c->cell,header)!=0) goto bad;
                 ++c->header; c->length=0; continue;
             }
         } else if(c->quoted) {
@@ -156,7 +165,7 @@ static bool value(Json* j) {
     }
     return true;
 }
-bool wardriver_wigle_response(const char* data,size_t n,bool* success,bool* warning) {
+static bool upload_response(const char* data,size_t n,bool* success,bool* warning,const char* field_name) {
     *success=false; *warning=false;
     if(!data || !n || n>4096 || memchr(data,0,n)) return false;
     Json j={.p=data,.end=data+n}; ws(&j);
@@ -165,7 +174,7 @@ bool wardriver_wigle_response(const char* data,size_t n,bool* success,bool* warn
     while(j.p<j.end && *j.p!='}') {
         char key[24]; if(!string(&j,key,sizeof(key))) return false;
         ws(&j); if(j.p==j.end || *j.p++!=':') return false; ws(&j);
-        if(!strcmp(key,"success")) {
+        if(!strcmp(key,field_name)) {
             if(found) return false;
             found=true;
             if(literal(&j,"true")) *success=true;
@@ -183,4 +192,10 @@ bool wardriver_wigle_response(const char* data,size_t n,bool* success,bool* warn
     }
     if(j.p==j.end || *j.p++!='}') return false;
     ws(&j); return found && j.p==j.end;
+}
+bool wardriver_wigle_response(const char* data,size_t n,bool* success,bool* warning) {
+    return upload_response(data,n,success,warning,"success");
+}
+bool wardriver_wdg_response(const char* data,size_t n,bool* success,bool* warning) {
+    return upload_response(data,n,success,warning,"ok");
 }

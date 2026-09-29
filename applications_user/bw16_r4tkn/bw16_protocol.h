@@ -9,6 +9,7 @@
 
 typedef struct {
     char ssid[33];
+    char raw_ssid[33]; /* Exact wire bytes; ssid is sanitized for the display. */
     char mac[18];
     unsigned channel;
     int rssi;

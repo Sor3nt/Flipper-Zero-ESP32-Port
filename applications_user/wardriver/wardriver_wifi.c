@@ -1,5 +1,6 @@
 #include "wardriver_wifi.h"
 #include "wardriver_detect.h"
+#include "wardriver_monitor.h"
 #include <wifi/wlan_hal.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -19,10 +20,12 @@ struct WardriverRadio {
     bool ble_requested, ble_scanning, ble_halted;
     WardriverRadioProgress progress;
     void* progress_context;
-    unsigned retries;
+    unsigned retries, ble_retries;
+    uint32_t ble_retry_at;
     uint32_t done, failed, dropped, callbacks, next_scan, scan_started;
     uint32_t ble_params, ble_started, ble_failed, ble_requested_at;
     wifi_ap_record_t* records;
+    WardriverMonitor* monitor;
     esp_err_t error;
     char status[32];
 };
@@ -63,8 +66,12 @@ static void wifi_frame(void* buffer,wifi_promiscuous_pkt_type_t type) {
             .rssi=packet->rx_ctrl.rssi,.channel=packet->rx_ctrl.channel};
         size_t length=packet->rx_ctrl.sig_len;
         /* IDF includes four bytes of FCS in sig_len. */
-        if(length>=40 && length<=2500 &&
-           wardriver_detect_beacon(packet->payload,length-4,&o)) push(r,&o);
+        if(length>=28 && length<=2500) {
+            uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+            bool behavior=wardriver_monitor_frame(r->monitor,packet->payload,length-4,now,&o);
+            bool device=wardriver_detect_beacon(packet->payload,length-4,&o);
+            if(behavior || device) push(r,&o);
+        }
     }
     leave();
 }
@@ -76,6 +83,8 @@ static void ble_event(esp_gap_ble_cb_event_t event,esp_ble_gap_cb_param_t* p) {
         } else if(event==ESP_GAP_BLE_SCAN_START_COMPLETE_EVT) {
             __atomic_store_n(&r->ble_started,p->scan_start_cmpl.status==ESP_BT_STATUS_SUCCESS?1:2,__ATOMIC_RELEASE);
         } else if(event==ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT) {
+            __atomic_store_n(&r->ble_failed,1,__ATOMIC_RELEASE);
+        } else if(event==ESP_GAP_BLE_SCAN_RESULT_EVT && p->scan_rst.search_evt==ESP_GAP_SEARCH_INQ_CMPL_EVT) {
             __atomic_store_n(&r->ble_failed,1,__ATOMIC_RELEASE);
         } else if(event==ESP_GAP_BLE_SCAN_RESULT_EVT &&
                   p->scan_rst.search_evt==ESP_GAP_SEARCH_INQ_RES_EVT) {
@@ -149,7 +158,7 @@ static void collect(void* context) {
             .auth=ap->authmode,.pairwise=ap->pairwise_cipher,.group=ap->group_cipher};
         memcpy(o.mac,ap->bssid,6); memcpy(o.ssid,ap->ssid,32); o.ssid[32]=0;
         /* Apply name heuristics without manufacturing any service signature. */
-        wardriver_detect_ble(NULL,0,&o);
+        wardriver_detect_wifi(&o);
         push(r,&o);
     }
 }
@@ -204,6 +213,7 @@ WardriverRadio* wardriver_radio_alloc(FuriMessageQueue* q,WardriverRadioProgress
 bool wardriver_radio_start(WardriverRadio* r) {
     r->done=r->failed=r->dropped=0; r->scanning=false; r->halted=false; r->retries=0;
     r->ble_params=r->ble_started=r->ble_failed=0;
+    r->ble_retries=0; r->ble_retry_at=0;
     r->ble_requested=r->ble_scanning=r->ble_halted=false; r->quiesced=false;
     /* One lease owns both scanners. Firmware coexistence remains enabled. */
     if(!wlan_hal_survey_begin(true)) {
@@ -213,6 +223,9 @@ bool wardriver_radio_start(WardriverRadio* r) {
     r->records=heap_caps_malloc(SCAN_BATCH*sizeof(*r->records),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!r->records) r->records=malloc(SCAN_BATCH*sizeof(*r->records));
     if(!r->records) { wardriver_radio_stop(r); strcpy(r->status,"LOW MEMORY"); return false; }
+    r->monitor=heap_caps_calloc(1,sizeof(*r->monitor),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!r->monitor) r->monitor=calloc(1,sizeof(*r->monitor));
+    if(!r->monitor) { wardriver_radio_stop(r); strcpy(r->status,"LOW MEMORY"); return false; }
     __atomic_store_n(&callback_count,&r->callbacks,__ATOMIC_RELEASE);
     __atomic_store_n(&owner,r,__ATOMIC_RELEASE);
     progress(r,"STARTING WI-FI");
@@ -232,6 +245,16 @@ bool wardriver_radio_start(WardriverRadio* r) {
 }
 static void poll_ble(WardriverRadio* r,uint32_t now) {
     if(r->ble_halted) return;
+    /* A continuous scan can end unexpectedly. Its completion is not a live
+     * scanner: retry up to three times instead of silently losing BLE. */
+    if(r->ble_scanning && __atomic_load_n(&r->ble_failed,__ATOMIC_ACQUIRE) && r->ble_retries<3) {
+        ++r->ble_retries; r->ble_scanning=false; r->ble_requested=false;
+        r->ble_retry_at=now+1000; r->ble_requested_at=now;
+        __atomic_store_n(&r->ble_failed,0,__ATOMIC_RELEASE);
+        __atomic_store_n(&r->ble_started,0,__ATOMIC_RELEASE);
+    }
+    if(r->ble_retry_at && (int32_t)(now-r->ble_retry_at)<0) return;
+    r->ble_retry_at=0;
     uint32_t ready=__atomic_load_n(&r->ble_params,__ATOMIC_ACQUIRE);
     uint32_t started=__atomic_load_n(&r->ble_started,__ATOMIC_ACQUIRE);
     if(ready==2 || started==2 || __atomic_load_n(&r->ble_failed,__ATOMIC_ACQUIRE) ||
@@ -271,7 +294,7 @@ void wardriver_radio_poll(WardriverRadio* r,uint32_t now) {
     else if(r->halted) strcpy(r->status,"WIFI FAILED - BLE RUNNING");
     else if(r->ble_halted) strcpy(r->status,"BLE FAILED - WIFI RUNNING");
     else if(r->retries) snprintf(r->status,sizeof(r->status),"WIFI RETRY %u/3 + BLE",r->retries);
-    else strcpy(r->status,r->ble_scanning?"LISTENING":"WIFI + BLE STARTING");
+    else strcpy(r->status,r->ble_scanning?"LISTENING":r->ble_retries?"WIFI + BLE RETRY":"WIFI + BLE STARTING");
 }
 void wardriver_radio_quiesce(WardriverRadio* r) {
     if(!r->leased || r->quiesced) return;
@@ -289,6 +312,7 @@ void wardriver_radio_quiesce(WardriverRadio* r) {
     __atomic_store_n(&callback_count,NULL,__ATOMIC_RELEASE);
     r->scanning=r->ble_scanning=false; r->quiesced=true;
     free(r->records); r->records=NULL;
+    free(r->monitor); r->monitor=NULL;
 }
 void wardriver_radio_stop(WardriverRadio* r) {
     if(!r->leased) return;

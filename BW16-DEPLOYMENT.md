@@ -1,3 +1,7 @@
+> Historical guarded-UART integration (3.0). The current feature set, including
+> I2C and PCAP capture, is documented in [T-EMBED-FEATURES.md](T-EMBED-FEATURES.md).
+> Use [T-EMBED-BW16-SETUP.md](T-EMBED-BW16-SETUP.md) for current wiring and power requirements.
+
 # BW16 R4TKN and Wardriver for T-Embed CC1101 Plus
 
 > **Transport notice:** this document describes the older UART integration. For the separately distributed I2C builds, wiring, true Power Off before connecting, flashing, SD setup and troubleshooting, use [T-Embed and BW16 setup](T-EMBED-BW16-SETUP.md). Do not mix the two transports.

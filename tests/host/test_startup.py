@@ -88,7 +88,7 @@ static void set_status(WardriverApp* a,const char* text) { assert(a==active && a
 static DialogMessage* dialog_message_alloc(void) { return dialog_oom?NULL:allocate(sizeof(DialogMessage)); }
 static void dialog_message_free(DialogMessage* m) { release(m); }
 static void dialog_message_set_header(DialogMessage* m,const char* s,int x,int y,Align h,Align v) {
-    assert(strstr(s,"1.3.2") && x==64 && y==1 && h==AlignCenter && v==AlignTop);m->fields|=1;
+    assert(strstr(s,"1.5.2") && x==64 && y==1 && h==AlignCenter && v==AlignTop);m->fields|=1;
 }
 static void dialog_message_set_text(DialogMessage* m,const char* s,int x,int y,Align h,Align v) {
     assert(x==2 && y==18 && h==AlignLeft && v==AlignTop && strstr(s,"Free ") && strstr(s,"Largest "));

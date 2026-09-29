@@ -458,7 +458,11 @@ static FS_Error storage_process_sd_unmount(Storage* app) {
             break;
         }
 
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        ret = sd_unmount_card(storage);
+#else
         sd_unmount_card(storage);
+#endif
         storage_data_timestamp(storage);
     } while(false);
 

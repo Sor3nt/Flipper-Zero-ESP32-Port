@@ -177,4 +177,4 @@ radio_source='\n'.join(line for line in radio_source.splitlines() if not line.st
 run('combined_radio_test',
     (ROOT/'tests/host/wardriver_radio_backend.h').read_text()+radio_source+
     (ROOT/'tests/host/wardriver_radio_test.c').read_text(),
-    [ROOT/'applications_user/wardriver/wardriver_detect.c'])
+    [ROOT/'applications_user/wardriver/wardriver_detect.c', ROOT/'applications_user/wardriver/wardriver_monitor.c'])

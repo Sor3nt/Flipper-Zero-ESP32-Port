@@ -1,5 +1,6 @@
 #include "subghz_spectrum.h"
 #include "../helpers/subghz_spectrum_worker.h"
+#include "../helpers/subghz_spectrum_math.h"
 
 #include <furi.h>
 #include <furi_hal.h>
@@ -11,6 +12,7 @@
 
 #include <esp_lcd_panel_ops.h>
 #include <esp_heap_caps.h>
+#include <stdatomic.h>
 
 #define TAG "SubGhzSpectrum"
 
@@ -23,7 +25,8 @@
  * ST7789 SPI byte order. */
 
 #define WF_ROWS_MAX 96
-#define STRIPE_H    17
+/* Match the existing LCD SPI bus maximum: 320 * 8 * 2 bytes. */
+#define STRIPE_H    8
 
 #define BINS SUBGHZ_SPECTRUM_BINS
 
@@ -47,6 +50,11 @@ typedef enum {
     SubGhzSpectrumAdjustCursor,
     SubGhzSpectrumAdjustCenter,
     SubGhzSpectrumAdjustSpan,
+    SubGhzSpectrumAdjustStep,
+    SubGhzSpectrumAdjustDwell,
+    SubGhzSpectrumAdjustThreshold,
+    SubGhzSpectrumAdjustHold,
+    SubGhzSpectrumAdjustRun,
     SubGhzSpectrumAdjustMAX,
 } SubGhzSpectrumAdjust;
 
@@ -69,17 +77,27 @@ struct SubGhzSpectrum {
     uint16_t* stripe; // DRAM DMA, w*STRIPE_H
     uint8_t* wf; // PSRAM, WF_ROWS_MAX*BINS normalized power (0..255)
 
-    volatile bool running;
-    volatile bool dirty;
+    atomic_bool running;
+    atomic_bool dirty;
 
     // model (mutex-protected)
     float rssi[BINS];
     float peak[BINS];
+    float displayed[BINS]; // visual easing only; waterfall/readouts remain raw
     uint32_t center;
     uint32_t span;
     uint16_t cursor;
     SubGhzSpectrumAdjust adjust;
     bool has_data;
+    uint16_t wf_write;
+    uint16_t dwell_ms;
+    int16_t threshold;
+    bool paused;
+    bool peak_hold;
+    bool peak_decay;
+    bool spectrogram;
+    bool configured_window;
+    uint16_t bins;
 };
 
 /* ---- 5x7 font (column-major, bit0 = top row) ---------------------------- */
@@ -89,6 +107,12 @@ typedef struct {
 } SubGhzGlyph;
 
 static const SubGhzGlyph subghz_font[] = {
+    {'A', {0x7E, 0x11, 0x11, 0x11, 0x7E}}, {'D', {0x7F, 0x41, 0x41, 0x22, 0x1C}},
+    {'L', {0x7F, 0x40, 0x40, 0x40, 0x40}}, {'O', {0x3E, 0x41, 0x41, 0x41, 0x3E}},
+    {'T', {0x01, 0x01, 0x7F, 0x01, 0x01}}, {'W', {0x3F, 0x40, 0x38, 0x40, 0x3F}},
+    {'I', {0x00, 0x41, 0x7F, 0x41, 0x00}}, {'K', {0x7F, 0x08, 0x14, 0x22, 0x41}},
+    {'Y', {0x07, 0x08, 0x70, 0x08, 0x07}}, {'m', {0x7C, 0x04, 0x18, 0x04, 0x78}},
+    {'F', {0x7F, 0x09, 0x09, 0x09, 0x01}},
     {'0', {0x3E, 0x51, 0x49, 0x45, 0x3E}}, {'1', {0x00, 0x42, 0x7F, 0x40, 0x00}},
     {'2', {0x42, 0x61, 0x51, 0x49, 0x46}}, {'3', {0x21, 0x41, 0x45, 0x4B, 0x31}},
     {'4', {0x18, 0x14, 0x12, 0x7F, 0x10}}, {'5', {0x27, 0x45, 0x45, 0x45, 0x39}},
@@ -122,6 +146,8 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 #define COL_BLACK  0x0000
 #define COL_GRID   rgb565(38, 38, 44)
 #define COL_TRACE  rgb565(255, 48, 40)
+#define COL_BODY   rgb565(70, 13, 11)
+#define COL_BODY_PEAK rgb565(135, 28, 18)
 #define COL_HOLD   rgb565(0, 210, 210)
 #define COL_CURSOR rgb565(255, 220, 0)
 #define COL_TEXT   rgb565(220, 220, 220)
@@ -240,20 +266,95 @@ static void fmt_mhz(uint32_t hz, char* buf, size_t n, int dec) {
         snprintf(buf, n, "%lu", mhz);
     } else if(dec == 1) {
         snprintf(buf, n, "%lu.%01lu", mhz, (unsigned long)((hz % 1000000UL) / 100000UL));
-    } else {
+    } else if(dec == 2) {
         snprintf(buf, n, "%lu.%02lu", mhz, (unsigned long)((hz % 1000000UL) / 10000UL));
+    } else {
+        snprintf(buf, n, "%lu.%03lu", mhz, (unsigned long)((hz % 1000000UL) / 1000UL));
     }
 }
 
 /* ---- frame composition (holds the data mutex) --------------------------- */
+static float subghz_waterfall_norm(float rssi) {
+    float value = (rssi + 100.0f) / 70.0f;
+    return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+/* Bruce-beta workflow has its own plot geometry and controls. The local CC1101
+ * service remains shared; this is not the legacy spectrum with a palette swap. */
+static void subghz_spectrogram_compose(SubGhzSpectrum* s) {
+    const int left = 8, width = s->w - 16;
+    const int footer = s->h - 16, ruler = footer - 11;
+    const int top = 20, bottom = s->h / 2, height = bottom - top;
+    const int waterfall_top = bottom + 3;
+    const int rows = ruler - waterfall_top - 2;
+    memset(s->fb, 0, (size_t)s->w * s->h * sizeof(*s->fb));
+    fb_text(s, left, 5, "RF WATERFALL", COL_TRACE, 1);
+    fb_text(s, s->w - 86, 5, s->paused ? "OK RESUME" : "OK PAUSE", COL_TEXT_DIM, 1);
+    unsigned strongest = 0;
+    for(unsigned i = 1; i < s->bins; ++i)
+        if(s->rssi[i] > s->rssi[strongest]) strongest = i;
+    int strongest_column = strongest * (width - 1) / (s->bins - 1);
+    for(int column = 0; column < width; ++column) {
+        int live_y = bottom, peak_y = bottom;
+        if(s->has_data) {
+            live_y -= subghz_waterfall_norm(subghz_spectrum_interpolate(s->displayed, s->bins, column, width)) * height;
+            peak_y -= subghz_waterfall_norm(subghz_spectrum_interpolate(s->peak, s->bins, column, width)) * height;
+        }
+        bool highlight = column >= strongest_column - width / 40 && column <= strongest_column + width / 40;
+        /* A restrained blue glow sits under the real red trace. It changes only
+         * presentation, never the measured RSSI or the waterfall samples. */
+        fb_vline(s, left + column, live_y, bottom, highlight ? rgb565(4,16,42) : rgb565(3,9,24));
+        for(int depth = 1; depth <= 6 && live_y + depth <= bottom; ++depth)
+            fb_px(s, left + column, live_y + depth, rgb565(0,100-depth*10,200-depth*20));
+        fb_px(s, left + column, live_y, COL_TRACE);
+        if(s->has_data && peak_y < live_y) fb_px(s, left + column, peak_y, COL_HOLD);
+        if((column & 3) == 0)
+            for(int quarter = 1; quarter <= 3; ++quarter) {
+                int y = bottom - height * quarter / 4;
+                if(y < live_y - 1) fb_px(s, left + column, y, COL_GRID);
+            }
+    }
+    fb_hline(s, left, left + width - 1, bottom + 1, rgb565(0,35,90));
+    fb_hline(s, left, left + width - 1, bottom + 2, rgb565(0,12,35));
+    for(int age = 0; age < rows; ++age) {
+        const uint8_t* row = s->wf + subghz_spectrum_history_row(s->wf_write, age, WF_ROWS_MAX) * BINS;
+        for(int column = 0; column < width; ++column) {
+            unsigned position = (unsigned)column * (s->bins - 1) * 256 / (width - 1);
+            unsigned bin = position / 256, fraction = position % 256;
+            unsigned level = row[bin];
+            if(bin + 1 < s->bins) level = (level * (256 - fraction) + row[bin + 1] * fraction) / 256;
+            uint16_t color = subghz_spectrum_sdr_color(level);
+            fb_px(s, left + column, waterfall_top + age, (uint16_t)((color << 8) | (color >> 8)));
+        }
+    }
+    char label[64];
+    uint32_t start = s->center - s->span / 2;
+    for(unsigned tick = 0; tick < 5; ++tick) {
+        fmt_mhz(start + (uint64_t)s->span * tick / 4, label, sizeof(label), 2);
+        int x = left + tick * (width - 1) / 4 - text_width(label, 1) / 2;
+        if(x < left) x = left;
+        if(x + text_width(label, 1) > left + width) x = left + width - text_width(label, 1);
+        fb_text(s, x, ruler, label, COL_TEXT_DIM, 1);
+    }
+    if(s->has_data && s->rssi[strongest] > -127.0f) {
+        char freq[16];
+        fmt_mhz(subghz_spectrum_bin_frequency(s->center, s->span, strongest, s->bins, true), freq, sizeof(freq), 3);
+        snprintf(label, sizeof(label), "%ddBm %sMHz  ROTATE PAN", (int)s->rssi[strongest], freq);
+    } else {
+        snprintf(label, sizeof(label), "NO DATA  ROTATE PAN");
+    }
+    fb_text(s, left, footer, label, COL_TEXT, 1);
+}
+
 static void subghz_spectrum_compose(SubGhzSpectrum* s) {
+    if(s->spectrogram) { subghz_spectrogram_compose(s); return; }
     const int w = s->w;
     const int h = s->h;
-    const int spec_h = (h * 56) / 100; // spectrum region height (~95)
-    const int plot_top = 16; // reserve top strip for the readout
+    const int spec_h = (h * 60) / 100;
+    const int plot_top = 34; // title, raw measurement and parameter rows
     const int plot_bottom = spec_h - 10; // reserve bottom strip for freq ticks
     const int plot_h = plot_bottom - plot_top;
-    const int wf_h = h - spec_h;
+    const int wf_h = h - spec_h - 10; // footer identifies hold mode / pause
 
     memset(s->fb, 0, (size_t)w * h * sizeof(uint16_t)); // black
 
@@ -272,55 +373,84 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
     uint32_t stepf = s->span / BINS;
     uint32_t cursor_freq = f_start + (uint32_t)s->cursor * stepf + stepf / 2;
 
-    // --- traces (max-hold cyan, then live red) ---
+    unsigned peak_bin = 0;
+    for(unsigned i = 1; i < BINS; ++i)
+        if(s->rssi[i] > s->rssi[peak_bin]) peak_bin = i;
+
+    // --- traces (visual interpolation, never extra measurement bins) ---
     if(s->has_data) {
-        int px = 0, py_hold = 0, py = 0;
-        for(int i = 0; i < BINS; i++) {
-            int x = i * (w - 1) / (BINS - 1);
-            int yh = plot_bottom - (int)(subghz_norm(s->peak[i]) * plot_h);
-            int yl = plot_bottom - (int)(subghz_norm(s->rssi[i]) * plot_h);
-            if(i > 0) {
-                fb_line(s, px, py_hold, x, yh, COL_HOLD);
-                fb_line(s, px, py, x, yl, COL_TRACE);
+        const float* live = s->spectrogram ? s->displayed : s->rssi;
+        int previous_hold = 0, previous_live = 0;
+        int peak_column = peak_bin * (w - 1) / (BINS - 1);
+        for(int x = 0; x < w; x++) {
+            int yh = plot_bottom - (int)(subghz_norm(subghz_spectrum_interpolate(s->peak, BINS, x, w)) * plot_h);
+            int yl = plot_bottom - (int)(subghz_norm(subghz_spectrum_interpolate(live, BINS, x, w)) * plot_h);
+            if(s->spectrogram) {
+                bool highlight = x >= peak_column - w / 40 && x <= peak_column + w / 40;
+                fb_vline(s, x, yl, plot_bottom, highlight ? COL_BODY_PEAK : COL_BODY);
             }
-            px = x;
-            py_hold = yh;
-            py = yl;
+            if(x > 0) {
+                if(s->peak_hold || s->peak_decay) fb_line(s, x - 1, previous_hold, x, yh, COL_HOLD);
+                fb_line(s, x - 1, previous_live, x, yl, COL_TRACE);
+            }
+            previous_hold = yh;
+            previous_live = yl;
         }
     }
 
     // --- cursor ---
     int cx = s->cursor * (w - 1) / (BINS - 1);
     fb_vline(s, cx, plot_top, plot_bottom, COL_CURSOR);
+    int threshold_y = plot_bottom - (int)(subghz_norm(s->threshold) * plot_h);
+    fb_hline(s, 0, w - 1, threshold_y, COL_TEXT_DIM);
 
     // --- waterfall ---
     for(int r = 0; r < wf_h && r < WF_ROWS_MAX; r++) {
-        uint8_t* row = &s->wf[r * BINS];
+        size_t history_row = subghz_spectrum_history_row(s->wf_write, r, WF_ROWS_MAX);
+        uint8_t* row = &s->wf[history_row * BINS];
         int y = spec_h + r;
         for(int x = 0; x < w; x++) {
-            int bin = x * BINS / w;
-            if(bin >= BINS) bin = BINS - 1;
-            fb_px(s, x, y, magma(row[bin] / 255.0f));
+            unsigned position = (unsigned)x * (BINS - 1) * 256 / (w - 1);
+            unsigned bin = position / 256;
+            unsigned fraction = position % 256;
+            unsigned level = row[bin];
+            if(bin + 1 < BINS) level = (row[bin] * (256 - fraction) + row[bin + 1] * fraction) / 256;
+            uint16_t color = subghz_spectrum_sdr_color((uint8_t)level);
+            color = (uint16_t)((color << 8) | (color >> 8));
+            fb_px(s, x, y, s->spectrogram ? color : magma(level / 255.0f));
         }
     }
     // cursor column marker in the waterfall
-    fb_vline(s, cx, spec_h, h - 1, COL_CURSOR);
+    fb_vline(s, cx, spec_h, spec_h + wf_h - 1, COL_CURSOR);
 
     // --- text: readout ---
-    char buf[40];
-    const char* tag = (s->adjust == SubGhzSpectrumAdjustCursor) ? "CUR" :
-                      (s->adjust == SubGhzSpectrumAdjustCenter) ? "CEN" :
-                                                                  "SPN";
-    fb_text(s, 2, 2, tag, COL_CURSOR, 2);
+    char buf[64];
+    const char* tags[] = {"CUR", "CEN", "SPN", "STEP", "DWL", "THR", "HOLD", "RUN"};
+    const char* tag = tags[s->adjust];
+    fb_text(s, 2, 2, s->spectrogram ? "SPECTROGRAM" : "SPECTRUM", COL_TEXT, 1);
+    fb_text(s, 92, 2, tag, COL_CURSOR, 1);
 
     char fbuf[16];
-    fmt_mhz(cursor_freq, fbuf, sizeof(fbuf), 2);
+    fmt_mhz(cursor_freq, fbuf, sizeof(fbuf), 3);
     if(s->has_data) {
-        snprintf(buf, sizeof(buf), "f=%s P=%ddB", fbuf, (int)s->rssi[s->cursor]);
+        snprintf(buf, sizeof(buf), "CUR %s %ddBm", fbuf, (int)s->rssi[s->cursor]);
     } else {
-        snprintf(buf, sizeof(buf), "f=%s", fbuf);
+        snprintf(buf, sizeof(buf), "CUR %s", fbuf);
     }
-    fb_text(s, w - text_width(buf, 1) - 2, 4, buf, COL_TEXT, 1);
+    fb_text(s, 2, 12, buf, COL_TEXT, 1);
+    if(s->has_data && s->rssi[peak_bin] > -127.0f) {
+        fmt_mhz(f_start + peak_bin * stepf + stepf / 2, fbuf, sizeof(fbuf), 3);
+        snprintf(buf, sizeof(buf), "PK %s %ddBm", fbuf, (int)s->rssi[peak_bin]);
+        fb_text(s, w - text_width(buf, 1) - 2, 12, buf, COL_HOLD, 1);
+    } else {
+        fb_text(s, w - 44, 12, "PK NONE", COL_TEXT_DIM, 1);
+    }
+    snprintf(buf, sizeof(buf), "STEP %luHz DWL %u THR %d %s",
+        (unsigned long)stepf, s->dwell_ms, s->threshold, s->paused ? "PAUSE" : "RUN");
+    fb_text(s, 2, 23, buf, COL_TEXT_DIM, 1);
+    snprintf(buf, sizeof(buf), "HOLD %s  %s",
+        s->peak_hold ? "HOLD" : s->peak_decay ? "DECAY" : "OFF", s->paused ? "PAUSE" : "RUN");
+    fb_text(s, 2, h - 8, buf, COL_TEXT_DIM, 1);
 
     // --- text: frequency ticks along the spectrum baseline ---
     fmt_mhz(f_start, buf, sizeof(buf), 1);
@@ -335,13 +465,11 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
 static void subghz_spectrum_blit(SubGhzSpectrum* s) {
     const int w = s->w;
     const int h = s->h;
-    furi_hal_spi_bus_lock();
     for(int y0 = 0; y0 < h; y0 += STRIPE_H) {
         int rows = (y0 + STRIPE_H > h) ? (h - y0) : STRIPE_H;
         memcpy(s->stripe, &s->fb[(size_t)y0 * w], (size_t)rows * w * sizeof(uint16_t));
-        esp_lcd_panel_draw_bitmap(s->panel, 0, y0, w, y0 + rows, s->stripe);
+        if(!furi_hal_display_draw_rgb565(0, y0, w, rows, s->stripe)) break;
     }
-    furi_hal_spi_bus_unlock();
 }
 
 static int32_t subghz_spectrum_render_thread(void* context) {
@@ -371,10 +499,12 @@ static int32_t subghz_spectrum_render_thread(void* context) {
 /* ---- input (runs on the input pubsub thread) ---------------------------- */
 static void subghz_spectrum_reset_data(SubGhzSpectrum* s) {
     for(int i = 0; i < BINS; i++) {
-        s->rssi[i] = RSSI_FLOOR;
-        s->peak[i] = RSSI_FLOOR;
+        s->rssi[i] = s->spectrogram ? -100.0f : RSSI_FLOOR;
+        s->peak[i] = s->rssi[i];
+        s->displayed[i] = s->rssi[i];
     }
     memset(s->wf, 0, (size_t)WF_ROWS_MAX * BINS);
+    s->wf_write = 0;
     s->has_data = false;
 }
 
@@ -397,6 +527,31 @@ static void subghz_spectrum_input_callback(const void* value, void* context) {
         return;
     }
 
+    if(s->spectrogram) {
+        bool toggle = event->key == InputKeyOk && event->type == InputTypeShort;
+        bool direction = (event->type == InputTypePress || event->type == InputTypeRepeat) &&
+            (event->key == InputKeyUp || event->key == InputKeyDown || event->key == InputKeyLeft || event->key == InputKeyRight);
+        if(!toggle && !direction) return;
+        furi_mutex_acquire(s->mutex, FuriWaitForever);
+        if(toggle) s->paused = !s->paused;
+        if(direction) {
+            int sign = event->key == InputKeyDown || event->key == InputKeyRight ? 1 : -1;
+            int64_t center = (int64_t)s->center + sign * (int64_t)subghz_spectrum_pan_step(s->span);
+            int64_t low = CENTER_MIN + s->span / 2, high = CENTER_MAX - (s->span - s->span / 2);
+            if(center < low) center = low;
+            if(center > high) center = high;
+            s->center = center;
+            subghz_spectrum_reset_data(s); // never mix different frequency axes in history
+        }
+        uint32_t center = s->center, span = s->span;
+        bool paused = s->paused;
+        s->dirty = true;
+        furi_mutex_release(s->mutex);
+        if(direction) subghz_spectrum_worker_set_window(s->worker, center, span);
+        if(toggle) subghz_spectrum_worker_set_controls(s->worker, paused, s->dwell_ms);
+        return;
+    }
+
     // OK short -> cycle the active control
     if(event->key == InputKeyOk && event->type == InputTypeShort) {
         furi_mutex_acquire(s->mutex, FuriWaitForever);
@@ -413,6 +568,7 @@ static void subghz_spectrum_input_callback(const void* value, void* context) {
 
     int dir = (event->key == InputKeyDown || event->key == InputKeyRight) ? 1 : -1;
     bool changed_window = false;
+    bool changed_controls = false;
     uint32_t new_center = 0, new_span = 0;
 
     furi_mutex_acquire(s->mutex, FuriWaitForever);
@@ -446,15 +602,52 @@ static void subghz_spectrum_input_callback(const void* value, void* context) {
         changed_window = true;
         break;
     }
+    case SubGhzSpectrumAdjustStep: {
+        int64_t span = (int64_t)s->span + dir * (int64_t)BINS * 2500;
+        if(span < 128000) span = 128000;
+        if(span > 16000000) span = 16000000;
+        s->span = (uint32_t)span;
+        subghz_spectrum_reset_data(s);
+        changed_window = true;
+        break;
+    }
+    case SubGhzSpectrumAdjustDwell:
+        if(dir > 0 && s->dwell_ms < 20) ++s->dwell_ms;
+        if(dir < 0 && s->dwell_ms > 1) --s->dwell_ms;
+        changed_controls = true;
+        break;
+    case SubGhzSpectrumAdjustThreshold:
+        s->threshold += dir;
+        if(s->threshold < -95) s->threshold = -95;
+        if(s->threshold > -30) s->threshold = -30;
+        break;
+    case SubGhzSpectrumAdjustHold:
+        /* OFF -> DECAY (beta behavior) -> HOLD, bounded in both directions. */
+        if(dir > 0) {
+            if(s->peak_decay) { s->peak_hold = true; s->peak_decay = false; }
+            else if(!s->peak_hold) s->peak_decay = true;
+        } else {
+            if(s->peak_hold) { s->peak_hold = false; s->peak_decay = true; }
+            else s->peak_decay = false;
+        }
+        for(int i = 0; i < BINS; ++i) s->peak[i] = s->rssi[i];
+        break;
+    case SubGhzSpectrumAdjustRun:
+        s->paused = dir < 0;
+        changed_controls = true;
+        break;
     default:
         break;
     }
     new_center = s->center;
     new_span = s->span;
+    bool paused = s->paused;
+    uint16_t dwell_ms = s->dwell_ms;
     s->dirty = true;
     furi_mutex_release(s->mutex);
 
     if(changed_window) subghz_spectrum_worker_set_window(s->worker, new_center, new_span);
+    if(changed_controls) subghz_spectrum_worker_set_controls(s->worker, paused, dwell_ms);
 }
 
 /* ---- worker sweep callback (runs on the worker thread) ------------------ */
@@ -462,18 +655,21 @@ static void subghz_spectrum_sweep_callback(
     void* context,
     const float* rssi,
     uint32_t center,
-    uint32_t span) {
+    uint32_t span,
+    uint16_t bins) {
     SubGhzSpectrum* s = context;
     furi_mutex_acquire(s->mutex, FuriWaitForever);
-    if(s->wf && s->center == center && s->span == span) {
-        // scroll waterfall down (row 0 = newest)
-        memmove(&s->wf[BINS], &s->wf[0], (size_t)(WF_ROWS_MAX - 1) * BINS);
-        for(int i = 0; i < BINS; i++) {
+    if(s->wf && !s->paused && s->center == center && s->span == span && bins == s->bins) {
+        uint8_t* row = &s->wf[s->wf_write * BINS];
+        for(int i = 0; i < bins; i++) {
             s->rssi[i] = rssi[i];
-            s->peak[i] -= 0.5f;
+            s->displayed[i] += (rssi[i] - s->displayed[i]) / 3.0f;
+            if(s->peak_decay) s->peak[i] -= s->spectrogram ? 0.7f : 0.65f;
+            if(!s->peak_hold && !s->peak_decay) s->peak[i] = rssi[i];
             if(rssi[i] > s->peak[i]) s->peak[i] = rssi[i];
-            s->wf[i] = (uint8_t)(subghz_norm(rssi[i]) * 255.0f);
+            row[i] = (uint8_t)((s->spectrogram ? subghz_waterfall_norm(rssi[i]) : subghz_norm(rssi[i])) * 255.0f);
         }
+        s->wf_write = (s->wf_write + 1) % WF_ROWS_MAX;
         s->has_data = true;
         s->dirty = true;
     }
@@ -490,8 +686,9 @@ void subghz_spectrum_set_callback(
     instance->context = context;
 }
 
-void subghz_spectrum_start(SubGhzSpectrum* instance) {
+bool subghz_spectrum_start(SubGhzSpectrum* instance) {
     furi_assert(instance);
+    if(instance->running) return true;
 
     instance->w = furi_hal_display_get_h_res();
     instance->h = furi_hal_display_get_v_res();
@@ -501,17 +698,32 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
     instance->wf = heap_caps_malloc((size_t)WF_ROWS_MAX * BINS, MALLOC_CAP_SPIRAM);
     instance->stripe =
         heap_caps_malloc((size_t)instance->w * STRIPE_H * sizeof(uint16_t), MALLOC_CAP_DMA);
+    if(!instance->fb || !instance->wf || !instance->stripe) {
+        subghz_spectrum_stop(instance);
+        return false;
+    }
 
-    instance->center = 433920000UL;
-    instance->span = 6000000UL;
-    instance->cursor = BINS / 2;
+    if(!instance->configured_window) {
+        instance->center = instance->spectrogram ? 434000000UL : 433920000UL;
+        instance->span = instance->spectrogram ? 2000000UL : 6000000UL;
+    }
+    instance->bins = instance->spectrogram ? SUBGHZ_WATERFALL_BINS : BINS;
+    instance->cursor = instance->bins / 2;
     instance->adjust = SubGhzSpectrumAdjustCursor;
+    instance->paused = false;
+    instance->peak_hold = !instance->spectrogram;
+    instance->peak_decay = instance->spectrogram;
+    instance->threshold = -70;
+    instance->dwell_ms = 3;
     subghz_spectrum_reset_data(instance);
     instance->dirty = true;
 
     // Worker
     instance->worker = subghz_spectrum_worker_alloc();
+    if(!instance->worker) { subghz_spectrum_stop(instance); return false; }
+    subghz_spectrum_worker_set_spectrogram(instance->worker, instance->spectrogram);
     subghz_spectrum_worker_set_window(instance->worker, instance->center, instance->span);
+    subghz_spectrum_worker_set_controls(instance->worker, false, instance->dwell_ms);
     subghz_spectrum_worker_set_callback(
         instance->worker, subghz_spectrum_sweep_callback, instance);
 
@@ -527,11 +739,17 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
     furi_thread_start(instance->render_thread);
 
     subghz_spectrum_worker_start(instance->worker);
+    return true;
 }
 
 void subghz_spectrum_stop(SubGhzSpectrum* instance) {
     furi_assert(instance);
-    if(!instance->render_thread) return; // start() was never called
+    instance->running = false;
+    /* Drain input callbacks before destroying the worker they configure. */
+    if(instance->input_sub) {
+        furi_pubsub_unsubscribe(instance->input, instance->input_sub);
+        instance->input_sub = NULL;
+    }
 
     // Stop sweeps first (frees the SPI bus for the final render teardown).
     if(instance->worker && subghz_spectrum_worker_is_running(instance->worker)) {
@@ -540,14 +758,12 @@ void subghz_spectrum_stop(SubGhzSpectrum* instance) {
 
     // Stop the render loop; the thread releases direct-draw before it returns.
     instance->running = false;
-    furi_thread_join(instance->render_thread);
-    furi_thread_free(instance->render_thread);
-    instance->render_thread = NULL;
-
-    if(instance->input_sub) {
-        furi_pubsub_unsubscribe(instance->input, instance->input_sub);
-        instance->input_sub = NULL;
+    if(instance->render_thread) {
+        furi_thread_join(instance->render_thread);
+        furi_thread_free(instance->render_thread);
+        instance->render_thread = NULL;
     }
+
     if(instance->input) {
         furi_record_close(RECORD_INPUT_EVENTS);
         instance->input = NULL;
@@ -582,7 +798,8 @@ static void subghz_spectrum_view_draw(Canvas* canvas, void* model) {
 }
 
 SubGhzSpectrum* subghz_spectrum_alloc(void) {
-    SubGhzSpectrum* instance = malloc(sizeof(SubGhzSpectrum));
+    SubGhzSpectrum* instance = heap_caps_calloc(1, sizeof(SubGhzSpectrum), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    furi_check(instance);
     memset(instance, 0, sizeof(SubGhzSpectrum));
     instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     instance->view = view_alloc();
@@ -602,4 +819,20 @@ void subghz_spectrum_free(SubGhzSpectrum* instance) {
 View* subghz_spectrum_get_view(SubGhzSpectrum* instance) {
     furi_assert(instance);
     return instance->view;
+}
+
+void subghz_spectrum_set_spectrogram(SubGhzSpectrum* instance, bool enabled) {
+    furi_assert(instance);
+    furi_assert(!instance->running);
+    instance->spectrogram = enabled;
+}
+
+bool subghz_spectrum_configure_window(SubGhzSpectrum* instance, uint32_t start, uint32_t end) {
+    furi_assert(instance && !instance->running);
+    if(start < CENTER_MIN || end > CENTER_MAX || end <= start || end - start < 1000 ||
+       !subghz_spectrum_frequency_supported(start) || !subghz_spectrum_frequency_supported(end)) return false;
+    instance->span = end - start;
+    instance->center = start + instance->span / 2;
+    instance->configured_window = true;
+    return true;
 }

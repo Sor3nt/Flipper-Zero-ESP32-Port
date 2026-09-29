@@ -1,25 +1,24 @@
-"""Host tests: python tests/bw16/run.py [--zig path/to/zig.exe]."""
-import argparse, os, pathlib, shutil, subprocess
-p=argparse.ArgumentParser()
-p.add_argument('--zig')
-a=p.parse_args()
-root=pathlib.Path(__file__).resolve().parents[2]
+"""Run real protocol, control, UART/GPS and UI code against host boundaries."""
+from pathlib import Path
+import os, sys
+root=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(root/'tests/host'))
+from host_build import run
 os.chdir(root)
-out=root/'build_host_bw16'
-out.mkdir(exist_ok=True)
-env=os.environ.copy()
-env.setdefault('ZIG_GLOBAL_CACHE_DIR',str(out/'zig-cache'))
-compiler=[a.zig,'cc'] if a.zig else [shutil.which('cc') or 'cc']
+out=root/'build_t_embed/host_bw16'
+out.mkdir(parents=True,exist_ok=True)
 app=root/'applications_user/bw16_r4tkn'
-for name in ['protocol','uart','pins','guard','control']:
-    exe=out/('test_'+name+('.exe' if os.name=='nt' else ''))
-    args=compiler+['-std=c11','-Wall','-Wextra','-Werror','-g','-I'+str(app)]
-    if os.name!='nt': args+=['-fsanitize=address,undefined']
-    if name in ['uart','pins','guard']: args+=['-Itests/bw16/stubs','-Icomponents/furi_hal']
-    source=app/f'bw16_{name}.c'
-    if name in ['pins','guard']:
-        args+=['-DBOARD_INCLUDE="board_test.h"']
-        source=root/('components/furi_hal/furi_hal_shared_pins.c' if name=='pins' else 'components/furi_hal/furi_hal_bw16_guard.c')
-    extra=[str(app/'bw16_protocol.c')] if name=='control' else []
-    subprocess.run(args+[f'tests/bw16/test_{name}.c',str(source),*extra,'-o',str(exe)],env=env,check=True)
-    subprocess.run([str(exe)],check=True)
+gps=root/'applications_user/wardriver'
+for name in ('protocol','control','selection','batch','uart'):
+    sources=[app/f'bw16_{name}.c']
+    if name in ('control','selection'): sources+=[app/'bw16_protocol.c']
+    if name=='batch': sources+=[app/'bw16_control.c',app/'bw16_protocol.c']
+    if name=='uart': sources+=[gps/'wardriver_gps.c',gps/'wardriver_nmea.c']
+    exe=out/f'test_{name}'
+    run(['gcc','-std=c17','-Wall','-Wextra','-Werror','-O1','-g',
+         '-fsanitize=address,undefined','-I'+str(root/'tests/bw16/stubs'),
+         '-I'+str(app),'-I'+str(gps),'-I'+str(root/'components/furi_hal'),str(root/f'tests/bw16/test_{name}.c'),
+         *map(str,sources),'-lm','-o',str(exe)],check=True)
+    run([str(exe)],check=True)
+run([sys.executable,str(root/'tests/bw16/test_profile.py')],check=True)
+run([sys.executable,str(root/'tests/bw16/test_ui.py')],check=True)

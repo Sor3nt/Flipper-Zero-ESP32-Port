@@ -9,3 +9,5 @@ bool wardriver_log_record(WardriverLog* log, const WardriverNetwork* network);
 bool wardriver_log_flush(WardriverLog* log);
 bool wardriver_log_close(WardriverLog* log,WardriverLogProgress progress,void* context);
 bool wardriver_log_ok(const WardriverLog* log);
+/* False until the first uploadable GPS-tagged Wi-Fi observation is appended. */
+bool wardriver_log_has_records(const WardriverLog* log);

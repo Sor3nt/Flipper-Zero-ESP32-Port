@@ -42,11 +42,40 @@ int main(void) {
     previous=stages; wardriver_radio_quiesce(r); CHECK(stages==previous);
     wardriver_radio_stop(r); CHECK(restores==1 && !leased);
     wardriver_radio_stop(r); CHECK(restores==1);
+    /* Successfully reopen repeatedly, hearing the SAME address after each stop.
+     * Alternate full/nearby Find My advertisements, without cached hints. */
+    scan_error=false;
+    for(unsigned session=0;session<4;++session) {
+        q.count=0;
+        CHECK(wardriver_radio_start(r)); ble_ready(); wardriver_radio_poll(r,10);
+        ble_running(); wardriver_radio_poll(r,20);
+        CHECK(r->ble_scanning && r->scanning && r->monitor);
+        for(unsigned i=0;i<WARD_AP_WATCH;++i) CHECK(!r->monitor->aps[i].used);
+        memset(&adv,0,sizeof(adv)); adv.scan_rst.search_evt=ESP_GAP_SEARCH_INQ_RES_EVT;
+        adv.scan_rst.ble_addr_type=BLE_ADDR_TYPE_RANDOM; adv.scan_rst.rssi=-55;
+        memcpy(adv.scan_rst.bda,"\xCC\x01\x02\x03\x04\x05",6);
+        uint8_t payload[31]={30,0xFF,0x4C,0,0x12,0x19,0x10};
+        size_t length=31;
+        if(session%2) { payload[0]=7; payload[5]=2; length=8; }
+        memcpy(adv.scan_rst.ble_adv,payload,length); adv.scan_rst.adv_data_len=length;
+        ble_handler(ESP_GAP_BLE_SCAN_RESULT_EVT,&adv);
+        CHECK(q.count==1 && (q.rows[0].hints&WardriverHintAirTag));
+        CHECK(q.rows[0].confidence==WardConfidenceHigh);
+        /* An unexpected continuous-scan completion retries with backoff. */
+        unsigned before_retry=ble_scans;
+        adv.scan_rst.search_evt=ESP_GAP_SEARCH_INQ_CMPL_EVT;
+        ble_handler(ESP_GAP_BLE_SCAN_RESULT_EVT,&adv); wardriver_radio_poll(r,30);
+        CHECK(!r->ble_scanning && !r->ble_halted && r->ble_retries==1 && ble_scans==before_retry);
+        wardriver_radio_poll(r,1029); CHECK(ble_scans==before_retry);
+        wardriver_radio_poll(r,1030); CHECK(ble_scans==before_retry+1 && !r->ble_scanning);
+        ble_running(); wardriver_radio_poll(r,1040); CHECK(r->ble_scanning);
+        wardriver_radio_stop(r); CHECK(!owner && !callback_count && !r->monitor);
+    }
     /* Start again resets independent state. BLE init failure stays visible. */
     scan_error=false; ble_init_error=true;
     CHECK(wardriver_radio_start(r)); wardriver_radio_poll(r,100);
     CHECK(r->scanning && r->ble_halted && !strcmp(r->status,"BLE FAILED - WIFI RUNNING"));
-    wardriver_radio_stop(r); CHECK(restores==2);
+    wardriver_radio_stop(r); CHECK(restores==6);
     /* BLE parameter/start failures do not stop the Wi-Fi sweep. */
     ble_init_error=false; CHECK(wardriver_radio_start(r));
     esp_ble_gap_cb_param_t failure={.scan_param_cmpl={.status=1}};
@@ -62,6 +91,6 @@ int main(void) {
     worker_failure=true; r->scanning=false; r->next_scan=0;
     wardriver_radio_poll(r,11000); CHECK(!r->scanning && r->retries==1);
     worker_failure=false; wardriver_radio_stop(r); wardriver_radio_free(r);
-    puts("PASS: complete radio backend runs passive Wi-Fi/BLE together, isolates callbacks/errors, retries, drains before restore, and reopens");
+    puts("PASS: complete radio backend runs passive Wi-Fi/BLE together, isolates callbacks/errors, retries, drains before restore, and reopens; four same-address AirTag sessions and unexpected BLE completion recovery");
     return 0;
 }

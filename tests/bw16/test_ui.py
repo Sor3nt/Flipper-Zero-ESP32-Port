@@ -15,5 +15,7 @@ run(['gcc','-std=gnu17','-O1','-g','-ffunction-sections','-fdata-sections',
      '-I'+str(root/'tests/bw16/ui_stubs'),'-I'+str(root/'tests/bw16/stubs'),
      '-I'+str(app),'-I'+str(root/'components/furi_hal'),'-I'+str(u8g2),
      str(root/'tests/bw16/test_ui.c'),str(app/'bw16_control.c'),str(app/'bw16_protocol.c'),
+     str(app/'bw16_selection.c'),str(app/'bw16_batch.c'),
+     str(app/'bw16_capture.c'),str(app/'bw16_pcap.c'),
      *map(str,sources),'-Wl,--gc-sections','-o',str(exe)],check=True)
 run([str(exe),str(out/'controls-ui.pgm')],check=True)

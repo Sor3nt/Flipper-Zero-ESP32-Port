@@ -8,7 +8,14 @@ typedef void* QueueHandle_t;
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_STATE 1
 #define ESP_ERR_NOT_SUPPORTED 2
+#ifndef ESP_ERR_INVALID_RESPONSE
+#define ESP_ERR_INVALID_RESPONSE 3
+#endif
+#ifndef ESP_ERR_INVALID_ARG
+#define ESP_ERR_INVALID_ARG 4
+#endif
 #define UART_NUM_1 1
+#define UART_NUM_2 2
 #define UART_DATA_8_BITS 8
 #define UART_PARITY_DISABLE 0
 #define UART_STOP_BITS_1 1

@@ -1,8 +1,17 @@
-# Wardriver 1.3.2 for this ESP32-S3 firmware
+# Wardriver 1.4.0 for this ESP32-S3 firmware
 
 Passive Wi-Fi/BLE surveying for the LILYGO T-Embed CC1101 Plus. This is an
 Xtensa ESP32-S3 FAP. Install it with matching firmware using the
 [deployment guide](../../BW16-DEPLOYMENT.md).
+
+## Version 1.4.0: device labels and counter-surveillance
+
+Adds specific tracker labels, short Find My advertisements, SquachWatch-inspired
+camera/glasses/radio-tool signatures, Remote ID positions, passive deauth-burst
+and possible evil-twin detection, evidence/confidence, detection filters and a
+live signal page. See [coverage and limitations](DETECTIONS.md), including the
+upstream attribution and the repeat-scan regression cases. Generic module OUIs
+are not treated as product identities. Version 1.3.2's startup fix is retained.
 
 ## Version 1.3.2: startup exit fix
 
@@ -15,12 +24,12 @@ cause still needs serial-log confirmation.
 
 Startup now attempts its actual allocations and releases partial allocations on
 failure. Failures returned by allocation APIs show the failed stage and internal
-RAM statistics in a dialog; USB logs also identify version 1.3.2 and memory sizes.
+RAM statistics in a dialog; USB logs also identify the running version and memory sizes.
 If even an error dialog cannot allocate, the USB log retains the reason. Firmware
 helpers that assert internally on severe exhaustion remain firmware limitations.
 The app's atomic control object still stays in internal RAM.
 
-About / limits shows version 1.3.2.
+About / limits now shows version 1.4.0.
 
 Host checks exercise the actual entry point with 4/8/32 KiB largest-block values,
 six injected allocation failures and normal cleanup. Windows optimized host tests
@@ -37,8 +46,9 @@ are checked against the matching firmware. A device retry is still required.
 - Broadcast hints and supported Remote ID fields, labelled as clues rather than
   proof of a particular product, camera, tracker or drone. Randomized MACs do
   not identify a manufacturer.
-- Buffered local CSV logs, optional NMEA GPS, and separate WiGLE CSV files only
-  for positioned Wi-Fi observations. Stale GPS fixes are not reused for new rows.
+- A single buffered WiGLE/WDGWars-compatible CSV, created only for Wi-Fi
+  observations with valid GPS fix and UTC. No GPS fix means no CSV file.
+  Stale fixes are not reused; live BLE/RID detection does not create extra files.
 - The optional WiGLE upload/configuration UI is retained. It sends only after
   explicit selection and confirmation; upload tests use simulated HTTP, not the
   real service. No account or captured scan data was uploaded in this integration.
@@ -128,7 +138,18 @@ wiring, SD-card reliability or actual WiGLE service acceptance.
    incrementally during scanning; allow it time to finish.
 3. Confirm known nearby Wi-Fi/BLE observations and vendor names for public MACs.
    Randomized addresses should not be assigned a vendor from their prefix.
-4. Stop, inspect the local CSV, then exit and repeat. Check that other normal
+4. Stop, confirm no CSV was created without GPS, then exit and repeat. Check that other normal
    Wi-Fi apps and the previous Bluetooth state still work afterward.
 5. Test BW16 separately using its prepare/connect/disconnect sequence. No
    deauthentication, beacon flooding or upload is part of the smoke test.
+# Unified uploads (1.5.2)
+
+The single Uploads screen includes the WDGWars API key stored in
+`/ext/apps_data/wardriver/wdgwars.conf` (`API Key: <64 hex characters>`).
+Stop scanning, connect normal firmware Wi-Fi, choose a saved GPS
+`wardrive_*_wigle.csv`, then explicitly confirm upload.
+WiGLE credentials and the working GPS configuration are unchanged.
+Set both services' credentials on this screen, choose one CSV, then select
+**Upload to both** to confirm both sequential uploads. Each service has its own
+result page. Check both accounts before repeating a partial/uncertain upload.
+See [WDGWARS_UPLOAD.md](../../docs/WDGWARS_UPLOAD.md) for setup and limits.

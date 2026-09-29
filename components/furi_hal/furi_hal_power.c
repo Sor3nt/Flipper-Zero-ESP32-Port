@@ -22,6 +22,10 @@
 #include <esp_timer.h>
 #include <driver/gpio.h>
 
+#if SOC_PM_SUPPORT_EXT0_WAKEUP
+#include <driver/rtc_io.h>
+#endif
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -543,7 +547,7 @@ static void furi_hal_power_prepare_shutdown(void) {
     while(gpio_get_level((gpio_num_t)BOARD_PIN_BUTTON_BOOT) == 0) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    vTaskDelay(pdMS_TO_TICKS(200)); /* debounce */
+    vTaskDelay(pdMS_TO_TICKS(500)); /* let the mechanical switch settle */
 
 #ifdef BOARD_PIN_LCD_BL
     furi_hal_display_set_backlight(0);
@@ -573,9 +577,28 @@ static void furi_hal_power_enter_deep_sleep(void) {
      * re-wake immediately — unlike the side key (GPIO6), which floats LOW and
      * rebooted the device instantly (regression from the multi-boot PR). */
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
+    const gpio_num_t wake_gpio = (gpio_num_t)BOARD_PIN_BUTTON_BOOT;
+
+    /* EXT0 switches the pad from the normal digital GPIO function to RTC IO
+     * during the final sleep transition. Re-apply the pull-up in the RTC
+     * domain so a released encoder button cannot float LOW and immediately
+     * wake the chip. Clear any stale wake/hold state left by an older image. */
+    (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    (void)rtc_gpio_hold_dis(wake_gpio);
+    (void)rtc_gpio_init(wake_gpio);
+    (void)rtc_gpio_set_direction(wake_gpio, RTC_GPIO_MODE_INPUT_ONLY);
+    (void)rtc_gpio_pullup_en(wake_gpio);
+    (void)rtc_gpio_pulldown_dis(wake_gpio);
+
+    esp_err_t wake_err = esp_sleep_enable_ext0_wakeup(wake_gpio, 0);
+    if(wake_err != ESP_OK) {
+        FURI_LOG_E(TAG, "Failed to configure power-button wake: %s", esp_err_to_name(wake_err));
+    }
 #else
-    esp_deep_sleep_enable_gpio_wakeup(BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
+    gpio_pullup_en((gpio_num_t)BOARD_PIN_BUTTON_BOOT);
+    gpio_pulldown_dis((gpio_num_t)BOARD_PIN_BUTTON_BOOT);
+    esp_deep_sleep_enable_gpio_wakeup(
+        BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
 #endif
     /* Clear the deep-sleep GPIO auto-hold bit. It lives in the RTC domain
      * (RTC_CNTL_DIG_ISO_REG) and SURVIVES resets/panics, so a firmware that once

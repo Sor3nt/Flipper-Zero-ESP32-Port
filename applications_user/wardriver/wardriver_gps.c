@@ -7,12 +7,10 @@ void wardriver_gps_start(WardriverGps* g,const WardriverConfig* c) {
     memset(g,0,sizeof(*g)); wardriver_nmea_init(&g->parser);
     g->parser.data.enabled=c->gps_mode!=0;
     if(!c->gps_mode) { strcpy(g->status,"OFF"); return; }
-    /* The BW16 guard's swapped UART protocol does not authorize a GPS module
-     * to take NRF CE/CS. GPS has no prepare/disconnect workflow. Reject shared
-     * pins before touching either UART or GPIO; the survey still works without GPS. */
-    if(c->gps_rx==43 || c->gps_rx==44 || c->gps_tx==43 || c->gps_tx==44) {
-        strcpy(g->status,"NRF PINS RESERVED"); return;
-    }
+    /* On the T-Embed CC1101, the external UART header is GPIO43 (TX) and
+     * GPIO44 (RX). Those pins are also offered for an optional external
+     * nRF24, but Wardriver does not initialize or use that peripheral, so
+     * they are valid GPS pins here. */
     strcpy(g->status,"WAITING");
     /* No pin is assigned automatically. Custom wiring must first be isolated
      * from its board peripheral. Never repurpose flash/PSRAM or USB pins.

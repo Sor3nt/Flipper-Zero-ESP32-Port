@@ -57,6 +57,14 @@ static void consume(WardriverApp* a,WardriverTable* table,WardriverGps* gps,
         WardriverNetwork* n=wardriver_table_observe(table,&observation,stamp,&position,&is_new);
         if(n) {
             if(is_new) {
+                if(observation.hints & WARDRIVER_NOTABLE_HINTS) {
+                    furi_mutex_acquire(a->lock,FuriWaitForever);
+                    if(wardriver_filter_match(&observation,a->model.filter,a->model.min_confidence)) {
+                        snprintf(a->model.alert,sizeof(a->model.alert),"NEW: %s",wardriver_hint_text(observation.primary_hint?observation.primary_hint:observation.hints));
+                        a->model.alert_until=now+5000;
+                    }
+                    furi_mutex_release(a->lock);
+                }
                 if(observation.random_address) strcpy(n->vendor,"Random BLE address");
                 else wardriver_oui_lookup(oui,observation.mac,n->vendor);
             }
@@ -68,14 +76,29 @@ static void publish(WardriverApp* a,WardriverTable* t,WardriverGps* gps,
                     WardriverRadio* radio,WardriverLog* log,WardriverNetwork* last,bool running) {
     furi_mutex_acquire(a->lock,FuriWaitForever);
     size_t selected=a->model.selected; bool notable_only=a->model.notable_only;
+    unsigned filter=a->model.filter; WardriverConfidence minimum=a->model.min_confidence;
+    bool detail=a->model.page==WardPageDetail;
+    WardriverObservation selected_device=a->model.rows[0].observation;
     furi_mutex_release(a->lock);
-    size_t list_count=notable_only?t->notable_count:t->count;
+    size_t list_count=t->count;
+    if(notable_only) {
+        list_count=0;
+        for(size_t i=0;i<t->capacity;++i) if(t->entries[i].used && wardriver_filter_match(&t->entries[i].observation,filter,minimum)) ++list_count;
+    }
     if(selected>=list_count) selected=list_count?list_count-1:0;
     WardriverNetwork rows[3]={0}; unsigned row_count=0; size_t index=0;
     for(size_t i=0;i<t->capacity && row_count<3;++i) {
         if(!t->entries[i].used) continue;
-        if(notable_only && !(t->entries[i].observation.hints & WARDRIVER_NOTABLE_HINTS)) continue;
+        if(notable_only && !wardriver_filter_match(&t->entries[i].observation,filter,minimum)) continue;
         if(index++>=selected) rows[row_count++]=t->entries[i];
+    }
+    bool detail_found=false;
+    WardriverNetwork current_detail={0};
+    if(detail) for(size_t i=0;i<t->capacity;++i) {
+        const WardriverNetwork* n=&t->entries[i];
+        if(n->used && n->observation.mode==selected_device.mode && n->observation.random_address==selected_device.random_address && !memcmp(n->observation.mac,selected_device.mac,6)) {
+            current_detail=*n; detail_found=true; break;
+        }
     }
     WardriverGpsData data=wardriver_nmea_snapshot(&gps->parser,now_ms());
     furi_mutex_acquire(a->lock,FuriWaitForever);
@@ -84,11 +107,15 @@ static void publish(WardriverApp* a,WardriverTable* t,WardriverGps* gps,
     m->wifi_count=t->wifi_count; m->ble_count=t->ble_count; m->notable_count=t->notable_count;
     m->overflow=t->overflow; m->dropped=wardriver_radio_dropped(radio);
     /* Keep the selected detail snapshot stable as new hash-table entries arrive. */
-    if(m->page!=WardPageDetail && m->notable_only==notable_only) {
+    if(m->page!=WardPageDetail && m->notable_only==notable_only && m->filter==filter && m->min_confidence==minimum) {
         m->selected=selected; m->list_count=list_count; m->row_count=row_count; memcpy(m->rows,rows,sizeof(rows));
     }
+    /* Update live RSSI/RID by identity, never by the moving list index. */
+    if(detail_found && m->page==WardPageDetail && m->rows[0].observation.mode==selected_device.mode &&
+       m->rows[0].observation.random_address==selected_device.random_address && !memcmp(m->rows[0].observation.mac,selected_device.mac,6)) m->rows[0]=current_detail;
     if(last) m->last=*last;
     m->gps=data; m->active=running; m->log_ok=wardriver_log_ok(log);
+    m->log_started=wardriver_log_has_records(log);
     m->wifi_online=wlan_hal_is_connected();
     snprintf(m->wifi_status,sizeof(m->wifi_status),"%s",wardriver_radio_wifi_status(radio));
     snprintf(m->ble_status,sizeof(m->ble_status),"%s",wardriver_radio_ble_status(radio));
@@ -96,6 +123,10 @@ static void publish(WardriverApp* a,WardriverTable* t,WardriverGps* gps,
     if(running) {
         snprintf(m->status,sizeof(m->status),"%s",wardriver_radio_status(radio));
         if(data.enabled && !gps->installed) snprintf(m->notice,sizeof(m->notice),"GPS: %s",gps->status);
+        else if(!m->log_ok) strcpy(m->notice,"SD ERROR - NOT SAVING");
+        else if(!data.has_fix || !data.timestamp_valid) strcpy(m->notice,"GPS FIX NEEDED - NOT SAVING");
+        else if(!m->log_started) strcpy(m->notice,"WAITING FOR GPS WI-FI DATA");
+        else m->notice[0]=0;
     }
     furi_mutex_release(a->lock); view_port_update(a->view);
 }
@@ -113,28 +144,51 @@ static bool wigle_cancelled(void* context) {
 static void wigle_process(WardriverApp* a,WardWigleCommand command) {
     WardWigleUpload job={.cancelled=wigle_cancelled,.progress=wigle_progress,.context=a};
     furi_mutex_acquire(a->lock,FuriWaitForever);
-    job.credentials=a->wigle_credentials;
+    bool wdg=command==WardWdgSave;
+    bool both=command==WardWigleSend;
+    job.service=wdg?WardUploadWdgWars:WardUploadWigle;
+    job.credentials=wdg?a->wdg_credentials:a->wigle_credentials;
     snprintf(job.path,sizeof(job.path),"%s",a->model.wigle_path);
     furi_mutex_release(a->lock);
     bool update=false;
-    if(command==WardWigleSend) wardriver_wigle_upload(&job);
-    else if(command==WardWigleSave) {
-        strcpy(job.result,wardriver_wigle_credentials_save(&job.credentials)?"Credentials saved on SD":"SD save failed; settings in RAM");
+    WardWigleCredentials loaded_wdg={0};
+    if(both) {
+        WardWigleUpload second={.cancelled=wigle_cancelled,.progress=wigle_progress,.context=a};
+        furi_mutex_acquire(a->lock,FuriWaitForever);
+        job.credentials=a->wigle_credentials; second.credentials=a->wdg_credentials;
+        furi_mutex_release(a->lock);
+        snprintf(second.path,sizeof(second.path),"%s",job.path);
+        wardriver_upload_both(&job,&second);
+        furi_mutex_acquire(a->lock,FuriWaitForever);
+        snprintf(a->model.upload_results[0],48,"%s",job.result);
+        snprintf(a->model.upload_results[1],48,"%s",second.result);
+        a->model.batch_result=true; a->model.upload_result_service=0;
+        furi_mutex_release(a->lock);
+        wardriver_wigle_erase(&second,sizeof(second));
+    } else if(command==WardWigleSave || command==WardWdgSave) {
+        bool ok=wdg?wardriver_wdg_credentials_save(&job.credentials):wardriver_wigle_credentials_save(&job.credentials);
+        strcpy(job.result,ok?"Credentials saved on SD":"SD save failed; settings in RAM");
     } else if(command==WardWigleReload) {
-        bool ok=wardriver_wigle_credentials_load(&job.credentials); update=true;
-        strcpy(job.result,ok?"Credentials loaded from SD":"wigle.conf missing or invalid");
+        bool wigle_ok=wardriver_wigle_credentials_load(&job.credentials);
+        bool wdg_ok=wardriver_wdg_credentials_load(&loaded_wdg); update=true;
+        strcpy(job.result,wigle_ok && wdg_ok?"Both credentials loaded from SD":
+            wigle_ok?"WiGLE loaded; set WDGWars key":wdg_ok?"WDGWars loaded; set WiGLE API":"Keys missing or invalid on SD");
     } else if(command==WardWigleClear) {
         wardriver_wigle_erase(&job.credentials,sizeof(job.credentials)); update=true;
-        strcpy(job.result,wardriver_wigle_credentials_clear()?"Credentials cleared":"RAM cleared; SD delete failed");
+        bool wigle_ok=wardriver_wigle_credentials_clear();
+        bool wdg_ok=wardriver_wdg_credentials_clear();
+        strcpy(job.result,wigle_ok && wdg_ok?"Both credentials cleared":"RAM cleared; SD delete failed");
     }
     furi_mutex_acquire(a->lock,FuriWaitForever);
-    if(update) a->wigle_credentials=job.credentials;
+    if(update) { a->wigle_credentials=job.credentials; a->wdg_credentials=loaded_wdg; }
+    a->model.wdg_key_set=wardriver_wdg_key_valid(a->wdg_credentials.token);
     a->model.wigle_name_set=a->wigle_credentials.name[0]!=0;
     a->model.wigle_token_set=a->wigle_credentials.token[0]!=0;
     a->model.wigle_busy=false; a->model.wigle_uploading=false;
     snprintf(a->model.wigle_status,sizeof(a->model.wigle_status),"%s",job.result);
     furi_mutex_release(a->lock);
-    wardriver_wigle_erase(&job,sizeof(job)); view_port_update(a->view);
+    wardriver_wigle_erase(&job,sizeof(job));
+    wardriver_wigle_erase(&loaded_wdg,sizeof(loaded_wdg)); view_port_update(a->view);
 }
 static int32_t wardriver_worker(void* context) {
     WardriverApp* a=context;
@@ -179,7 +233,7 @@ static int32_t wardriver_worker(void* context) {
             set_status(a,"STARTING GPS");
             furi_mutex_acquire(a->lock,FuriWaitForever);
             WardriverConfig config=a->model.config;
-            a->model.selected=0; a->model.notice[0]=0; memset(&a->model.last,0,sizeof(a->model.last));
+            a->model.selected=0; a->model.notice[0]=0; a->model.alert[0]=0; memset(&a->model.last,0,sizeof(a->model.last));
             furi_mutex_release(a->lock);
             memset(table.entries,0,table.capacity*sizeof(*table.entries));
             table.count=table.wifi_count=table.ble_count=table.notable_count=0;
@@ -194,7 +248,7 @@ static int32_t wardriver_worker(void* context) {
             if(running && !__atomic_load_n(&a->quit,__ATOMIC_ACQUIRE)) {
                 /* Begin the nonblocking scan before any optional vendor I/O. */
                 wardriver_radio_poll(radio,now_ms());
-                set_status(a,"OPENING SESSION LOG");
+                set_status(a,"WAITING FOR GPS FIX");
                 log=wardriver_log_open(furi_hal_rtc_get_timestamp(),esp_random()); flush_at=now_ms();
             }
             else {
@@ -210,14 +264,17 @@ static int32_t wardriver_worker(void* context) {
             consume(a,&table,&gps,oui,&last); wardriver_gps_stop(&gps);
             set_status(a,"SAVING LAST OBSERVATIONS");
             log_dirty(&table,log,&cursor,table.capacity);
+            bool recorded=wardriver_log_has_records(log);
             bool saved=wardriver_log_close(log,progress,a); log=NULL;
             set_status(a,"RESTORING RADIO"); radio_transition(a,true);
             wardriver_radio_stop(radio); radio_transition(a,false);
             bool restored=strcmp(wardriver_radio_status(radio),"RADIO RESTORE FAILED")!=0;
             running=false;
-            set_status(a,!restored?"RADIO RESTORE FAILED":saved?"SESSION SAVED":"STOPPED - SD ERROR");
+            const char* stopped=!restored?"RADIO RESTORE FAILED":!saved?"STOPPED - SD ERROR":
+                recorded?"SESSION SAVED":"NO GPS DATA - NOT SAVED";
+            set_status(a,stopped);
             furi_mutex_acquire(a->lock,FuriWaitForever);
-            strcpy(a->model.notice,!restored?"RADIO RESTORE FAILED":saved?"SESSION SAVED":"SESSION: SD ERROR");
+            strcpy(a->model.notice,stopped);
             a->model.active=false; a->model.transitioning=false;
             furi_mutex_release(a->lock);
         }
@@ -283,7 +340,7 @@ static void startup_error(const char* stage) {
     char text[96];
     snprintf(text,sizeof(text),"%s\nFree %u B\nLargest %u B",stage,(unsigned)available,(unsigned)largest);
     /* dialog_message_alloc does not initialize its fields in this port. */
-    dialog_message_set_header(message,"Wardriver 1.3.2",64,1,AlignCenter,AlignTop);
+    dialog_message_set_header(message,"Wardriver 1.5.2",64,1,AlignCenter,AlignTop);
     dialog_message_set_text(message,text,2,18,AlignLeft,AlignTop);
     dialog_message_set_icon(message,NULL,0,0);
     dialog_message_set_buttons(message,NULL,"Back",NULL);
@@ -298,7 +355,7 @@ int32_t wardriver_app(void* context) {
     /* Total free memory and the largest block are diagnostics, not an arbitrary
      * admission threshold. No startup allocation requires one 48 KiB block.
      * Keep the atomic control words in internal RAM; never move this object to PSRAM. */
-    FURI_LOG_I("Wardriver","Start 1.3.2: internal free=%u largest=%u app=%u",
+    FURI_LOG_I("Wardriver","Start 1.5.2: internal free=%u largest=%u app=%u",
                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
                (unsigned)sizeof(WardriverApp));
@@ -339,7 +396,8 @@ int32_t wardriver_app(void* context) {
     set_status(a,"JOINING WORKER"); furi_thread_join(a->worker); furi_thread_free(a->worker);
     gui_remove_view_port(a->gui,a->view); view_port_free(a->view); furi_record_close(RECORD_GUI);
     furi_message_queue_free(a->observations); furi_message_queue_free(a->inputs);
-    furi_mutex_free(a->lock); wardriver_wigle_erase(&a->wigle_credentials,sizeof(a->wigle_credentials)); free(a); return 0;
+    furi_mutex_free(a->lock); wardriver_wigle_erase(&a->wigle_credentials,sizeof(a->wigle_credentials));
+    wardriver_wigle_erase(&a->wdg_credentials,sizeof(a->wdg_credentials)); free(a); return 0;
 fail:
     if(a->view) view_port_free(a->view);
     if(a->observations) furi_message_queue_free(a->observations);

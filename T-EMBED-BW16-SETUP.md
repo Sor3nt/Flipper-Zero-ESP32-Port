@@ -12,13 +12,14 @@ the Plus profile reserves those pins for NRF. Do not interchange host images.
 Both listed bundles contain the **same BW16 I2C 4.5 firmware**. The separate
 ProtoPirate RX fix uses the same replacement FAP on both.
 
-**Availability and scope:** the I2C bundles above are separately distributed
-custom builds, not official upstream releases or binary attachments to this PR.
-Their flashing scripts/images are not generated merely by checking out this PR.
-The commands below apply only after obtaining and extracting one of those complete
-bundles. This PR's existing BW16 UART controller is documented separately in
-[BW16-DEPLOYMENT.md](BW16-DEPLOYMENT.md); it is not interchangeable with the I2C
-controller or this wiring. Do not mix UART and I2C instructions.
+**Availability and scope:** this PR now includes the I2C controller/companion,
+standalone map, Wardriver updates and both hardware profiles. See the
+[feature list and source-build instructions](T-EMBED-FEATURES.md). The named
+binary bundles above remain separately distributed custom builds, not official
+upstream releases or binary attachments to the PR. The bundle commands below
+apply after obtaining and extracting a complete bundle; checking out source alone
+does not create those files. Earlier UART wiring is documented separately in
+[BW16-DEPLOYMENT.md](BW16-DEPLOYMENT.md); do not mix UART and I2C instructions.
 
 ## Important: connect BW16 only with the Lilygo fully powered off
 
@@ -169,6 +170,20 @@ API Key: YOUR_64_CHARACTER_WDGWARS_API_KEY
 Preserve existing credentials instead of replacing them with this placeholder.
 Offline map areas remain in `apps_data/wdgwars_map/area1.wdg` through `area4.wdg`.
 The map and Wardriver remain separate apps.
+
+## BW16 handshake capture
+
+The I2C app includes **Capture handshake** for passive capture and a separate
+**Capture + deauth** option that starts the receiver before its bounded burst.
+Both save raw 802.11 PCAP files under `apps_data/bw16/captures/`, for example
+`capture_0001.pcap`, without replacing older captures. Capture is limited to the
+selected AP's BSSID/channel. Switching bands does not move that capture to the
+other channel. A saved file or a growing counter does not prove a complete
+handshake; partial exchanges and retries are preserved for inspection.
+
+See the [complete feature list](T-EMBED-FEATURES.md) for capture limits, online and
+offline maps, territory/streets coverage, Wardriver uploads, RF Waterfall and the
+ProtoPirate fix, including what has and has not been confirmed on hardware.
 
 ## Troubleshooting
 

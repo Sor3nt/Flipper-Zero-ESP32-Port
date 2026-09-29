@@ -4,7 +4,7 @@
 typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_FAIL -1
-enum { HTTP_METHOD_POST,HTTP_TRANSPORT_OVER_SSL,HTTP_AUTH_TYPE_BASIC };
+enum { HTTP_METHOD_POST,HTTP_TRANSPORT_OVER_SSL,HTTP_AUTH_TYPE_BASIC,HTTP_AUTH_TYPE_NONE };
 typedef struct Http* esp_http_client_handle_t;
 typedef struct {
     const char *url,*username,*password,*user_agent;

@@ -29,47 +29,68 @@ uint8_t u8g2_GetKerningByTable(u8g2_t* u,const uint16_t* k,uint16_t a,uint16_t b
 /* Exercise the production input handler, including repeated Start presses. */
 static void input_tests(void) {
     WardriverApp app={0}; InputEvent e={.key=InputKeyOk,.type=InputTypeShort};
-    wardriver_ui_handle(&app,&e);
-    if(app.want_running) abort(); /* Not ready: don't queue a hidden Start. */
-    app.model.ready=true;
-    wardriver_ui_handle(&app,&e);
+    wardriver_ui_handle(&app,&e); if(app.want_running) abort();
+    app.model.ready=true; wardriver_ui_handle(&app,&e);
     if(!app.want_running || !app.model.transitioning) abort();
     for(unsigned i=0;i<20;++i) wardriver_ui_handle(&app,&e);
-    if(!app.want_running) abort(); /* Repeated presses cannot cancel/restart. */
+    if(!app.want_running) abort();
     app.model.active=true; app.model.transitioning=false;
-    e.type=InputTypeRepeat; wardriver_ui_handle(&app,&e);
-    if(!app.want_running) abort(); /* A held knob is not repeated Start/Stop. */
+    e.type=InputTypeRepeat; wardriver_ui_handle(&app,&e); if(!app.want_running) abort();
     e.type=InputTypeShort; wardriver_ui_handle(&app,&e);
     if(app.want_running || !app.model.transitioning) abort();
-    wardriver_ui_handle(&app,&e);
-    if(app.want_running) abort();
-    e.key=InputKeyBack; wardriver_ui_handle(&app,&e);
-    if(!app.quit) abort(); /* Exit request remains available during transition. */
-    app=(WardriverApp){0}; app.model.ready=true; app.model.active=true;
-    app.model.page=WardPageMenu; app.model.menu=1; app.model.notable_count=3;
-    e.key=InputKeyOk; wardriver_ui_handle(&app,&e);
-    if(app.model.page!=WardPageList || !app.model.notable_only || app.model.list_count!=3) abort();
-    app.model.page=WardPageMenu; app.model.menu=2; wardriver_ui_handle(&app,&e);
-    if(app.model.page!=WardPageStats) abort();
-    e.key=InputKeyBack; wardriver_ui_handle(&app,&e);
-    if(app.model.page!=WardPageMenu) abort();
-    app=(WardriverApp){0}; app.model.ready=true; app.model.active=true;
-    app.model.page=WardPageMenu; app.model.menu=4; e.key=InputKeyOk;
-    wardriver_ui_handle(&app,&e);
-    if(app.model.page!=WardPageHome || app.wigle_command) abort(); /* Never upload while surveying. */
+    e.key=InputKeyBack; wardriver_ui_handle(&app,&e); if(!app.quit) abort();
+    app=(WardriverApp){0}; app.model.ready=true; app.model.page=WardPageMenu;
+    /* Exactly seven top-level entries, only index 4 opens Uploads. */
+    for(unsigned i=0;i<7;++i) {
+        e.key=InputKeyDown; wardriver_ui_handle(&app,&e);
+        if(app.model.menu!=(i+1)%7) abort();
+    }
+    app.model.menu=4; app.model.active=true; e.key=InputKeyOk;
+    wardriver_ui_handle(&app,&e); if(app.model.page!=WardPageHome || app.wigle_command) abort();
     app.model.active=false; app.model.page=WardPageMenu; wardriver_ui_handle(&app,&e);
-    if(app.model.page!=WardPageWigle) abort();
-    app.model.wigle_menu=3; app.model.wigle_name_set=app.model.wigle_token_set=true;
+    if(app.model.page!=WardPageWigle || app.model.wigle_menu) abort();
+    /* One page routes CSV + all three credential editors distinctly. */
+    const unsigned slots[]={0,2,3,4},actions[]={3,1,2,4};
+    for(unsigned i=0;i<4;++i) {
+        app.model.page=WardPageWigle; app.model.wigle_menu=slots[i];
+        wardriver_ui_handle(&app,&e);
+        if(!app.model.wigle_busy || app.wigle_action!=actions[i]) abort();
+        app.model.wigle_busy=false; app.wigle_action=0;
+    }
+    app.model.wigle_menu=1;
     strcpy(app.model.wigle_path,WARD_WIGLE_DIR "wardrive_1790164800_abcd1234_wigle.csv");
-    wardriver_ui_handle(&app,&e);
+    for(unsigned missing=0;missing<3;++missing) {
+        app.model.wigle_name_set=missing!=0; app.model.wigle_token_set=missing!=1;
+        app.model.wdg_key_set=missing!=2; app.model.page=WardPageWigle;
+        wardriver_ui_handle(&app,&e);
+        if(app.model.page!=WardPageUploadStatus || app.wigle_command) abort();
+    }
+    app.model.wigle_name_set=app.model.wigle_token_set=app.model.wdg_key_set=true;
+    app.model.page=WardPageWigle; wardriver_ui_handle(&app,&e);
     if(app.model.page!=WardPageUploadConfirm || app.wigle_command) abort();
     wardriver_ui_handle(&app,&e);
     if(app.wigle_command!=WardWigleSend || !app.model.wigle_busy || !app.model.wigle_uploading) abort();
+    app.wigle_command=WardWigleNone;
     for(unsigned i=0;i<10;++i) wardriver_ui_handle(&app,&e);
+    if(app.wigle_command) abort();
     e.key=InputKeyBack; wardriver_ui_handle(&app,&e);
-    if(!app.cancel_upload || app.quit || app.model.page!=WardPageUploadStatus) abort();
-    puts("PASS: upload requires idle radio and explicit confirmation; repeated OK gated; BACK cancels without unloading");
-    puts("PASS: production UI ignores repeated Start/Stop during transitions; BACK remains available");
+    if(!app.cancel_upload || app.quit) abort();
+    app.model.wigle_busy=app.model.wigle_uploading=false; app.model.batch_result=true;
+    e.key=InputKeyDown; wardriver_ui_handle(&app,&e); if(app.model.upload_result_service!=1) abort();
+    e.key=InputKeyUp; wardriver_ui_handle(&app,&e); if(app.model.upload_result_service) abort();
+    e.key=InputKeyBack; wardriver_ui_handle(&app,&e); if(app.model.page!=WardPageWigle) abort();
+    e.key=InputKeyOk; app.model.wigle_menu=5; wardriver_ui_handle(&app,&e);
+    if(app.wigle_command!=WardWigleReload || app.model.batch_result) abort();
+    app.model.wigle_busy=false; app.model.page=WardPageWigle; app.model.wigle_menu=6;
+    wardriver_ui_handle(&app,&e); if(app.wigle_command!=WardWigleClear) abort();
+    app.model.wigle_busy=false; app.model.page=WardPageMenu; app.model.menu=5;
+    wardriver_ui_handle(&app,&e); if(app.model.page!=WardPageFilter) abort();
+    e.key=InputKeyDown; wardriver_ui_handle(&app,&e); if(app.model.filter!=1) abort();
+    e.key=InputKeyOk; wardriver_ui_handle(&app,&e); if(app.model.min_confidence!=WardConfidenceLow) abort();
+    app.model.page=WardPageDetail; app.model.detail=0;
+    for(unsigned i=1;i<=7;++i) { wardriver_ui_handle(&app,&e); if(app.model.detail!=i%7) abort(); }
+    puts("PASS: single Uploads entry; one screen for CSV/both services/three credential fields/reload/clear");
+    puts("PASS: both credential gates, confirmation, duplicate-button guard, cancel, result switching and existing UI navigation");
 }
 void canvas_clear(Canvas* c) { u8g2_ClearBuffer(c); }
 void canvas_set_font(Canvas* c,Font f) { u8g2_SetFont(c,f==FontPrimary?u8g2_font_helvB08_tr:u8g2_font_haxrcorp4089_tr); }
@@ -102,8 +123,8 @@ int main(int argc,char** argv) {
     strcpy(m->rows[1].observation.ssid,"Possible camera"); m->rows[1].observation.hints=WardriverHintFlock; m->rows[1].observation.mode=WardriverBle;
     strcpy(m->rows[2].observation.ssid,"Remote ID"); m->rows[2].observation.hints=WardriverHintRemoteId; m->rows[2].observation.mode=WardriverBle;
     m->config=(WardriverConfig){.gps_mode=0,.gps_uart=2,.gps_rx=-1,.gps_tx=-1,.gps_baud=9600};
-    unsigned char pages[16][1024];
-    for(unsigned i=0;i<16;++i) {
+    unsigned char pages[24][1024];
+    for(unsigned i=0;i<24;++i) {
         m->page=i==0||i==1?WardPageHome:i==2?WardPageMenu:i==3?WardPageList:
             i==4?WardPageSettings:i==7?WardPageAbout:WardPageDetail;
         if(i==1) { strcpy(m->gps_status,"OFF"); m->gps.has_fix=false; m->gps.satellites_valid=false; }
@@ -114,20 +135,39 @@ int main(int argc,char** argv) {
         }
         if(i==9) { m->page=WardPageStats; strcpy(m->wifi_status,"SCAN"); strcpy(m->ble_status,"SCAN"); }
         if(i==10) { m->page=WardPageHome; m->wifi_count=4096; m->ble_count=0; m->notable_count=0; strcpy(m->status,"BLE FAILED - WIFI RUNNING"); }
-        if(i==11) { a.quit=1; strcpy(m->status,"SYNCING LOCAL CSV"); }
+        if(i==11) { a.quit=1; strcpy(m->status,"SYNCING UPLOAD CSV"); }
         if(i>=12) { a.quit=0; m->active=false; m->wifi_online=true; }
         if(i==12) { m->page=WardPageWigle; m->wigle_name_set=m->wigle_token_set=true; }
         if(i==13) { m->page=WardPageUploadConfirm; strcpy(m->wigle_path,WARD_WIGLE_DIR "wardrive_1790164800_abcd1234_wigle.csv"); }
         if(i==14) { m->page=WardPageUploadStatus; m->wigle_busy=m->wigle_uploading=true; m->upload_percent=68; strcpy(m->wigle_status,"UPLOADING CSV"); }
         if(i==15) { m->page=WardPageUploadStatus; m->wigle_busy=m->wigle_uploading=false; strcpy(m->wigle_status,"TLS/network error; check Wi-Fi/time"); }
+        if(i==16) {
+            m->active=true; m->page=WardPageList; m->notable_only=true; m->row_count=3; m->list_count=3; m->selected=0;
+            m->rows[0]=(WardriverNetwork){.used=true,.observation={.mode=WardriverBle,.hints=WardriverHintAirTag|WardriverHintTracker,
+                .primary_hint=WardriverHintAirTag,.confidence=WardConfidenceHigh,.evidence=WardEvidencePayload,
+                .mac={0xCC,1,2,3,4,5},.rssi=-45},.last_seen_ms=4900,.previous_rssi=-52};
+            strcpy(m->rows[0].vendor,"Random BLE address");
+            m->rows[1]=m->rows[0]; m->rows[1].observation.primary_hint=WardriverHintFlock; m->rows[1].observation.rssi=-70;
+            m->rows[2]=m->rows[0]; m->rows[2].observation.primary_hint=WardriverHintRemoteId; m->rows[2].observation.rssi=-65;
+        }
+        if(i==17 || i==18 || i==19) { m->page=WardPageDetail; m->active=true; m->detail=i==17?0:i==18?1:6; }
+        if(i==20) { m->page=WardPageFilter; m->filter=1; m->min_confidence=WardConfidenceMedium; }
+        if(i==21 || i==22) {
+            m->page=WardPageDetail; m->detail=i==21?4:5;
+            m->rows[0].observation.primary_hint=WardriverHintRemoteId;
+            m->rows[0].observation.rid=(WardriverRemoteId){.fields=WardRidPosition|WardRidAltitude|WardRidOperator|WardRidSystem|WardRidLocation,
+                .latitude=481173000,.longitude=115167000,.altitude=2400,.operator_latitude=481180000,.operator_longitude=115160000,.operator_type=1};
+            m->rows[0].rid_location_ms=m->rows[0].rid_operator_ms=2000;
+        }
+        if(i==23) { m->page=WardPageHome; m->active=true; strcpy(m->status,"LISTENING"); strcpy(m->alert,"NEW: AirTag"); m->alert_until=9000; m->notable_count=4; }
         wardriver_ui_draw(&c,&a); memcpy(pages[i],u8g2_GetBufferPtr(&c),1024);
     }
     FILE* f=fopen(argv[1],"wb"); if(!f) return 2;
-    /* Two columns, eight rows, 3x nearest-neighbour pixels, 12-pixel gutter. */
-    fprintf(f,"P5\n804 1836\n255\n");
-    for(unsigned y=0;y<1836;++y) for(unsigned x=0;x<804;++x) {
+    /* Two columns, twelve rows, 3x nearest-neighbour pixels, 12-pixel gutter. */
+    fprintf(f,"P5\n804 2748\n255\n");
+    for(unsigned y=0;y<2748;++y) for(unsigned x=0;x<804;++x) {
         unsigned gx=x/396,gy=y/228,lx=x%396,ly=y%228; unsigned char pixel=205;
-        if(gx<2 && gy<8 && lx>=12 && ly>=18 && lx<396 && ly<210) {
+        if(gx<2 && gy<12 && lx>=12 && ly>=18 && lx<396 && ly<210) {
             unsigned px=(lx-12)/3,py=(ly-18)/3;
             pixel=(pages[gy*2+gx][px+128*(py/8)]&(1U<<(py%8)))?16:248;
         }

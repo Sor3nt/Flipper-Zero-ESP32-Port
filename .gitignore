@@ -25,3 +25,7 @@ releases/*.zip
 *-backup-*
 *.backup-*
 /tmp/
+
+# Generated feature validation output
+/tests/wdgwars_map/render_previews/
+/build*.log
