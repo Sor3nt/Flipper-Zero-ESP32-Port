@@ -1,5 +1,7 @@
 # BW16 R4TKN and Wardriver for T-Embed CC1101 Plus
 
+> **Transport notice:** this document describes the older UART integration. For the separately distributed I2C builds, wiring, true Power Off before connecting, flashing, SD setup and troubleshooting, use [T-Embed and BW16 setup](T-EMBED-BW16-SETUP.md). Do not mix the two transports.
+
 This integration provides two standalone ESP32-S3 FAPs and their required firmware
 API exports. BW16 R4TKN controls the public v4 UART operations described in
 [BW16-CONTROLS.md](BW16-CONTROLS.md). Wardriver surveys

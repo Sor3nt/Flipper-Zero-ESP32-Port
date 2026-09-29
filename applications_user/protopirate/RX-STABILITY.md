@@ -44,3 +44,8 @@ must be reported separately when run on a compatible GCC host.
 
 This fix does not claim to resolve an unrelated SPI assertion seen once during
 SD-card initialization at boot.
+
+## BW16 setup and power sequence
+
+For complete wiring, full Power Off before connection (not Deep Sleep), flashing
+and SD instructions, see [T-Embed and BW16 setup](../../T-EMBED-BW16-SETUP.md).

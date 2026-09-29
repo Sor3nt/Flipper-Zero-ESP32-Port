@@ -1,5 +1,7 @@
 # BW16 R4TKN v3 controller
 
+> **Transport notice:** this document describes the older UART integration. For the separately distributed I2C builds, wiring, true Power Off before connecting, flashing, SD setup and troubleshooting, use [T-Embed and BW16 setup](T-EMBED-BW16-SETUP.md). Do not mix the two transports.
+
 The BW16 R4TKN companion for the T-Embed CC1101 Plus requires firmware
 built from the same revision. See [BW16-DEPLOYMENT.md](BW16-DEPLOYMENT.md)
 for building both the controller and Wardriver, and installing the OUI data.
