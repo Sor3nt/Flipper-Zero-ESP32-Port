@@ -2,7 +2,7 @@
 #include "../protopirate_app_i.h"
 #include "proto_pirate_icons.h"
 
-#define TAG "ProtoPirateNeedSaving"
+#define TAG "PPNeedSaving"
 
 static void
     protopirate_scene_need_saving_callback(GuiButtonType result, InputType type, void* context) {
@@ -38,9 +38,9 @@ void protopirate_scene_need_saving_on_enter(void* context) {
         FontSecondary,
         "All unsaved data\nwill be lost!");
 
-    widget_add_button_element(
+    protopirate_widget_add_button_element(
         app->widget, GuiButtonTypeRight, "Stay", protopirate_scene_need_saving_callback, app);
-    widget_add_button_element(
+    protopirate_widget_add_button_element(
         app->widget, GuiButtonTypeLeft, "Exit", protopirate_scene_need_saving_callback, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, ProtoPirateViewWidget);
@@ -71,5 +71,5 @@ bool protopirate_scene_need_saving_on_event(void* context, SceneManagerEvent eve
 void protopirate_scene_need_saving_on_exit(void* context) {
     furi_check(context);
     ProtoPirateApp* app = context;
-    widget_reset(app->widget);
+    protopirate_actions_widget_reset(app, app->widget);
 }

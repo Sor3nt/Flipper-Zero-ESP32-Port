@@ -2,6 +2,9 @@
 #include "../protopirate_app_i.h"
 #ifdef ENABLE_SUB_DECODE_SCENE
 
+#define STATE_EMULATE 0
+#define STATE_BF      1
+
 #ifndef PROTOPIRATE_SUB_DECODE_PLUGIN_BUILD
 
 void protopirate_scene_sub_decode_on_enter(void* context) {
@@ -9,7 +12,13 @@ void protopirate_scene_sub_decode_on_enter(void* context) {
 }
 
 bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent event) {
-    return protopirate_tool_scene_on_event(context, event);
+    ProtoPirateApp* app = (ProtoPirateApp*)context;
+    if(protopirate_tool_scene_on_event(context, event)) {
+        return true;
+    } else {
+        return shared_plugin_handle_navigation_events(
+            app->scene_manager, app->view_dispatcher, event);
+    }
 }
 
 void protopirate_scene_sub_decode_on_exit(void* context) {
@@ -33,12 +42,12 @@ void protopirate_scene_sub_decode_on_exit(void* context) {
 #include <lib/subghz/types.h>
 
 #ifdef PROTOPIRATE_SUB_DECODE_PLUGIN_BUILD
-#include "protopirate_sub_decode_plugin_icons.h"
+#include "pp_sub_decode_icons.h"
 #else
 #include "proto_pirate_icons.h"
 #endif
 
-#define TAG "ProtoPirateSubDecode"
+#define TAG "PPSubDecode"
 
 static const ProtoPirateToolSceneHostApi* g_tool_scene_host_api = NULL;
 
@@ -61,10 +70,26 @@ static const ProtoPirateToolSceneHostApi* g_tool_scene_host_api = NULL;
         app, frequency, frequency_size, modulation, modulation_size)
 #define radio_device_loader_is_external(radio_device) \
     g_tool_scene_host_api->radio_device_is_external(radio_device)
+
 #define protopirate_view_receiver_add_data_statusbar(   \
-    receiver, frequency, modulation, history, external) \
+    receiver,                                           \
+    frequency,                                          \
+    frequency_size,                                     \
+    modulation,                                         \
+    modulation_size,                                    \
+    history,                                            \
+    history_size,                                       \
+    external)                                           \
     g_tool_scene_host_api->receiver_add_data_statusbar( \
-        receiver, frequency, modulation, history, external)
+        receiver,                                       \
+        frequency,                                      \
+        frequency_size,                                 \
+        modulation,                                     \
+        modulation_size,                                \
+        history,                                        \
+        history_size,                                   \
+        external)
+
 #define protopirate_view_receiver_get_idx_menu(receiver) \
     g_tool_scene_host_api->receiver_get_idx_menu(receiver)
 #define protopirate_view_receiver_set_idx_menu(receiver, idx) \
@@ -81,6 +106,8 @@ static const ProtoPirateToolSceneHostApi* g_tool_scene_host_api = NULL;
     g_tool_scene_host_api->receiver_sync_menu_from_history(receiver, history)
 #define protopirate_psa_bf_plugin_ensure_loaded(app) \
     g_tool_scene_host_api->psa_bf_plugin_ensure_loaded(app)
+#define protopirate_psa_bf_plugin_unload_if_idle(app) \
+    g_tool_scene_host_api->psa_bf_plugin_unload_if_idle(app)
 #define protopirate_psa_bf_context_release(app) g_tool_scene_host_api->psa_bf_context_release(app)
 
 #define SUBGHZ_APP_FOLDER EXT_PATH("subghz")
@@ -132,7 +159,6 @@ typedef struct {
     uint16_t signal_count;
     uint16_t selected_history_index;
     bool showing_signal_info;
-    bool signal_info_left_is_emulate;
     bool previous_preset_saved;
     char previous_preset_name[SUB_DECODE_PRESET_NAME_MAX];
     uint32_t previous_frequency;
@@ -217,12 +243,11 @@ static void protopirate_scene_sub_decode_update_receiver_statusbar(
     char modulation_str[8] = {0};
     char history_stat_str[16] = {0};
 
-    protopirate_get_frequency_modulation_str(
-        app, frequency_str, sizeof(frequency_str), modulation_str, sizeof(modulation_str));
+    protopirate_get_frequency_modulation_str(app, frequency_str, 16, modulation_str, 8);
     if(ctx && ctx->frequency > 0U) {
         snprintf(
             frequency_str,
-            sizeof(frequency_str),
+            20,
             "%03lu.%02lu",
             (unsigned long)((ctx->frequency / 1000000UL) % 1000UL),
             (unsigned long)((ctx->frequency / 10000UL) % 100UL));
@@ -230,13 +255,20 @@ static void protopirate_scene_sub_decode_update_receiver_statusbar(
 
     const uint16_t signal_count =
         (ctx && ctx->history) ? protopirate_history_get_item(ctx->history) : 0U;
-    snprintf(
-        history_stat_str, sizeof(history_stat_str), "%u/%u", signal_count, PROTOPIRATE_HISTORY_MAX);
+    snprintf(history_stat_str, 16, "%u/%u", signal_count, PROTOPIRATE_HISTORY_MAX);
 
     bool is_external =
         app->txrx->radio_device ? radio_device_loader_is_external(app->txrx->radio_device) : false;
+
     protopirate_view_receiver_add_data_statusbar(
-        app->protopirate_receiver, frequency_str, modulation_str, history_stat_str, is_external);
+        app->protopirate_receiver,
+        frequency_str,
+        16,
+        modulation_str,
+        8,
+        history_stat_str,
+        16,
+        is_external);
 }
 
 static void protopirate_scene_sub_decode_update_receiver_progress(
@@ -369,10 +401,16 @@ static void protopirate_scene_sub_decode_widget_callback(
             view_dispatcher_send_custom_event(
                 app->view_dispatcher, ProtoPirateCustomEventSubDecodeSave);
         } else if(result == GuiButtonTypeLeft) {
-            SubDecodeContext* ctx = g_decode_ctx;
-            const uint32_t left_event = (ctx && ctx->signal_info_left_is_emulate) ?
-                                            ProtoPirateCustomEventSubDecodeEmulate :
-                                            ProtoPirateCustomEventSubDecodeBruteforceStart;
+
+#ifdef ENABLE_EMULATE_FEATURE
+            const uint32_t left_event =
+                (scene_manager_get_scene_state(app->scene_manager, ProtoPirateSceneSubDecode) ==
+                 STATE_BF) ?
+                    ProtoPirateCustomEventBruteforceStart :
+                    ProtoPirateCustomEventSubDecodeEmulate;
+#else
+            const uint32_t left_event = ProtoPirateCustomEventBruteforceStart;
+#endif
             view_dispatcher_send_custom_event(app->view_dispatcher, left_event);
         }
     }
@@ -380,7 +418,7 @@ static void protopirate_scene_sub_decode_widget_callback(
 
 static void
     protopirate_scene_sub_decode_draw_failure(ProtoPirateApp* app, const SubDecodeContext* ctx) {
-    widget_reset(app->widget);
+    protopirate_actions_widget_reset(app, app->widget);
 
     const char* title = "Decode failed";
     char body[88] = {0};
@@ -421,7 +459,7 @@ static void
     widget_add_icon_element(app->widget, 2, 16, &I_WarningDolphin_45x42);
     widget_add_string_multiline_element(
         app->widget, 50, 15, AlignLeft, AlignTop, FontSecondary, body);
-    widget_add_button_element(
+    protopirate_widget_add_button_element(
         app->widget, GuiButtonTypeCenter, "OK", protopirate_scene_sub_decode_widget_callback, app);
 }
 
@@ -473,7 +511,6 @@ static void protopirate_scene_sub_decode_reset_for_file(SubDecodeContext* ctx) {
     ctx->signal_count = 0;
     ctx->selected_history_index = 0;
     ctx->showing_signal_info = false;
-    ctx->signal_info_left_is_emulate = false;
     ctx->worker_startup_delay = 0;
     ctx->decode_elapsed_us = 0;
 }
@@ -493,19 +530,27 @@ static bool protopirate_scene_sub_decode_open_browser_for_next_file(ProtoPirateA
     return true;
 }
 
+static void protopirate_scene_sub_decode_text_input_callback(void* context) {
+    ProtoPirateApp* app = context;
+    view_dispatcher_send_custom_event(
+        app->view_dispatcher, ProtoPirateCustomEventSubDecodeSaveConfirm);
+}
+
 void protopirate_scene_sub_decode_on_enter(void* context) {
     ProtoPirateApp* app = context;
 
     if(!protopirate_ensure_receiver_view(app) || !protopirate_ensure_widget(app)) {
         notification_message(app->notifications, &sequence_error);
-        app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
         return;
     }
 
     if(!app->radio_initialized && !protopirate_radio_init(app)) {
         FURI_LOG_E(TAG, "Failed to initialize radio for sub decode scene");
         notification_message(app->notifications, &sequence_error);
-        app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
         return;
     }
 
@@ -517,7 +562,8 @@ void protopirate_scene_sub_decode_on_enter(void* context) {
     if(!app->txrx->receiver) {
         FURI_LOG_E(TAG, "Failed to allocate receiver for sub decode scene");
         notification_message(app->notifications, &sequence_error);
-        app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
         return;
     }
 
@@ -526,7 +572,8 @@ void protopirate_scene_sub_decode_on_enter(void* context) {
     g_decode_ctx = malloc(sizeof(SubDecodeContext));
     if(!g_decode_ctx) {
         FURI_LOG_E(TAG, "Failed to allocate decode context");
-        app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
         return;
     }
     memset(g_decode_ctx, 0, sizeof(SubDecodeContext));
@@ -554,7 +601,8 @@ void protopirate_scene_sub_decode_on_enter(void* context) {
             free(g_decode_ctx);
             g_decode_ctx = NULL;
             notification_message(app->notifications, &sequence_error);
-            app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+            view_dispatcher_send_custom_event(
+                app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
             return;
         }
         owns_history = true;
@@ -582,17 +630,17 @@ void protopirate_scene_sub_decode_on_enter(void* context) {
         g_decode_ctx->state = DecodeStateOpenFile;
         protopirate_scene_sub_decode_prepare_receiver_view(app);
     } else {
-        app->tool_scene_nav_pending = TOOL_SCENE_NAV_POP;
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
     }
 }
 
 bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent event) {
     ProtoPirateApp* app = context;
-    bool consumed = false;
     SubDecodeContext* ctx = g_decode_ctx;
 
     if(!ctx) return false;
-
+    bool consumed = false;
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == ProtoPirateCustomEventSubDecodeUpdate) {
             // Update receiver view with new history items (when signals are detected during decoding)
@@ -621,20 +669,79 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                 protopirate_history_get_raw_data(ctx->history, ctx->selected_history_index);
 
             if(ff) {
+                FuriString* file_name_str = furi_string_alloc();
+                if(app->datetime_filenames) {
+                    //Get the date and time to save.
+                    DateTime date_time;
+                    furi_hal_rtc_get_datetime(&date_time);
+                    furi_string_printf(
+                        file_name_str,
+                        "%.2d%.2d%.2d_%.2d.%.2d.%.2d_",
+                        date_time.year,
+                        date_time.month,
+                        date_time.day,
+                        date_time.hour,
+                        date_time.minute,
+                        date_time.second);
+                }
+
                 // Extract protocol name
                 FuriString* protocol = furi_string_alloc();
                 protopirate_storage_get_capture_display_protocol(ff, protocol);
 
-                FuriString* saved_path = furi_string_alloc();
-                if(protopirate_storage_save_capture(
-                       ff, furi_string_get_cstr(protocol), saved_path)) {
-                    notification_message(app->notifications, &sequence_success);
-                } else {
-                    notification_message(app->notifications, &sequence_error);
-                }
-
+                //Add the protocol
+                furi_string_cat(file_name_str, protocol);
                 furi_string_free(protocol);
-                furi_string_free(saved_path);
+
+                // Clean protocol name for filename
+                furi_string_replace_all(file_name_str, "/", "_");
+                furi_string_replace_all(file_name_str, " ", "_");
+
+                // Get the next auto-generated filename (just the name part)
+                FuriString* auto_path = furi_string_alloc();
+                if(protopirate_storage_get_next_filename(
+                       furi_string_get_cstr(file_name_str), auto_path, app->datetime_filenames)) {
+                    // Extract just the filename without folder and extension
+                    const char* full = furi_string_get_cstr(auto_path);
+                    const char* slash = strrchr(full, '/');
+                    const char* name_start = slash ? slash + 1 : full;
+
+                    // Copy without extension
+                    size_t name_len = strlen(name_start);
+                    const char* dot = strrchr(name_start, '.');
+                    if(dot) name_len = dot - name_start;
+                    if(name_len > 64) name_len = 64;
+                    if(name_len > 63) name_len = 63;
+                    memcpy(app->save_filename, name_start, name_len);
+                    app->save_filename[name_len] = '\0';
+                } else {
+                    snprintf(app->save_filename, 64, "capture");
+                }
+                furi_string_free(auto_path);
+
+                // Store context for when text input confirms
+                app->save_history_idx = app->txrx->idx_menu_chosen;
+
+                //Make sure we have a text input window.
+                app->text_input = text_input_alloc();
+                view_dispatcher_add_view(
+                    app->view_dispatcher,
+                    ProtoPirateViewTextInput,
+                    text_input_get_view(app->text_input));
+
+                // Configure and show text input
+                text_input_reset(app->text_input);
+                text_input_set_header_text(app->text_input, "Save filename:");
+                text_input_set_result_callback(
+                    app->text_input,
+                    protopirate_scene_sub_decode_text_input_callback,
+                    app,
+                    app->save_filename,
+                    64,
+                    false); // don't clear default text
+
+                view_dispatcher_switch_to_view(app->view_dispatcher, ProtoPirateViewTextInput);
+                furi_string_free(file_name_str);
             } else {
                 FURI_LOG_E(
                     TAG,
@@ -643,6 +750,42 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                 notification_message(app->notifications, &sequence_error);
             }
             consumed = true;
+        } else if(event.event == ProtoPirateCustomEventSubDecodeSaveConfirm) {
+            // User confirmed the filename in text input
+            FlipperFormat* ff =
+                protopirate_history_get_raw_data(app->txrx->history, app->save_history_idx);
+            if(ff) {
+                // Build full path: folder/filename.psf
+                FuriString* save_path = furi_string_alloc_printf(
+                    "%s/%s%s",
+                    PROTOPIRATE_APP_FOLDER,
+                    app->save_filename,
+                    PROTOPIRATE_APP_EXTENSION);
+
+                if(protopirate_storage_save_capture_to_path(ff, furi_string_get_cstr(save_path))) {
+                    notification_message(app->notifications, &sequence_success);
+                    FURI_LOG_I(TAG, "Saved to: %s", furi_string_get_cstr(save_path));
+                } else {
+                    notification_message(app->notifications, &sequence_error);
+                    FURI_LOG_E(TAG, "Save failed");
+                }
+                furi_string_free(save_path);
+            }
+
+            // Return to the receiver info widget
+            view_dispatcher_switch_to_view(app->view_dispatcher, ProtoPirateViewWidget);
+
+            //Kill the text_input view.
+            if(app->text_input) {
+                FURI_LOG_D(TAG, "Removing text_input view");
+                view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewTextInput);
+                text_input_free(app->text_input);
+                app->text_input = NULL;
+            }
+
+            app->save_filename[0] = '\0';
+            consumed = true;
+
         }
 #ifdef ENABLE_EMULATE_FEATURE
         else if(
@@ -652,14 +795,14 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                 protopirate_history_get_raw_data(ctx->history, ctx->selected_history_index);
             if(ff && protopirate_storage_save_capture_to_path(ff, PROTOPIRATE_TEMP_FILE)) {
                 protopirate_history_release_scratch(ctx->history);
-                if(app->loaded_file_path) furi_string_free(app->loaded_file_path);
-                app->loaded_file_path = furi_string_alloc_set(PROTOPIRATE_TEMP_FILE);
-                FURI_LOG_I(
-                    TAG,
-                    "Emulate from sub-decode temp file: %s",
-                    furi_string_get_cstr(app->loaded_file_path));
-                app->tool_scene_nav_pending = TOOL_SCENE_NAV_NEXT;
-                app->tool_scene_nav_target = ProtoPirateSceneEmulate;
+                if(app->loaded_file_path) free(app->loaded_file_path);
+                size_t len = strlen(PROTOPIRATE_TEMP_FILE) + 1;
+                app->loaded_file_path = malloc(len);
+                snprintf(app->loaded_file_path, len, PROTOPIRATE_TEMP_FILE);
+
+                FURI_LOG_I(TAG, "Emulate from sub-decode temp file: %s", app->loaded_file_path);
+                view_dispatcher_send_custom_event(
+                    app->view_dispatcher, ProtoPirateCustomEventPluginNavigateEmulate);
             } else {
                 FURI_LOG_E(
                     TAG, "Failed to prepare emulate capture %u", ctx->selected_history_index);
@@ -668,7 +811,7 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
             consumed = true;
         }
 #endif
-        else if(event.event == ProtoPirateCustomEventSubDecodeBruteforceStart) {
+        else if(event.event == ProtoPirateCustomEventBruteforceStart) {
             app->txrx->idx_menu_chosen = ctx->selected_history_index;
             if(protopirate_psa_bf_plugin_ensure_loaded(app) && app->psa_bf_plugin &&
                app->psa_bf_plugin->on_scene_event(app, ProtoPiratePsaBfContextSubDecode, event)) {
@@ -678,8 +821,7 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
             }
             consumed = true;
             return consumed;
-
-        } else if(event.event == ProtoPirateCustomEventPsaBruteforceComplete) {
+        } else if(event.event == ProtoPirateCustomEventBruteforceComplete) {
             app->txrx->idx_menu_chosen = ctx->selected_history_index;
             if(app->psa_bf_plugin) {
                 app->psa_bf_plugin->on_scene_event(app, ProtoPiratePsaBfContextSubDecode, event);
@@ -689,7 +831,6 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                 app->view_dispatcher, ProtoPirateCustomEventSubDecodeUpdate);
             consumed = true;
             return consumed;
-
         } else if(event.event == ProtoPirateCustomEventViewReceiverOK) {
             // User selected a signal from history - show signal info
             uint16_t idx = protopirate_view_receiver_get_idx_menu(app->protopirate_receiver);
@@ -711,8 +852,8 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
 
             if(!protopirate_scene_sub_decode_open_browser_for_next_file(app)) {
                 protopirate_history_reset(ctx->history);
-                app->tool_scene_nav_pending = TOOL_SCENE_NAV_SEARCH_PREVIOUS;
-                app->tool_scene_nav_target = ProtoPirateSceneStart;
+                view_dispatcher_send_custom_event(
+                    app->view_dispatcher, ProtoPirateCustomEventPluginNavigateBack);
             }
             consumed = true;
         }
@@ -726,8 +867,6 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
            app->psa_bf_plugin->on_scene_event(app, ProtoPiratePsaBfContextSubDecode, event)) {
             return consumed;
         }
-
-        FURI_LOG_D(TAG, "Tick: state=%d", ctx->state);
 
         switch(ctx->state) {
         case DecodeStateOpenFile: {
@@ -1166,7 +1305,7 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
 
         case DecodeStateShowSignalInfo: {
             // Show signal info in widget (same layout as receiver_info)
-            widget_reset(app->widget);
+            protopirate_actions_widget_reset(app, app->widget);
 
             uint16_t history_count = protopirate_history_get_item(ctx->history);
             if(ctx->selected_history_index < history_count) {
@@ -1192,17 +1331,14 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                     app->widget, 0, 0, 128, 50, furi_string_get_cstr(text));
 
                 // Add save button
-                widget_add_button_element(
+                protopirate_widget_add_button_element(
                     app->widget,
                     GuiButtonTypeRight,
                     "Save",
                     protopirate_scene_sub_decode_widget_callback,
                     app);
 
-                ctx->signal_info_left_is_emulate = false;
-#ifdef ENABLE_EMULATE_FEATURE
-                bool left_button_used = false;
-#endif
+                bool left_button_bf = false;
                 app->emulate_disabled_for_loaded = true;
 
                 // Store reference to history item's flipper format for saving
@@ -1212,7 +1348,8 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                     FuriString* proto_str = furi_string_alloc();
                     flipper_format_rewind(ff);
                     bool have_proto = flipper_format_read_string(ff, FF_PROTOCOL, proto_str);
-                    bool is_psa = have_proto && furi_string_cmp_str(proto_str, "PSA") == 0;
+                    bool offers_bf = have_proto && protopirate_protocol_catalog_offers_bruteforce(
+                                                       furi_string_get_cstr(proto_str));
 
                     if(have_proto) {
                         const char* protocol_name = furi_string_get_cstr(proto_str);
@@ -1222,41 +1359,44 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
                         app->emulate_disabled_for_loaded = true;
                     }
                     furi_string_free(proto_str);
-                    if(is_psa) {
+                    if(offers_bf) {
                         app->txrx->idx_menu_chosen = ctx->selected_history_index;
                         bool needs_bf = false;
                         if(protopirate_psa_bf_plugin_ensure_loaded(app) && app->psa_bf_plugin) {
-                            needs_bf = app->psa_bf_plugin->needs_bruteforce(
-                                app, ProtoPiratePsaBfContextSubDecode);
+                            needs_bf = app->psa_bf_plugin->needs_bruteforce(ff);
                         }
+                        protopirate_psa_bf_plugin_unload_if_idle(app);
                         if(needs_bf) {
-                            widget_add_button_element(
+                            scene_manager_set_scene_state(
+                                app->scene_manager, ProtoPirateSceneSubDecode, STATE_BF);
+
+                            protopirate_widget_add_button_element(
                                 app->widget,
                                 GuiButtonTypeLeft,
-                                "Brute force",
+                                "BF",
                                 protopirate_scene_sub_decode_widget_callback,
                                 app);
-#ifdef ENABLE_EMULATE_FEATURE
-                            left_button_used = true;
-#endif
+                            left_button_bf = true;
                         }
                     }
                 }
 
 #ifdef ENABLE_EMULATE_FEATURE
-                if(!left_button_used && app->emulate_feature_enabled &&
+                if(!left_button_bf && app->emulate_feature_enabled &&
                    !app->emulate_disabled_for_loaded) {
-                    widget_add_button_element(
+                    protopirate_widget_add_button_element(
                         app->widget,
                         GuiButtonTypeLeft,
                         "Emulate",
                         protopirate_scene_sub_decode_widget_callback,
                         app);
-                    ctx->signal_info_left_is_emulate = true;
-                    left_button_used = true;
                 }
 #endif
 
+                scene_manager_set_scene_state(
+                    app->scene_manager,
+                    ProtoPirateSceneSubDecode,
+                    left_button_bf ? STATE_BF : STATE_EMULATE);
                 furi_string_free(text);
             }
 
@@ -1285,7 +1425,7 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
         if(ctx->showing_signal_info) {
             // In signal info - go back to history
             ctx->showing_signal_info = false;
-            //ctx->selected_history_index = 0;
+            app->save_filename[0] = '\0';
             ctx->state = DecodeStateShowHistory;
             view_dispatcher_send_custom_event(
                 app->view_dispatcher, ProtoPirateCustomEventSubDecodeUpdate);
@@ -1293,7 +1433,6 @@ bool protopirate_scene_sub_decode_on_event(void* context, SceneManagerEvent even
         }
         // If in history view, back is handled by ViewReceiverBack event
     }
-
     return consumed;
 }
 
@@ -1337,20 +1476,20 @@ void protopirate_scene_sub_decode_on_exit(void* context) {
         g_decode_ctx = NULL;
     }
 
-    if(owns_history && app && app->txrx && app->txrx->history) {
-        protopirate_history_reset(app->txrx->history);
-
-        FURI_LOG_D(TAG, "Freeing history %p", app->txrx->history);
-        protopirate_history_free(app->txrx->history);
-        app->txrx->history = NULL;
-    }
-
-    if(app && app->widget) {
-        widget_reset(app->widget);
-    }
-
+    // Detach GUI readers/callbacks before freeing their data or this plugin.
     if(app && app->protopirate_receiver) {
         protopirate_view_receiver_reset_menu(app->protopirate_receiver);
+        protopirate_view_receiver_set_callback(app->protopirate_receiver, NULL, NULL);
+    }
+    if(app && app->text_input) {
+        view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewTextInput);
+        text_input_free(app->text_input);
+        app->text_input = NULL;
+    }
+    if(app && app->widget) protopirate_actions_widget_reset(app, app->widget);
+    if(owns_history && app && app->txrx && app->txrx->history) {
+        protopirate_history_free(app->txrx->history);
+        app->txrx->history = NULL;
     }
 }
 
@@ -1359,7 +1498,7 @@ static void sub_decode_plugin_set_host_api(const ProtoPirateToolSceneHostApi* ho
 }
 
 static const ProtoPirateToolScenePlugin protopirate_sub_decode_plugin = {
-    .plugin_name = "ProtoPirate Sub Decode",
+    .plugin_name = "Sub Decode",
     .kind = ProtoPirateToolScenePluginKindSubDecode,
     .set_host_api = sub_decode_plugin_set_host_api,
     .on_enter = protopirate_scene_sub_decode_on_enter,

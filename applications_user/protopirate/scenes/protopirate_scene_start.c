@@ -4,7 +4,7 @@
 
 #include "proto_pirate_icons.h"
 
-#define TAG "ProtoPirateSceneStart"
+#define TAG "PPSceneStart"
 
 typedef enum {
     SubmenuIndexProtoPirateReceiver,
@@ -17,6 +17,7 @@ typedef enum {
     SubmenuIndexProtoPirateTimingTuner,
 #endif
     SubmenuIndexProtoPirateAbout,
+    SubmenuIndexProtoPirateExit,
 } SubmenuIndex;
 
 static void protopirate_scene_start_submenu_callback(void* context, uint32_t index) {
@@ -75,10 +76,17 @@ void protopirate_scene_start_on_enter(void* context) {
         protopirate_scene_start_submenu_callback,
         app);
 
+    submenu_add_item(app->submenu, "Exit app", SubmenuIndexProtoPirateExit,
+        protopirate_scene_start_submenu_callback, app);
+
     submenu_set_selected_item(
         app->submenu, scene_manager_get_scene_state(app->scene_manager, ProtoPirateSceneStart));
 
     view_dispatcher_switch_to_view(app->view_dispatcher, ProtoPirateViewSubmenu);
+
+    //Kill Config if it exists now to save memory.
+    protopirate_variable_item_list_free(app);
+    protopirate_widget_free(app);
 }
 
 bool protopirate_scene_start_on_event(void* context, SceneManagerEvent event) {
@@ -86,7 +94,14 @@ bool protopirate_scene_start_on_event(void* context, SceneManagerEvent event) {
     ProtoPirateApp* app = context;
     bool consumed = false;
 
+    if(event.type == SceneManagerEventTypeBack) return true;
     if(event.type == SceneManagerEventTypeCustom) {
+        if(event.event == SubmenuIndexProtoPirateExit) {
+            scene_manager_stop(app->scene_manager);
+            view_dispatcher_stop(app->view_dispatcher);
+            return true;
+        }
+        scene_manager_set_scene_state(app->scene_manager, ProtoPirateSceneStart, event.event);
         if(event.event == SubmenuIndexProtoPirateAbout) {
             scene_manager_next_scene(app->scene_manager, ProtoPirateSceneAbout);
             consumed = true;
@@ -97,6 +112,8 @@ bool protopirate_scene_start_on_event(void* context, SceneManagerEvent event) {
             scene_manager_next_scene(app->scene_manager, ProtoPirateSceneSaved);
             consumed = true;
         } else if(event.event == SubmenuIndexProtoPirateReceiverConfig) {
+            //Hide the lock keyboard option.
+            scene_manager_set_scene_state(app->scene_manager, ProtoPirateSceneReceiverConfig, 0);
             scene_manager_next_scene(app->scene_manager, ProtoPirateSceneReceiverConfig);
             consumed = true;
         }
@@ -108,18 +125,18 @@ bool protopirate_scene_start_on_event(void* context, SceneManagerEvent event) {
 #endif
 #ifdef ENABLE_TIMING_TUNER_SCENE
         else if(event.event == SubmenuIndexProtoPirateTimingTuner) {
+            //Hide the lock keyboard option.
+            scene_manager_set_scene_state(app->scene_manager, ProtoPirateSceneReceiverConfig, 0);
             scene_manager_next_scene(app->scene_manager, ProtoPirateSceneTimingTuner);
             consumed = true;
         }
 #endif
-        scene_manager_set_scene_state(app->scene_manager, ProtoPirateSceneStart, event.event);
     }
 
     return consumed;
 }
 
 void protopirate_scene_start_on_exit(void* context) {
-    furi_check(context);
     ProtoPirateApp* app = context;
     submenu_reset(app->submenu);
 }

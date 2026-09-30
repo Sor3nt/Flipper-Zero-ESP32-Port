@@ -3,7 +3,6 @@
 
 #include <stddef.h>
 #include "helpers/protopirate_types.h"
-#include "helpers/protopirate_settings.h"
 #include "scenes/protopirate_scene.h"
 #include "views/protopirate_receiver.h"
 #include "protopirate_history.h"
@@ -13,7 +12,7 @@
 #include <gui/view_dispatcher.h>
 #include <gui/scene_manager.h>
 #include <gui/modules/submenu.h>
-#include <gui/modules/variable_item_list.h>
+
 #include <gui/modules/widget.h>
 #include <gui/modules/text_input.h>
 #include <notification/notification_messages.h>
@@ -23,8 +22,6 @@
 #include <lib/subghz/transmitter.h>
 #include <lib/subghz/devices/devices.h>
 #include <lib/subghz/subghz_file_encoder_worker.h>
-#include <lib/flipper_application/plugins/plugin_manager.h>
-#include <lib/flipper_application/plugins/composite_resolver.h>
 #include <dialogs/dialogs.h>
 #include "defines.h"
 #include "protocols/protocols_common.h"
@@ -33,16 +30,26 @@
 #ifdef ENABLE_EMULATE_FEATURE
 #include "scenes/plugins/protopirate_emulate_plugin.h"
 #endif
+#include "scenes/plugins/protopirate_config_plugin.h"
+#include "scenes/plugins/protopirate_saved_info_plugin.h"
+#include "scenes/plugins/protopirate_about_plugin.h"
 #include "scenes/plugins/protopirate_psa_bf_plugin.h"
 #include "scenes/plugins/protopirate_tool_scene_plugin.h"
+#include "helpers/protopirate_plugins.h"
 #include "helpers/protopirate_views.h"
 #include "helpers/protopirate_radio.h"
 #include "helpers/protopirate_protocol_plugin_host.h"
 #include "helpers/protopirate_txrx.h"
+#include "helpers/protopirate_models.h"
+#include "helpers/protopirate_settings.h"
 
+#ifdef ENABLE_MODELS_DATABASE
+#define PROTOPIRATE_KEYSTORE_DIR_NAME APP_ASSETS_PATH("keystore/encrypted")
+#else
 #define PROTOPIRATE_KEYSTORE_DIR_NAME APP_ASSETS_PATH("encrypted")
+#endif
 
-typedef struct ProtoPirateApp ProtoPirateApp;
+typedef struct VariableItemList VariableItemList;
 
 typedef struct ProtoPirateTxRx {
     SubGhzWorker* worker;
@@ -50,8 +57,7 @@ typedef struct ProtoPirateTxRx {
     SubGhzReceiver* receiver;
     SubGhzRadioPreset* preset;
     const SubGhzProtocolRegistry* protocol_registry;
-    CompositeApiResolver* plugin_resolver;
-    PluginManager* protocol_plugin_manager;
+    FlipperApplication* protocol_plugin_flipper_application;
     const ProtoPirateProtocolPlugin* protocol_plugin;
     ProtoPirateProtocolRegistryRoute protocol_registry_route;
     ProtoPirateHistory* history;
@@ -64,6 +70,15 @@ typedef struct ProtoPirateTxRx {
     uint16_t idx_menu_chosen;
 } ProtoPirateTxRx;
 
+typedef struct ProtoPirateConfigPlugin ProtoPirateConfigPlugin;
+typedef struct {
+    char label[32];
+    ButtonCallback callback;
+    void* context;
+    GuiButtonType button;
+    uint32_t event;
+} ProtoPirateAction;
+
 struct ProtoPirateApp {
     Gui* gui;
     ViewDispatcher* view_dispatcher;
@@ -72,49 +87,60 @@ struct ProtoPirateApp {
     DialogsApp* dialogs;
     VariableItemList* variable_item_list;
     Submenu* submenu;
+    Submenu* actions_menu;
+    ProtoPirateAction actions[3];
+    uint8_t action_count;
+    bool actions_visible;
+    uint32_t actions_return_view;
     Widget* widget;
     TextInput* text_input;
     View* view_about;
-    FuriString* file_path;
+    char* file_path;
     ProtoPirateReceiver* protopirate_receiver;
+    uint32_t deferred_storage_deadline;
+    bool deferred_storage_pending;
+    uint32_t receiver_update_pending;
     ProtoPirateTxRx* txrx;
     SubGhzSetting* setting;
     ProtoPirateLock lock;
-    FuriString* loaded_file_path;
-    bool auto_save;
-    bool check_saved;
-    bool radio_initialized;
+    char* loaded_file_path;
+    /*****************/
+    // Byte 1
+    uint8_t deferred_storage_in_progress : 1;
+    uint8_t auto_save                    : 1;
+    uint8_t check_saved                  : 1;
+    uint8_t sound                        : 1;
+    uint8_t datetime_filenames           : 1;
+    uint8_t radio_initialized            : 1;
+    uint8_t emulate_disabled_for_loaded  : 1;
+    uint8_t emulate_feature_enabled      : 1;
+    // Byte 2
+    uint8_t key_found                    : 1;
+    uint8_t reserved                     : 7;
+    /*****************/
     uint32_t start_tx_time;
     uint8_t tx_power;
     char save_filename[64];
     FuriString* save_protocol;
     uint16_t save_history_idx;
-    bool save_from_saved_info;
-    bool emulate_disabled_for_loaded;
-    bool emulate_feature_enabled;
+    bool receiver_info_editing;
+    FlipperApplication* plugin_flipper_application;
 #ifdef ENABLE_EMULATE_FEATURE
-#define EMULATE_NAV_NONE     0U
-#define EMULATE_NAV_POP      1U
-#define EMULATE_NAV_STOP_APP 2U
-    CompositeApiResolver* emulate_plugin_resolver;
-    PluginManager* emulate_plugin_manager;
     const ProtoPirateEmulatePlugin* emulate_plugin;
     uint8_t emulate_nav_pending;
 #endif
-    CompositeApiResolver* psa_bf_plugin_resolver;
-    PluginManager* psa_bf_plugin_manager;
+    const ProtoPirateConfigPlugin* config_plugin;
+    const ProtoPirateSavedInfoPlugin* saved_info_plugin;
+    const ProtoPirateAboutPlugin* about_plugin;
+    FlipperApplication* psa_bf_plugin_flipper_application;
     const ProtoPiratePsaBfPlugin* psa_bf_plugin;
-    CompositeApiResolver* tool_scene_plugin_resolver;
-    PluginManager* tool_scene_plugin_manager;
+    FlipperApplication* tool_scene_plugin_flipper_application;
     const ProtoPirateToolScenePlugin* tool_scene_plugin;
     ProtoPirateToolScenePluginKind tool_scene_plugin_kind;
-
-#define TOOL_SCENE_NAV_NONE            0U
-#define TOOL_SCENE_NAV_POP             1U
-#define TOOL_SCENE_NAV_NEXT            2U
-#define TOOL_SCENE_NAV_SEARCH_PREVIOUS 3U
-    uint8_t tool_scene_nav_pending;
-    uint32_t tool_scene_nav_target;
+#ifdef ENABLE_MODELS_DATABASE
+    ProtoPirateCarModel* selected_model;
+    uint16_t car_models_count;
+#endif
 };
 
 #ifdef ENABLE_EMULATE_FEATURE
@@ -130,7 +156,6 @@ bool protopirate_tool_scene_on_enter(void* app, ProtoPirateToolScenePluginKind k
 bool protopirate_tool_scene_on_event(void* app, SceneManagerEvent event);
 void protopirate_tool_scene_on_exit(void* app);
 void protopirate_tool_scene_plugin_release(ProtoPirateApp* app);
-
 void protopirate_app_free(ProtoPirateApp* app);
 
 static const NotificationSequence sequence_tx = {
@@ -145,3 +170,5 @@ static const NotificationSequence sequence_tx = {
     &message_sound_off,
     NULL,
 };
+
+#include "helpers/protopirate_actions.h"

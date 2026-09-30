@@ -4,7 +4,7 @@
 #include <furi.h>
 #include <string.h>
 
-#define TAG "ProtoPirateRadio"
+#define TAG "PPRadio"
 
 static void protopirate_radio_free_receiver(ProtoPirateApp* app) {
     furi_check(app);
@@ -90,7 +90,7 @@ static void protopirate_radio_init_cleanup(ProtoPirateApp* app, bool devices_ini
     protopirate_radio_free_receiver(app);
     protopirate_radio_end_device(app, false);
     protopirate_radio_free_environment(app);
-    protopirate_unload_protocol_plugin(app->txrx);
+    protopirate_unload_protocol_plugin(app);
 
     if(devices_initialized) {
         subghz_devices_deinit();
@@ -163,7 +163,7 @@ bool protopirate_radio_init(ProtoPirateApp* app) {
         return false;
     }
 #ifndef REMOVE_LOGS
-    const char* device_name = subghz_devices_get_name(app->txrx->radio_device);
+    const char* device_name = app->txrx->radio_device->name;
     bool is_external = device_name && strstr(device_name, "ext");
     FURI_LOG_I(
         TAG,
@@ -203,7 +203,6 @@ void protopirate_radio_deinit(ProtoPirateApp* app) {
     bool has_radio_resources = app->radio_initialized || app->txrx->worker ||
                                app->txrx->environment || app->txrx->receiver ||
                                app->txrx->history || app->txrx->radio_device ||
-                               app->txrx->protocol_plugin_manager || app->txrx->plugin_resolver ||
                                app->txrx->protocol_plugin;
     if(!has_radio_resources) {
 #ifndef REMOVE_LOGS
@@ -235,8 +234,10 @@ void protopirate_radio_deinit(ProtoPirateApp* app) {
 
     protopirate_radio_free_receiver(app);
     protopirate_radio_free_environment(app);
-    protopirate_unload_protocol_plugin(app->txrx);
+    protopirate_unload_protocol_plugin(app);
 
+    // Detach the GUI reader before releasing the history it can draw.
+    if(app->protopirate_receiver) protopirate_view_receiver_reset_menu(app->protopirate_receiver);
     if(app->txrx->history) {
 #ifndef REMOVE_LOGS
         FURI_LOG_D(TAG, "Freeing history %p", app->txrx->history);
