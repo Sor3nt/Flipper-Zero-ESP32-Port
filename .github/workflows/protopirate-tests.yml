@@ -1,0 +1,24 @@
+name: ProtoPirate host regressions
+on:
+  pull_request:
+    paths:
+      - 'applications_user/protopirate/**'
+      - 'components/gui/**'
+      - 'tests/protopirate*/**'
+      - 'tests/host/host_build.py'
+      - '.github/workflows/protopirate-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test production history, loading and navigation
+        run: |
+          python3 tests/protopirate_rx/run.py
+          python3 tests/protopirate36/run.py
+          python3 tests/protopirate362/run.py
+          python3 tests/protopirate363/run.py

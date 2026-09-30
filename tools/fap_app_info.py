@@ -68,19 +68,19 @@ def _match(app_dir, pattern):
     out = []
     if os.path.isdir(full):
         for m in _walk_sources(full):
-            out.append(os.path.relpath(m, app_dir))
+            out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     elif "/" not in pattern:
         # bare filename (maybe wildcard): match by basename anywhere in the tree
         for m in _walk_sources(app_dir):
             if fnmatch.fnmatch(os.path.basename(m), pattern):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     else:
         for m in glob.glob(full, recursive=True):
             if os.path.isdir(m):
                 for f in _walk_sources(m):
-                    out.append(os.path.relpath(f, app_dir))
+                    out.append(os.path.relpath(f, app_dir).replace("\\", "/"))
             elif os.path.isfile(m) and m.endswith(_SRC_EXTS):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     return out
 
 

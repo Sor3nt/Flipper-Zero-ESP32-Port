@@ -4,10 +4,9 @@
 #include <storage/storage.h>
 #include <flipper_format/flipper_format.h>
 #include <furi.h>
-#include "../defines.h"
 #include "../protocols/protocols_common.h"
 
-#define TAG "ProtoPirateSettings"
+#define TAG "PPSettings"
 
 #define SETTINGS_FILE_HEADER  "ProtoPirate Settings"
 #define SETTINGS_FILE_VERSION 1
@@ -17,9 +16,14 @@ void protopirate_settings_set_defaults(ProtoPirateSettings* settings) {
     settings->preset_index = 0;
     settings->tx_power = 0;
     settings->auto_save = false;
+    settings->sound = false;
     settings->hopping_enabled = false;
     settings->emulate_feature_enabled = false;
     settings->check_saved = false;
+    settings->datetime_filenames = false;
+#ifdef ENABLE_MODELS_DATABASE
+    settings->car_model_index = 0;
+#endif
 }
 
 void protopirate_settings_load(ProtoPirateSettings* settings) {
@@ -72,7 +76,7 @@ void protopirate_settings_load(ProtoPirateSettings* settings) {
             FURI_LOG_W(TAG, "Failed to read preset index, using default");
             preset_temp = 0;
         }
-        settings->preset_index = (uint8_t)preset_temp;
+        settings->preset_index = preset_temp <= UINT8_MAX ? (uint8_t)preset_temp : 0;
 
         // Read auto-save
         uint32_t auto_save_temp = 0;
@@ -118,15 +122,38 @@ void protopirate_settings_load(ProtoPirateSettings* settings) {
         }
         settings->check_saved = (check_saved_temp == 1);
 
+        uint32_t sound_temp = 0;
+        if(!flipper_format_read_uint32(ff, "Sound", &sound_temp, 1)) {
+            sound_temp = 0;
+        }
+        settings->sound = (sound_temp == 1);
+
+        // Read Date/Time file names.
+        uint32_t datetime_filenames_temp = 0;
+        if(!flipper_format_read_uint32(ff, "DateTimeFilenames", &datetime_filenames_temp, 1)) {
+            FURI_LOG_W(TAG, "Failed to read date-time filenames, using default");
+            datetime_filenames_temp = 0;
+        }
+        settings->datetime_filenames = (datetime_filenames_temp == 1);
+
+// Read Selected Car Model
+#ifdef ENABLE_MODELS_DATABASE
+        uint32_t car_model_index_temp = 0;
+        if(!flipper_format_read_uint32(ff, "CarModelIndex", &car_model_index_temp, 1)) {
+            car_model_index_temp = 0;
+        }
+        settings->car_model_index = car_model_index_temp <= UINT16_MAX ? car_model_index_temp : 0;
+#endif
         FURI_LOG_I(
             TAG,
-            "Settings loaded: freq=%lu, preset=%u, auto_save=%d, hopping=%d, emulate=%d, check_saved=%d",
+            "Settings loaded: freq=%lu, preset=%u, auto_save=%d, hopping=%d, emulate=%d, check_saved=%d, sound = %d",
             settings->frequency,
             settings->preset_index,
             settings->auto_save,
             settings->hopping_enabled,
             settings->emulate_feature_enabled,
-            settings->check_saved);
+            settings->check_saved,
+            settings->sound);
 
     } while(false);
 
@@ -200,19 +227,35 @@ void protopirate_settings_save(ProtoPirateSettings* settings) {
             FURI_LOG_E(TAG, "Failed to write check saved");
             break;
         }
+        uint32_t sound_temp = settings->sound ? 1 : 0;
+        if(!flipper_format_write_uint32(ff, "Sound", &sound_temp, 1)) {
+            FURI_LOG_E(TAG, "Failed to write Sound.");
+            break;
+        }
+        uint32_t datetime_filenames_temp = settings->datetime_filenames ? 1 : 0;
+        if(!flipper_format_write_uint32(ff, "DateTimeFilenames", &datetime_filenames_temp, 1)) {
+            FURI_LOG_E(TAG, "Failed to write Date Time Filenames");
+        }
+#ifdef ENABLE_MODELS_DATABASE
+        uint32_t car_model_index_temp = settings->car_model_index;
+        if(!flipper_format_write_uint32(ff, "CarModelIndex", &car_model_index_temp, 1)) {
+            FURI_LOG_E(TAG, "Failed to write car model");
 
+            break;
+        }
+#endif
         write_ok = true;
 
         FURI_LOG_I(
             TAG,
-            "Settings saved: freq=%lu, preset=%u, auto_save=%d, hopping=%d, emulate=%d, check_saved=%d",
+            "Settings saved: freq=%lu, preset=%u, auto_save=%d, hopping=%d, emulate=%d, check_saved=%d, sound=%d",
             settings->frequency,
             settings->preset_index,
             settings->auto_save,
             settings->hopping_enabled,
             settings->emulate_feature_enabled,
-            settings->check_saved);
-
+            settings->check_saved,
+            settings->sound);
     } while(false);
 
     flipper_format_free(ff);

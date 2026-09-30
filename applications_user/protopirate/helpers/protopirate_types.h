@@ -12,6 +12,7 @@ typedef enum {
     ProtoPirateViewAbout,
     ProtoPirateViewFileBrowser,
     ProtoPirateViewTextInput,
+    ProtoPirateViewActions,
 } ProtoPirateView;
 
 typedef enum {
@@ -21,6 +22,7 @@ typedef enum {
     ProtoPirateCustomEventViewReceiverBack,
     ProtoPirateCustomEventViewReceiverDeleteItem,
     ProtoPirateCustomEventViewReceiverUnlock,
+    ProtoPirateCustomEventViewReceiverHopperUpdate,
     // Custom events for scenes
     ProtoPirateCustomEventSceneReceiverUpdate,
     ProtoPirateCustomEventReceiverDeferredRxStart,
@@ -30,20 +32,20 @@ typedef enum {
     ProtoPirateCustomEventReceiverInfoSaveConfirm,
     ProtoPirateCustomEventReceiverInfoUpdate,
     ProtoPirateCustomEventReceiverInfoEmulate,
-    ProtoPirateCustomEventReceiverInfoBruteforceStart,
-    ProtoPirateCustomEventReceiverInfoBruteforceCancel,
     ProtoPirateCustomEventSavedInfoDelete,
+    //Bruteforcing PSA & Renault
+    ProtoPirateCustomEventBruteforceStart,
+    ProtoPirateCustomEventBruteforceComplete,
     // Emulator
-    ProtoPirateCustomEventSavedInfoEmulate,
     ProtoPirateCustomEventEmulateTransmit,
     ProtoPirateCustomEventEmulateStop,
     ProtoPirateCustomEventEmulateExit,
+    ProtoPirateCustomEventSavedInfoEmulate,
     // Sub decode
     ProtoPirateCustomEventSubDecodeUpdate,
     ProtoPirateCustomEventSubDecodeSave,
     ProtoPirateCustomEventSubDecodeEmulate,
-    ProtoPirateCustomEventSubDecodeBruteforceStart,
-    ProtoPirateCustomEventPsaBruteforceComplete,
+    ProtoPirateCustomEventSubDecodeSaveConfirm,
     // File Browser
     ProtoPirateCustomEventSavedFileSelected,
     // Need saving confirmation
@@ -51,6 +53,16 @@ typedef enum {
     ProtoPirateCustomEventSceneExit,
     // About scene
     ProtoPirateCustomEventAboutToggleEmulate,
+    //Plugin Scenes
+    ProtoPirateCustomEventPluginNavigateBack,
+    ProtoPirateCustomEventPluginNavigateEmulate,
+    ProtoPirateCustomEventPluginNavigateConfig,
+    ProtoPirateCustomEventPluginNavigateStopApp,
+    ProtoPirateCustomEventOpenActions,
+    ProtoPirateCustomEventOpenReceiverActions,
+    ProtoPirateCustomEventAction0,
+    ProtoPirateCustomEventAction1,
+    ProtoPirateCustomEventAction2,
 } ProtoPirateCustomEvent;
 
 typedef enum {

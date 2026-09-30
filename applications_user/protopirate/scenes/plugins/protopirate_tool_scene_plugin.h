@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include <gui/scene_manager.h>
-#include <lib/flipper_application/flipper_application.h>
 #include <lib/subghz/devices/devices.h>
 
 #include "../../defines.h"
@@ -13,7 +12,7 @@
 #include "../../views/protopirate_receiver.h"
 
 #define PROTOPIRATE_TOOL_SCENE_PLUGIN_APP_ID      "protopirate_tool_scene_plugins"
-#define PROTOPIRATE_TOOL_SCENE_PLUGIN_API_VERSION 1U
+#define PROTOPIRATE_TOOL_SCENE_PLUGIN_API_VERSION 0x03060201U
 
 typedef enum {
     ProtoPirateToolScenePluginKindSubDecode = 0,
@@ -58,9 +57,13 @@ typedef struct {
     void (*receiver_add_data_statusbar)(
         ProtoPirateReceiver* receiver,
         const char* frequency_str,
+        size_t frequency_size,
         const char* preset_str,
+        size_t preset_size,
         const char* history_stat_str,
+        size_t history_stat_size,
         bool external_radio);
+
     uint16_t (*receiver_get_idx_menu)(ProtoPirateReceiver* receiver);
     void (*receiver_set_idx_menu)(ProtoPirateReceiver* receiver, uint16_t idx);
     void (*receiver_set_callback)(
@@ -75,6 +78,7 @@ typedef struct {
         ProtoPirateHistory* history);
 
     bool (*psa_bf_plugin_ensure_loaded)(void* app);
+    void (*psa_bf_plugin_unload_if_idle)(void* app);
     void (*psa_bf_context_release)(void* app);
 } ProtoPirateToolSceneHostApi;
 

@@ -6,7 +6,7 @@
 
 #include <stdio.h>
 
-#define TAG "ProtoPirateTxRx"
+#define TAG "PPTxRx"
 
 void protopirate_rx_stack_teardown_for_registry_switch(ProtoPirateApp* app) {
     furi_check(app);
@@ -58,13 +58,13 @@ void protopirate_get_frequency_modulation_str(
     size_t modulation_size) {
     furi_check(app);
 
-    if(frequency && frequency_size > 0) {
+    if(frequency) {
         unsigned long mhz = (unsigned long)((app->txrx->preset->frequency / 1000000UL) % 1000UL);
         unsigned long khz = (unsigned long)((app->txrx->preset->frequency / 10000UL) % 100UL);
         snprintf(frequency, frequency_size, "%03lu.%02lu", mhz, khz);
     }
 
-    if(modulation && modulation_size > 0) {
+    if(modulation) {
         snprintf(
             modulation, modulation_size, "%.2s", furi_string_get_cstr(app->txrx->preset->name));
     }
@@ -73,18 +73,21 @@ void protopirate_get_frequency_modulation_str(
 void protopirate_get_frequency_modulation(
     ProtoPirateApp* app,
     FuriString* frequency,
-    FuriString* modulation) {
+    size_t frequency_size,
+    FuriString* modulation,
+    size_t modulation_size) {
     furi_check(app);
 
     char frequency_buf[16] = {0};
     char modulation_buf[8] = {0};
-    protopirate_get_frequency_modulation_str(
-        app, frequency_buf, sizeof(frequency_buf), modulation_buf, sizeof(modulation_buf));
+    protopirate_get_frequency_modulation_str(app, frequency_buf, 16, modulation_buf, 8);
 
     if(frequency != NULL) {
+        UNUSED(frequency_size);
         furi_string_set_str(frequency, frequency_buf);
     }
     if(modulation != NULL) {
+        UNUSED(modulation_size);
         furi_string_set_str(modulation, modulation_buf);
     }
 }
@@ -133,6 +136,9 @@ uint32_t protopirate_rx(ProtoPirateApp* app, uint32_t frequency) {
     subghz_devices_idle(app->txrx->radio_device);
     uint32_t value = subghz_devices_set_frequency(app->txrx->radio_device, frequency);
     subghz_devices_flush_rx(app->txrx->radio_device);
+
+    // The deployed ESP32 FAP ABI has no raw-audio mirror entry point.
+    // RX sound uses the board's notification service when a capture is admitted.
     subghz_devices_set_rx(app->txrx->radio_device);
 
     subghz_devices_start_async_rx(
@@ -225,10 +231,15 @@ void protopirate_rx_stack_resume_after_tx(ProtoPirateApp* app) {
 bool protopirate_hopper_update(ProtoPirateApp* app) {
     furi_check(app);
 
+    if(app->key_found) {
+        app->key_found = false;
+        return false;
+    }
+
     switch(app->txrx->hopper_state) {
     case ProtoPirateHopperStateOFF:
-    case ProtoPirateHopperStatePause:
         return false;
+    case ProtoPirateHopperStatePause:
     case ProtoPirateHopperStateRSSITimeOut:
         if(app->txrx->hopper_timeout != 0) {
             app->txrx->hopper_timeout--;
@@ -239,11 +250,11 @@ bool protopirate_hopper_update(ProtoPirateApp* app) {
         break;
     }
     float rssi = -127.0f;
-    if(app->txrx->hopper_state != ProtoPirateHopperStateRSSITimeOut) {
+    if(app->txrx->hopper_state == ProtoPirateHopperStateRunning) {
         rssi = subghz_devices_get_rssi(app->txrx->radio_device);
 
-        if(rssi > -90.0f) {
-            app->txrx->hopper_timeout = 10;
+        if(rssi > -75.0f) {
+            app->txrx->hopper_timeout = 20;
             app->txrx->hopper_state = ProtoPirateHopperStateRSSITimeOut;
             return false;
         }
