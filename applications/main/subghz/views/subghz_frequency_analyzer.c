@@ -8,6 +8,7 @@
 
 #include <assets_icons.h>
 #include <float_tools.h>
+#include <u8g2.h>
 
 #define TAG "frequency_analyzer"
 
@@ -42,6 +43,7 @@ struct SubGhzFrequencyAnalyzer {
 typedef struct {
     uint32_t frequency;
     uint32_t frequency_to_save;
+    uint32_t history_active_frequency;
     float rssi;
     uint32_t history_frequency[MAX_HISTORY];
     uint8_t history_frequency_rx_count[MAX_HISTORY];
@@ -74,6 +76,7 @@ void subghz_frequency_analyzer_draw_rssi(
     uint8_t y) {
     // Current RSSI
     if(!float_is_equal(rssi, 0.f)) {
+        if(rssi < RSSI_MIN) rssi = RSSI_MIN;
         if(rssi > RSSI_MAX) {
             rssi = RSSI_MAX;
         }
@@ -82,13 +85,16 @@ void subghz_frequency_analyzer_draw_rssi(
         for(size_t i = 0; i <= (uint8_t)rssi; i++) {
             if((i + 1) % 4) {
                 column_number++;
-                canvas_draw_box(canvas, x + 2 * i, (y + 4) - column_number, 2, column_number);
+                // Reserve y=28..50 for the two history rows and their frames.
+                uint8_t height = (column_number + 1) / 2;
+                canvas_draw_box(canvas, x + 2 * i, (y + 4) - height, 2, height);
             }
         }
     }
 
     // Last RSSI
     if(!float_is_equal(rssi_last, 0.f)) {
+        if(rssi_last < RSSI_MIN) rssi_last = RSSI_MIN;
         if(rssi_last > RSSI_MAX) {
             rssi_last = RSSI_MAX;
         }
@@ -96,10 +102,14 @@ void subghz_frequency_analyzer_draw_rssi(
         //if(!(max_x % 8)) max_x -= 2;
         int max_h = (int)((rssi_last - RSSI_MIN) / RSSI_SCALE) + 1;
         max_h -= (max_h / 4) + 3;
+        if(max_h < 0) max_h = 0;
+        max_h = (max_h + 1) / 2;
         canvas_draw_line(canvas, x + max_x + 1, y - max_h, x + max_x + 1, y + 3);
     }
 
     // Trigger cursor
+    if(trigger < RSSI_MIN) trigger = RSSI_MIN;
+    if(trigger > RSSI_MAX) trigger = RSSI_MAX;
     trigger = (trigger - RSSI_MIN) / RSSI_SCALE;
     uint8_t tr_x = (uint8_t)((float)x + (2 * trigger));
     canvas_draw_dot(canvas, tr_x, y + 4);
@@ -133,9 +143,9 @@ static void subghz_frequency_analyzer_history_frequency_draw(
             snprintf(
                 buffer,
                 sizeof(buffer),
-                "%03ld.%03ld",
-                model->history_frequency[i] / 1000000 % 1000,
-                model->history_frequency[i] / 1000 % 1000);
+                "%03lu.%03lu",
+                (unsigned long)(model->history_frequency[i] / 1000000 % 1000),
+                (unsigned long)(model->history_frequency[i] / 1000 % 1000));
             canvas_draw_str(canvas, current_x, current_y, buffer);
         } else {
             canvas_draw_str(canvas, current_x, current_y, "---.---");
@@ -168,28 +178,30 @@ void subghz_frequency_analyzer_draw(Canvas* canvas, SubGhzFrequencyAnalyzerModel
     subghz_frequency_analyzer_draw_rssi(
         canvas, model->rssi, model->rssi_last, model->trigger, 56, 57);
 
-    // Last detected frequency
-    subghz_frequency_analyzer_history_frequency_draw(canvas, model);
-
     // Frequency
-    canvas_set_font(canvas, FontBigNumbers);
+    // The port's FontBigNumbers uses profont22, which exceeds the original
+    // 19px highlight. Keep the complete live readout inside y=10..27.
+    canvas_set_custom_u8g2_font(canvas, u8g2_font_profont17_tn);
     snprintf(
         buffer,
         sizeof(buffer),
-        "%03ld.%03ld",
-        model->frequency / 1000000 % 1000,
-        model->frequency / 1000 % 1000);
+        "%03lu.%03lu",
+        (unsigned long)(model->frequency / 1000000 % 1000),
+        (unsigned long)(model->frequency / 1000 % 1000));
     if(model->signal) {
-        canvas_draw_box(canvas, 4, 10, 121, 19);
+        canvas_draw_box(canvas, 4, 10, 121, 18);
         canvas_set_color(canvas, ColorWhite);
     } else {
         canvas_set_color(canvas, ColorBlack);
     }
 
-    canvas_draw_str(canvas, 8, 26, buffer);
-    canvas_draw_icon(canvas, 96, 15, &I_MHz_25x11);
+    canvas_draw_str(canvas, 8, 25, buffer);
+    canvas_draw_icon(canvas, 96, 14, &I_MHz_25x11);
 
     canvas_set_color(canvas, ColorBlack);
+    // Draw history after the live panel; its first selection frame starts at
+    // y=28, immediately below the highlight, and can never be erased by it.
+    subghz_frequency_analyzer_history_frequency_draw(canvas, model);
     canvas_set_font(canvas, FontSecondary);
     const uint8_t icon_x = 119;
     switch(model->feedback_level) {
@@ -336,99 +348,74 @@ uint32_t round_int(uint32_t value, uint8_t n) {
     return value;
 }
 
+static void subghz_frequency_analyzer_history_record(
+    SubGhzFrequencyAnalyzerModel* model, uint32_t frequency) {
+    if(!frequency) return;
+    size_t found = MAX_HISTORY;
+    for(size_t i = 0; i < MAX_HISTORY; i++) {
+        if(model->history_frequency[i] == frequency) { found = i; break; }
+    }
+    uint8_t count = 1;
+    if(found < MAX_HISTORY) {
+        count = model->history_frequency_rx_count[found];
+        if(count < UINT8_MAX) count++;
+    }
+    size_t last = found < MAX_HISTORY ? found : MAX_HISTORY - 1;
+    for(size_t i = last; i > 0; i--) {
+        model->history_frequency[i] = model->history_frequency[i - 1];
+        model->history_frequency_rx_count[i] = model->history_frequency_rx_count[i - 1];
+    }
+    model->history_frequency[0] = frequency;
+    model->history_frequency_rx_count[0] = count;
+    model->max_index = 0;
+    for(size_t i = 0; i < MAX_HISTORY; i++) {
+        if(model->history_frequency[i]) model->max_index = i + 1;
+    }
+}
+
 void subghz_frequency_analyzer_pair_callback(
     void* context,
     uint32_t frequency,
     float rssi,
     bool signal) {
     SubGhzFrequencyAnalyzer* instance = (SubGhzFrequencyAnalyzer*)context;
-    if(float_is_equal(rssi, 0.f) && instance->locked) {
+    bool has_rssi = !float_is_equal(rssi, 0.f);
+    if(!has_rssi && instance->locked) {
         if(instance->callback) {
             instance->callback(SubGhzCustomEventSceneAnalyzerUnlock, instance->context);
         }
-        //update history
-        instance->show_frame = true;
-        uint8_t max_index = instance->max_index;
-        with_view_model(
-            instance->view,
-            SubGhzFrequencyAnalyzerModel * model,
-            {
-                bool in_array = false;
-                uint32_t normal_frequency = subghz_frequency_analyzer_get_nearest_frequency(
-                    instance->worker, model->frequency);
-                for(size_t i = 0; i < MAX_HISTORY; i++) {
-                    if(model->history_frequency[i] == normal_frequency) {
-                        in_array = true;
-                        if(model->history_frequency[i] > 0) {
-                            if(model->history_frequency_rx_count[i] == 0) {
-                                model->history_frequency_rx_count[i]++;
-                            }
-                            model->history_frequency_rx_count[i]++;
-                        }
-                        if(i > 0) {
-                            size_t offset = 0;
-                            uint8_t temp_rx_count = model->history_frequency_rx_count[i];
-
-                            for(size_t j = MAX_HISTORY - 1; j > 0; j--) {
-                                if(j == i) {
-                                    offset++;
-                                }
-                                model->history_frequency[j] = model->history_frequency[j - offset];
-                                model->history_frequency_rx_count[j] =
-                                    model->history_frequency_rx_count[j - offset];
-                            }
-                            model->history_frequency[0] = normal_frequency;
-                            model->history_frequency_rx_count[0] = temp_rx_count;
-                        }
-
-                        break;
-                    }
-                }
-
-                if(!in_array) {
-                    model->history_frequency[3] = model->history_frequency[2];
-                    model->history_frequency[2] = model->history_frequency[1];
-                    model->history_frequency[1] = model->history_frequency[0];
-                    model->history_frequency[0] = normal_frequency;
-
-                    model->history_frequency_rx_count[3] = model->history_frequency_rx_count[2];
-                    model->history_frequency_rx_count[2] = model->history_frequency_rx_count[1];
-                    model->history_frequency_rx_count[1] = model->history_frequency_rx_count[0];
-                    model->history_frequency_rx_count[0] = 0;
-                }
-
-                if(max_index < MAX_HISTORY) {
-                    for(size_t i = 0; i < MAX_HISTORY; i++) {
-                        if(model->history_frequency[i] > 0) {
-                            max_index = i + 1;
-                        }
-                    }
-                }
-            },
-            false);
-        instance->max_index = max_index;
-    } else if(!float_is_equal(rssi, 0.f) && !instance->locked) {
-        // There is some signal
-        FURI_LOG_I(TAG, "rssi = %.2f, frequency = %ld Hz", (double)rssi, frequency);
-        frequency = round_int(frequency, 3); // Round 299999990Hz to 300000000Hz
-
-        // Triggered!
+    } else if(has_rssi && !instance->locked) {
         instance->rssi_last = rssi;
         if(instance->callback) {
             instance->callback(SubGhzCustomEventSceneAnalyzerLock, instance->context);
         }
     }
-
-    // Update values
-    if(rssi >= instance->rssi_last && frequency != 0) {
-        instance->rssi_last = rssi;
+    if(frequency) frequency = round_int(frequency, 3);
+    uint32_t history_frequency = 0;
+    if(signal && has_rssi && frequency) {
+        history_frequency = subghz_frequency_analyzer_get_nearest_frequency(
+            instance->worker, frequency);
+        // Frequencies above the last configured preset can have no nearest
+        // result. Never discard a valid worker detection just for that reason.
+        if(!history_frequency) history_frequency = frequency;
     }
-
-    instance->locked = !float_is_equal(rssi, 0.f);
+    if(rssi >= instance->rssi_last && frequency) instance->rssi_last = rssi;
+    instance->locked = has_rssi;
     with_view_model(
         instance->view,
         SubGhzFrequencyAnalyzerModel * model,
         {
+            // Record at detection, not after the worker's 20-scan hold expires.
+            // Continuous transmitters then appear immediately too. Held samples
+            // do not count twice; a new burst or frequency change records once.
+            if(!has_rssi) model->history_active_frequency = 0;
+            if(history_frequency && history_frequency != model->history_active_frequency) {
+                subghz_frequency_analyzer_history_record(model, history_frequency);
+                model->history_active_frequency = history_frequency;
+                instance->max_index = model->max_index;
+                instance->show_frame = true;
+                instance->selected_index = 0;
+            }
             model->rssi = rssi;
             model->rssi_last = instance->rssi_last;
             model->frequency = frequency;
@@ -454,8 +441,8 @@ void subghz_frequency_analyzer_enter(void* context) {
         (SubGhzFrequencyAnalyzerWorkerPairCallback)subghz_frequency_analyzer_pair_callback,
         instance);
 
-    subghz_frequency_analyzer_worker_start(instance->worker);
-
+    // Reset all state before starting RX so the first callback cannot be erased.
+    instance->locked = false;
     instance->rssi_last = 0;
     instance->selected_index = 0;
     instance->max_index = 0;
@@ -481,11 +468,13 @@ void subghz_frequency_analyzer_enter(void* context) {
             model->history_frequency_rx_count[1] = 0;
             model->history_frequency_rx_count[0] = 0;
             model->frequency_to_save = 0;
+            model->history_active_frequency = 0;
             model->trigger = RSSI_MIN;
             model->is_ext_radio =
                 (subghz_txrx_radio_device_get(instance->txrx) != SubGhzRadioDeviceTypeInternal);
         },
         true);
+    subghz_frequency_analyzer_worker_start(instance->worker);
 }
 
 void subghz_frequency_analyzer_exit(void* context) {
