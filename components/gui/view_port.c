@@ -95,9 +95,14 @@ static void view_port_setup_canvas_orientation(const ViewPort* view_port, Canvas
 
 ViewPort* view_port_alloc(void) {
     ViewPort* view_port = malloc(sizeof(ViewPort));
+    if(!view_port) return NULL;
     view_port->orientation = ViewPortOrientationHorizontal;
     view_port->is_enabled = true;
     view_port->mutex = furi_mutex_alloc(FuriMutexTypeRecursive);
+    if(!view_port->mutex) {
+        free(view_port);
+        return NULL;
+    }
     return view_port;
 }
 
