@@ -100,11 +100,7 @@ age, not a guaranteed server generation timestamp. Streets and territories have
 independent coverage and limits. See [map details](docs/WDGWARS_MAP.md) and
 [source attribution](docs/WDGWARS_BASEMAP_SOURCES.md).
 
-## RF display and ProtoPirate
-
-RF Waterfall and the Sub-GHz spectrum view retain the native color waterfall,
-centered frequency display and signal history. See
-[spectrum documentation](docs/SPECTRUM_ANALYZER.md).
+## ProtoPirate
 
 ProtoPirate keeps its decoder/plugins and gains the receive-history lifetime
 and concurrency fix: incoming records no longer free a reader borrowed by the
