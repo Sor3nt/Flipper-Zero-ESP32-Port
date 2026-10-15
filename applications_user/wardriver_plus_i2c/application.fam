@@ -1,0 +1,14 @@
+App(
+    appid="wardriver_plus_i2c",
+    name="Wardriver Plus",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="wardriver_app",
+    requires=["gui", "storage", "dialogs"],
+    stack_size=16 * 1024,
+    fap_category="Tools",
+    fap_version="1.5.2",
+    fap_icon="wardriver_icon.pbm",
+    fap_description="Plus Wi-Fi/BLE survey; NRF and I2C pins protected from GPS",
+    fap_author="Sor3nt port contributors",
+    sources=["*.c"],
+)
