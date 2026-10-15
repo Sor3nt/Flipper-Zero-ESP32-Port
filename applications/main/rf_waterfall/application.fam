@@ -1,0 +1,11 @@
+App(
+    appid="rf_waterfall",
+    name="RF Waterfall",
+    apptype=FlipperAppType.APP,
+    targets=["f32"],
+    entry_point="rf_waterfall_app",
+    requires=["gui", "dialogs", "subghz"],
+    icon="A_Sub1ghz_14",
+    stack_size=4096,
+    order=21,
+)
