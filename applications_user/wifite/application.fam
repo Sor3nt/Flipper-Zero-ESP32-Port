@@ -1,0 +1,14 @@
+App(
+    appid="wifite",
+    name="WIFITE",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="wifite_app",
+    requires=["gui", "storage"],
+    stack_size=16 * 1024,
+    fap_category="WiFi",
+    fap_icon="wifite_10px.png",
+    fap_version="0.8.1",
+    fap_description="Experimental standalone WPS: Pixie Dust, PIN brute force, automatic fallback and terminal logs",
+    fap_author="T-Embed Native Tools custom build",
+    sources=["*.c"],
+)
