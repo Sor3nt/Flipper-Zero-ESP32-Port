@@ -1,4 +1,5 @@
 #include "thread_i.h"
+#include "thread_tls.h"
 #include "thread_list_i.h"
 #include "kernel.h"
 #include "message_queue.h"
@@ -107,8 +108,8 @@ static void furi_thread_body(void* context) {
     furi_check(context);
     FuriThread* thread = context;
 
-    furi_check(pvTaskGetThreadLocalStoragePointer(NULL, 0) == NULL);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, thread);
+    furi_check(furi_thread_local_get(NULL) == NULL);
+    furi_thread_local_set(NULL, thread);
 
     furi_check(thread->state == FuriThreadStateStarting);
     furi_thread_set_state(thread, FuriThreadStateRunning);
@@ -159,7 +160,7 @@ static void furi_thread_init_common(FuriThread* thread) {
 
     FuriThread* parent = NULL;
     if(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-        parent = pvTaskGetThreadLocalStoragePointer(NULL, 0);
+        parent = furi_thread_local_get(NULL);
 
         if(parent && parent->appid) {
             furi_thread_set_appid(thread, parent->appid);
@@ -197,8 +198,8 @@ void furi_thread_scrub(void) {
         TaskHandle_t task = (TaskHandle_t)thread_to_scrub;
 
         vTaskDelete(task);
-        furi_check(pvTaskGetThreadLocalStoragePointer(task, 0) == thread_to_scrub);
-        vTaskSetThreadLocalStoragePointer(task, 0, NULL);
+        furi_check(furi_thread_local_get(task) == thread_to_scrub);
+        furi_thread_local_set(task, NULL);
 
         furi_thread_set_state(thread_to_scrub, FuriThreadStateStopped);
     }
@@ -486,7 +487,7 @@ FuriThreadId furi_thread_get_current_id(void) {
 }
 
 FuriThread* furi_thread_get_current(void) {
-    FuriThread* thread = pvTaskGetThreadLocalStoragePointer(NULL, 0);
+    FuriThread* thread = furi_thread_local_get(NULL);
     return thread;
 }
 
@@ -730,7 +731,7 @@ const char* furi_thread_get_appid(FuriThreadId thread_id) {
     const char* appid = "system";
 
     if(!FURI_IS_IRQ_MODE() && (hTask != NULL)) {
-        FuriThread* thread = (FuriThread*)pvTaskGetThreadLocalStoragePointer(hTask, 0);
+        FuriThread* thread = (FuriThread*)furi_thread_local_get(hTask);
         if(thread) {
             appid = thread->appid;
         }
