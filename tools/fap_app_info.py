@@ -68,19 +68,19 @@ def _match(app_dir, pattern):
     out = []
     if os.path.isdir(full):
         for m in _walk_sources(full):
-            out.append(os.path.relpath(m, app_dir))
+            out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     elif "/" not in pattern:
         # bare filename (maybe wildcard): match by basename anywhere in the tree
         for m in _walk_sources(app_dir):
             if fnmatch.fnmatch(os.path.basename(m), pattern):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     else:
         for m in glob.glob(full, recursive=True):
             if os.path.isdir(m):
                 for f in _walk_sources(m):
-                    out.append(os.path.relpath(f, app_dir))
+                    out.append(os.path.relpath(f, app_dir).replace("\\", "/"))
             elif os.path.isfile(m) and m.endswith(_SRC_EXTS):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace("\\", "/"))
     return out
 
 
@@ -152,7 +152,7 @@ def main():
     out = []
     if not trivial:
         for rel in _resolve(app_dir, sources):
-            out.append(f"APPSOURCE\t{rel}")
+            out.append(f"APPSOURCE\t{rel.replace(chr(92), chr(47))}")
 
     # cdefines are emitted whenever the override triggers, so the main app builds
     # with the same feature flags fbt would pass (e.g. PROTOPIRATE_PROTOCOL_RX_ONLY).
@@ -177,7 +177,7 @@ def main():
             continue
         out.append(f"PLUGIN\t{appid}\t{ep}")
         for rel in _resolve(app_dir, a.get("sources", []) or []):
-            out.append(f"PLUGINSRC\t{appid}\t{rel}")
+            out.append(f"PLUGINSRC\t{appid}\t{rel.replace(chr(92), chr(47))}")
         for d in a.get("cdefines", []) or []:
             out.append(f"PLUGINDEF\t{appid}\t{str(d).replace(chr(92) + chr(34), chr(34))}")
 
