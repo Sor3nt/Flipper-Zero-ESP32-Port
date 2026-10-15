@@ -140,6 +140,10 @@
 #define BOARD_HAS_IBUTTON       0
 #define BOARD_HAS_RFID          1
 
+/* Physical UART header shared by optional external modules. */
+#define BOARD_EXTERNAL_UART_TX 43
+#define BOARD_EXTERNAL_UART_RX 44
+
 /* ---- RFID / RDM6300 (UART, 125kHz read-only) ---- */
 #define BOARD_PIN_RFID_RX       44      /* GROVE / SERIAL_RX */
 #define BOARD_PIN_RFID_TX       43      /* GROVE / SERIAL_TX */
