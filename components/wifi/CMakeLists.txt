@@ -4,7 +4,14 @@ idf_component_register(
         "wlan_passwords.c"
         "wifi_settings.c"
         "wifi_service.c"
+        "wifite/core.c"
+        "wifite/pixie.c"
+        "wifite/radio.c"
+        "wifite/link.c"
     INCLUDE_DIRS "."
+    PRIV_INCLUDE_DIRS
+        "$ENV{IDF_PATH}/components/wpa_supplicant/esp_supplicant/src"
+        "$ENV{IDF_PATH}/components/wpa_supplicant/src"
     REQUIRES
         furi
         toolbox
@@ -15,4 +22,6 @@ idf_component_register(
         esp_netif
         esp_event
         lwip
+        mbedtls
+        wpa_supplicant
 )
