@@ -1,0 +1,9 @@
+{
+  "url": "https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A20%5D%5Bmaxsize%3A8388608%5D%5Bbbox%3A51.476000%2C-0.006000%2C51.480000%2C0.006000%5D%3B%28way%5Bhighway~%22%5E%28motorway%7Cmotorway_link%7Ctrunk%7Ctrunk_link%7Cprimary%7Cprimary_link%7Csecondary%7Csecondary_link%7Ctertiary%7Ctertiary_link%7Cresidential%7Cunclassified%7Cservice%7Cliving_street%7Cpedestrian%7Cfootway%7Cpath%7Ctrack%7Csteps%7Ccycleway%29%24%22%5D%3Bway%5Bnatural%3Dwater%5D%3Bway%5Bwaterway~%22%5E%28river%7Cstream%7Ccanal%7Cdrain%29%24%22%5D%3Bway%5Bleisure~%22%5E%28park%7Cgarden%7Crecreation_ground%29%24%22%5D%3Bway%5Blanduse~%22%5E%28forest%7Cgrass%7Crecreation_ground%29%24%22%5D%3Bway%5Brailway~%22%5E%28rail%7Clight_rail%7Ctram%7Csubway%29%24%22%5D%3B%29%3Bout%20body%20geom%2851.476000%2C-0.006000%2C51.480000%2C0.006000%29%20qt%20257%3B",
+  "retrieved_utc": "2026-09-28T19:04:57.656658+00:00",
+  "http_status": 200,
+  "bytes": 174008,
+  "sha256": "130350d18e82ed385d2e7f490cb8bfaf02f292ef3546759d4bd849bd5f5cc355",
+  "license": "OpenStreetMap contributors, ODbL 1.0; https://www.openstreetmap.org/copyright",
+  "purpose": "Neutral small public Greenwich bbox; optional captured-response parser verification; never shipped as live user data"
+}
