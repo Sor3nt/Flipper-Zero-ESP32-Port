@@ -1,0 +1,13 @@
+App(
+    appid="flip_pi",
+    name="Flip Pi Wireless",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="flip_pi_app",
+    requires=["gui", "wifi"],
+    stack_size=8192,
+    fap_icon="flip_pi_10px.png",
+    fap_category="GPIO",
+    fap_author="Salik / ESP32 port",
+    fap_version="2.1",
+    fap_description="Persistent SSH terminal and editable Kali tools over Wi-Fi or BLE.",
+)
