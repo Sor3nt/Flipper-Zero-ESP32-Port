@@ -1,0 +1,4 @@
+{
+  "components/furi_hal/furi_hal_power.c": "a31ae68cefc51a3e30b9abaa454ac2382294008ab42116c727e6cac4ea9ba5e3",
+  "applications/services/power/power_service/power.c": "b4d2f7f20dbdeb7c2218ba4ede4d7ec5b344384bbb4a51cb82fac8fe879e8b9f"
+}
