@@ -3,25 +3,7 @@
 
 #include <furi.h>
 
-#define TAG "ProtoPirateViews"
-
-bool protopirate_ensure_variable_item_list(ProtoPirateApp* app) {
-    furi_check(app);
-    if(app->variable_item_list) {
-        return true;
-    }
-
-    app->variable_item_list = variable_item_list_alloc();
-    if(!app->variable_item_list) {
-        return false;
-    }
-
-    view_dispatcher_add_view(
-        app->view_dispatcher,
-        ProtoPirateViewVariableItemList,
-        variable_item_list_get_view(app->variable_item_list));
-    return true;
-}
+#define TAG "PPViews"
 
 bool protopirate_ensure_widget(ProtoPirateApp* app) {
     furi_check(app);
@@ -33,6 +15,7 @@ bool protopirate_ensure_widget(ProtoPirateApp* app) {
     if(!app->widget) {
         return false;
     }
+    protopirate_actions_widget_reset(app, app->widget);
 
     view_dispatcher_add_view(
         app->view_dispatcher, ProtoPirateViewWidget, widget_get_view(app->widget));
@@ -91,6 +74,11 @@ bool protopirate_ensure_receiver_view(ProtoPirateApp* app) {
 void protopirate_views_free(ProtoPirateApp* app) {
     furi_check(app);
 
+    if(app->actions_menu) {
+        view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewActions);
+        submenu_free(app->actions_menu);
+        app->actions_menu = NULL;
+    }
     if(app->submenu) {
         FURI_LOG_D(TAG, "Removing submenu view");
         view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewSubmenu);
@@ -98,12 +86,7 @@ void protopirate_views_free(ProtoPirateApp* app) {
         app->submenu = NULL;
     }
 
-    if(app->variable_item_list) {
-        FURI_LOG_D(TAG, "Removing variable_item_list view");
-        view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewVariableItemList);
-        variable_item_list_free(app->variable_item_list);
-        app->variable_item_list = NULL;
-    }
+    protopirate_variable_item_list_free(app);
 
     if(app->view_about) {
         FURI_LOG_D(TAG, "Removing about view");
@@ -131,5 +114,20 @@ void protopirate_views_free(ProtoPirateApp* app) {
         view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewReceiver);
         protopirate_view_receiver_free(app->protopirate_receiver);
         app->protopirate_receiver = NULL;
+    }
+}
+
+void protopirate_variable_item_list_free(ProtoPirateApp* app) {
+    if(app->config_plugin && app->config_plugin->on_exit) {
+        app->config_plugin->on_exit(app);
+    }
+}
+
+void protopirate_widget_free(ProtoPirateApp* app) {
+    if(app->widget) {
+        app->action_count = 0;
+        view_dispatcher_remove_view(app->view_dispatcher, ProtoPirateViewWidget);
+        widget_free(app->widget);
+        app->widget = NULL;
     }
 }

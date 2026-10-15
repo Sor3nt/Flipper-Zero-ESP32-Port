@@ -1,6 +1,7 @@
 // helpers/protopirate_settings.h
 #pragma once
 
+#include "../defines.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -14,9 +15,14 @@ typedef struct {
     uint8_t preset_index;
     uint8_t tx_power;
     bool auto_save;
+    bool sound;
     bool hopping_enabled;
     bool emulate_feature_enabled;
     bool check_saved;
+    bool datetime_filenames;
+#ifdef ENABLE_MODELS_DATABASE
+    uint16_t car_model_index;
+#endif
 } ProtoPirateSettings;
 
 void protopirate_settings_load(ProtoPirateSettings* settings);
