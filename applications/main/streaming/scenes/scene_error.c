@@ -7,7 +7,7 @@
 void streaming_scene_error_on_enter(void* context) {
     StreamingApp* app = context;
     popup_reset(app->popup);
-    popup_set_header(app->popup, "Not supported", 64, 12, AlignCenter, AlignTop);
+    popup_set_header(app->popup, "Media message", 64, 12, AlignCenter, AlignTop);
     popup_set_text(app->popup, app->error_msg, 64, 36, AlignCenter, AlignCenter);
     view_dispatcher_switch_to_view(app->view_dispatcher, StreamingViewPopup);
 }

@@ -1,4 +1,5 @@
 #include "../streaming.h"
+#include "../video_player.h"
 
 #include <assets_icons.h>
 #include <gui/icon_i.h>
@@ -27,7 +28,7 @@ static bool browser_item_cb(FuriString* path, void* ctx, uint8_t** icon, FuriStr
         const char* ext = p + len - 4;
         if(strcasecmp(ext, ".mp3") == 0)
             src = note_icon;
-        else if(strcasecmp(ext, ".mp4") == 0)
+        else if(strcasecmp(ext, ".mp4") == 0 || video_player_is_local(p))
             src = video_icon;
     }
     if(!src) return false;
@@ -45,7 +46,7 @@ void streaming_scene_browser_on_enter(void* context) {
 
     file_browser_configure(
         app->file_browser,
-        ".mp3|.mp4",
+        ".mp3|.mp4|.tvid",
         STREAMING_DATA_DIR,
         true, /* skip_assets */
         true, /* hide_dot_files */
