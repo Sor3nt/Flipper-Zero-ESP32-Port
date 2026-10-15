@@ -1,17 +1,14 @@
 #include "subghz_spectrum_worker.h"
-#include "subghz_spectrum_math.h"
 #include <lib/drivers/cc1101.h>
 #include <furi_hal_subghz.h>
 
 #include <furi.h>
-#include <esp_heap_caps.h>
-#include <stdatomic.h>
 
 #define TAG "SubGhzSpectrumWorker"
 
-/* Initial settle matches the Bruce-beta waterfall reference. Actual dwell is
- * user adjustable and rounded to the RTOS tick; RF accuracy needs bench tests. */
-#define SUBGHZ_SPECTRUM_SETTLE_MS 3
+/* Per-bin RSSI settle time after switching to RX. 1 ms keeps the sweep snappy
+ * for the live waterfall; the CC1101 AGC settles fast enough for a power view. */
+#define SUBGHZ_SPECTRUM_SETTLE_MS 1
 
 #define SUBGHZ_SPECTRUM_DEFAULT_CENTER 433920000UL
 #define SUBGHZ_SPECTRUM_DEFAULT_SPAN 6000000UL
@@ -46,14 +43,11 @@ static const SubGhzSpectrumBw subghz_spectrum_bw_table[] = {
 
 struct SubGhzSpectrumWorker {
     FuriThread* thread;
-    atomic_bool worker_running;
+    volatile bool worker_running;
     FuriMutex* mutex;
 
     uint32_t center;
     uint32_t span;
-    bool paused;
-    uint16_t dwell_ms;
-    bool spectrogram;
 
     SubGhzSpectrumWorkerSweepCallback callback;
     void* context;
@@ -109,30 +103,22 @@ static int32_t subghz_spectrum_worker_thread(void* context) {
         furi_mutex_acquire(instance->mutex, FuriWaitForever);
         uint32_t center = instance->center;
         uint32_t span = instance->span;
-        bool paused = instance->paused;
-        uint16_t dwell_ms = instance->dwell_ms;
         furi_mutex_release(instance->mutex);
-        if(paused) {
-            furi_hal_subghz_idle();
-            furi_delay_ms(20);
-            continue;
-        }
 
-        uint16_t bins = instance->spectrogram ? SUBGHZ_WATERFALL_BINS : SUBGHZ_SPECTRUM_BINS;
-        uint32_t step = span / bins;
+        uint32_t step = span / SUBGHZ_SPECTRUM_BINS;
         if(step == 0) step = 1;
+        uint32_t f_start = center - span / 2;
 
         // Match the channel filter to the bin spacing.
-        uint8_t bandwidth = instance->spectrogram ? 0x8 : subghz_spectrum_worker_bw_nibble(step);
-        uint8_t mdmcfg4 = (bandwidth << 4) | 0b0111;
+        uint8_t mdmcfg4 = (subghz_spectrum_worker_bw_nibble(step) << 4) | 0b0111;
         furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
         cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_MDMCFG4, mdmcfg4);
         furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
 
-        for(size_t i = 0; i < bins && instance->worker_running; i++) {
-            uint32_t freq = subghz_spectrum_bin_frequency(center, span, i, bins, instance->spectrogram);
+        for(size_t i = 0; i < SUBGHZ_SPECTRUM_BINS && instance->worker_running; i++) {
+            uint32_t freq = f_start + (uint32_t)(step * i) + step / 2;
 
-            if(!subghz_spectrum_frequency_supported(freq) || !furi_hal_subghz_is_frequency_valid(freq)) {
+            if(!furi_hal_subghz_is_frequency_valid(freq)) {
                 instance->rssi[i] = -127.0f;
                 continue;
             }
@@ -143,22 +129,17 @@ static int32_t subghz_spectrum_worker_thread(void* context) {
             cc1101_switch_to_idle(&furi_hal_spi_bus_handle_subghz);
             cc1101_set_frequency(&furi_hal_spi_bus_handle_subghz, freq);
             cc1101_calibrate(&furi_hal_spi_bus_handle_subghz);
-            bool calibrated = cc1101_wait_status_state(&furi_hal_spi_bus_handle_subghz, CC1101StateIDLE, 10000);
-            if(!calibrated) {
-                furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
-                instance->rssi[i] = -127.0f;
-                continue;
-            }
+            cc1101_wait_status_state(&furi_hal_spi_bus_handle_subghz, CC1101StateIDLE, 10000);
             cc1101_switch_to_rx(&furi_hal_spi_bus_handle_subghz);
             furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
 
-            furi_delay_ms(dwell_ms);
+            furi_delay_ms(SUBGHZ_SPECTRUM_SETTLE_MS);
 
             instance->rssi[i] = furi_hal_subghz_get_rssi();
         }
 
         if(instance->worker_running && instance->callback) {
-            instance->callback(instance->context, instance->rssi, center, span, bins);
+            instance->callback(instance->context, instance->rssi, center, span);
         }
 
         furi_delay_ms(1); // let the GUI thread run
@@ -170,16 +151,13 @@ static int32_t subghz_spectrum_worker_thread(void* context) {
 }
 
 SubGhzSpectrumWorker* subghz_spectrum_worker_alloc(void) {
-    SubGhzSpectrumWorker* instance = heap_caps_calloc(1, sizeof(SubGhzSpectrumWorker), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if(!instance) return NULL;
-    instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
-    if(!instance->mutex) { free(instance); return NULL; }
+    SubGhzSpectrumWorker* instance = malloc(sizeof(SubGhzSpectrumWorker));
     instance->thread =
         furi_thread_alloc_ex("SubGhzSpectrumWorker", 4096, subghz_spectrum_worker_thread, instance);
+    instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     instance->worker_running = false;
     instance->center = SUBGHZ_SPECTRUM_DEFAULT_CENTER;
     instance->span = SUBGHZ_SPECTRUM_DEFAULT_SPAN;
-    instance->dwell_ms = SUBGHZ_SPECTRUM_SETTLE_MS;
     instance->callback = NULL;
     instance->context = NULL;
     return instance;
@@ -229,17 +207,4 @@ void subghz_spectrum_worker_stop(SubGhzSpectrumWorker* instance) {
 bool subghz_spectrum_worker_is_running(SubGhzSpectrumWorker* instance) {
     furi_assert(instance);
     return instance->worker_running;
-}
-
-void subghz_spectrum_worker_set_spectrogram(SubGhzSpectrumWorker* instance, bool enabled) {
-    furi_assert(instance && !instance->worker_running);
-    instance->spectrogram = enabled;
-}
-
-void subghz_spectrum_worker_set_controls(SubGhzSpectrumWorker* instance, bool paused, uint16_t dwell_ms) {
-    furi_assert(instance);
-    furi_mutex_acquire(instance->mutex, FuriWaitForever);
-    instance->paused = paused;
-    instance->dwell_ms = dwell_ms < 1 ? 1 : dwell_ms > 20 ? 20 : dwell_ms;
-    furi_mutex_release(instance->mutex);
 }

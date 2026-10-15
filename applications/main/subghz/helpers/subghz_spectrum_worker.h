@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Bounded measured bins, interpolated for display only. Sweep time includes
- * PLL calibration, dwell rounded to RTOS ticks, and shared-SPI contention. */
+/* Number of frequency bins per sweep. 128 bins give a detailed trace on the
+ * 320 px color display (interpolated ~2.5 px/bin) while keeping one sweep fast
+ * enough (~300 ms) for a live waterfall. */
 #define SUBGHZ_SPECTRUM_BINS 128
-#define SUBGHZ_WATERFALL_BINS 64
 
 typedef struct SubGhzSpectrumWorker SubGhzSpectrumWorker;
 
@@ -22,8 +22,7 @@ typedef void (*SubGhzSpectrumWorkerSweepCallback)(
     void* context,
     const float* rssi,
     uint32_t center,
-    uint32_t span,
-    uint16_t bins);
+    uint32_t span);
 
 SubGhzSpectrumWorker* subghz_spectrum_worker_alloc(void);
 
@@ -41,10 +40,7 @@ void subghz_spectrum_worker_set_window(
     uint32_t span);
 
 void subghz_spectrum_worker_start(SubGhzSpectrumWorker* instance);
-/** Configure while stopped: beta waterfall is 64 endpoint bins, 203 kHz RX filter. */
-void subghz_spectrum_worker_set_spectrogram(SubGhzSpectrumWorker* instance, bool enabled);
 
 void subghz_spectrum_worker_stop(SubGhzSpectrumWorker* instance);
 
 bool subghz_spectrum_worker_is_running(SubGhzSpectrumWorker* instance);
-void subghz_spectrum_worker_set_controls(SubGhzSpectrumWorker* instance, bool paused, uint16_t dwell_ms);
