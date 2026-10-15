@@ -1,0 +1,2 @@
+# Keep the cross-platform FAP entry point executable by Bash on Windows.
+/buildFap.sh text eol=lf
