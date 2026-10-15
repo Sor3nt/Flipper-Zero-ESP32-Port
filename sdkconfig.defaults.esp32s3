@@ -109,3 +109,15 @@ CONFIG_LWIP_L2_TO_L3_COPY=y
 # writes (would make PSRAM task stacks safe). Needs verified flash-chip support;
 # our chip is mfr 0x46 (no-name) so this is a test.
 CONFIG_SPI_FLASH_AUTO_SUSPEND=y
+
+# Power management: dynamic frequency scaling (80-160 MHz DFS) plus gated
+# automatic light sleep, both configured at runtime in furi_hal_power_init.
+# See furi_hal_power.c. Note: IDF auto-loads this file after sdkconfig.defaults
+# for the esp32s3 target.
+CONFIG_PM_ENABLE=y
+
+# Aggressive idle power: automatic light sleep (gated at runtime by a
+# NO_LIGHT_SLEEP lock so it only engages screen-off on battery). Tickless idle
+# lets IDF step the FreeRTOS tick across sleep so there's no clock drift.
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048

@@ -33,6 +33,13 @@ void furi_hal_bq25896_enable_otg(void);
 void furi_hal_bq25896_disable_otg(void);
 bool furi_hal_bq25896_is_otg_enabled(void);
 
+/** True if the charger is currently powered from VBUS (USB attached). */
+bool furi_hal_bq25896_is_vbus_present(void);
+
+/** Enter ship mode (BATFET off): physically disconnect the battery for a real
+ *  power-off. Only effective on battery — with USB attached SYS stays powered. */
+void furi_hal_bq25896_poweroff(void);
+
 #ifdef __cplusplus
 }
 #endif

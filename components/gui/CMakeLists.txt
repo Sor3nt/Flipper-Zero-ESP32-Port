@@ -1,3 +1,16 @@
+if(FLIPPER_BOARD STREQUAL "thormini")
+    set(VIEW_INPUT_SRC "view_dispatcher_thormini.c")
+else()
+    set(VIEW_INPUT_SRC "view_dispatcher.c")
+endif()
+
+if(FLIPPER_BOARD STREQUAL "thormini")
+    set(TEXT_INPUT_SRC "modules/text_input_thormini.c")
+else()
+    set(TEXT_INPUT_SRC "modules/text_input.c")
+endif()
+
+
 idf_component_register(
     SRCS
         "gui.c"
@@ -8,7 +21,7 @@ idf_component_register(
         "view.c"
         "view_port.c"
         "view_holder.c"
-        "view_dispatcher.c"
+        ${VIEW_INPUT_SRC}
         "view_stack.c"
         "scene_manager.c"
         "modules/button_menu.c"
@@ -25,7 +38,7 @@ idf_component_register(
         "modules/popup.c"
         "modules/submenu.c"
         "modules/text_box.c"
-        "modules/text_input.c"
+        ${TEXT_INPUT_SRC}
         "modules/validators.c"
         "modules/variable_item_list.c"
         "modules/widget.c"

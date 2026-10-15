@@ -122,10 +122,24 @@ void furi_hal_display_set_backlight(uint8_t brightness) {
     (void)brightness;
 }
 
+static bool panel_is_asleep = false;
+
 void furi_hal_display_sleep(void) {
-    if(!display_ready) return;
-    const uint8_t command = 0xAE;
+    if(!display_ready || panel_is_asleep) return;
+    const uint8_t command = 0xAE; /* display off */
     sh1106_commands(&command, 1);
+    panel_is_asleep = true;
+}
+
+void furi_hal_display_wakeup(void) {
+    if(!display_ready || !panel_is_asleep) return;
+    const uint8_t command = 0xAF; /* display on */
+    sh1106_commands(&command, 1);
+    panel_is_asleep = false;
+}
+
+bool furi_hal_display_is_asleep(void) {
+    return panel_is_asleep;
 }
 
 uint16_t furi_hal_display_get_h_res(void) {

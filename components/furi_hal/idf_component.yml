@@ -1,4 +1,6 @@
 dependencies:
+  espressif/mdns:
+    version: "^1.0.3"
   espressif/esp_tinyusb:
     version: "^1.4.0"
     rules:

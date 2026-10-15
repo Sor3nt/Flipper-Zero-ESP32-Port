@@ -21,6 +21,8 @@
 #include "wlan_webfs.h"
 #include "wlan_smb.h"
 #include "wlan_androidtv.h"
+#include "wlan_airprint.h"
+#include "wlan_printhijack.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_androidtv_remote_view.h"
 #include "views/wlan_connect_view.h"
@@ -294,6 +296,15 @@ struct WlanApp {
     char androidtv_ip[64]; // selected TV ("a.b.c.d")
     char androidtv_name[WLAN_ATV_NAME_MAX]; // host/NetBIOS label from the scan
     char androidtv_pin[8]; // 6-hex PIN entered during pairing
+
+    // AirPrint: Puffer für die Namens-Eingabe in der Config-Scene.
+    char airprint_name[WLAN_AIRPRINT_NAME_MAX + 1];
+
+    // AirPrint Hijack: gewähltes Ziel (aus der Scan-Scene an die Hijack-Scene).
+    uint32_t airprint_hijack_ip; // network byte order
+    char airprint_hijack_name[WLAN_PRINTHIJACK_NAME_MAX];
+    uint8_t airprint_hijack_mac[6];
+    bool airprint_hijack_has_mac;
 };
 
 /** Schlüssel der aktuellen Picker-Assoziation: Channel-Key im Channel-Mode,

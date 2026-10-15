@@ -8,6 +8,7 @@ enum NetworkActionsIndex {
     NaIndexSmb,
     NaIndexAirSnitch,
     NaIndexAndroidTv,
+    NaIndexAirPrint,
 };
 
 static void network_actions_submenu_cb(void* context, uint32_t index) {
@@ -47,6 +48,10 @@ void wlan_app_scene_network_actions_on_enter(void* context) {
     if(app->connected) {
         submenu_add_item(
             app->submenu, "Android TV", NaIndexAndroidTv, network_actions_submenu_cb, app);
+    }
+    // AirPrint (IPP-Drucker) braucht eine aktive STA-Verbindung (mDNS + Server).
+    if(app->connected) {
+        submenu_add_item(app->submenu, "AirPrint", NaIndexAirPrint, network_actions_submenu_cb, app);
     }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewSubmenu);
@@ -101,6 +106,10 @@ bool wlan_app_scene_network_actions_on_event(void* context, SceneManagerEvent ev
             break;
         case NaIndexAndroidTv:
             scene_manager_next_scene(app->scene_manager, WlanAppSceneAndroidTvScan);
+            consumed = true;
+            break;
+        case NaIndexAirPrint:
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneAirPrintMenu);
             consumed = true;
             break;
         }

@@ -28,6 +28,7 @@ static const char* TAG = "BQ25896";
 #define REG05   0x05    /* Pre-charge / termination current */
 #define REG06   0x06    /* Charge voltage limit (VREG) */
 #define REG07   0x07    /* Charge timer, watchdog */
+#define REG09   0x09    /* BATFET control (ship mode) */
 #define REG0A   0x0A    /* Boost voltage/current */
 #define REG0B   0x0B    /* Status: VBUS, CHG, PG */
 #define REG0C   0x0C    /* Fault flags */
@@ -238,4 +239,25 @@ bool furi_hal_bq25896_is_otg_enabled(void) {
     uint8_t reg03 = 0;
     bq25896_read_reg(REG03, &reg03);
     return (reg03 & 0x20) != 0;
+}
+
+bool furi_hal_bq25896_is_vbus_present(void) {
+    if(!bq25896_present) return false;
+    uint8_t reg0b = 0;
+    if(!bq25896_read_reg(REG0B, &reg0b)) return false;
+    /* VBUS_STAT (bits 7:5): 000 = No Input, anything else = powered from VBUS */
+    return ((reg0b >> 5) & 0x07) != 0;
+}
+
+void furi_hal_bq25896_poweroff(void) {
+    if(!bq25896_present) return;
+    /* Ship mode: force BATFET off (REG09 bit 5 = BATFET_DIS) to physically
+     * disconnect the battery from the system rail. Real power-off (0 draw),
+     * not deep sleep. Wakes only via a fresh USB plug or the /QON button.
+     * Note: with VBUS present the charger keeps SYS powered anyway, so callers
+     * must gate this on battery-only operation (see furi_hal_bq25896_is_vbus_present). */
+    uint8_t reg09 = 0;
+    bq25896_read_reg(REG09, &reg09);
+    reg09 |= 0x20; /* BATFET_DIS */
+    bq25896_write_reg(REG09, reg09);
 }

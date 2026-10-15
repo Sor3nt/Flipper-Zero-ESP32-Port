@@ -60,6 +60,31 @@ void furi_hal_power_suppress_charge_exit(void);
 void furi_hal_power_info_get(PropertyValueCallback callback, char sep, void* context);
 void furi_hal_power_debug_get(PropertyValueCallback callback, void* context);
 
+/** True only when a charger IC confirms VBUS is absent (running on battery).
+ * False on boards without one, so they never gate light sleep on it. */
+bool furi_hal_power_is_running_on_battery(void);
+
+/** Gate for automatic light sleep: true permits it, false blocks it (the
+ * default). Idempotent. Even when permitted, IDF sleeps only once every other
+ * PM lock is free (insomnia, peripheral, WiFi/BT), so callers just pass the
+ * idle condition (screen off and on battery). No-op without CONFIG_PM_ENABLE. */
+void furi_hal_power_allow_light_sleep(bool allow);
+
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+/** Light-sleep instrumentation, compiled in only with the debug Kconfig option
+ * CONFIG_PM_LIGHT_SLEEP_CALLBACKS. Lets a consumer confirm sleep is engaging. */
+typedef struct {
+    uint32_t sleep_count;
+    uint64_t total_sleep_us;
+    uint32_t wake_timer;
+    uint32_t wake_gpio;
+    uint32_t wake_other;
+    bool allowed;
+} FuriHalPowerLightSleepStats;
+
+void furi_hal_power_get_light_sleep_stats(FuriHalPowerLightSleepStats* out);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

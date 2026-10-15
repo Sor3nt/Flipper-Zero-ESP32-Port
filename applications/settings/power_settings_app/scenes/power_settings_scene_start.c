@@ -21,6 +21,11 @@ const char* const charge_supress_percent_text[CHARGE_SUPRESS_PERCENT_COUNT] =
 
 const uint32_t charge_supress_percent_value[CHARGE_SUPRESS_PERCENT_COUNT] = {0, 90, 85, 80, 75, 70};
 
+#define OFF_MODE_COUNT 2
+const char* const off_mode_text[OFF_MODE_COUNT] = {"Deep Sleep", "Power Off"};
+
+const uint32_t off_mode_value[OFF_MODE_COUNT] = {PowerOffModeDeepSleep, PowerOffModePowerOff};
+
 // change variable_item_list visible text and charge_supress_percent_settings when user change item in variable_item_list
 static void power_settings_scene_start_charge_supress_percent_changed(VariableItem* item) {
     PowerSettingsApp* app = variable_item_get_context(item);
@@ -37,6 +42,15 @@ static void power_settings_scene_start_auto_poweroff_delay_changed(VariableItem*
 
     variable_item_set_current_value_text(item, auto_poweroff_delay_text[index]);
     app->settings.auto_poweroff_delay_ms = auto_poweroff_delay_value[index];
+}
+
+// change visible text and off_mode setting when user changes item in variable_item_list
+static void power_settings_scene_start_off_mode_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, off_mode_text[index]);
+    app->settings.off_mode = off_mode_value[index];
 }
 
 static void power_settings_scene_start_submenu_callback(void* context, uint32_t index) {
@@ -84,6 +98,17 @@ void power_settings_scene_start_on_enter(void* context) {
         CHARGE_SUPRESS_PERCENT_COUNT);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, charge_supress_percent_text[value_index]);
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "Off Mode",
+        OFF_MODE_COUNT,
+        power_settings_scene_start_off_mode_changed,
+        app);
+
+    value_index = value_index_uint32(app->settings.off_mode, off_mode_value, OFF_MODE_COUNT);
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, off_mode_text[value_index]);
 
     variable_item_list_set_selected_item(
         variable_item_list,

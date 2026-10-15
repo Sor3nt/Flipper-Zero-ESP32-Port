@@ -225,8 +225,10 @@ static bool sd_update_download_attempt(
     const char* url,
     const char* dest,
     uint32_t* resume_from,
-    bool* complete) {
+    bool* complete,
+    bool* not_found) {
     *complete = false;
+    *not_found = false;
     if(esp_http_client_set_url(client, url) != ESP_OK) return false;
 
     if(*resume_from > 0) {
@@ -250,7 +252,14 @@ static bool sd_update_download_attempt(
         // 206 = Server akzeptiert Range (Resume). 200 = voller Inhalt — auch
         // wenn wir Range gefordert haben (Server ignoriert es) → von vorn.
         bool resumed = (status == 206);
-        if(status != 200 && status != 206) break;
+        if(status != 200 && status != 206) {
+            // 4xx (z.B. 404) → Datei liegt nicht auf dem Server (z.B. von
+            // GitHub Pages/Jekyll ausgeschlossene Dotfiles). Retries sind
+            // sinnlos → als "not found" markieren, damit der Sync sie
+            // überspringt statt abzubrechen.
+            if(status >= 400 && status < 500) *not_found = true;
+            break;
+        }
         if(*resume_from > 0 && !resumed) *resume_from = 0;
 
         f = storage_file_alloc(storage);
@@ -311,9 +320,11 @@ static bool sd_update_download_file(
     esp_http_client_handle_t client,
     Storage* storage,
     const char* url,
-    const char* dest) {
+    const char* dest,
+    bool* not_found) {
     sd_update_mkdirs(storage, dest);
 
+    *not_found = false;
     uint32_t resume_from = 0;
     bool complete = false;
 
@@ -329,10 +340,13 @@ static bool sd_update_download_file(
             vTaskDelay(pdMS_TO_TICKS(500));
         }
         if(sd_update_download_attempt(
-               u, client, storage, url, dest, &resume_from, &complete)) {
+               u, client, storage, url, dest, &resume_from, &complete, not_found)) {
             return true;
         }
         if(u->cancel) return false;
+        // 4xx → Datei existiert serverseitig nicht; erneute Versuche bringen
+        // nichts, sofort abbrechen (Sync überspringt sie dann).
+        if(*not_found) return false;
     }
     return false;
 }
@@ -477,6 +491,8 @@ static bool sd_update_sync(WlanSdUpdate* u, const char* manifest, size_t mlen) {
     bool ok = (client != NULL);
     const char* cur = manifest;
     char line[300];
+    uint32_t skipped = 0;     // Dateien, die nicht geladen werden konnten
+    bool transient_fail = false; // mind. ein NICHT-4xx-Fehler (Netz/Abbruch)
 
     while(ok && *cur) {
         if(u->cancel) {
@@ -522,16 +538,26 @@ static bool sd_update_sync(WlanSdUpdate* u, const char* manifest, size_t mlen) {
         char url[400];
         snprintf(url, sizeof(url), "%s/%s", SD_UPDATE_BASE_URL, rel);
         FURI_LOG_I(SD_UPDATE_TAG, "fetch %s", rel);
-        if(!sd_update_download_file(u, client, storage, url, dest)) {
+        bool not_found = false;
+        if(!sd_update_download_file(u, client, storage, url, dest, &not_found)) {
             if(u->cancel) {
                 ok = false;
                 break;
             }
-            char m[64];
-            snprintf(m, sizeof(m), "Download failed: %.32s", rel);
-            sd_update_fail(u, m);
-            ok = false;
-            break;
+            // Einzelne Datei nicht ladbar → NICHT den ganzen Sync abbrechen,
+            // sondern überspringen und weitermachen. 4xx (Datei nicht auf dem
+            // Server, z.B. Jekyll-ausgeschlossene Dotfiles wie .fap_icon_cache)
+            // ist erwartbar und dauerhaft. Andere Fehler (Netz/Abbruch) merken
+            // wir uns → Manifest wird dann NICHT als vollständig persistiert,
+            // damit die Datei beim nächsten Lauf erneut versucht wird.
+            skipped++;
+            if(not_found) {
+                FURI_LOG_W(SD_UPDATE_TAG, "skip (not on server): %s", rel);
+            } else {
+                FURI_LOG_W(SD_UPDATE_TAG, "skip (download failed): %s", rel);
+                transient_fail = true;
+            }
+            continue;
         }
     }
 
@@ -539,9 +565,16 @@ static bool sd_update_sync(WlanSdUpdate* u, const char* manifest, size_t mlen) {
     if(lentries) free(lentries);
     if(lbuf) free(lbuf);
 
-    // Nur bei vollständigem Erfolg das Manifest persistieren (sonst beim
-    // nächsten Lauf erneut diffen).
-    if(ok && !u->cancel) {
+    if(skipped) {
+        FURI_LOG_W(SD_UPDATE_TAG, "%lu file(s) skipped", (unsigned long)skipped);
+    }
+
+    // Manifest persistieren, wenn der Lauf nicht abgebrochen wurde und es
+    // keinen transienten Fehler gab. 404-Skips sind dauerhaft (Datei existiert
+    // serverseitig nicht) → dürfen persistiert werden, sonst würde jeder Lauf
+    // sie erneut vergeblich anfragen. Bei transienten Fehlern NICHT
+    // persistieren → der nächste Lauf re-diffed und holt sie nach.
+    if(ok && !u->cancel && !transient_fail) {
         sd_update_save_manifest(storage, manifest, mlen);
     }
 
