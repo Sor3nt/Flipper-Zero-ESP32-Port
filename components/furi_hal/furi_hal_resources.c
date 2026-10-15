@@ -21,9 +21,16 @@ const GpioPin gpio_lcd_cs  = {.port = NULL, .pin = BOARD_PIN_LCD_CS};
 const GpioPin gpio_lcd_rst = {.port = NULL, .pin = BOARD_PIN_LCD_RST};
 const GpioPin gpio_lcd_bl  = {.port = NULL, .pin = BOARD_PIN_LCD_BL};
 
+#ifdef BOARD_SD_BUS_NOT_SHARED
+const GpioPin gpio_sdcard_miso2   = {.port = NULL, .pin = BOARD_PIN_SD_MISO2};
+const GpioPin gpio_sdcard_mosi = {.port = NULL, .pin = BOARD_PIN_SD_MOSI};
+const GpioPin gpio_sdcard_clk   = {.port = NULL, .pin = BOARD_PIN_SD_SCK};
+#endif
+
 /* SD Card Pins */
 const GpioPin gpio_sdcard_cs   = {.port = NULL, .pin = BOARD_PIN_SD_CS};
 const GpioPin gpio_sdcard_miso = {.port = NULL, .pin = BOARD_PIN_SD_MISO};
+
 
 /* Touch Pins */
 const GpioPin gpio_touch_scl = {.port = NULL, .pin = BOARD_PIN_TOUCH_SCL};

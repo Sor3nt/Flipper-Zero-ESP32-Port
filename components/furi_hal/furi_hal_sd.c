@@ -22,10 +22,20 @@
 #include <sdmmc_cmd.h>
 #include <driver/sdspi_host.h>
 
+#ifdef BOARD_SD_BUS_NOT_SHARED
+#include <driver/spi_master.h>
+#endif
+
 static const char* TAG = "FuriHalSd";
 
 #define SD_FATFS_DRIVE "0:"
+
+#ifdef BOARD_SD_BUS_NOT_SHARED
+#define SD_SPI_HOST    BOARD_SD_SPI_HOST   /* SPI3_HOST */
+#else
 #define SD_SPI_HOST    SPI2_HOST
+#endif
+
 #define SD_MAX_FREQ    (20 * 1000) /* 20 MHz — conservative for shared bus */
 #define SD_BOUNCE_SECTORS 8 /* 4 KiB persistent DMA bounce buffer */
 
@@ -37,6 +47,15 @@ static bool sd_disk_status_check = false;
 static bool sd_mounted = false;
 static const BYTE sd_pdrv = 0;
 static uint8_t* sd_bounce_buf = NULL;
+
+#ifdef BOARD_SD_BUS_NOT_SHARED
+/* True only if *this* module called spi_bus_initialize() successfully.
+ * If the bus was already up (initialized elsewhere), we must NOT free it. */
+static bool sd_bus_initialized_here = false;
+#endif
+
+
+
 
 static bool sd_ensure_bounce_buf(void) {
     if(sd_bounce_buf) return true;
@@ -65,10 +84,55 @@ static bool sd_host_conflicts_with(const FuriHalSpiBus* bus) {
     /* No conflict if bus shares the same SPI host (CS-based multiplexing) */
     if(bus->host_id == SD_SPI_HOST) return false;
 
+
+
+    #ifdef BOARD_SD_BUS_NOT_SHARED
+    /* Dedicated SD bus: check every SD pin (MISO2 is the *only* pin that
+     * collides name-wise with the legacy shared-bus symbol, hence the "2"). */
+    return bus->mosi_pin == gpio_sdcard_miso2.pin || bus->miso_pin == gpio_sdcard_miso2.pin ||
+           bus->sck_pin == gpio_sdcard_miso2.pin ||
+           bus->mosi_pin == gpio_sdcard_cs.pin || bus->miso_pin == gpio_sdcard_cs.pin ||
+           bus->sck_pin == gpio_sdcard_cs.pin ||
+           bus->mosi_pin == gpio_sdcard_mosi.pin || bus->miso_pin == gpio_sdcard_mosi.pin ||
+           bus->sck_pin == gpio_sdcard_mosi.pin ||
+           bus->mosi_pin == gpio_sdcard_clk.pin || bus->miso_pin == gpio_sdcard_clk.pin ||
+           bus->sck_pin == gpio_sdcard_clk.pin;
+    #else
     return bus->mosi_pin == gpio_sdcard_miso.pin || bus->miso_pin == gpio_sdcard_miso.pin ||
            bus->mosi_pin == gpio_sdcard_cs.pin || bus->miso_pin == gpio_sdcard_cs.pin ||
            bus->sck_pin == gpio_sdcard_cs.pin;
+        #endif
 }
+
+#ifdef BOARD_SD_BUS_NOT_SHARED
+/* Initialize the dedicated SD SPI bus. Idempotent: if the bus is already
+ * initialized (by us or anyone else), returns true without touching it. */
+static bool sd_ensure_spi_bus(void) {
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = gpio_sdcard_mosi.pin,
+        .miso_io_num = gpio_sdcard_miso2.pin,
+        .sclk_io_num = gpio_sdcard_clk.pin,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 512 * SD_BOUNCE_SECTORS,
+    };
+
+    esp_err_t err = spi_bus_initialize(SD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    if(err == ESP_OK) {
+        sd_bus_initialized_here = true;
+        return true;
+    }
+    if(err == ESP_ERR_INVALID_STATE) {
+        /* Already initialized — not an error, just not ours to free. */
+        return true;
+    }
+
+    ESP_LOGE(TAG, "spi_bus_initialize(SD_SPI_HOST=%d) failed: %s",
+             (int)SD_SPI_HOST, esp_err_to_name(err));
+    return false;
+}
+#endif
+
 
 static uint16_t sd_read_le16(const uint8_t* data) {
     return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
@@ -523,6 +587,15 @@ static void sd_release_host(void) {
 
     sdspi_host_deinit();
 
+    #ifdef BOARD_SD_BUS_NOT_SHARED
+    /* Only free the SPI bus if *we* brought it up. If it was already up
+     * (e.g. shared host) it isn't ours to free. */
+    if(sd_bus_initialized_here) {
+        spi_bus_free(SD_SPI_HOST);
+        sd_bus_initialized_here = false;
+    }
+#endif
+
     free(sd_card);
     sd_card = NULL;
     sd_initialized = false;
@@ -545,7 +618,23 @@ static bool sd_prepare_card(void) {
 
     sd_release_host();
 
+
+    #ifdef BOARD_SD_BUS_NOT_SHARED
+    if(!sd_ensure_spi_bus()) {
+        return false;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Initializing SD card on SPI%d_HOST, CS=%d MISO=%d MOSI=%d CLK=%d",
+        (int)SD_SPI_HOST,
+        gpio_sdcard_cs.pin,
+        gpio_sdcard_miso2.pin,
+        gpio_sdcard_mosi.pin,
+        gpio_sdcard_clk.pin);
+    #else
     ESP_LOGI(TAG, "Initializing SD card on SPI2_HOST, CS=GPIO%d", gpio_sdcard_cs.pin);
+    #endif
 
     sdspi_device_config_t dev_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
     dev_cfg.host_id = SD_SPI_HOST;
