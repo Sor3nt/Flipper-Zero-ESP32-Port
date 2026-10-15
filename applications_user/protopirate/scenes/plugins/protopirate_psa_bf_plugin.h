@@ -2,14 +2,13 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <lib/flipper_application/flipper_application.h>
 #include <gui/scene_manager.h>
 #include <flipper_format/flipper_format.h>
 
 #include "../../protocols/psa_bf_types.h"
 
-#define PROTOPIRATE_PSA_BF_PLUGIN_APP_ID      "protopirate_psa_bf_plugin"
-#define PROTOPIRATE_PSA_BF_PLUGIN_API_VERSION 1U
+#define PROTOPIRATE_PSA_BF_PLUGIN_APP_ID      "pp_bf"
+#define PROTOPIRATE_PSA_BF_PLUGIN_API_VERSION 0x03060201U
 
 typedef struct ProtoPirateApp ProtoPirateApp;
 typedef struct ProtoPirateHistory ProtoPirateHistory;
@@ -18,6 +17,7 @@ typedef struct Widget Widget;
 typedef enum {
     ProtoPiratePsaBfContextReceiverInfo,
     ProtoPiratePsaBfContextSubDecode,
+    ProtoPiratePsaBfContextSavedInfo,
 } ProtoPiratePsaBfContext;
 
 typedef struct {
@@ -33,18 +33,20 @@ typedef struct {
     void (*notification_error)(void* app);
     void (*notification_success)(void* app);
     void (*receiver_info_rebuild_widget)(void* app);
+    void (*saved_info_rebuild_widget)(void* app);
     void (*subdecode_signal_info_refresh)(void* app);
     void (*scene_previous)(void* app);
+    const char* (*get_loaded_file_path)(void* app);
 } ProtoPiratePsaBfHostApi;
 
 typedef struct {
     const char* plugin_name;
     void (*set_host_api)(const ProtoPiratePsaBfHostApi* api);
-    bool (*needs_bruteforce)(void* app, ProtoPiratePsaBfContext ctx);
+    bool (*needs_bruteforce)(FlipperFormat* ff);
     bool (*is_running)(void* app);
     void (*on_scene_enter)(void* app, ProtoPiratePsaBfContext ctx);
     bool (*on_scene_event)(void* app, ProtoPiratePsaBfContext ctx, SceneManagerEvent event);
     void (*on_scene_exit)(void* app, ProtoPiratePsaBfContext ctx);
-    bool (*widget_left_should_bruteforce)(void* app, ProtoPiratePsaBfContext ctx);
+    bool (*widget_left_should_bruteforce)(void* app, FlipperFormat* ff);
     void (*context_release)(void* app);
 } ProtoPiratePsaBfPlugin;
