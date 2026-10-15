@@ -11,6 +11,10 @@
 #include "furi_hal_resources.h"
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
+#include <sdkconfig.h>
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+#include "furi_hal_gpio.h"
+#endif
 
 #include <inttypes.h>
 #include <string.h>
@@ -37,6 +41,27 @@ static bool sd_disk_status_check = false;
 static bool sd_mounted = false;
 static const BYTE sd_pdrv = 0;
 static uint8_t* sd_bounce_buf = NULL;
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+/* A successful lower-speed session stays at that speed. A full unmount starts
+ * the next session at the normal rate; retries cannot slow below 4 MHz. */
+static uint8_t sd_retry_frequency_step;
+static const int sd_retry_frequency_khz[] = {SD_MAX_FREQ, 10000, 4000};
+/* Some SanDisk cards temporarily enumerate as SD032 / OEM SD / 62688
+ * sectors. Do not expose this false identity to FatFs or raw USB access.
+ * A fresh driver/card initialization must run through the existing bounded
+ * recovery path. This is not a capacity override or a physical power cycle.
+ * Reference: jupiter-hw-support commit 7d58dcf5cea3d7fc82546639902d6a6150ade7f0.
+ */
+static bool sd_has_sandisk_fallback_identity(const sdmmc_card_t* card) {
+    return strncmp(card->cid.name, "SD032", 6) == 0 && card->cid.oem_id == 0x5344 &&
+           card->csd.sector_size == 512 && card->csd.capacity == 62688;
+}
+
+static void sd_lower_retry_frequency(void) {
+    if((size_t)sd_retry_frequency_step + 1 < sizeof(sd_retry_frequency_khz) / sizeof(sd_retry_frequency_khz[0]))
+        ++sd_retry_frequency_step;
+}
+#endif
 
 static bool sd_ensure_bounce_buf(void) {
     if(sd_bounce_buf) return true;
@@ -70,6 +95,7 @@ static bool sd_host_conflicts_with(const FuriHalSpiBus* bus) {
            bus->sck_pin == gpio_sdcard_cs.pin;
 }
 
+#if !CONFIG_T_EMBED_PLUS_SD_RECOVERY
 static uint16_t sd_read_le16(const uint8_t* data) {
     return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
 }
@@ -347,6 +373,8 @@ static void sd_run_mount_diagnostics(const sdspi_device_config_t* dev_cfg, const
     sdspi_host_deinit();
 }
 
+#endif /* legacy diagnostic probe */
+
 static DSTATUS sd_fatfs_card_available(BYTE pdrv) {
     if((pdrv != sd_pdrv) || (sd_card == NULL)) {
         return STA_NOINIT;
@@ -511,6 +539,9 @@ static void sd_register_fatfs_diskio(void) {
 }
 
 static void sd_release_host(void) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    furi_hal_spi_bus_lock();
+#endif
     if(sd_diskio_registered) {
         ff_diskio_unregister(sd_pdrv);
         sd_diskio_registered = false;
@@ -521,17 +552,34 @@ static void sd_release_host(void) {
         sd_handle = 0;
     }
 
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    /* Remove only our device. SDSPI deinit can remove other registered cards.
+     * IDF removal leaves CS as an input; drive it idle before other SPI users
+     * run. Set the output latch first to avoid a low pulse on enabling output. */
+    furi_hal_gpio_write(&gpio_sdcard_cs, true);
+    furi_hal_gpio_init_simple(&gpio_sdcard_cs, GpioModeOutputPushPull);
+#else
     sdspi_host_deinit();
+#endif
 
     free(sd_card);
     sd_card = NULL;
     sd_initialized = false;
     sd_mounted = false;
     fatfs_init();
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    furi_hal_spi_bus_unlock();
+#endif
 }
 
 static bool sd_prepare_card(void) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    furi_hal_spi_bus_lock();
+#endif
     if(sd_initialized && sd_card != NULL) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        furi_hal_spi_bus_unlock();
+#endif
         return true;
     }
 
@@ -540,6 +588,9 @@ static bool sd_prepare_card(void) {
         ESP_LOGW(
             TAG,
             "Skipping SD init because SPI2_HOST is reserved for the external CC1101 pin set");
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        furi_hal_spi_bus_unlock();
+#endif
         return false;
     }
 
@@ -555,7 +606,11 @@ static bool sd_prepare_card(void) {
     dev_cfg.gpio_int = SDSPI_SLOT_NO_INT;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    host.max_freq_khz = sd_retry_frequency_khz[sd_retry_frequency_step];
+#else
     host.max_freq_khz = SD_MAX_FREQ;
+#endif
 
     ESP_LOGI(
         TAG,
@@ -584,13 +639,37 @@ static bool sd_prepare_card(void) {
 
         host.slot = sd_handle;
         ret = sdmmc_card_init(&host, sd_card);
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        if(ret == ESP_OK) {
+            ESP_LOGI(
+                TAG,
+                "SD identity: name=%.5s OEM=0x%04X sectors=%d sector_size=%d",
+                sd_card->cid.name,
+                (unsigned)sd_card->cid.oem_id,
+                sd_card->csd.capacity,
+                sd_card->csd.sector_size);
+            if(sd_has_sandisk_fallback_identity(sd_card)) {
+                ESP_LOGW(TAG, "SanDisk SD032 fallback identity; rejecting false 30 MB card and scheduling fresh initialization");
+                ret = ESP_ERR_INVALID_RESPONSE;
+            }
+        }
+#endif
     } while(false);
     furi_hal_spi_bus_unlock();
 
     if(ret != ESP_OK) {
         ESP_LOGE(TAG, "SD init failed: %s", esp_err_to_name(ret));
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        /* One failed attempt owns one device. Never attach a second probe on
+         * the same CS, and do not issue an unrequested retry here. */
+        sd_lower_retry_frequency();
+#else
         sd_run_mount_diagnostics(&dev_cfg, &host);
+#endif
         sd_release_host();
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        furi_hal_spi_bus_unlock();
+#endif
         return false;
     }
 
@@ -599,6 +678,9 @@ static bool sd_prepare_card(void) {
     sd_initialized = true;
 
     sdmmc_card_print_info(stdout, sd_card);
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    furi_hal_spi_bus_unlock();
+#endif
     return true;
 }
 
@@ -618,7 +700,31 @@ bool furi_hal_sd_is_present(void) {
 }
 
 FuriStatus furi_hal_sd_init(bool power_reset) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    if(power_reset) {
+        /* Keep the existing cross-host pin ownership check ahead of cleanup. */
+        if(!furi_hal_sd_is_present()) return FuriStatusError;
+        /* The board has no dedicated SD power switch. This is a requested
+         * driver/card reset after a failed mount, not a shared-rail toggle.
+         * The storage owner must exclude open files and active USB MSC. */
+        furi_hal_spi_bus_lock();
+        FRESULT result = f_mount(NULL, SD_FATFS_DRIVE, 0);
+        if(result != FR_OK) {
+            ESP_LOGE(TAG, "SD retry detach failed: %d", result);
+            furi_hal_spi_bus_unlock();
+            return FuriStatusError;
+        }
+        /* A failed card init already advanced the rate. An initialized card
+         * being reset here failed later at the filesystem stage. */
+        if(sd_initialized) sd_lower_retry_frequency();
+        sd_release_host();
+        bool ready = sd_prepare_card();
+        furi_hal_spi_bus_unlock();
+        return ready ? FuriStatusOk : FuriStatusError;
+    }
+#else
     (void)power_reset;
+#endif
     return sd_prepare_card() ? FuriStatusOk : FuriStatusError;
 }
 
@@ -675,7 +781,14 @@ bool furi_hal_sd_mount(void) {
 }
 
 bool furi_hal_sd_unmount(void) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    if(!sd_initialized) {
+        sd_retry_frequency_step = 0;
+        return true;
+    }
+#else
     if(!sd_initialized) return true;
+#endif
 
     const FRESULT result = f_mount(NULL, SD_FATFS_DRIVE, 0);
     if(result != FR_OK) {
@@ -685,6 +798,9 @@ bool furi_hal_sd_unmount(void) {
 
     ESP_LOGI(TAG, "SD card unmounted");
     sd_release_host();
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    sd_retry_frequency_step = 0;
+#endif
     return true;
 }
 

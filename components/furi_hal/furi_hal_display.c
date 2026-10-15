@@ -77,6 +77,7 @@ static uint16_t bg_color;
 #define STRIPE_HEIGHT 8
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
+static esp_lcd_panel_io_handle_t io_handle = NULL;
 static bool panel_is_asleep = false; /* guards the sleep/wake pair */
 static uint16_t* rgb565_buf = NULL; // STRIPE_HEIGHT lines only
 static SemaphoreHandle_t lcd_flush_done = NULL;
@@ -97,6 +98,20 @@ static bool furi_hal_display_flush_done_callback(
     }
 
     return yield == pdTRUE;
+}
+
+bool furi_hal_display_draw_rgb565(
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* pixels) {
+    if(!panel_handle || !io_handle || !pixels || !width || !height ||
+       (uint32_t)x + width > LCD_H_RES || (uint32_t)y + height > LCD_V_RES) return false;
+    furi_hal_spi_bus_lock();
+    esp_err_t result = esp_lcd_panel_draw_bitmap(panel_handle, x, y, x + width, y + height, pixels);
+    /* IDF SPI tx_param drains all outstanding color transactions before issuing
+     * its polling command. ST7789 NOP makes buffer lifetime synchronous even
+     * when a flush semaphore notification was delayed or previously consumed. */
+    esp_err_t drained = esp_lcd_panel_io_tx_param(io_handle, 0x00, NULL, 0);
+    furi_hal_spi_bus_unlock();
+    return result == ESP_OK && drained == ESP_OK;
 }
 
 static void furi_hal_display_prepare_flush(void) {
@@ -183,7 +198,6 @@ void furi_hal_display_init(void) {
     }
 
     /* Create panel IO (SPI) */
-    esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = gpio_lcd_dc.pin,
         .cs_gpio_num = gpio_lcd_cs.pin,

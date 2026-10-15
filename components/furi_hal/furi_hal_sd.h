@@ -33,7 +33,10 @@ void furi_hal_sd_presence_init(void);
 bool furi_hal_sd_is_present(void);
 
 /** Initialize SD card
- * @param power_reset  perform power reset before init
+ * @param power_reset Request reset before init. On the Plus SD recovery profile,
+ * this detaches FatFs and reinitializes the owned driver/card at a bounded retry
+ * speed; it does not toggle a power rail. The caller must exclude open files and
+ * active USB MSC before requesting reset. Legacy profiles ignore this argument.
  * @return FuriStatusOk on success
  */
 FuriStatus furi_hal_sd_init(bool power_reset);
