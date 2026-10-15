@@ -1,0 +1,13 @@
+App(
+    appid="csploit_mini",
+    name="cSploit Mini",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="csploit_mini_app",
+    requires=["gui", "storage"],
+    stack_size=24 * 1024,
+    fap_category="WiFi",
+    fap_icon="csploit_10px.png",
+    fap_version="1.0",
+    fap_description="Native LAN diagnostics and configured-name protocol tests for T-Embed Native Tools",
+    fap_author="T-Embed Native Tools",
+)
