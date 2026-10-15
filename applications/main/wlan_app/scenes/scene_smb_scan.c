@@ -151,20 +151,13 @@ void wlan_app_scene_smb_scan_on_enter(void* context) {
     smb_scan_render(app, false);
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewLan);
 
-    // FuriThread-TLS reset before spawning the pthread (see port_scanner).
-    // Save + restore: leaving the GUI thread's TLS[0] NULL crashes
-    // furi_event_loop_run's cleanup on app exit (furi_thread_get_current()
-    // returns NULL -> furi_check in furi_thread_set_signal_callback).
-    void* saved_tls = pvTaskGetThreadLocalStoragePointer(NULL, 0);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, NULL);
-
+    /* Furi and pthreads use separate TLS slots; keep pthread TLS intact. */
     s_scanning = true;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 6144);
     int rc = pthread_create(&s_thread, &attr, smb_scan_thread, app);
     pthread_attr_destroy(&attr);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, saved_tls);
     s_thread_running = (rc == 0);
     if(rc != 0) {
         s_scanning = false;

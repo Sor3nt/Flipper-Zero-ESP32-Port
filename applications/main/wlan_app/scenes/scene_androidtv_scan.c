@@ -197,23 +197,13 @@ void wlan_app_scene_androidtv_scan_on_enter(void* context) {
     atv_scan_render(app, false);
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewLan);
 
-    // FuriThread-TLS reset before spawning the pthread (see port_scanner):
-    // pthread_create's setup would otherwise deref the FuriThread* at TLS
-    // index 0 as pthread-specific garbage. IMPORTANT: this clears the *GUI
-    // thread's* TLS slot that furi_thread_get_current() reads — leaving it
-    // NULL crashes furi_event_loop_run's cleanup on app exit (furi_check in
-    // furi_thread_set_signal_callback). So restore it right after
-    // pthread_create; the scan task has its own (NULL) TLS and never needs it.
-    void* saved_tls = pvTaskGetThreadLocalStoragePointer(NULL, 0);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, NULL);
-
+    /* Furi and pthreads use separate TLS slots; keep pthread TLS intact. */
     s_scanning = true;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 6144);
     int rc = pthread_create(&s_thread, &attr, atv_scan_thread, app);
     pthread_attr_destroy(&attr);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, saved_tls);
     s_thread_running = (rc == 0);
     if(rc != 0) {
         s_scanning = false;
