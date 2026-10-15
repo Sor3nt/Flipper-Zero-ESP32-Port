@@ -13,6 +13,8 @@
 #include BOARD_INCLUDE
 #elif defined(BOARD_WAVESHARE_C6_1_9)
 #include "board_waveshare_c6_1.9.h"
+#elif defined(thorchimera)
+#include "board_thorchimera.h"
 #else
 /* Default board */
 #include "board_waveshare_c6_1.9.h"
@@ -25,6 +27,8 @@
 #ifndef BOARD_ID
 #define BOARD_ID "unknown"
 #endif
+// #ifndef BOARD_PIN_LCD_MOSI
+// #error "Board header must define LCD pins"
 #if !defined(BOARD_DISPLAY_SH1106) && !defined(BOARD_DISPLAY_SSD1306) && \
     !defined(BOARD_PIN_LCD_MOSI)
 #error "Board header must define a supported display and its pins"
