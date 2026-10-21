@@ -1,4 +1,4 @@
-/* Compact RGB565 UI for T-Embed Native Tools / T-Embed. MIT; font attribution in
+/* Compact RGB565 UI for WirelessPi / T-Embed. MIT; font attribution in
  * LICENSE.font. */
 #pragma once
 #include <furi.h>
