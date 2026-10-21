@@ -10,19 +10,21 @@ This is the native ESP32/Furi port. The Bruce JavaScript interpreter port is a s
 2. Review app changes and their host tests using the inventory below.
 3. Build firmware and matching FAPs together, then run the hardware acceptance checks.
 
-This consolidation overlaps SOR3NT PR #118 (BW16/Wardriver/map/profiles) and #119 (ProtoPirate 3.6.3). It includes their prepared work plus the later app revisions. Those PRs are not automatically closed or merged by this proposal; maintainers should choose one merge path and avoid applying overlapping patches twice. A squash merge is suitable for this browser-uploaded source consolidation. Only ProtoPirate, WIFITE, BW16, Wardriver, WDGWars Map and RTL433 are included. No prebuilt firmware images, personal captures, SD credentials or generated build directories are part of the proposed source change.
+This consolidation overlaps SOR3NT PR #118 (BW16/Wardriver/map/profiles) and #119 (ProtoPirate 3.6.3). It includes their prepared work plus the later app revisions. Those PRs are not automatically closed or merged by this proposal; maintainers should choose one merge path and avoid applying overlapping patches twice. A squash merge is suitable for this browser-uploaded source consolidation. The consolidated apps are ProtoPirate, WIFITE, BW16, Wardriver, WDGWars Map, RTL433 and Walkie Talkie. No prebuilt firmware images, personal captures, SD credentials or generated build directories are part of the proposed source change.
 
 ## Included app inventory
 
 | App / source directory | Revision | Changes and integration notes |
 | --- | --- | --- |
 | `applications_user/protopirate` | 3.6.3 local port | Ported protocol sources and 34 matching FAL plugins; emulation compiled in by default; receive/history stability; lazy SD saves; rotary and Back navigation; configuration-view cleanup. Protocol labels report implemented capabilities and are not proof of physical interoperability. |
-| `applications_user/rtl433` | 1.1.6 | Complete catalog (377 protocol entries, 333 enabled by default); native OOK/FSK capture; original two-profile AUTO plus optional ALL/FIXED; structured history, JSON/CSV and RAW save/replay/offline decode. Keeps delayed FSK packets and coalesces partial snapshots to prevent full-packet queue starvation. Worker stack is 60 KiB. |
+| `applications_user/rtl433` | 1.1.8 | Complete catalog (377 protocol entries, 333 enabled by default); native OOK/FSK capture; original two-profile AUTO plus optional ALL/FIXED; structured history, JSON/CSV and RAW save/replay/offline decode. Keeps delayed FSK packets and coalesces partial snapshots to prevent full-packet queue starvation. Worker stack is 60 KiB. Adds strict Princeton framing, model-candidate evidence, RF-tech/GS558 collision fixes and short-burst termination validation. |
 | `applications_user/wardriver` and `wardriver_plus_i2c` | 1.5.2 | Passive Wi-Fi/BLE survey, NMEA GPS, WiGLE export and WDG upload workflow; bounded queues, radio handoff and two hardware pin profiles. |
 | `applications_user/wdgwars_map` | 1.3 | Native RGB565 world/street/territory map, GPS/manual position, pan/zoom and four offline areas; bounded network and cache handling. |
 | `applications_user/bw16_r4tkn_i2c` | 4.5 | Native BW16 companion control, sequenced/CRC-checked I2C transport, bounded capture queues and PCAP export. Shared I2C ownership is respected. Companion source is included. |
 | `applications_user/bw16_r4tkn` | 4.4 legacy | Preserves the prepared UART variant; it is separate from the recommended I2C profile. |
 | `applications_user/wifite` | 0.8.1 experimental | Native ESP32 WPS workflow and firmware-resident bridge. Its SDK adapter is pinned to ESP-IDF 5.4.1; this is not a claim of complete desktop Wifite parity or verified success against every AP. |
+
+| `applications_user/walkie_talkie` | 1.2 experimental | Receive-only channel monitor, rotary controls, RSSI/squelch, scanning and bounded pulse-to-PCM sound. No TX, FM voice decoding or CTCSS/DCS decoding. Requires the added speaker stop/PCM exports. |
 
 Existing upstream applications remain present. Upstream licenses and copyright/font attribution are retained; product/build branding has been changed without rewriting third-party attribution.
 
@@ -45,7 +47,7 @@ python -m pip install idf-component-manager==2.2.2 Pillow pyelftools
 bash BUILD-NATIVE-TOOLS.sh
 ```
 
-The script builds the T-Embed firmware into `build_native`, builds six matching FAPs and checks their imported symbols against the firmware API. It never flashes a device. The ProtoPirate output is `proto_pirate.fap`, with its matching `proto_pirate_assets/plugins` FAL files; preserve that directory structure on SD.
+The script builds the T-Embed firmware into `build_native`, builds seven matching FAPs and checks their imported symbols against the firmware API. It never flashes a device. The ProtoPirate output is `proto_pirate.fap`, with its matching `proto_pirate_assets/plugins` FAL files; preserve that directory structure on SD.
 
 For explicitly selected wiring profiles:
 
@@ -54,11 +56,11 @@ python tools/build_t_embed_profiles.py --profile cc1101 --jobs 2
 python tools/build_t_embed_profiles.py --profile cc1101-plus --jobs 2
 ```
 
-The profile builder compiles the corresponding Wardriver variant, includes all six app builds, checks their linked ABI and records artifact hashes. `--faps-only` requires an already-built matching firmware. Use the generated build's `flash_args`/`flasher_args.json` and actual board profile when flashing; no single image is asserted to fit every supported board. Do not mix historical `.fap` or `.fal` binaries with this build.
+The profile builder compiles the corresponding Wardriver variant, includes all seven app builds, checks their linked ABI and records artifact hashes. `--faps-only` requires an already-built matching firmware. Use the generated build's `flash_args`/`flasher_args.json` and actual board profile when flashing; no single image is asserted to fit every supported board. Do not mix historical `.fap` or `.fal` binaries with this build.
 
 The BW16 companion is a separate device/build. See `BW16-DEPLOYMENT.md`, `T-EMBED-BW16-SETUP.md` and the companion source for its requirements. Large SD theme/media packs are not firmware source dependencies.
 
-## Verification recorded for this consolidation
+## Original consolidation validation (before the 2026-10-21 update)
 
 The following host checks were rerun on the consolidated source, rather than inferred from an older release:
 
@@ -91,3 +93,26 @@ The previously reported BW16 hot-plug reset/SD-mount failure is not claimed fixe
 ## Provenance
 
 The consolidation is recovered from the user's published native-tools source bundle in `salikisazazil/Flipper-firmware-Flashable-files` at commit `6a28fca1096ac1fd5968908d3866fbc5c2ca69d2`, overlaid with the published RTL433 1.1.6 source. Source/license notices remain alongside the vendored code. The upstream README, unrelated assets and dependency lockfile are retained. Obsolete ProtoPirate protocol/keystore locations are removed only where replaced by the port's current source/assets layout.
+
+## 2026-10-21 source refresh
+
+Compared against `WirelessPi-Native-RF4-RX2-BW16-Games-and-Source.zip`,
+`RTL433-1.1.8-Short-Press-Fix-and-Source.zip` and
+`Walkie-Talkie-Native-RX2-FAP-and-Source.zip`.
+
+- RTL433 updated from 1.1.6 to 1.1.8, retaining the complete decoder catalog.
+- BW16 UART/I2C and both Wardriver source directories already match RX2.
+- WIFITE differs only in author branding; retained the consolidated branding.
+- WDGWars Map differences are prior warning-cleanup edits; retained them.
+- Added Walkie Talkie source/icon/license and its host control regression.
+- Added bounded speaker PCM writing and two hash-sorted API exports. Existing API entries are retained.
+- Both build entry points now include seven apps and pin RTL433 to 118.
+
+Walkie Talkie is receive-only experimental pulse audio. It does not provide
+two-way communication or intelligible FM voice decoding. The previous PR
+firmware lacks its speaker exports and must be rebuilt/flashed; the historical
+RX2 firmware already contains those exports. Hardware acceptance remains pending.
+
+See `NATIVE_TOOLS_APP_AUDIT.md` for the complete external-app inventory and
+the validation scope of this refresh. The original full firmware/linked-ELF
+validation above does not apply automatically to this new revision.
