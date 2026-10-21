@@ -676,6 +676,7 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0x5d5c8310, .address = (uint32_t)furi_delay_us }, /* furi_delay_us */
     { .hash = 0x5dd98f20, .address = (uint32_t)subghz_environment_load_keystore }, /* subghz_environment_load_keystore */
     { .hash = 0x5e9fe0fe, .address = (uint32_t)&message_blink_stop }, /* message_blink_stop */
+    { .hash = 0x5ee6ee82, .address = (uint32_t)furi_hal_speaker_write_pcm }, /* furi_hal_speaker_write_pcm */
     { .hash = 0x5f1f6d6d, .address = (uint32_t)variable_item_list_get_view }, /* variable_item_list_get_view */
     { .hash = 0x5f6d7493, .address = (uint32_t)infrared_worker_alloc }, /* infrared_worker_alloc */
     { .hash = 0x5fbd8ec6, .address = (uint32_t)esp_ble_gap_register_callback }, /* esp_ble_gap_register_callback */
@@ -703,6 +704,7 @@ static const struct sym_entry firmware_api_table[] = {
     { .hash = 0x66ca7248, .address = (uint32_t)furi_string_equal }, /* furi_string_equal */
     { .hash = 0x66f03645, .address = (uint32_t)furi_timer_alloc }, /* furi_timer_alloc */
     { .hash = 0x6716ccec, .address = (uint32_t)furi_hal_speaker_init }, /* furi_hal_speaker_init */
+    { .hash = 0x671c62fe, .address = (uint32_t)furi_hal_speaker_stop }, /* furi_hal_speaker_stop */
     { .hash = 0x67280fac, .address = (uint32_t)furi_thread_set_stack_size }, /* furi_thread_set_stack_size */
     { .hash = 0x6728399c, .address = (uint32_t)subghz_receiver_set_filter }, /* subghz_receiver_set_filter */
     { .hash = 0x6776e177, .address = (uint32_t)esp_err_to_name }, /* esp_err_to_name */
