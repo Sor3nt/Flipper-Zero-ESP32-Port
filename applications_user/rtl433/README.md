@@ -1,103 +1,127 @@
-# RTL433 1.1.6 — Receive queue fixes
+# RTL433 1.1.8 — Short-burst validation
 
 Native ESP32-S3 FAP for LilyGo T-Embed CC1101 / CC1101 Plus running the
-Sor3nt-based T-Embed Native Tools firmware. No Raspberry Pi is involved. This binary
+Sor3nt-based WirelessPi firmware. No Raspberry Pi is involved. This binary
 is not for a stock Flipper Zero.
 
 ## Install
 
-Exit RTL433 and replace **apps/Sub-GHz/rtl433.fap** on the SD card with
-**SD/apps/Sub-GHz/rtl433.fap** from this archive. The app title must show
-**RTL433 1.1.6**. This update only changes the FAP; no firmware reflash is
-required on the existing compatible T-Embed Native Tools build. Firmware API checks
-are included in validation/symbols.log.
+Exit RTL433. Replace **apps/Sub-GHz/rtl433.fap** on the SD card with
+**SD/apps/Sub-GHz/rtl433.fap** from this archive. The title and About screen
+must show **RTL433 1.1.8**. No firmware reflash is needed on the compatible
+WirelessPi Native Tools 1.0 / RF3 build. All 125 imports were checked against
+the linked RF3 firmware image. Keep the rest of the SD card in place.
 
-Choose **Start receiver (original)** for the original two-profile AUTO
-schedule. It alternates OOK650 and FSK40, with a 2-second listening period
-extended up to 3 seconds during a burst. It submits packets during that
-period rather than waiting until it finishes.
+Saved settings, decoder selections, captures and exports remain intact.
+The icon, Signal Desk theme, compact font, receive profiles, gain settings,
+queue fixes and fast screen updates are retained.
 
-Radio settings, captures, exports and decoder selections remain intact.
-If the home screen reports fewer than the standard 333 enabled decoders,
-open **Decoder catalog** and **hold OK** to restore the default selection.
-Use the transmitter's frequency and leave band hopping off for a comparison
-with a particular device. No settings file needs to be deleted.
+## New in 1.1.8
 
-## What was actually wrong
+Fixed a reproduced short-burst regression in 1.1.7: capture termination
+extends the final low gap to 100 ms. The strict validator rejected that gap,
+so a valid two-frame press had only one eligible frame and disappeared.
+The final complete 24-bit payload plus short stop pulse can now confirm a
+preceding matching frame with a real sync. A terminal marker alone cannot
+establish a match. Two matching payloads, timing and stop-pulse validation
+remain required; single, mismatched or incomplete frames are rejected.
 
-The previous release restored scan timing but left two receive-path
-regressions. These were reproduced with complete sensor fixtures through
-the actual receive worker and decoder engine, with simulated GPIO/RSSI.
+All 256 final-byte values pass the two-frame termination regression. This
+also covers button encodings beyond 1/2/4/8. It does not establish why the
+user's particular remaining buttons produce smoke or another model: raw
+recordings of each physical button are still needed for that diagnosis.
 
-1. **Buffered FSK pulses were discarded after a processing delay.** The
-   newer receiver applied the 4 ms pretrigger age limit to the pending
-   input queue too. That could discard a real packet or its beginning when
-   the capture worker ran late. The first receiver adapter did not do this.
-   Version 1.1.6 processes pending received pulses without that age cutoff.
-   Closed-gate noise history remains bounded to 256 edges / 4 ms; the input
-   queue remains bounded to 4096 edges, with explicit overflow recovery.
+For comparison, capture each button separately, stop reception immediately,
+open **Last raw pulse / save**, and press OK. Files are saved under
+**apps_data/rtl433/** with the `.rtl` extension. Note which file corresponds
+to each button; include the exact unexpected model name or a photo.
 
-2. **Unfinished snapshots could crowd out complete packets.** Periodic
-   snapshots of a noisy channel could fill all three decoder queue slots
-   when decoding fell behind. The next complete sensor burst was dropped.
-   Version 1.1.6 allows at most one unfinished snapshot outstanding,
-   including one already decoding. Further partial snapshots are coalesced
-   while capture continues, leaving queue capacity for completed bursts.
-   Complete packets can still overflow the bounded queue under sustained
-   overload; this is not a promise of unlimited throughput.
+## Identification changes retained from 1.1.7
 
-## Evidence
+A synthetic Princeton waveform reproduced the three reported labels in
+1.1.6: Akhan-100F14, RF-tech and Smoke-GS558. These were decoder collisions,
+not evidence of three physical devices.
 
-| Test | Before (1.1.5) | 1.1.6 |
-| --- | --- | --- |
-| Valid WH31E FSK packet queued while capture worker pauses 12 ms | 0 decoded, no edge drops | 1 decoded, ID 195 and humidity 92 intact |
-| Complete Prologue OOK packet after noisy partial snapshots and a stalled decoder | 0 decoded, 3 frame drops | 1 decoded, 0 frame drops, temperature 23.4 C and humidity 56 intact |
+- Akhan uses the same 24-bit EV1527 encoding as other remotes. Those bits
+  cannot establish a particular manufacturer/model.
+- RF-tech had no timing tolerance. Its slicer interpreted unrelated short
+  PWM gaps as zero bits, producing a bogus temperature record.
+- GS558 accepted incomplete frame shapes without its two short stop pulses.
+- The generic remote decoder checked high pulse widths but did not validate
+  the full Princeton pulse/gap timing and sync structure.
 
-The same delayed-FSK test passes against the original 1.0.1 receive adapter
-using the current shared types and decoder engine. This isolates the adapter
-regression; it is not a physical side-by-side test of the two whole releases.
-See validation/baseline.log, before.log, before-backlog.log and tests.log.
+## Changes
 
-The existing host sanitizer suite also passes: original and ALL scanning,
-weak OOK capture, FSK pretrigger/tail handling, continuous-noise recovery,
-doorbell decoding, full decoded fields, synthetic 315 MHz Toyota TPMS,
-receive lifecycle, raw replay and incremental UI rendering. The catalog
-tests exercise synthetic inputs and bounds, not every physical transmitter.
+1. The generic remote entry now checks 24 complete pulse/gap pairs, sync
+   timing and at least two consecutive matching frames. It adapts to pulse
+   timing rather than assuming one fixed remote speed. It reports
+   **Princeton** as an encoding family, including raw code, address, data
+   nibble, pulse time, repeats and tri-state view. This is not a brand claim.
+2. An Akhan result for the same independently validated code is deduplicated.
+   If Akhan is selected alone, its output says Princeton-compatible and
+   retains Akhan only as an explicitly unverified candidate.
+3. RF-tech now checks plausible gap timing and decimal temperature fractions.
+4. GS558 requires its documented complete stop-pulse framing. Genuine
+   RF-tech and GS558 fixtures still decode.
+5. **Every catalog result** now exposes identification status and validation
+   evidence in JSON/CSV. On-screen, **~** means a model candidate. The
+   second line shows CANDIDATE, CRC, CHECKSUM or PARITY. Princeton's line
+   says FRAMING because full timing and matching frames were validated.
+   CRC/checksum/parity labels describe checks reported by the decoder;
+   they do not prove a manufacturer, authenticity or a unique physical device.
+6. The About screen explains these labels, and optional decoders carry an
+   ambiguity warning in the catalog.
 
-No user-provided failing waveform or RF hardware was available. These fixes
-address proven software losses; they do not establish that every signal
-reported missing, or physical range, is now restored. For a remaining failure,
-the original transmitted .sub/raw file and its frequency/profile are useful.
+No catalog entries were removed. There are still 377 entries, 376 runnable
+and 333 enabled by default. All decoded sensor fields are preserved.
+Multiple independent transmissions can still produce multiple results.
 
-## Features retained
+## Validation and limits
 
-- Signal Desk theme, compact text, icon and fast result updates.
-- Original AUTO, optional ALL six-profile scan, and FIXED reception.
-- All 377 catalog entries, with 333 default-enabled decoders.
-- Weak OOK acceptance, bounded FSK pretrigger, overlapping noisy-channel
-  windows, decoder scheduling and prior memory-bounds fixes.
-- Complete decoded fields, history, SD logging, JSON/CSV export and raw replay.
+The host ASan/UBSan tests include:
 
-ALL profiles shares one receiver over time. It cannot listen to every
-frequency/modulation simultaneously and can miss short transmissions while
-another profile is active. It remains available as the second menu action.
-Hold OK on the live screen to lock the current frequency/profile; hold it
-again to resume the previous automatic mode.
+- 80 Princeton button/timing/jitter/cache-order cases, with all runnable
+  decoders enabled: one family result and none of the three false models.
+- RF-tech documented data and GS558 documented framing; separate remote
+  and sensor bursts in one capture remain available together.
+- Single, incomplete, changing, malformed-gap and malformed-sync frames;
+  sample-rate changes, leading noise, clipped endings and multiple keys.
+- Evidence reporting for all 377 catalog entries, plus 1,504 bounded
+  synthetic decoder inputs. These are not 376 physical device recordings.
+- Original/ALL scanning, weak OOK, FSK pretrigger and queue handling,
+  doorbell, synthetic 315 MHz Toyota TPMS, full JSON/CSV fields, lifecycle,
+  raw replay and incremental UI regressions.
+
+Zero false positives cannot be guaranteed across RF protocols: many share
+encodings and lack integrity checks, and checksums can collide. This release
+fixes the reproduced collisions and stops treating model candidates as
+confirmed identities. It does not claim every physical device in the catalog
+has been tested. No RF hardware or recording of your particular remote was
+available; the reproduction uses independent synthetic pulse timings.
+
+The radio profile schedule and sensitivity are unchanged from 1.1.6. ALL
+profiles still shares one receiver over time; it is not simultaneous
+reception on every modulation/frequency.
 
 ## Source and build
 
-The archive contains the complete **app source overlay**, its vendored
-decoder library, licenses, tests, a patch from 1.1.5 and validation logs.
-The full firmware tree and ESP-IDF are not duplicated. Overlay
-source/applications_user/rtl433 onto the matching T-Embed Native Tools firmware source.
-Build with its ESP-IDF 5.4.1 / Xtensa toolchain active:
+The ZIP contains a complete **app source overlay**, vendored decoder
+library, licenses, tests, patch from 1.1.7 and validation results.
+The firmware source and ESP-IDF are not duplicated. Overlay
+source/applications_user/rtl433 onto the matching WirelessPi source tree.
+With ESP-IDF 5.4.1, its Xtensa toolchain and Pillow available:
 
 ```sh
-FAP_FW_BUILD_DIR=build_native FAP_APP_VERSION_OVERRIDE=116 \
-  bash buildFap.sh applications_user/rtl433
+FAP_BOARD=lilygo_t_embed_cc1101 FAP_FW_BUILD_DIR=build_native_rf \
+FAP_APP_VERSION_OVERRIDE=118 bash buildFap.sh applications_user/rtl433
 ```
 
-Host regressions from the firmware root:
+Use the build directory containing your compatible firmware ELF/API exports.
+This delivered binary was checked against RF3 commit
+33549321fab648901691ff528ac52c427eb25fd3. The patch baseline is 1.1.7 commit
+9c91ec2cb14bc8efb87fcf347b452ba029b2776d.
+
+Run host regressions from the firmware root:
 
 ```sh
 bash applications_user/rtl433/tests/run.sh

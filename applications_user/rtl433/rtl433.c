@@ -1,4 +1,4 @@
-/* Native RTL433 app for T-Embed Native Tools ESP32-S3. GPL-3.0-or-later. */
+/* Native RTL433 app for WirelessPi ESP32-S3. GPL-3.0-or-later. */
 #include "rtl_file.h"
 #include "rtl_radio.h"
 #include "rtl_text.h"
@@ -14,6 +14,8 @@
 #define HISTORY_BYTES (1024 * 1024)
 typedef struct {
   char model[40], id[32], channel[16];
+  const char *evidence;
+  bool family;
   char *json, *key;
   RtlMeta meta;
   unsigned protocol, hits;
@@ -84,6 +86,8 @@ static void decoded(void *ctx, const r_device *d, const data_t *data,
   rtl_value_text(rtl_field(data, "id"), r->id, sizeof r->id);
   rtl_value_text(rtl_field(data, "channel"), r->channel, sizeof r->channel);
   r->protocol = d->protocol_num;
+  r->evidence = rtl_evidence(d, data);
+  r->family = rtl_encoding_family(d, data);
   r->meta = *meta;
   r->hits = 1;
   if (furi_message_queue_put(a->events, &r, 0) != FuriStatusOk) {
@@ -412,8 +416,8 @@ static void render(App *a) {
     for (unsigned row = 0; row < 3 && start + row < a->count; row++) {
       Record *r = a->records[start + row];
       RtlDeviceCard *card=&v->card[row];
-      snprintf(card->name,sizeof card->name,"%.30s",r->model);
-      snprintf(card->detail,sizeof card->detail,"ID %.14s CH %.4s  %ddBm",r->id,r->channel,r->meta.rssi);
+      snprintf(card->name,sizeof card->name,"%s%.28s",r->family?"":"~ ",r->model);
+      snprintf(card->detail,sizeof card->detail,"%s ID %.12s CH %.4s",r->evidence,r->id,r->channel);
       card->hits=r->hits;card->rssi=r->meta.rssi;card->selected=a->selected==start+row;v->cards++;
     }
     if(now-u->status_at>furi_ms_to_ticks(3000))
@@ -459,6 +463,7 @@ static void render(App *a) {
     const r_device *chosen=a->engine.devices[a->catalog];
     nui_line(u,11,!strcmp(chosen->name,"ANT and ANT+ devices")?
         "2.4 GHz protocol: outside CC1101 RF range":
+        chosen->disabled ? "Optional decoder: model matches may be ambiguous.":
         "Catalog code does not imply hardware validation.");
     unsigned enabled=0;for(unsigned i=0;i<a->engine.count;i++)enabled+=a->engine.enabled[i];
     nui_line(u, 12, "%s | %s | %u on", rtl_modulation_name(chosen->modulation)?
@@ -497,15 +502,16 @@ static void render(App *a) {
     snprintf(u->foot, sizeof u->foot, "%s", a->radio.transmitting ?
              "TRANSMITTING ONCE   BACK STOP" : "HOLD OK REPLAY ONCE   BACK MENU");
   } else if (a->screen == About) {
-    nui_line(u, 0, "RTL433 1.1.5 / T-Embed Native Tools ESP32-S3");
+    nui_line(u, 0, "RTL433 1.1.8 / WirelessPi ESP32-S3");
     nui_line(u, 2, "rtl_433_ESP decoder snapshot f0a81569b58a");
     nui_line(u, 3, "377 catalog entries; 333 enabled by default");
     nui_line(u, 4, "376 runnable decoders / 12 coding types");
     nui_line(u, 5, "CC1101 OOK + 2-FSK decode / raw replay.");
     nui_line(u, 6, "Receiver sensitivity and timing need RF testing.");
     nui_line(u, 7, "No SDR I/Q, rtl_tcp, MQTT or Linux CLI.");
-    nui_line(u, 9, "History: latest 64 model/ID/channel groups.");
-    nui_line(u, 10, "IDs may not uniquely identify physical devices.");
+    nui_line(u, 8, "~ means model candidate, not a confirmed device.");
+    nui_line(u, 9, "CRC/CHECKSUM/PARITY: decoder-reported checks.");
+    nui_line(u, 10, "Checks validate data; they cannot prove a brand.");
     nui_line(u, 11, "All decoded fields retained in JSON/CSV.");
     nui_line(u, 12, "GPL-3.0-or-later; upstream credits in source.");
   }
@@ -723,7 +729,7 @@ int32_t rtl433_app(void *ctx) {
     free(a);
     return -1;
   }
-  if (!nui_open(&a->ui, "RTL433 1.1.6")) {
+  if (!nui_open(&a->ui, "RTL433 1.1.8")) {
     rtl_radio_free(&a->radio);
     rtl_engine_free(&a->engine);
     furi_message_queue_free(a->events);

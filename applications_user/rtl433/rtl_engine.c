@@ -38,9 +38,37 @@ const char *rtl_modulation_name(unsigned m) {
 bool rtl_decoder_runnable(const r_device *d) {
   return d && d->disabled != 3 && d->decode_fn && rtl_modulation_name(d->modulation);
 }
+bool rtl_encoding_family(const r_device *d, const data_t *data) {
+  const data_t *model = rtl_field(data, "model");
+  return d && d->decode_fn == generic_remote.decode_fn && model &&
+         model->type == DATA_STRING && !strcmp(model->value.v_ptr, "Princeton");
+}
+const char *rtl_evidence(const r_device *d, const data_t *data) {
+  if (rtl_encoding_family(d, data)) return "FRAMING";
+  const data_t *mic = rtl_field(data, "mic");
+  if (mic && mic->type == DATA_STRING) {
+    if (!strcmp(mic->value.v_ptr, "CRC")) return "CRC";
+    if (!strcmp(mic->value.v_ptr, "CHECKSUM")) return "CHECKSUM";
+    if (!strcmp(mic->value.v_ptr, "PARITY")) return "PARITY";
+  }
+  return "CANDIDATE";
+}
 static void output_data(r_device *d, data_t *data) {
   RtlEngine *e = d->output_ctx;
   if (data) {
+    // Akhan uses the same 24-bit EV1527 encoding. Do not create a second,
+    // model-specific record for the identical independently validated key.
+    if (d->decode_fn == akhan_100F14.decode_fn && e->princeton_count) {
+      const data_t *id = rtl_field(data, "id"), *cmd = rtl_field(data, "data");
+      if (id && id->type == DATA_INT && cmd && cmd->type == DATA_STRING) {
+        unsigned nibble = 0;
+        if (sscanf(cmd->value.v_ptr, "0x%x", &nibble) == 1 && nibble < 16) {
+          uint32_t key = ((uint32_t)id->value.v_int << 4) | nibble;
+          for (size_t i = 0; i < e->princeton_count; i++)
+            if (e->princeton[i].key == key) { data_free(data); return; }
+        }
+      }
+    }
     e->messages++;
     e->output(e->ctx, d, data, e->meta);
     data_free(data);
@@ -97,6 +125,30 @@ void rtl_engine_free(RtlEngine *e) {
   memset(e, 0, sizeof(*e));
 }
 static int slice(const pulse_data_t *p, r_device *d) {
+  if (d->decode_fn == generic_remote.decode_fn) {
+    RtlEngine *e = d->output_ctx;
+    for (size_t i = 0; i < e->princeton_count; i++) {
+      const RtlPrinceton *v = &e->princeton[i];
+      char code[7], tristate[13];
+      snprintf(code, sizeof code, "%06lX", (unsigned long)(v->key & 0xffffff));
+      for (unsigned b = 0; b < 12; b++) tristate[b] = "0ZX1"[(v->key >> (22 - b*2)) & 3];
+      tristate[12] = 0;
+      data_t *data = data_make(
+          "model", "", DATA_STRING, "Princeton",
+          "id", "Address (20 bit)", DATA_INT, v->key >> 4,
+          "button", "Data (4 bit)", DATA_INT, v->key & 15,
+          "code", "Raw 24-bit code", DATA_STRING, code,
+          "bits", "", DATA_INT, 24,
+          "te_us", "Short pulse", DATA_INT, v->te_us,
+          "repeats", "Matching complete frames", DATA_INT, v->repeats,
+          "tristate", "", DATA_STRING, tristate,
+          "family", "", DATA_STRING, "Princeton / EV1527 / PT226x compatible",
+          "identification", "", DATA_STRING, "Encoding family; device model unverified",
+          NULL);
+      output_data(d, data);
+    }
+    return (int)e->princeton_count;
+  }
   switch (d->modulation) {
   case OOK_PULSE_PCM:
   case FSK_PULSE_PCM:
@@ -130,6 +182,13 @@ unsigned rtl_engine_decode(RtlEngine *e, const pulse_data_t *p,
   if (!e || !meta || !p || !p->num_pulses || p->num_pulses > PD_MAX_PULSES || !p->sample_rate)
     return 0;
   e->meta = meta;
+  e->princeton_count = 0;
+  if (!meta->fsk)
+    for (size_t i = 0; i < e->count; i++)
+      if (e->enabled[i] && e->devices[i]->decode_fn == generic_remote.decode_fn) {
+        e->princeton_count = rtl_princeton_collect(p, e->princeton, RTL_PRINCETON_MAX);
+        break;
+      }
   size_t hot[4];
   memcpy(hot, e->recent[meta->fsk], sizeof hot);
   unsigned before = e->messages, next = 0;
@@ -305,6 +364,12 @@ char *rtl_json(const r_device *d, const data_t *data, const RtlMeta *m) {
       m->fsk ? "FSK" : "OOK", m->offline ? "file" : "radio", d->protocol_num);
   literal(&j, b);
   quoted(&j, d->name);
+  literal(&j, ",\"identification_status\":");
+  quoted(&j, rtl_encoding_family(d, data) ? "encoding_family" : "model_candidate");
+  literal(&j, ",\"validation_reported\":");
+  quoted(&j, rtl_evidence(d, data));
+  literal(&j, ",\"optional_decoder\":");
+  literal(&j, d->disabled ? "true" : "false");
   literal(&j, ",\"radio_profile\":");
   if (m->profile_known) {
     snprintf(b, sizeof b, "%u", m->profile);

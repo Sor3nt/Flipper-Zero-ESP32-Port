@@ -7,7 +7,7 @@ App(
     stack_size=32 * 1024,
     fap_category="Sub-GHz",
     fap_icon="rtl433_10px.png",
-    fap_version="1.1.6",
+    fap_version="1.1.8",
     fap_description="Native rtl_433 CC1101 decoding, full fields, raw replay and SD reports",
     fap_author="T-Embed Native Tools; rtl_433 contributors",
 )

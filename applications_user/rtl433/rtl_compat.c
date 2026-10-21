@@ -1,4 +1,4 @@
-/* Narrow libc/compiler compatibility for the T-Embed Native Tools FAP ABI.
+/* Narrow libc/compiler compatibility for the WirelessPi FAP ABI.
  * GPL-3.0-or-later. Calendar functions use UTC, with no process-global timezone
  * dependency. strftime supports the formats actually used by this vendored
  * decoder snapshot. */

@@ -1,7 +1,8 @@
-/* Native T-Embed Native Tools adapter. GPL-3.0-or-later. */
+/* Native WirelessPi adapter. GPL-3.0-or-later. */
 #pragma once
 #include "lib/rtl433/pulse_data.h"
 #include "lib/rtl433/r_device.h"
+#include "rtl_princeton.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,11 +28,16 @@ typedef struct {
   unsigned messages, warnings;
   /* One-based catalog indices, most recent first, separated by modulation. */
   size_t recent[2][4];
+  RtlPrinceton princeton[RTL_PRINCETON_MAX];
+  size_t princeton_count;
 } RtlEngine;
 size_t rtl_catalog_count(void);
 const r_device *rtl_catalog_get(size_t index);
 const char *rtl_modulation_name(unsigned modulation);
 bool rtl_decoder_runnable(const r_device *decoder);
+/* Integrity evidence is not proof of a manufacturer's identity. */
+bool rtl_encoding_family(const r_device *decoder, const data_t *data);
+const char *rtl_evidence(const r_device *decoder, const data_t *data);
 bool rtl_engine_init(RtlEngine *e, RtlOutput output, RtlYield yield, void *ctx);
 void rtl_engine_free(RtlEngine *e);
 unsigned rtl_engine_decode(RtlEngine *e, const pulse_data_t *pulses,
