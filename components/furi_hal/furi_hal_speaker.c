@@ -322,6 +322,27 @@ void furi_hal_speaker_stop(void) {
     speaker_mode = SpeakerModeIdle;
 }
 
+bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count) {
+    furi_check(furi_hal_speaker_is_mine());
+    furi_check(samples || !count);
+    if(speaker_mode != SpeakerModeIdle || !i2s_channel_enabled) return false;
+    int16_t stereo[128 * 2];
+    while(count) {
+        size_t frames = count > 128 ? 128 : count;
+        for(size_t i = 0; i < frames; ++i) {
+            stereo[i * 2] = samples[i];
+            stereo[i * 2 + 1] = samples[i];
+        }
+        size_t written = 0;
+        if(i2s_channel_write(i2s_tx_handle, stereo, frames * sizeof(int16_t) * 2,
+                             &written, 1000) != ESP_OK ||
+           written != frames * sizeof(int16_t) * 2) return false;
+        samples += frames;
+        count -= frames;
+    }
+    return true;
+}
+
 #else /* !BOARD_HAS_SPEAKER */
 
 /* ---- No-op stubs for boards without speaker hardware ---- */
@@ -359,6 +380,12 @@ void furi_hal_speaker_set_volume(float volume) {
 }
 
 void furi_hal_speaker_stop(void) {
+}
+
+bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count) {
+    (void)samples;
+    (void)count;
+    return false;
 }
 
 #endif /* BOARD_HAS_SPEAKER */

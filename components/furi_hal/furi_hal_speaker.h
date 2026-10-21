@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <common_defines.h>
 #include "furi_hal_gpio.h"
 
@@ -65,6 +66,9 @@ void furi_hal_speaker_set_volume(float volume);
  * @warning    no ownership check if called from ISR
  */
 void furi_hal_speaker_stop(void);
+
+/** Write signed mono PCM at 44100 Hz. Caller must own the speaker and stop tones first. */
+bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count);
 
 /** Mirror a GPIO pin (e.g. CC1101 GDO0) onto the speaker as 1-bit audio.
  *
