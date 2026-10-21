@@ -91,11 +91,11 @@ def main():
         run(['ninja', '-C', build, '-j', args.jobs])
     if not (build / 'furi_esp32.elf').is_file():
         parser.error('Build firmware before using --faps-only.')
-    versions = {'rtl433': '116', 'wifite': '81', 'wardriver': '152',
+    versions = {'rtl433': '118', 'wifite': '81', 'wardriver': '152',
                 'wardriver_plus_i2c': '152', 'wdgwars_map': '13',
-                'bw16_r4tkn_i2c': '45', 'protopirate': '198147'}
+                'bw16_r4tkn_i2c': '45', 'protopirate': '198147', 'walkie_talkie': '12'}
     for app in ('bw16_r4tkn_i2c', wardriver, 'wdgwars_map', 'protopirate',
-                'rtl433', 'wifite'):
+                'rtl433', 'wifite', 'walkie_talkie'):
         if app == 'wardriver_plus_i2c':
             env['FAP_OUTPUT_NAME'] = 'wardriver.fap'
         else:
