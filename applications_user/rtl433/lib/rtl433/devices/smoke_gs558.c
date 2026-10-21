@@ -74,6 +74,8 @@ static int smoke_gs558_callback(r_device *decoder, bitbuffer_t *bitbuffer)
         if ((bitbuffer->bits_per_row[r] == 26 || bitbuffer->bits_per_row[r] == 27)
                 && b[3] == 0)
             bitbuffer->bits_per_row[r] = 24;
+        else
+            bitbuffer->bits_per_row[r] = 0; // Missing two short stop pulses: not a complete GS558 frame.
     }
 
     r = bitbuffer_find_repeated_row(bitbuffer, 3, 24);

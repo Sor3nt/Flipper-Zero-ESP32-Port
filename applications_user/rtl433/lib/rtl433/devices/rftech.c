@@ -46,6 +46,9 @@ static int rftech_callback(r_device *decoder, bitbuffer_t *bitbuffer)
     if (r < 0 || bitbuffer->bits_per_row[r] != 24)
         return DECODE_ABORT_LENGTH;
     uint8_t *b = bitbuffer->bb[r];
+    // Tenths are decimal; values 10..15 cannot be a temperature fraction.
+    if ((b[2] & 0x0f) > 9)
+        return DECODE_FAIL_SANITY;
 
     int sensor_id = b[0];
     float temp_c  = (b[1] & 0x7f) + (b[2] & 0x0f) * 0.1f;
@@ -83,6 +86,7 @@ r_device const rftech = {
         .modulation  = OOK_PULSE_PPM,
         .short_width = 2000,
         .long_width  = 4000,
+        .tolerance   = 600, // Reject unrelated sub-ms PWM gaps, not just threshold them to zero.
         .gap_limit   = 5000,
         .reset_limit = 10000,
         .decode_fn   = &rftech_callback,
