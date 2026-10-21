@@ -29,6 +29,8 @@ jobs:
         run: |
           python3 tests/run_t_embed_features.py
           bash applications_user/rtl433/tests/run.sh
+          python3 tests/walkie_talkie/test_controls.py
+          python3 tests/walkie_talkie/test_pcm.py
       - name: Preserve per-suite feature results
         if: always()
         uses: actions/upload-artifact@v7
