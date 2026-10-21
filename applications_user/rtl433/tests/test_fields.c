@@ -50,10 +50,12 @@ void test_fields(void) {
   unsigned lines = rtl_text_page(pretty, 52, 0, 0, NULL, 0);
   assert(lines > 130);
   char screen[13][53];
-  rtl_text_page(pretty, 52, 13, lines - 13, &screen[0][0], 53);
   bool final = false;
-  for (unsigned i = 0; i < 13; i++) final |= strstr(screen[i], "END-OF-RECORD") != NULL;
-  assert(final); /* last decoded field is reachable on the physical layout */
+  for (unsigned start = 0; start < lines; start += 13) {
+    rtl_text_page(pretty, 52, 13, start, &screen[0][0], 53);
+    for (unsigned i = 0; i < 13; i++) final |= strstr(screen[i], "END-OF-RECORD") != NULL;
+  }
+  assert(final); /* last sensor field remains reachable ahead of capture/evidence metadata */
   char *key1 = rtl_identity(&device, d); assert(key1);
   ((char *)rtl_field(d, "id")->value.v_ptr)[298] = 'z';
   char *key2 = rtl_identity(&device, d); assert(key2 && strcmp(key1, key2));
@@ -61,6 +63,14 @@ void test_fields(void) {
   assert(rtl_text_page(exact, 52, 13, 0, &screen[0][0], 53) == 2);
   assert(strlen(screen[0]) == 52 && !strcmp(screen[1], "Y"));
   free(key1); free(key2); free(json); free(pretty); free(csv); data_free(d);
+  const char *checks[]={"CRC","CHECKSUM","PARITY","unknown",""};
+  for (unsigned i=0;i<5;i++) {
+    d=data_make("model","",DATA_STRING,"Candidate sensor","mic","",DATA_STRING,checks[i],NULL);
+    assert(d && !rtl_encoding_family(&device,d));
+    assert(!strcmp(rtl_evidence(&device,d),i<3?checks[i]:"CANDIDATE"));
+    json=rtl_json(&device,d,&meta);assert(json && strstr(json,"\"identification_status\":\"model_candidate\""));
+    free(json);data_free(d);
+  }
   puts("PASS: every data type, nested arrays/objects, optional fields, exact float values, long identities, Unicode and final-field pagination");
 }
 

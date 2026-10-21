@@ -12,6 +12,7 @@ void save_test(const char *, const char *);
 void test_schedule(void);
 void test_doorbell(void);
 void test_catalog(void);
+void test_identification(void);
 static void output(void *ctx,const r_device *d,const data_t *data,const RtlMeta *m){(void)ctx;free(last);last=rtl_json(d,data,m);assert(last);messages++;}
 static void only(RtlEngine *e,const char *needle){bool found=false;for(unsigned i=0;i<e->count;i++){e->enabled[i]=strstr(e->devices[i]->name,needle)!=NULL;found|=e->enabled[i];}assert(found);}
 int main(void){RtlEngine e;assert(rtl_engine_init(&e,output,NULL,NULL));assert(e.count==377);
@@ -26,7 +27,7 @@ int main(void){RtlEngine e;assert(rtl_engine_init(&e,output,NULL,NULL));assert(e
     const unsigned char wh[]={0xaa,0xaa,0xaa,0xaa,0xaa,0xaa,0x2d,0xd4,0x30,0xc3,0x81,0xd5,0x5c,0x2a,0xcf,0x08,0x35,0x44,0x2c};
     rtl_capture_reset(&c,f);bool level=true;unsigned duration=0;
     for(unsigned bit=0;bit<sizeof(wh)*8;bit++){bool next=(wh[bit/8]&(0x80>>(bit%8)))!=0;if(next!=level){if(duration)rtl_capture_feed(&c,f,level,duration);duration=0;level=next;}duration+=56;}rtl_capture_feed(&c,f,level,duration);assert(rtl_capture_finish(&c,f,100000));f->meta=(RtlMeta){915000000,456,-60,true,true};only(&e,"Ambient Weather WH31E");assert(rtl_engine_decode(&e,&f->pulses,&f->meta)==1);assert(strstr(last,"AmbientWeather-WH31E"));assert(strstr(last,"\"id\":195"));assert(strstr(last,"\"humidity\":92"));puts(last);
-    test_catalog(); test_schedule(); test_doorbell(); test_fields(); test_tpms(&e,f); save_test("toyota.json",last);
+    test_identification(); test_catalog(); test_schedule(); test_doorbell(); test_fields(); test_tpms(&e,f); save_test("toyota.json",last);
     char *pretty=rtl_pretty_json(last);assert(pretty);save_test("toyota-pretty.json",pretty);free(pretty);puts(last);
     /* Dropped/oversized bursts cannot be decoded as complete captures. */
     rtl_capture_reset(&c,f);for(unsigned i=0;i<PD_MAX_PULSES+1;i++){rtl_capture_feed(&c,f,true,200);rtl_capture_feed(&c,f,false,200);}assert(c.invalid);assert(!rtl_capture_finish(&c,f,100000));

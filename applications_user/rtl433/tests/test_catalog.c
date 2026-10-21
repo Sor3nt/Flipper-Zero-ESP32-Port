@@ -9,6 +9,9 @@ static unsigned wind;
 
 static void discard(void *ctx, const r_device *d, const data_t *data, const RtlMeta *m) {
   (void)ctx; char *json=rtl_json(d,data,m); assert(json);
+  assert(strstr(json,"\"identification_status\":\"model_candidate\"") ||
+         strstr(json,"\"identification_status\":\"encoding_family\""));
+  assert(strstr(json,"\"validation_reported\":"));
   if(strstr(json,"TFA-303307")) {
     assert(strstr(json,"0b0102030405"));
     assert(rtl_field(data,"wind_dir_deg")->value.v_dbl==90);
@@ -63,6 +66,12 @@ void test_catalog(void) {
   memset(e.enabled,0,e.count*sizeof(*e.enabled));
   for(unsigned i=0;i<e.count;i++) {
     r_device *d=e.devices[i]; bool ok=rtl_decoder_runnable(d);
+    data_t *candidate=data_make("model","",DATA_STRING,"unverified",NULL);
+    assert(candidate && !rtl_encoding_family(d,candidate));
+    assert(!strcmp(rtl_evidence(d,candidate),"CANDIDATE"));
+    RtlMeta audit_meta={0};char *audit_json=rtl_json(d,candidate,&audit_meta);
+    assert(audit_json && strstr(audit_json,"\"identification_status\":\"model_candidate\""));
+    free(audit_json);data_free(candidate);
     if(d->disabled!=3) assert(ok); /* no silently unhandled catalog coding */
     const char *mod=rtl_modulation_name(d->modulation);
     unsigned tested=0;

@@ -5,6 +5,8 @@ import sys
 
 p = Path(sys.argv[1])
 doc = json.loads((p / "fields.json").read_text())
+assert doc['identification_status'] == 'model_candidate'
+assert doc['validation_reported'] == 'CANDIDATE'
 assert json.loads((p / "fields-pretty.json").read_text()) == doc
 with (p / "fields.csv").open(newline="") as f:
     rows = list(csv.reader(f))
@@ -21,6 +23,8 @@ assert d["strings"] == ['quote" slash\\', 'degree Â° C', 'line\nnext', 'emoji ðŸ
 assert d["objects"] == [{"last_nested": 42}] and d["arrays"] == [[-123, 0, 2147483647], []]
 assert d["nested"] == {"battery_ok": 1} and d["conditional"] == "present"
 tpms = json.loads((p / "toyota.json").read_text())
+assert tpms['identification_status'] == 'model_candidate'
+assert tpms['validation_reported'] == 'CRC'
 assert tpms["data"] == dict(model="Toyota", type="TPMS", id="12345678", status=0,
                            pressure_PSI=35.5, temperature_C=24, mic="CRC")
 assert json.loads((p / "toyota-pretty.json").read_text()) == tpms
