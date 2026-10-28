@@ -1,8 +1,11 @@
 #include "furi_hal_usb.h"
 #include "furi_hal_usb_hid.h"
 #include "furi_hal_usb_hid_backend.h"
+#include "furi_hal_usb_tinyusb_composite.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 /* No-op HID backend for SoCs without USB-OTG (e.g. ESP32-C6).
  * Tracks only the connection-state callback so BLE HID can coexist
@@ -83,4 +86,43 @@ bool furi_hal_hid_consumer_key_release(uint16_t button) {
 
 bool furi_hal_hid_consumer_key_release_all(void) {
     return false;
+}
+
+/* No-op TinyUSB composite / USB-Serial-JTAG shims for SoCs without USB-OTG.
+ * furi_hal_usb_tinyusb_composite.c is only built for esp32s3/esp32s2
+ * (see CMakeLists), but furi_hal_usb.c, desktop and qflipper_usj_cmd call
+ * these unconditionally — without these stubs the C6 link fails. */
+bool furi_hal_usb_composite_install(
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product) {
+    (void)vid;
+    (void)pid;
+    (void)manuf;
+    (void)product;
+    return false;
+}
+
+bool furi_hal_usb_composite_is_installed(void) {
+    return false;
+}
+
+bool furi_hal_usb_composite_uninstall(void) {
+    return false;
+}
+
+void furi_hal_usb_composite_restore_serial_jtag(void) {
+}
+
+size_t furi_hal_usb_serial_jtag_read(uint8_t* buf, size_t len) {
+    (void)buf;
+    (void)len;
+    return 0;
+}
+
+size_t furi_hal_usb_serial_jtag_write(const uint8_t* buf, size_t len) {
+    (void)buf;
+    (void)len;
+    return 0;
 }
