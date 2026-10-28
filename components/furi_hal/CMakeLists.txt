@@ -3,10 +3,24 @@
 #   waveshare_c6_1.9        - Waveshare ESP32-C6-LCD-1.9 (default, touch input)
 #   waveshare_c6_1.47       - Waveshare ESP32-C6-LCD-1.47 (touch input + IMU)
 #   lilygo_t_embed_cc1101   - LilyGo T-Embed CC1101 (ESP32-S3, encoder input, CC1101/NFC/IR)
+#   DIY                     - Custom ESP32-S3 build, push-button input, pins set in Pinout.txt
 if(NOT DEFINED FLIPPER_BOARD)
     set(FLIPPER_BOARD "waveshare_c6_1.9" CACHE STRING "Target board for Flipper ESP32 port")
 endif()
 message(STATUS "Flipper board: ${FLIPPER_BOARD}")
+
+# DIY board: generate board_DIY.h from Pinout.txt
+if(FLIPPER_BOARD STREQUAL "DIY")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(DIY_PINOUT "${CMAKE_CURRENT_LIST_DIR}/../../Pinout.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DIY_PINOUT}")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/gen_diy_board.py" "${DIY_PINOUT}"
+        RESULT_VARIABLE DIY_GEN_RES OUTPUT_VARIABLE DIY_GEN_OUT ERROR_VARIABLE DIY_GEN_ERR)
+    if(NOT DIY_GEN_RES EQUAL 0)
+        message(FATAL_ERROR "Invalid Pinout.txt:\n${DIY_GEN_ERR}")
+    endif()
+endif()
 
 set(FURI_HAL_SRCS
     "furi_hal.c"

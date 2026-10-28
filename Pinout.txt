@@ -1,0 +1,52 @@
+# ============================================================
+#  Pinout.txt - "DIY" board
+#  Default target: ESP32-S3 DevKitC-1 N16R8 (16 MB flash, 8 MB octal PSRAM)
+#
+#  Format: NAME=GPIO   (-1 = not connected)
+#  After editing, rebuild with ./build_diy.sh; board_DIY.h is
+#  regenerated automatically and the pins are validated.
+#
+#  Avoid on N16R8: 26-32 (flash), 33-37 (octal PSRAM),
+#  19/20 (USB), 43/44 (UART0), 3/45/46 (strapping).
+# ============================================================
+
+# --- Shared SPI bus (LCD + SD + CC1101 + NRF24) ---
+SPI_SCK=12
+SPI_MOSI=11
+SPI_MISO=13
+
+# --- Display (ST7789, 320x172) ---
+LCD_CS=10
+LCD_DC=15
+LCD_RST=16
+LCD_BL=7
+
+# --- SD card ---
+SD_CS=14
+
+# --- CC1101 (Sub-GHz) ---
+CC1101_CS=21
+CC1101_GDO0=2
+CC1101_GDO2=1
+
+# --- NRF24L01 (-1 on either pin disables the module) ---
+NRF24_CS=38
+NRF24_CE=39
+
+# --- NFC: PN532 in I2C mode ---
+NFC_SDA=8
+NFC_SCL=9
+NFC_IRQ=47
+NFC_RST=48
+
+# --- Infrared (-1 = not present) ---
+IR_TX=42
+IR_RX=41
+
+# --- Push buttons (pin to GND, no external resistor) ---
+BTN_UP=4
+BTN_DOWN=5
+BTN_LEFT=6
+BTN_RIGHT=17
+BTN_OK=0
+BTN_BACK=18
