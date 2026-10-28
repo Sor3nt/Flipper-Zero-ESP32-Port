@@ -169,3 +169,10 @@ void furi_hal_display_set_bg_color(uint16_t color) {
 uint16_t furi_hal_display_get_bg_color(void) {
     return bg_color;
 }
+
+/* Monochrome panel: native colour framebuffer blits are unsupported. */
+bool furi_hal_display_draw_rgb565(
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* pixels) {
+    (void)x; (void)y; (void)width; (void)height; (void)pixels;
+    return false;
+}

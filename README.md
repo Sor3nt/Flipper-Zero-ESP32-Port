@@ -308,3 +308,9 @@ This port preserves the original Flipper Zero architecture as closely as possibl
 - **Applications** compile with minimal changes (`#include` path adjustments, no-op stubs for missing hardware like 1-Wire)
 - **`malloc` is redefined to `calloc`** — STM32 heap starts zeroed, ESP32 does not
 - **Crypto** is stubbed (no Flipper-Enclave key) — affects encrypted SubGHz keystores; everything else uses real mbedtls
+
+## T-Embed Native Tools integration proposal
+
+See [the developer review guide](docs/T_EMBED_NATIVE_TOOLS_REVIEW.md) for the
+consolidated app inventory, firmware changes, build instructions, provenance,
+validation status, and remaining hardware acceptance work.

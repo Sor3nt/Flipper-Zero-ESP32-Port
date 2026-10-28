@@ -1,0 +1,40 @@
+name: Native Tools host regressions
+on:
+  pull_request:
+    paths:
+      - 'applications_user/**'
+      - 'applications/main/**'
+      - 'applications/services/**'
+      - 'components/**'
+      - 'tests/**'
+      - 'tools/**'
+      - '.github/workflows/native-tools-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ASAN_OPTIONS: detect_leaks=0
+      UBSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc python3-pil
+      - name: Run app and decoder regressions
+        run: |
+          python3 tests/run_t_embed_features.py
+          bash applications_user/rtl433/tests/run.sh
+          python3 tests/walkie_talkie/test_controls.py
+          python3 tests/walkie_talkie/test_pcm.py
+      - name: Preserve per-suite feature results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-tools-host-results
+          path: build_feature_tests/
+          retention-days: 14

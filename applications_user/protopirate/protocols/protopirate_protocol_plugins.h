@@ -1,11 +1,10 @@
 #pragma once
 
-#include <lib/flipper_application/flipper_application.h>
 #include <lib/subghz/types.h>
 #include "protocol_items.h"
 
 #define PROTOPIRATE_PROTOCOL_PLUGIN_APP_ID      "protopirate_protocol_plugins"
-#define PROTOPIRATE_PROTOCOL_PLUGIN_API_VERSION 2U
+#define PROTOPIRATE_PROTOCOL_PLUGIN_API_VERSION 0x03060201U
 
 typedef enum {
     ProtoPirateProtocolPluginKindRx = 0,

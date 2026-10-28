@@ -76,17 +76,13 @@ void wlan_app_scene_airprint_hijack_scan_on_enter(void* context) {
     ph_scan_render(app, false);
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewLan);
 
-    /* FuriThread-TLS-Reset vor pthread_create (siehe androidtv_scan/port_scanner). */
-    void* saved_tls = pvTaskGetThreadLocalStoragePointer(NULL, 0);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, NULL);
-
+    /* Furi and pthreads use separate TLS slots; keep pthread TLS intact. */
     s_scanning = true;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 6144);
     int rc = pthread_create(&s_thread, &attr, ph_scan_thread, app);
     pthread_attr_destroy(&attr);
-    vTaskSetThreadLocalStoragePointer(NULL, 0, saved_tls);
     s_thread_running = (rc == 0);
     if(rc != 0) {
         s_scanning = false;

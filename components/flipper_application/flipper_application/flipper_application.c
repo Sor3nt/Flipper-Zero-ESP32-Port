@@ -516,7 +516,10 @@ static bool fap_icon_cache_try_get(
     fap_icon_cache_load_locked(storage);
     if(!fap_icon_cache.disabled) {
         int idx = fap_icon_cache_find_locked(path);
-        if(idx >= 0 && fap_icon_cache.records[idx].size == size) {
+        /* A replacement can add an icon without changing the FAP byte size.
+         * Re-read negative cache entries so the new icon becomes visible. */
+        if(idx >= 0 && fap_icon_cache.records[idx].size == size &&
+           fap_icon_cache.records[idx].has_icon) {
             const FapIconCacheRecord* rec = &fap_icon_cache.records[idx];
             if(rec->has_icon && *icon_ptr) {
                 memcpy(*icon_ptr, rec->icon, FAP_MANIFEST_MAX_ICON_SIZE);
@@ -617,7 +620,7 @@ bool flipper_application_load_name_and_icon(
             item_name, manifest->name, strnlen(manifest->name, FAP_MANIFEST_MAX_APP_NAME_LENGTH));
         load_success = true;
 
-        if(cacheable) {
+        if(cacheable && has_icon) {
             fap_icon_cache_put(
                 storage,
                 path_cstr,

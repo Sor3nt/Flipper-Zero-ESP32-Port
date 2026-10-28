@@ -1,0 +1,10 @@
+App(
+    appid="walkie_talkie",
+    name="Walkie Talkie",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="walkie_talkie_app",
+    stack_size=16384,
+    fap_category="Sub-GHz",
+    fap_version="1.2",
+    fap_icon="walkie_talkie.png",
+)

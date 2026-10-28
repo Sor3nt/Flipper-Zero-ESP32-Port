@@ -1,0 +1,4 @@
+# UART0's default GPIO43/44 are the T-Embed shared external/NRF pins.
+# Applied only to this board; other S3 board console choices remain unchanged.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

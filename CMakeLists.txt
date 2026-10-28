@@ -40,6 +40,8 @@ endif()
 # Flashen, der OTA-Updater schreibt sie nach dem Flashen in /ext/.fw_version.
 # Ohne PROJECT_VER wuerde ESP-IDF "git describe" eintragen.
 # ---------------------------------------------------------------------------
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/components/toolbox/fw_version.h")
 file(STRINGS "${CMAKE_SOURCE_DIR}/components/toolbox/fw_version.h" _furi_ver_line
     REGEX "^#define[ \t]+FURI_ESP32_VERSION[ \t]+\"")
 string(REGEX REPLACE ".*\"([^\"]+)\".*" "\\1" PROJECT_VER "${_furi_ver_line}")
@@ -50,3 +52,4 @@ message(STATUS "Firmware version (PROJECT_VER): ${PROJECT_VER}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(furi_esp32)
+include(cmake/wifite_sdk_adapter.cmake)

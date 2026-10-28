@@ -1,0 +1,40 @@
+/* Signature facts adapted from skizzophrenic/SquachWatch-CYD ecaff618.
+ * Upstream: GPL-3.0; see LICENSE-SquachWatch and DETECTIONS.md.
+ * Generic module/ODM prefixes are deliberately not product identifications. */
+    {{0x00,0x25,0xDF}, WardriverHintAxon}, /* Axon */
+    {{0xB4,0x1E,0x52}, WardriverHintFlock}, /* Flock-MA-L */
+    {{0x00,0x04,0x7D}, WardriverHintAlpr}, /* ALPR-Mtrla */
+    {{0x00,0x18,0x85}, WardriverHintAlpr}, /* ALPR-Mtrla */
+    {{0x00,0x1F,0x92}, WardriverHintAlpr}, /* ALPR-Mtrla */
+    {{0x4C,0xCC,0x34}, WardriverHintAlpr}, /* ALPR-Mtrla */
+    {{0xB8,0xE2,0x8C}, WardriverHintAlpr}, /* ALPR-Mtrla */
+    {{0x00,0xBF,0x15}, WardriverHintAlpr}, /* ALPR-Gentec */
+    {{0x0C,0xBF,0x15}, WardriverHintAlpr}, /* ALPR-Gentec */
+    {{0x2C,0xAA,0x8E}, WardriverHintCamera}, /* Wyze */
+    {{0xD0,0x3F,0x27}, WardriverHintCamera}, /* Wyze */
+    {{0x7C,0x78,0xB2}, WardriverHintCamera}, /* Wyze */
+    {{0x34,0xD2,0x70}, WardriverHintCamera}, /* Amazon */
+    {{0xF0,0x27,0x2D}, WardriverHintCamera}, /* Amazon */
+    {{0xC0,0x56,0xE3}, WardriverHintCamera}, /* Hikvision */
+    {{0x44,0x19,0xB6}, WardriverHintCamera}, /* Hikvision */
+    {{0x28,0x57,0xBE}, WardriverHintCamera}, /* Hikvision */
+    {{0xFC,0x65,0xDE}, WardriverHintRing}, /* Ring */
+    {{0x68,0x37,0xE9}, WardriverHintRing}, /* Ring */
+    {{0xAC,0x9F,0xC3}, WardriverHintRing}, /* Ring */
+    {{0x18,0x7F,0x88}, WardriverHintRing}, /* Ring */
+    {{0x34,0x3E,0xA4}, WardriverHintRing}, /* Ring */
+    {{0x54,0xE0,0x19}, WardriverHintRing}, /* Ring */
+    {{0x5C,0x47,0x5E}, WardriverHintRing}, /* Ring */
+    {{0x64,0x9A,0x63}, WardriverHintRing}, /* Ring */
+    {{0x90,0x48,0x6C}, WardriverHintRing}, /* Ring */
+    {{0x9C,0x76,0x13}, WardriverHintRing}, /* Ring */
+    {{0xCC,0x3B,0xFB}, WardriverHintRing}, /* Ring */
+    {{0xC4,0xDB,0xAD}, WardriverHintRing}, /* Ring */
+    {{0x24,0x2B,0xD6}, WardriverHintRing}, /* Ring */
+    {{0x00,0xB4,0x63}, WardriverHintRing}, /* Ring */
+    {{0x50,0xE4,0x67}, WardriverHintRing}, /* Ring */
+    {{0xE0,0xA7,0x00}, WardriverHintCamera}, /* Verkada */
+    {{0x70,0x1A,0xD5}, WardriverHintCamera}, /* Avigilon */
+    {{0x00,0x40,0x8C}, WardriverHintCamera}, /* Axis */
+    {{0xB8,0xA4,0x4F}, WardriverHintCamera}, /* Axis */
+    {{0x0C,0xFA,0x22}, WardriverHintFlipper}, /* Flipper */

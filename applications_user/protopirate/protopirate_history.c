@@ -7,6 +7,11 @@
 #include <stdio.h>
 #include <furi.h>
 #include "defines.h"
+#include <lib/flipper_format/flipper_format_i.h>
+#include <toolbox/stream/stream.h>
+
+#define HISTORY_CAPTURE_MAX_BYTES 4096U
+#define HISTORY_LABEL_MAX_BYTES 1024U
 
 #define TAG                          "ProtoPirateHistory"
 #define HISTORY_SCRATCH_TEXT_RESERVE 256U
@@ -28,6 +33,8 @@ typedef enum {
 
 typedef struct {
     uint32_t seq_id;
+    FlipperFormat* capture; /* Owned RAM snapshot in live receive mode. */
+    bool persisted;
     uint16_t text_offset;
     uint16_t text_len;
     uint8_t type;
@@ -40,6 +47,8 @@ typedef struct {
 ARRAY_DEF(ProtoPirateHistoryItemArray, ProtoPirateHistoryItem, M_POD_OPLIST)
 
 struct ProtoPirateHistory {
+    FuriMutex* mutex;
+    bool memory_mode;
     ProtoPirateHistoryItemArray_t data;
     uint16_t last_index;
     uint32_t last_update_timestamp;
@@ -54,7 +63,31 @@ struct ProtoPirateHistory {
     FuriString* text_arena;
 };
 
+/* RX, the UI event loop and the GUI draw thread share the history index.
+ * Use a recursive lock because the public helpers call one another. Never hold
+ * it while acquiring a view-model lock or waiting for the receive worker. */
+void protopirate_history_lock(ProtoPirateHistory* instance) {
+    furi_check(instance);
+    furi_check(furi_mutex_acquire(instance->mutex, FuriWaitForever) == FuriStatusOk);
+}
+
+void protopirate_history_unlock(ProtoPirateHistory* instance) {
+    furi_check(instance);
+    furi_check(furi_mutex_release(instance->mutex) == FuriStatusOk);
+}
+
+static void protopirate_history_guard_release(ProtoPirateHistory** instance) {
+    protopirate_history_unlock(*instance);
+}
+
+/* GCC/Clang scope cleanup releases the lock on every early-return path. */
+#define HISTORY_GUARD(instance) \
+    protopirate_history_lock(instance); \
+    ProtoPirateHistory* history_guard \
+        __attribute__((cleanup(protopirate_history_guard_release))) = (instance)
+
 void protopirate_history_release_scratch(ProtoPirateHistory* instance) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     if(instance->loaded_ff) {
         flipper_format_free(instance->loaded_ff);
@@ -77,6 +110,10 @@ static void
 
 static void protopirate_history_item_clear_matched(ProtoPirateHistoryItem* item) {
     if(!item) return;
+    if(item->capture) {
+        flipper_format_free(item->capture);
+        item->capture = NULL;
+    }
     if(item->matched_saved_path) {
         furi_string_free(item->matched_saved_path);
         item->matched_saved_path = NULL;
@@ -123,6 +160,9 @@ static void
 ProtoPirateHistory* protopirate_history_alloc(void) {
     ProtoPirateHistory* instance = malloc(sizeof(ProtoPirateHistory));
     furi_check(instance);
+    instance->memory_mode = false;
+    instance->mutex = furi_mutex_alloc(FuriMutexTypeRecursive);
+    furi_check(instance->mutex);
     ProtoPirateHistoryItemArray_init(instance->data);
     instance->last_index = 0;
     instance->last_update_timestamp = 0;
@@ -150,6 +190,11 @@ ProtoPirateHistory* protopirate_history_alloc(void) {
     return instance;
 }
 
+void protopirate_history_enable_memory(ProtoPirateHistory* instance) {
+    HISTORY_GUARD(instance);
+    instance->memory_mode = true;
+}
+
 void protopirate_history_free(ProtoPirateHistory* instance) {
     furi_check(instance);
     protopirate_history_release_scratch(instance);
@@ -174,10 +219,12 @@ void protopirate_history_free(ProtoPirateHistory* instance) {
         furi_record_close(RECORD_STORAGE);
         instance->storage = NULL;
     }
+    furi_mutex_free(instance->mutex);
     free(instance);
 }
 
 void protopirate_history_reset(ProtoPirateHistory* instance) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     protopirate_history_release_scratch(instance);
     protopirate_history_clear_all_matched(instance);
@@ -188,11 +235,13 @@ void protopirate_history_reset(ProtoPirateHistory* instance) {
 }
 
 uint16_t protopirate_history_get_item(ProtoPirateHistory* instance) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     return ProtoPirateHistoryItemArray_size(instance->data);
 }
 
 uint16_t protopirate_history_get_last_index(ProtoPirateHistory* instance) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     return instance->last_index;
 }
@@ -201,6 +250,7 @@ void protopirate_history_format_status_text(
     ProtoPirateHistory* instance,
     char* output,
     size_t output_size) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(output);
 
@@ -217,6 +267,7 @@ void protopirate_history_format_status_text(
 }
 
 void protopirate_history_get_status_text(ProtoPirateHistory* instance, FuriString* output) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(output);
 
@@ -229,6 +280,7 @@ bool protopirate_history_get_capture_path(
     ProtoPirateHistory* instance,
     uint16_t idx,
     FuriString* out_path) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(out_path);
 
@@ -236,6 +288,12 @@ bool protopirate_history_get_capture_path(
         return false;
     }
     ProtoPirateHistoryItem* item = ProtoPirateHistoryItemArray_get(instance->data, idx);
+    if(item->capture && !item->persisted) {
+        /* UI-only: materialize a file only when a file path is requested. */
+        if(!protopirate_storage_save_history_capture(item->capture, item->seq_id, out_path))
+            return false;
+        item->persisted = true;
+    }
     protopirate_history_build_path(instance, item->seq_id, out_path);
     return true;
 }
@@ -244,6 +302,7 @@ bool protopirate_history_capture_path_equals(
     ProtoPirateHistory* instance,
     uint16_t idx,
     const char* path) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(!path || idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -260,6 +319,7 @@ bool protopirate_history_add_to_history_at(
     void* context,
     SubGhzRadioPreset* preset,
     uint32_t update_timestamp) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(context);
 
@@ -277,7 +337,8 @@ bool protopirate_history_add_to_history_at(
         return false;
     }
 
-    protopirate_history_release_scratch(instance);
+    /* loaded_ff belongs to the UI until it releases/switches that reader.
+     * A new RX must not close it while auto-save or saved-match is reading. */
 
     furi_string_reset(instance->scratch_text);
     furi_string_reset(instance->scratch_path);
@@ -295,13 +356,21 @@ bool protopirate_history_add_to_history_at(
         return false;
     }
 
-    uint32_t seq = instance->next_capture_seq++;
-    bool saved = protopirate_storage_save_history_capture(temp_ff, seq, instance->scratch_path);
-    flipper_format_free(temp_ff);
-
-    if(!saved) {
-        FURI_LOG_E(TAG, "Failed to save history file");
+    if(stream_size(flipper_format_get_raw_stream(temp_ff)) > HISTORY_CAPTURE_MAX_BYTES ||
+       furi_string_size(instance->scratch_text) > HISTORY_LABEL_MAX_BYTES) {
+        FURI_LOG_E(TAG, "Capture exceeds bounded history capacity");
+        flipper_format_free(temp_ff);
         return false;
+    }
+    uint32_t seq = instance->next_capture_seq++;
+    if(!instance->memory_mode) {
+        bool saved = protopirate_storage_save_history_capture(temp_ff, seq, instance->scratch_path);
+        flipper_format_free(temp_ff);
+        temp_ff = NULL;
+        if(!saved) {
+            FURI_LOG_E(TAG, "Failed to save history file");
+            return false;
+        }
     }
 
     instance->code_last_hash_data = subghz_protocol_decoder_base_get_hash_data(decoder_base);
@@ -316,6 +385,8 @@ bool protopirate_history_add_to_history_at(
 
     ProtoPirateHistoryItem* item = ProtoPirateHistoryItemArray_push_raw(instance->data);
     item->seq_id = seq;
+    item->capture = temp_ff;
+    item->persisted = !instance->memory_mode;
     item->text_offset = (uint16_t)offset;
     item->text_len = (uint16_t)text_len;
     item->type = 0;
@@ -340,10 +411,12 @@ bool protopirate_history_add_to_history(
     ProtoPirateHistory* instance,
     void* context,
     SubGhzRadioPreset* preset) {
+    HISTORY_GUARD(instance);
     return protopirate_history_add_to_history_at(instance, context, preset, furi_get_tick());
 }
 
 void protopirate_history_delete_item(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     size_t item_count = ProtoPirateHistoryItemArray_size(instance->data);
@@ -365,7 +438,7 @@ void protopirate_history_delete_item(ProtoPirateHistory* instance, uint16_t idx)
     uint16_t text_len = item->text_len;
 
     protopirate_history_item_clear_matched(item);
-    protopirate_history_delete_capture_file(instance, seq_id);
+    if(item->persisted) protopirate_history_delete_capture_file(instance, seq_id);
     ProtoPirateHistoryItemArray_pop_at(NULL, instance->data, idx);
     protopirate_history_arena_remove(instance, text_offset, text_len);
 
@@ -380,6 +453,7 @@ void protopirate_history_get_text_item_menu(
     ProtoPirateHistory* instance,
     FuriString* output,
     uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(output);
 
@@ -407,6 +481,7 @@ void protopirate_history_get_text_item_detail(
     uint16_t idx,
     FuriString* output,
     SubGhzEnvironment* environment) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(output);
     UNUSED(environment);
@@ -422,6 +497,7 @@ void protopirate_history_get_text_item_detail(
 }
 
 FlipperFormat* protopirate_history_get_raw_data(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -435,6 +511,22 @@ FlipperFormat* protopirate_history_get_raw_data(ProtoPirateHistory* instance, ui
     protopirate_history_release_scratch(instance);
 
     ProtoPirateHistoryItem* item = ProtoPirateHistoryItemArray_get(instance->data, idx);
+    if(item->capture) {
+        instance->loaded_ff = flipper_format_string_alloc();
+        if(!instance->loaded_ff) return NULL;
+        Stream* source = flipper_format_get_raw_stream(item->capture);
+        Stream* dest = flipper_format_get_raw_stream(instance->loaded_ff);
+        size_t size = stream_size(source);
+        if(!stream_seek(source, 0, StreamOffsetFromStart) ||
+           !stream_seek(dest, 0, StreamOffsetFromStart) || stream_copy(source, dest, size) != size) {
+            flipper_format_free(instance->loaded_ff);
+            instance->loaded_ff = NULL;
+            return NULL;
+        }
+        flipper_format_rewind(instance->loaded_ff);
+        instance->loaded_idx = (int16_t)idx;
+        return instance->loaded_ff;
+    }
     protopirate_history_build_path(instance, item->seq_id, instance->scratch_path);
 
     instance->loaded_ff = flipper_format_file_alloc(instance->storage);
@@ -456,6 +548,7 @@ void protopirate_history_set_matched_saved(
     uint16_t idx,
     const char* name,
     const char* path) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -474,6 +567,7 @@ void protopirate_history_set_matched_saved(
 
 const char*
     protopirate_history_get_matched_saved_path(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -488,6 +582,7 @@ const char*
 }
 
 const char* protopirate_history_get_matched_name(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -502,10 +597,12 @@ const char* protopirate_history_get_matched_name(ProtoPirateHistory* instance, u
 }
 
 bool protopirate_history_has_matched_saved(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     return protopirate_history_get_matched_saved_path(instance, idx) != NULL;
 }
 
 void protopirate_history_mark_auto_save_pending(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -517,6 +614,7 @@ void protopirate_history_mark_auto_save_pending(ProtoPirateHistory* instance, ui
 }
 
 bool protopirate_history_find_pending_auto_save(ProtoPirateHistory* instance, uint16_t* idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(idx);
 
@@ -532,6 +630,7 @@ bool protopirate_history_find_pending_auto_save(ProtoPirateHistory* instance, ui
 }
 
 void protopirate_history_mark_auto_save_done(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -543,6 +642,7 @@ void protopirate_history_mark_auto_save_done(ProtoPirateHistory* instance, uint1
 }
 
 void protopirate_history_mark_saved_match_pending(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -554,6 +654,7 @@ void protopirate_history_mark_saved_match_pending(ProtoPirateHistory* instance, 
 }
 
 bool protopirate_history_find_pending_saved_match(ProtoPirateHistory* instance, uint16_t* idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(idx);
 
@@ -569,6 +670,7 @@ bool protopirate_history_find_pending_saved_match(ProtoPirateHistory* instance, 
 }
 
 void protopirate_history_mark_saved_match_done(ProtoPirateHistory* instance, uint16_t idx) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
 
     if(idx >= ProtoPirateHistoryItemArray_size(instance->data)) {
@@ -580,6 +682,7 @@ void protopirate_history_mark_saved_match_done(ProtoPirateHistory* instance, uin
 }
 
 void protopirate_history_set_item_str(ProtoPirateHistory* instance, uint16_t idx, const char* str) {
+    HISTORY_GUARD(instance);
     furi_check(instance);
     furi_check(str);
 

@@ -1,0 +1,6 @@
+# Keep the cross-platform FAP entry point executable by Bash on Windows.
+/buildFap.sh text eol=lf
+
+# Keep upstream decoder and embedded map data collapsed during review.
+/applications_user/rtl433/lib/rtl433/** linguist-vendored
+/applications_user/wdgwars_map/wdgwars_map_world.h linguist-generated

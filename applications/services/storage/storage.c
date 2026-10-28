@@ -58,6 +58,10 @@ Storage* storage_app_alloc(void) {
 }
 
 void storage_tick(Storage* app) {
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    const bool sd_was_ok = app->storage[ST_EXT].status == StorageStatusOK;
+    const bool sd_was_enabled = app->sd_gui.enabled;
+#endif
     for(uint8_t i = 0; i < STORAGE_COUNT; i++) {
         StorageApi api = app->storage[i].api;
         if(api.tick != NULL) {
@@ -95,6 +99,16 @@ void storage_tick(Storage* app) {
             furi_pubsub_publish(app->pubsub, &event);
         }
     }
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    // An error icon is already enabled, so a recovered card does not pass through
+    // the normal disabled-to-enabled mount notification above.
+    if(sd_was_enabled && !sd_was_ok && app->storage[ST_EXT].status == StorageStatusOK) {
+        view_port_update(app->sd_gui.view_port);
+        FURI_LOG_I(TAG, "SD card recovered");
+        StorageEvent event = {.type = StorageEventTypeCardMount};
+        furi_pubsub_publish(app->pubsub, &event);
+    }
+#endif
 }
 
 int32_t storage_srv(void* p) {
@@ -108,12 +122,24 @@ int32_t storage_srv(void* p) {
     }
 
     StorageMessage message;
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    uint32_t last_tick = furi_get_tick();
+#endif
     while(1) {
         if(furi_message_queue_get(app->message_queue, &message, STORAGE_TICK) == FuriStatusOk) {
             storage_process_message(app, &message);
-        } else {
+        }
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+        // Pending remounts must not starve while applications keep the queue busy.
+        if((uint32_t)(furi_get_tick() - last_tick) >= furi_ms_to_ticks(STORAGE_TICK)) {
+            storage_tick(app);
+            last_tick = furi_get_tick();
+        }
+#else
+        else {
             storage_tick(app);
         }
+#endif
     }
 
     return 0;

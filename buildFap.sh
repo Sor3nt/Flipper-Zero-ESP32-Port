@@ -125,6 +125,7 @@ else
     IDF="$HOME/esp/esp-idf/components"
 fi
 IDF_COMMON_INCLUDES=(
+    -I"$IDF/json/cJSON"
     -I"$IDF/newlib/platform_include"
     -I"$IDF/esp_hw_support/include"
     -I"$IDF/esp_hw_support/include/soc"
@@ -149,7 +150,6 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/wear_levelling/include"
     -I"$IDF/sdmmc/include"
     -I"$IDF/nvs_flash/include"
-    -I"$IDF/bt/include/esp32c3/include"
     -I"$IDF/bt/host/bluedroid/api/include/api"
     -I"$IDF/lwip/include"
     -I"$IDF/lwip/lwip/src/include"
@@ -157,7 +157,10 @@ IDF_COMMON_INCLUDES=(
     -I"$IDF/lwip/port/freertos/include"
     -I"$IDF/lwip/port/esp32xx/include"
     -I"$IDF/esp_wifi/include"
+    -I"$IDF/esp_wifi/include/local"
     -I"$IDF/esp_netif/include"
+    -I"$IDF/esp_http_client/include"
+    -I"$IDF/mbedtls/esp_crt_bundle/include"
     -I"$IDF/driver/deprecated"
     -I"$IDF/driver/i2c/include"
     -I"$IDF/esp_driver_i2s/include"
@@ -230,7 +233,7 @@ build_for_target() {
     local BOARD="$1"
     local IDF_TARGET="$2"
     local TOOLCHAIN="$3"
-    local FW_BUILD_DIR="$4"
+    local FW_BUILD_DIR="${FAP_FW_BUILD_DIR:-$4}"
 
     local CC="${TOOLCHAIN}-gcc"
     local CXX="${TOOLCHAIN}-g++"
@@ -248,7 +251,7 @@ build_for_target() {
         return 0
     fi
 
-    local BUILD_DIR="$PROJECT_DIR/$FW_BUILD_DIR/fap/$(basename "$APP_DIR")"
+    local BUILD_DIR="$PROJECT_DIR/$FW_BUILD_DIR/fap/objects_$(basename "$FAP_FILENAME")"
     local OUTPUT_DIR="$PROJECT_DIR/$FW_BUILD_DIR/fap"
     local OUTPUT="$OUTPUT_DIR/$FAP_FILENAME"
     # dirname of OUTPUT so FAP_OUTPUT_NAME may carry a subpath (embedded plugins
@@ -264,6 +267,10 @@ build_for_target() {
 
     TARGET_INCLUDES+=(-I"$PROJECT_DIR/$FW_BUILD_DIR/config")
     TARGET_INCLUDES+=(-I"$IDF/esp_hw_support/include/soc/$IDF_TARGET")
+    # Match IDF 5.4's bt/CMakeLists.txt: S3 shares the C3-family public header.
+    local BT_HEADER_TARGET="$IDF_TARGET"
+    if [ "$IDF_TARGET" = "esp32s3" ]; then BT_HEADER_TARGET="esp32c3"; fi
+    TARGET_INCLUDES+=(-I"$IDF/bt/include/$BT_HEADER_TARGET/include")
 
     if [ "$IDF_TARGET" = "esp32s3" ]; then
         # -mlongcalls: allow calls beyond the ±512KB direct-call range (needed as
@@ -326,7 +333,8 @@ build_for_target() {
         TARGET_CFLAGS+=(-DBOARD_INCLUDE=\"board_waveshare_c6_1.9.h\")
     fi
 
-    TARGET_CFLAGS+=(-DFAP_VERSION=\"1.0\")
+    TARGET_CFLAGS+=(-fstack-usage)
+    TARGET_CFLAGS+=(-DFAP_VERSION=\"${FAP_VERSION_OVERRIDE:-1.0}\")
     [ -n "$FAP_CDEFINES" ] && TARGET_CFLAGS+=($FAP_CDEFINES)
     # Extra compiler flags (space-separated), e.g. to relax GCC 14 warnings
     # that upstream apps written for older toolchains trip over:
@@ -403,7 +411,7 @@ build_for_target() {
     local -a FAM_SOURCES=()
     if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_SINGLE_SOURCE" ] && [ -f "$APP_DIR/application.fam" ]; then
         local APP_INFO
-        APP_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null || true)
+        APP_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | tr -d '\r' || true)
         while IFS=$'\t' read -r kind val; do
             case "$kind" in
                 APPSOURCE)  [ -n "$val" ] && FAM_SOURCES+=("$APP_DIR/$val") ;;
@@ -501,6 +509,8 @@ build_for_target() {
 
     # Compile C sources
     local -a OBJECTS=()
+    local -a COMPILE_PIDS=()
+    local compile_failed=0
     for src in "${C_SOURCES[@]}"; do
         local obj="$BUILD_DIR/$(echo "$src" | sed 's|/|_|g' | sed 's|\.c$|.o|')"
         OBJECTS+=("$obj")
@@ -508,8 +518,16 @@ build_for_target() {
         "$CC" "${COMMON_CFLAGS[@]}" "${TARGET_CFLAGS[@]}" \
             "${COMMON_INCLUDES[@]}" "${IDF_COMMON_INCLUDES[@]}" "${TARGET_INCLUDES[@]}" \
             "${APP_INCLUDES[@]}" \
-            -c "$src" -o "$obj"
+            -c "$src" -o "$obj" &
+        COMPILE_PIDS+=("$!")
+        if [ "${#COMPILE_PIDS[@]}" -ge 6 ]; then
+            for compile_pid in "${COMPILE_PIDS[@]}"; do wait "$compile_pid" || compile_failed=1; done
+            COMPILE_PIDS=()
+            [ "$compile_failed" -eq 0 ] || return 1
+        fi
     done
+    for compile_pid in "${COMPILE_PIDS[@]}"; do wait "$compile_pid" || compile_failed=1; done
+    [ "$compile_failed" -eq 0 ] || return 1
 
     # Compile C++ sources
     for src in "${CXX_SOURCES[@]}"; do
@@ -537,7 +555,7 @@ build_for_target() {
         --api-major 1 --api-minor 0 \
         --target 32 \
         --stack-size "$APP_STACK" \
-        --app-version 1 \
+        --app-version "${FAP_APP_VERSION_OVERRIDE:-1}" \
         $ICON_ARG \
         --output "$BUILD_DIR/manifest.bin"
 
@@ -572,6 +590,7 @@ echo "╚═══════════════════════�
 
 for target_line in "${TARGETS[@]}"; do
     read -r BOARD IDF_TARGET TOOLCHAIN FW_BUILD_DIR <<< "$target_line"
+    [ -n "$FAP_BOARD" ] && [ "$BOARD" != "$FAP_BOARD" ] && continue
     build_for_target "$BOARD" "$IDF_TARGET" "$TOOLCHAIN" "$FW_BUILD_DIR"
 done
 
@@ -583,7 +602,7 @@ done
 # recurse. Output goes to <appid>_assets/plugins/ for deployment to the SD at
 # /ext/apps_assets/<mainappid>/plugins/.
 if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_OUTPUT_NAME" ] && [ -f "$APP_DIR/application.fam" ]; then
-    PLUGIN_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | grep '^PLUGIN' || true)
+    PLUGIN_INFO=$(python3 "$SCRIPT_DIR/tools/fap_app_info.py" "$APP_DIR" 2>/dev/null | tr -d '\r' | grep '^PLUGIN' || true)
     if [ -n "$PLUGIN_INFO" ]; then
         echo ""
         echo "━━━ Embedded plugins (fal_embedded) ━━━"
@@ -597,8 +616,7 @@ if [ -z "$FAP_SOURCES" ] && [ -z "$FAP_OUTPUT_NAME" ] && [ -f "$APP_DIR/applicat
             FAP_STACK_OVERRIDE=0 \
             FAP_OUTPUT_NAME="${APP_ID}_assets/plugins/${_p_id}.fal" \
             FAP_CDEFINES="$_p_defs" \
-            "$SCRIPT_DIR/buildFap.sh" "$APP_DIR" 2>&1 \
-                | grep -E '✓|error:|fatal error:|missing API symbols' | sed 's/^/    /' || true
+            bash "$SCRIPT_DIR/buildFap.sh" "$APP_DIR"
         }
         while IFS=$'\t' read -r kind a b; do
             case "$kind" in

@@ -27,9 +27,9 @@ typedef struct {
     uint8_t history_item;
     float rssi;
     bool auto_save;
-    FuriString* frequency_str;
-    FuriString* preset_str;
-    FuriString* history_stat_str;
+    char frequency_str[16];
+    char preset_str[8];
+    char history_stat_str[16];
     FuriString* draw_scratch;
     bool external_radio;
     ProtoPirateLock lock;
@@ -191,24 +191,26 @@ static void protopirate_view_receiver_update_offset(ProtoPirateReceiver* receive
 void protopirate_view_receiver_add_data_statusbar(
     ProtoPirateReceiver* receiver,
     const char* frequency_str,
+    size_t freqency_size,
     const char* preset_str,
+    size_t preset_size,
     const char* history_stat_str,
+    size_t history_stat_size,
     bool external_radio) {
     furi_check(receiver);
     with_view_model(
         receiver->view,
         ProtoPirateReceiverModel * model,
         {
-            furi_string_set_str(model->frequency_str, frequency_str);
-            furi_string_set_str(model->preset_str, preset_str);
-            furi_string_set_str(model->history_stat_str, history_stat_str);
+            snprintf(model->frequency_str, sizeof(model->frequency_str), "%.*s", (int)(freqency_size < 15 ? freqency_size : 15), frequency_str ? frequency_str : "");
+            snprintf(model->preset_str, sizeof(model->preset_str), "%.*s", (int)(preset_size < 7 ? preset_size : 7), preset_str ? preset_str : "");
+            snprintf(model->history_stat_str, sizeof(model->history_stat_str), "%.*s", (int)(history_stat_size < 15 ? history_stat_size : 15), history_stat_str ? history_stat_str : "");
             model->external_radio = external_radio;
         },
         true);
 }
 
 static void protopirate_view_receiver_draw_frame(Canvas* canvas, uint16_t idx, bool scrollbar) {
-    canvas_set_color(canvas, ColorBlack);
     canvas_draw_box(canvas, 0, 0 + idx * FRAME_HEIGHT, scrollbar ? 122 : 127, FRAME_HEIGHT);
 
     canvas_set_color(canvas, ColorWhite);
@@ -251,46 +253,12 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
 
     if(!model->sub_decode_mode) {
         //Config button. (Do it at the top so we dont get Inversion problems from the list view part.)
-        elements_button_left(canvas, "Config");
+        canvas_draw_str(canvas, 1, 63, "OK:Menu");
 
         // Draw RSSI
         protopirate_view_rssi_draw(canvas, model);
     } else {
         protopirate_view_receiver_draw_progress_badge(canvas, model->sub_decode_progress);
-    }
-
-    //Draw To Unlock, Locked etc...
-    if(model->lock_count) {
-        if(model->sub_decode_mode) {
-            canvas_draw_str(canvas, 44, 63, furi_string_get_cstr(model->frequency_str));
-            canvas_draw_str(canvas, 96, 63, furi_string_get_cstr(model->history_stat_str));
-        } else {
-            canvas_draw_str(canvas, 44, 63, furi_string_get_cstr(model->frequency_str));
-            canvas_draw_str(canvas, 79, 63, furi_string_get_cstr(model->preset_str));
-            canvas_draw_str(canvas, 96, 63, furi_string_get_cstr(model->history_stat_str));
-        }
-        canvas_set_font(canvas, FontSecondary);
-        elements_bold_rounded_frame(canvas, 14, 8, 99, 48);
-        elements_multiline_text(canvas, 65, 26, "To unlock\npress:");
-        canvas_draw_icon(canvas, 65, 42, &I_Pin_back_arrow_10x8);
-        canvas_draw_icon(canvas, 80, 42, &I_Pin_back_arrow_10x8);
-        canvas_draw_icon(canvas, 95, 42, &I_Pin_back_arrow_10x8);
-        canvas_draw_icon(canvas, 16, 13, &I_WarningDolphin_45x42);
-        canvas_draw_dot(canvas, 17, 61);
-    } else {
-        if(model->lock == ProtoPirateLockOn) {
-            canvas_draw_icon(canvas, 64, 55, &I_Lock_7x8);
-            canvas_draw_str(canvas, 74, 62, "Locked");
-        } else {
-            if(model->sub_decode_mode) {
-                canvas_draw_str(canvas, 44, 63, furi_string_get_cstr(model->frequency_str));
-                canvas_draw_str(canvas, 96, 63, furi_string_get_cstr(model->history_stat_str));
-            } else {
-                canvas_draw_str(canvas, 44, 63, furi_string_get_cstr(model->frequency_str));
-                canvas_draw_str(canvas, 79, 63, furi_string_get_cstr(model->preset_str));
-                canvas_draw_str(canvas, 96, 63, furi_string_get_cstr(model->history_stat_str));
-            }
-        }
     }
 
     //Draw the List, or the Radar/Dolphin View.
@@ -313,6 +281,9 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
             canvas_draw_str(
                 canvas, 4, 9 + (i * FRAME_HEIGHT), furi_string_get_cstr(model->draw_scratch));
         }
+
+        //Last item may be selected, it wont reset.
+        canvas_set_color(canvas, ColorBlack);
 
         //Draw scrollbar if needed
         if(scrollbar) {
@@ -394,8 +365,7 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
 
         canvas_set_font(canvas, FontSecondary);
         if(model->sub_decode_mode) {
-            canvas_draw_str_aligned(
-                canvas, 127, 0, AlignRight, AlignTop, furi_string_get_cstr(model->preset_str));
+            canvas_draw_str_aligned(canvas, 127, 0, AlignRight, AlignTop, model->preset_str);
         } else {
             if(model->external_radio) {
                 canvas_draw_str_aligned(canvas, 127, 0, AlignRight, AlignTop, "Ext");
@@ -409,6 +379,40 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
             const char* auto_save_text = "Save";
             canvas_draw_str(
                 canvas, 110 - canvas_string_width(canvas, auto_save_text), 7, auto_save_text);
+        }
+    }
+
+    //Draw the unlock instructions last, so they appear on top...
+    if(model->lock_count) {
+        if(model->sub_decode_mode) {
+            canvas_draw_str(canvas, 44, 63, model->frequency_str);
+            canvas_draw_str(canvas, 96, 63, model->history_stat_str);
+        } else {
+            canvas_draw_str(canvas, 44, 63, model->frequency_str);
+            canvas_draw_str(canvas, 79, 63, model->preset_str);
+            canvas_draw_str(canvas, 96, 63, model->history_stat_str);
+        }
+        canvas_set_font(canvas, FontSecondary);
+        elements_bold_rounded_frame(canvas, 14, 8, 99, 48);
+        elements_multiline_text(canvas, 65, 26, "To unlock\npress:");
+        canvas_draw_icon(canvas, 65, 42, &I_Pin_back_arrow_10x8);
+        canvas_draw_icon(canvas, 80, 42, &I_Pin_back_arrow_10x8);
+        canvas_draw_icon(canvas, 95, 42, &I_Pin_back_arrow_10x8);
+        canvas_draw_icon(canvas, 16, 13, &I_WarningDolphin_45x42);
+        canvas_draw_dot(canvas, 17, 61);
+    } else {
+        if(model->lock == ProtoPirateLockOn) {
+            canvas_draw_icon(canvas, 64, 55, &I_Lock_7x8);
+            canvas_draw_str(canvas, 74, 62, "Locked");
+        } else {
+            if(model->sub_decode_mode) {
+                canvas_draw_str(canvas, 44, 63, model->frequency_str);
+                canvas_draw_str(canvas, 96, 63, model->history_stat_str);
+            } else {
+                canvas_draw_str(canvas, 44, 63, model->frequency_str);
+                canvas_draw_str(canvas, 79, 63, model->preset_str);
+                canvas_draw_str(canvas, 96, 63, model->history_stat_str);
+            }
         }
     }
 }
@@ -511,7 +515,7 @@ bool protopirate_view_receiver_input(InputEvent* event, void* context) {
             }
             consumed = true;
             break;
-        case InputKeyOk:
+        case InputKeyOk: {
             bool do_ok_cb = false;
             bool do_toggle = false;
             /* Read-only: do not redraw */
@@ -537,14 +541,18 @@ bool protopirate_view_receiver_input(InputEvent* event, void* context) {
                     true);
             }
 
-            if(do_ok_cb && receiver->callback) {
-                receiver->callback(ProtoPirateCustomEventViewReceiverOK, receiver->context);
+            if(receiver->callback && event->type == InputTypeShort) {
+                if(!sub_decode_mode)
+                    receiver->callback(ProtoPirateCustomEventOpenReceiverActions, receiver->context);
+                else if(do_ok_cb)
+                    receiver->callback(ProtoPirateCustomEventViewReceiverOK, receiver->context);
             }
 
             consumed = true;
             break;
+        }
         case InputKeyBack:
-            if(receiver->callback) {
+            if((event->type == InputTypeShort || event->type == InputTypeLong) && receiver->callback) {
                 receiver->callback(ProtoPirateCustomEventViewReceiverBack, receiver->context);
             }
             consumed = true;
@@ -583,9 +591,9 @@ ProtoPirateReceiver* protopirate_view_receiver_alloc(bool auto_save) {
         ProtoPirateReceiverModel * model,
         {
             model->history = NULL;
-            model->frequency_str = furi_string_alloc();
-            model->preset_str = furi_string_alloc();
-            model->history_stat_str = furi_string_alloc();
+            model->frequency_str[0] = 0;
+            model->preset_str[0] = 0;
+            model->history_stat_str[0] = 0;
             model->draw_scratch = furi_string_alloc();
             furi_check(model->draw_scratch);
             model->list_offset = 0;
@@ -612,9 +620,6 @@ void protopirate_view_receiver_free(ProtoPirateReceiver* receiver) {
         receiver->view,
         ProtoPirateReceiverModel * model,
         {
-            furi_string_free(model->frequency_str);
-            furi_string_free(model->preset_str);
-            furi_string_free(model->history_stat_str);
             furi_string_free(model->draw_scratch);
         },
         false);

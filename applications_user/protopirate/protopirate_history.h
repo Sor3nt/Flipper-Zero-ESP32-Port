@@ -10,7 +10,13 @@
 typedef struct SubGhzEnvironment SubGhzEnvironment;
 typedef struct ProtoPirateHistory ProtoPirateHistory;
 
+/* Batch index updates only. Release before view operations or worker joins. */
+void protopirate_history_lock(ProtoPirateHistory* instance);
+void protopirate_history_unlock(ProtoPirateHistory* instance);
+
 ProtoPirateHistory* protopirate_history_alloc(void);
+/* Call before RX starts. At most 20 snapshots, each capped at 4096 bytes. */
+void protopirate_history_enable_memory(ProtoPirateHistory* instance);
 void protopirate_history_free(ProtoPirateHistory* instance);
 void protopirate_history_reset(ProtoPirateHistory* instance);
 uint16_t protopirate_history_get_item(ProtoPirateHistory* instance);
@@ -49,6 +55,9 @@ void protopirate_history_get_text_item_detail(
     uint16_t idx,
     FuriString* output,
     SubGhzEnvironment* environment);
+/* UI-thread borrowed reader, valid across RX appends. Invalidated only by
+ * UI release/switch, removal of its record, reset, or history destruction.
+ * Stop/join producers before destroying the history. */
 FlipperFormat* protopirate_history_get_raw_data(ProtoPirateHistory* instance, uint16_t idx);
 
 void protopirate_history_release_scratch(ProtoPirateHistory* instance);
