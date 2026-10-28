@@ -738,12 +738,15 @@ static bool sd_prepare_card(void) {
          * the same CS, and do not issue an unrequested retry here. */
         sd_lower_retry_frequency();
 #else
+        /* SPI2 is shared with the LCD/CC1101: tear down the failed device first
+         * (no duplicate CS device) and keep the bus locked for the whole probe,
+         * otherwise a concurrent display transfer trips spi_hal_setup_trans. */
+        furi_hal_spi_bus_lock();
+        sd_release_host();
         sd_run_mount_diagnostics(&dev_cfg, &host);
 #endif
         sd_release_host();
-#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
         furi_hal_spi_bus_unlock();
-#endif
         return false;
     }
 
