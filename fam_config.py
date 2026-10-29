@@ -45,7 +45,8 @@ APPS = [
     "passport",
     "nfc",
     "infrared",
-    "lfrfid",
+    # "lfrfid" (125 kHz RFID) disabled: no currently supported board has the
+    # LF-RFID hardware. Re-add here to build the app again.
     "wlan",
     "wifi",
     "ota_updater",
