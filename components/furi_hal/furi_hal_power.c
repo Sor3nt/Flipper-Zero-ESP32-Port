@@ -568,6 +568,14 @@ static void furi_hal_power_enter_deep_sleep(void) {
      * assert panicked (reset_reason=4) and rebooted on every power-off. Without
      * the hold, the isolation step is skipped and deep sleep starts cleanly. */
 
+    /* Clear any wake source left armed by the PM / idle-light-sleep machinery.
+     * Automatic light sleep (tickless idle) arms a timer wakeup for the next
+     * tick; that config is sticky, so esp_deep_sleep_start() would inherit it
+     * and wake almost immediately, so the device appears to power off and then
+     * jump straight back to life. Disable everything first, then enable only
+     * the button below. */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
     /* Wake on the BOOT/encoder button (GPIO0, active low). Its external
      * boot-strapping pull-up keeps it HIGH across deep sleep, so it does not
      * re-wake immediately — unlike the side key (GPIO6), which floats LOW and
