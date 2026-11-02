@@ -107,6 +107,15 @@ esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void);
  */
 void furi_hal_display_blit(int x0, int y0, int x1, int y1, const void* data);
 
+/** Like furi_hal_display_blit(), but `data` may be ANY memory (PSRAM included):
+ * the pixels are copied in stripes through the HAL's own DMA buffer, which is
+ * allocated once at boot. A takeover app therefore needs no internal DMA RAM of
+ * its own, which is the allocation that fails when internal RAM is exhausted.
+ * Blocks until the whole rectangle is on the panel. Returns false if the display
+ * is not initialised or the rectangle is wider than the stripe buffer.
+ */
+bool furi_hal_display_blit_buffered(int x0, int y0, int x1, int y1, const uint16_t* data);
+
 /** Forget what the HAL believes is on the panel, so the next commit repaints
  * the whole screen (margins included) instead of being skipped by the
  * frame-diff check. Call after drawing to the panel directly.

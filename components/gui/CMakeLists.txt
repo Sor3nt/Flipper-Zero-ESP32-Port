@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "gui.c"
+        "momentum_settings.c"
         "canvas.c"
         "icon.c"
         "icon_animation.c"

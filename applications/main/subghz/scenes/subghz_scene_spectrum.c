@@ -10,8 +10,15 @@ void subghz_scene_spectrum_callback(SubGhzCustomEvent event, void* context) {
 void subghz_scene_spectrum_on_enter(void* context) {
     SubGhz* subghz = context;
     subghz_spectrum_set_callback(subghz->subghz_spectrum, subghz_scene_spectrum_callback, subghz);
+    // Open where the user works (e.g. the frequency the Frequency Analyzer just
+    // saved), not always at 433.92 MHz.
+    subghz_spectrum_set_start_frequency(
+        subghz->subghz_spectrum, subghz->last_settings->frequency);
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdSpectrum);
-    subghz_spectrum_start(subghz->subghz_spectrum);
+    if(!subghz_spectrum_start(subghz->subghz_spectrum)) {
+        FURI_LOG_E("SubGhzSpectrum", "Spectrum view failed to start");
+    }
+    notification_message(subghz->notifications, &sequence_display_backlight_enforce_on);
 }
 
 bool subghz_scene_spectrum_on_event(void* context, SceneManagerEvent event) {
@@ -28,4 +35,5 @@ bool subghz_scene_spectrum_on_event(void* context, SceneManagerEvent event) {
 void subghz_scene_spectrum_on_exit(void* context) {
     SubGhz* subghz = context;
     subghz_spectrum_stop(subghz->subghz_spectrum);
+    notification_message(subghz->notifications, &sequence_display_backlight_enforce_auto);
 }

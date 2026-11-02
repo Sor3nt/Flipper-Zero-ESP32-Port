@@ -21,7 +21,7 @@ static void ble_spam_view_draw_callback(Canvas* canvas, void* _model) {
     snprintf(buf, sizeof(buf), "Device: %.22s", dev);
     canvas_draw_str(canvas, 2, 24, buf);
 
-    snprintf(buf, sizeof(buf), "Packets: %lu", (unsigned long)model->packet_count);
+    snprintf(buf, sizeof(buf), "Cycles: %lu", (unsigned long)model->packet_count);
     canvas_draw_str(canvas, 2, 34, buf);
 
     snprintf(buf, sizeof(buf), "Speed: %lums", (unsigned long)model->delay_ms);

@@ -23,6 +23,11 @@ FuriHalBleProfileBase* ble_profile_hid_start_with_config(
     const FuriHalBleProfileTemplate* profile_template,
     const GapConfig* config);
 
+/** BadUSB-only HID profile startup using unauthenticated Just Works pairing. */
+FuriHalBleProfileBase* ble_profile_hid_start_with_config_just_works(
+    const FuriHalBleProfileTemplate* profile_template,
+    const GapConfig* config);
+
 void ble_profile_hid_set_state_callback(
     FuriHalBleProfileBase* profile,
     void (*callback)(bool connected, void* context),

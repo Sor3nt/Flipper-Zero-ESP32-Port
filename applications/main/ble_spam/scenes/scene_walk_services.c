@@ -7,7 +7,7 @@
 
 #define TAG "BleWalk"
 
-static void format_service_label(esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+static void format_service_label(BleUuid* uuid, char* buf, size_t buf_len) {
     const char* name = ble_uuid_db_lookup_service(uuid);
     if(name) {
         snprintf(buf, buf_len, "%s", name);

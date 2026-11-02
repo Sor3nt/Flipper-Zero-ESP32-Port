@@ -64,6 +64,12 @@ static void rpc_system_gpio_set_pin_mode(const PB_Main* request, void* context) 
     const GpioPin* pin = rpc_pin_to_hal_pin(cmd.pin);
     GpioMode mode = rpc_mode_to_hal_mode(cmd.mode);
 
+    /* A HAL peripheral (e.g. external IR TX) is driving this pin right now. */
+    if(furi_hal_gpio_get_reservation(pin)) {
+        rpc_send_and_release_empty(session, request->command_id, PB_CommandStatus_ERROR_BUSY);
+        return;
+    }
+
     furi_hal_gpio_init_simple(pin, mode);
     if(mode == GpioModeOutputPushPull) {
         furi_hal_gpio_write(pin, false);
@@ -87,7 +93,9 @@ static void rpc_system_gpio_write_pin(const PB_Main* request, void* context) {
     response->command_id = request->command_id;
     response->has_next = false;
 
-    if(LL_GPIO_MODE_OUTPUT != LL_GPIO_GetPinMode(pin->port, pin->pin)) {
+    if(furi_hal_gpio_get_reservation(pin)) {
+        response->command_status = PB_CommandStatus_ERROR_BUSY;
+    } else if(!furi_hal_gpio_is_output(pin)) {
         response->command_status = PB_CommandStatus_ERROR_GPIO_MODE_INCORRECT;
     } else {
         response->command_status = PB_CommandStatus_OK;
@@ -113,7 +121,7 @@ static void rpc_system_gpio_read_pin(const PB_Main* request, void* context) {
     response->command_id = request->command_id;
     response->has_next = false;
 
-    if(LL_GPIO_MODE_INPUT != LL_GPIO_GetPinMode(pin->port, pin->pin)) {
+    if(!furi_hal_gpio_is_input(pin)) {
         response->command_status = PB_CommandStatus_ERROR_GPIO_MODE_INCORRECT;
     } else {
         response->command_status = PB_CommandStatus_OK;
@@ -140,14 +148,12 @@ void rpc_system_gpio_get_pin_mode(const PB_Main* request, void* context) {
     response->command_id = request->command_id;
     response->has_next = false;
 
-    uint32_t raw_pin_mode = LL_GPIO_GetPinMode(pin->port, pin->pin);
-
     PB_Gpio_GpioPinMode pin_mode;
-    if(LL_GPIO_MODE_INPUT == raw_pin_mode) {
-        pin_mode = PB_Gpio_GpioPinMode_INPUT;
-        response->command_status = PB_CommandStatus_OK;
-    } else if(LL_GPIO_MODE_OUTPUT == raw_pin_mode) {
+    if(furi_hal_gpio_is_output(pin)) {
         pin_mode = PB_Gpio_GpioPinMode_OUTPUT;
+        response->command_status = PB_CommandStatus_OK;
+    } else if(furi_hal_gpio_is_input(pin)) {
+        pin_mode = PB_Gpio_GpioPinMode_INPUT;
         response->command_status = PB_CommandStatus_OK;
     } else {
         pin_mode = PB_Gpio_GpioPinMode_INPUT;
@@ -178,7 +184,9 @@ void rpc_system_gpio_set_input_pull(const PB_Main* request, void* context) {
     response->has_next = false;
 
     PB_CommandStatus status;
-    if(LL_GPIO_MODE_INPUT != LL_GPIO_GetPinMode(pin->port, pin->pin)) {
+    if(furi_hal_gpio_get_reservation(pin)) {
+        status = PB_CommandStatus_ERROR_BUSY;
+    } else if(!furi_hal_gpio_is_input(pin)) {
         status = PB_CommandStatus_ERROR_GPIO_MODE_INCORRECT;
     } else {
         status = PB_CommandStatus_OK;

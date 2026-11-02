@@ -81,10 +81,15 @@ static uint16_t bg_color;
 #define STRIPE_HEIGHT 8
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
+static esp_lcd_panel_io_handle_t panel_io_handle = NULL;
 static bool panel_is_asleep = false; /* guards the sleep/wake pair */
 static uint32_t panel_sleep_transition_count = 0;
 static uint16_t* rgb565_buf = NULL; // STRIPE_HEIGHT lines only
 static SemaphoreHandle_t lcd_flush_done = NULL;
+/* Owns rgb565_buf: commit() renders into it and furi_hal_display_blit_buffered()
+ * bounces caller pixels through it. The GUI can still be finishing a commit when
+ * an app takes the display over (gui_direct_draw_acquire only sets a flag). */
+static SemaphoreHandle_t display_buf_lock = NULL;
 static uint8_t x_scale_lut[SCALED_WIDTH];
 static uint8_t y_scale_lut[SCALED_HEIGHT];
 
@@ -117,12 +122,46 @@ static void furi_hal_display_prepare_flush(void) {
     xSemaphoreTake(lcd_flush_done, 0);
 }
 
-static void furi_hal_display_wait_flush(void) {
-    if(!lcd_flush_done) return;
+static bool furi_hal_display_wait_flush(void) {
+    if(!lcd_flush_done) return false;
+    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(250)) == pdTRUE) return true;
 
-    if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(250)) != pdTRUE) {
-        ESP_LOGW(TAG, "Timed out waiting for LCD flush");
+    ESP_LOGW(TAG, "Timed out waiting for LCD flush; draining queued color transfer");
+    if(panel_io_handle) {
+        /* esp_lcd_panel_io_tx_param waits for queued color DMA to finish. ST7789
+         * NOP has no display side effect; its completion is the bus/buffer fence. */
+        const esp_err_t drain_err =
+            esp_lcd_panel_io_tx_param(panel_io_handle, 0x00 /* NOP */, NULL, 0);
+        if(drain_err == ESP_OK) {
+            (void)xSemaphoreTake(lcd_flush_done, 0);
+            return true;
+        }
+        ESP_LOGE(
+            TAG,
+            "LCD DMA drain failed: %s; waiting for completion before releasing SPI",
+            esp_err_to_name(drain_err));
     }
+
+    /* Never release the shared SPI lock or recycle the DMA buffer while the
+     * transfer completion is unknown. A failed callback must fail closed. */
+    return xSemaphoreTake(lcd_flush_done, portMAX_DELAY) == pdTRUE;
+}
+
+/* The caller holds the shared SPI bus lock through draw submission and DMA
+ * completion so radio/SD transfers cannot overlap the LCD transfer. */
+static bool furi_hal_display_send_bitmap(
+    int x0,
+    int y0,
+    int x1,
+    int y1,
+    const void* data) {
+    furi_hal_display_prepare_flush();
+    const esp_err_t draw_err = esp_lcd_panel_draw_bitmap(panel_handle, x0, y0, x1, y1, data);
+    if(draw_err != ESP_OK) {
+        ESP_LOGW(TAG, "LCD bitmap transfer was not queued: %s", esp_err_to_name(draw_err));
+        return false;
+    }
+    return furi_hal_display_wait_flush();
 }
 
 static void furi_hal_display_init_scale_lut(void) {
@@ -141,9 +180,7 @@ static void display_fill_color(uint16_t color) {
     for(int i = 0; i < LCD_H_RES; i++) line[i] = color;
     furi_hal_spi_bus_lock();
     for(int y = 0; y < LCD_V_RES; y++) {
-        furi_hal_display_prepare_flush();
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, y, LCD_H_RES, y + 1, line);
-        furi_hal_display_wait_flush();
+        if(!furi_hal_display_send_bitmap(0, y, LCD_H_RES, y + 1, line)) break;
     }
     furi_hal_spi_bus_unlock();
     free(line);
@@ -156,12 +193,11 @@ static void display_fill_color(uint16_t color) {
  * what lets other shared-bus users (CC1101/NRF24 register transactions, SD
  * card sector ops) get scheduled in between stripes rather than queuing
  * behind one multi-stripe hold. */
-static void display_flush_stripe(int x0, int y0, int x1, int y1) {
+static bool display_flush_stripe(int x0, int y0, int x1, int y1) {
     furi_hal_spi_bus_lock();
-    furi_hal_display_prepare_flush();
-    esp_lcd_panel_draw_bitmap(panel_handle, x0, y0, x1, y1, rgb565_buf);
-    furi_hal_display_wait_flush();
+    const bool complete = furi_hal_display_send_bitmap(x0, y0, x1, y1, rgb565_buf);
     furi_hal_spi_bus_unlock();
+    return complete;
 }
 
 /* Paint a solid-color rectangle using rgb565_buf as scratch. Chunks vertically
@@ -169,9 +205,9 @@ static void display_flush_stripe(int x0, int y0, int x1, int y1) {
  * SCALED_WIDTH cols, reused here at full LCD width). Used by the commit path
  * to keep the LCD margins in sync with fg_color changes -- only called when
  * margins_dirty is set, not on every frame. */
-static void display_paint_rect(
+static bool display_paint_rect(
     size_t x, size_t y, size_t w, size_t h, uint16_t color) {
-    if(w == 0 || h == 0 || w > LCD_H_RES) return;
+    if(w == 0 || h == 0 || w > LCD_H_RES) return true;
 
     for(size_t y_off = 0; y_off < h; y_off += STRIPE_HEIGHT) {
         size_t chunk_h = h - y_off;
@@ -180,8 +216,12 @@ static void display_paint_rect(
         const size_t px_count = w * chunk_h;
         for(size_t i = 0; i < px_count; i++) rgb565_buf[i] = color;
 
-        display_flush_stripe((int)x, (int)(y + y_off), (int)(x + w), (int)(y + y_off + chunk_h));
+        if(!display_flush_stripe(
+               (int)x, (int)(y + y_off), (int)(x + w), (int)(y + y_off + chunk_h))) {
+            return false;
+        }
     }
+    return true;
 }
 
 void furi_hal_display_init(void) {
@@ -190,6 +230,10 @@ void furi_hal_display_init(void) {
     if(!lcd_flush_done) {
         lcd_flush_done = xSemaphoreCreateBinary();
         ESP_ERROR_CHECK(lcd_flush_done ? ESP_OK : ESP_ERR_NO_MEM);
+    }
+    if(!display_buf_lock) {
+        display_buf_lock = xSemaphoreCreateMutex();
+        ESP_ERROR_CHECK(display_buf_lock ? ESP_OK : ESP_ERR_NO_MEM);
     }
 
     /* Initialize SPI bus */
@@ -208,7 +252,6 @@ void furi_hal_display_init(void) {
     }
 
     /* Create panel IO (SPI) */
-    esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = gpio_lcd_dc.pin,
         .cs_gpio_num = gpio_lcd_cs.pin,
@@ -220,7 +263,7 @@ void furi_hal_display_init(void) {
         .on_color_trans_done = furi_hal_display_flush_done_callback,
         .user_ctx = NULL,
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(LCD_SPI_HOST, &io_config, &io_handle));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(LCD_SPI_HOST, &io_config, &panel_io_handle));
 
     /* Create ST7789 panel */
     esp_lcd_panel_dev_config_t panel_config = {
@@ -260,10 +303,10 @@ void furi_hal_display_init(void) {
      *    even if the RESX pulse above didn't fully take (e.g. a glitch on the
      *    line right after the ESP32 digital reset). The display still draws
      *    pixels in that case, so this command reaches it just fine. */
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x01 /* SWRESET */, NULL, 0));
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(panel_io_handle, 0x01 /* SWRESET */, NULL, 0));
     vTaskDelay(pdMS_TO_TICKS(150));
 
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_handle, &panel_config, &panel_handle));
 
     /* 3) esp_lcd does another RESX pulse, then SLPOUT + COLMOD + MADCTL. */
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
@@ -282,9 +325,9 @@ void furi_hal_display_init(void) {
      *    when the state is already right and cost nothing. */
     {
         const uint8_t colmod = 0x55;
-        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x3A /* COLMOD */, &colmod, 1));
+        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(panel_io_handle, 0x3A /* COLMOD */, &colmod, 1));
     }
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, 0x13 /* NORON */, NULL, 0));
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(panel_io_handle, 0x13 /* NORON */, NULL, 0));
 
     /* Turn on display */
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
@@ -317,9 +360,18 @@ void furi_hal_display_init(void) {
              FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
 }
 
+static void furi_hal_display_commit_locked(const uint8_t* data, uint32_t size);
+
 void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
-    UNUSED(size);
-    if(!panel_handle || !rgb565_buf || !data) return;
+    if(!display_buf_lock) return;
+    xSemaphoreTake(display_buf_lock, portMAX_DELAY);
+    furi_hal_display_commit_locked(data, size);
+    xSemaphoreGive(display_buf_lock);
+}
+
+static void furi_hal_display_commit_locked(const uint8_t* data, uint32_t size) {
+    /* The renderer and the frame diff below read a whole 128x64 mono frame. */
+    if(!panel_handle || !rgb565_buf || !data || size < (uint32_t)FB_SIZE_BYTES) return;
 
     /* Panel in SLPIN with the backlight off: nothing is visible, so do not
      * render and DMA ~100 KB over the shared SPI bus (that also takes insomnia
@@ -362,16 +414,20 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
      * one taking the shared SPI lock. */
     if(margins_dirty) {
         if(MARGIN_Y > 0) {
-            display_paint_rect(0, 0, LCD_H_RES, MARGIN_Y, fg_color);
-            display_paint_rect(
+            if(!display_paint_rect(0, 0, LCD_H_RES, MARGIN_Y, fg_color)) return;
+            if(!display_paint_rect(
                 0, MARGIN_Y + SCALED_HEIGHT,
-                LCD_H_RES, LCD_V_RES - MARGIN_Y - SCALED_HEIGHT, fg_color);
+                LCD_H_RES, LCD_V_RES - MARGIN_Y - SCALED_HEIGHT, fg_color)) {
+                return;
+            }
         }
         if(MARGIN_X > 0) {
-            display_paint_rect(0, MARGIN_Y, MARGIN_X, SCALED_HEIGHT, fg_color);
-            display_paint_rect(
+            if(!display_paint_rect(0, MARGIN_Y, MARGIN_X, SCALED_HEIGHT, fg_color)) return;
+            if(!display_paint_rect(
                 MARGIN_X + SCALED_WIDTH, MARGIN_Y,
-                LCD_H_RES - MARGIN_X - SCALED_WIDTH, SCALED_HEIGHT, fg_color);
+                LCD_H_RES - MARGIN_X - SCALED_WIDTH, SCALED_HEIGHT, fg_color)) {
+                return;
+            }
         }
         margins_dirty = false;
     }
@@ -412,9 +468,12 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
 
         /* DMA send this stripe -- takes and releases the shared SPI lock
          * internally, just for this one transfer. */
-        display_flush_stripe(
-            MARGIN_X, MARGIN_Y + stripe_y,
-            MARGIN_X + SCALED_WIDTH, MARGIN_Y + stripe_y + stripe_h);
+        if(!display_flush_stripe(
+               MARGIN_X, MARGIN_Y + stripe_y,
+               MARGIN_X + SCALED_WIDTH, MARGIN_Y + stripe_y + stripe_h)) {
+            last_fb_valid = false;
+            return;
+        }
 
         /* Give any same/higher-priority task (radio worker, SD I/O) a chance
          * to run between stripes even on a single-core-bound build; harmless
@@ -429,10 +488,31 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
 void furi_hal_display_blit(int x0, int y0, int x1, int y1, const void* data) {
     if(!panel_handle || !data) return;
     furi_hal_spi_bus_lock();
-    furi_hal_display_prepare_flush();
-    esp_lcd_panel_draw_bitmap(panel_handle, x0, y0, x1, y1, data);
-    furi_hal_display_wait_flush();
+    (void)furi_hal_display_send_bitmap(x0, y0, x1, y1, data);
     furi_hal_spi_bus_unlock();
+}
+
+bool furi_hal_display_blit_buffered(int x0, int y0, int x1, int y1, const uint16_t* data) {
+    const int w = x1 - x0;
+    const int h = y1 - y0;
+    if(!panel_handle || !rgb565_buf || !display_buf_lock || !data || w <= 0 || h <= 0) {
+        return false;
+    }
+    const int rows_per_chunk = (int)((LCD_H_RES * STRIPE_HEIGHT) / (unsigned)w);
+    if(rows_per_chunk < 1) return false;
+
+    xSemaphoreTake(display_buf_lock, portMAX_DELAY);
+    bool success = true;
+    for(int row = 0; row < h; row += rows_per_chunk) {
+        const int rows = (row + rows_per_chunk > h) ? (h - row) : rows_per_chunk;
+        memcpy(rgb565_buf, data + (size_t)row * w, (size_t)rows * w * sizeof(uint16_t));
+        if(!display_flush_stripe(x0, y0 + row, x1, y0 + row + rows)) {
+            success = false;
+            break;
+        }
+    }
+    xSemaphoreGive(display_buf_lock);
+    return success;
 }
 
 void furi_hal_display_invalidate(void) {

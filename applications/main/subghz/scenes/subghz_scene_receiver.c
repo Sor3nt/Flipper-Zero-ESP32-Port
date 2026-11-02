@@ -36,10 +36,19 @@ const NotificationSequence subghz_sequence_rx_locked = {
     NULL,
 };
 
+/* Ticks (100 ms each) between attempts to restart RX after it failed to start. */
+#define SUBGHZ_RECEIVER_RX_RETRY_TICKS 10
+
 static void subghz_scene_receiver_update_statusbar(void* context) {
     SubGhz* subghz = context;
     FuriString* history_stat_str = furi_string_alloc();
-    if(!subghz_history_get_text_space_left(subghz->history, history_stat_str)) {
+    const bool memory_full = subghz_history_get_text_space_left(subghz->history, history_stat_str);
+    // RX keeps running in this scene (also with a full history), so not receiving
+    // means the radio failed to start: say so instead of looking like it listens.
+    if(!subghz_txrx_is_receiving(subghz->txrx)) {
+        furi_string_set(history_stat_str, "RX ERROR");
+    }
+    if(!memory_full) {
         FuriString* frequency_str = furi_string_alloc();
         FuriString* modulation_str = furi_string_alloc();
 
@@ -214,7 +223,11 @@ void subghz_scene_receiver_on_enter(void* context) {
         subghz_txrx_hopper_set_state(subghz->txrx, SubGhzHopperStateOFF);
     }
 
-    subghz_txrx_rx_start(subghz->txrx);
+    if(!subghz_txrx_rx_start(subghz->txrx)) {
+        // Shown as "RX ERROR" in the status bar and retried from the tick event.
+        // Staying here keeps any captured, unsaved signals in the list.
+        subghz->state_notifications = SubGhzNotificationStateIDLE;
+    }
     subghz_view_receiver_set_idx_menu(subghz->subghz_receiver, subghz->idx_menu_chosen);
 
     //to use a universal decoder, we are looking for a link to it
@@ -297,9 +310,27 @@ bool subghz_scene_receiver_on_event(void* context, SceneManagerEvent event) {
             break;
         }
     } else if(event.type == SceneManagerEventTypeTick) {
+        static uint8_t rx_retry_ticks = 0;
         if(subghz_txrx_hopper_get_state(subghz->txrx) != SubGhzHopperStateOFF) {
+            // The hopper itself restarts RX on its next hop if it failed.
             subghz_txrx_hopper_update(subghz->txrx, subghz->last_settings->hopping_threshold);
             subghz_scene_receiver_update_statusbar(subghz);
+        } else if(!subghz_txrx_is_receiving(subghz->txrx)) {
+            // RX failed to start (see on_enter): retry about once per second.
+            if(++rx_retry_ticks >= SUBGHZ_RECEIVER_RX_RETRY_TICKS) {
+                rx_retry_ticks = 0;
+                if(subghz_txrx_rx_start(subghz->txrx)) {
+                    FURI_LOG_I(TAG, "RX restarted");
+                    if(!subghz_history_get_text_space_left(subghz->history, NULL)) {
+                        subghz->state_notifications = SubGhzNotificationStateRx;
+                    }
+                } else {
+                    notification_message(subghz->notifications, &sequence_blink_red_10);
+                }
+                subghz_scene_receiver_update_statusbar(subghz);
+            }
+        } else {
+            rx_retry_ticks = 0;
         }
 
         SubGhzThresholdRssiData ret_rssi = subghz_threshold_get_rssi_data(

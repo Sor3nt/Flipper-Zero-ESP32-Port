@@ -6,6 +6,7 @@ enum MainMenuIndex {
     MainMenuIndexBleAutoWalk,
     MainMenuIndexBleTracker,
     MainMenuIndexBleRaceDetector,
+    MainMenuIndexBleWardriving,
 };
 
 static void main_menu_callback(void* context, uint32_t index) {
@@ -26,6 +27,12 @@ void ble_spam_scene_main_on_enter(void* context) {
         app->submenu,
         "Airoha RACE",
         MainMenuIndexBleRaceDetector,
+        main_menu_callback,
+        app);
+    submenu_add_item(
+        app->submenu,
+        "Wardriving",
+        MainMenuIndexBleWardriving,
         main_menu_callback,
         app);
 
@@ -56,6 +63,10 @@ bool ble_spam_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainMenuIndexBleRaceDetector:
             scene_manager_next_scene(app->scene_manager, BleSpamSceneRaceDetector);
+            consumed = true;
+            break;
+        case MainMenuIndexBleWardriving:
+            scene_manager_next_scene(app->scene_manager, BleSpamSceneWardriving);
             consumed = true;
             break;
         }

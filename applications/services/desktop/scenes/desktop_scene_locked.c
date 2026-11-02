@@ -9,6 +9,7 @@
 #include "../helpers/pin_code.h"
 #include "../animations/animation_manager.h"
 #include "../views/desktop_events.h"
+#include <momentum_settings.h>
 #include "../views/desktop_view_locked.h"
 #include "desktop_scene.h"
 #include "desktop_scene_locked.h"
@@ -79,12 +80,19 @@ bool desktop_scene_locked_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
+        case DesktopLockedEventOpenPowerOff:
+            if(momentum_settings.lockscreen_poweroff) {
+                loader_start_detached_with_gui_error(desktop->loader, "Power", "off");
+            }
+            consumed = true;
+            break;
         case DesktopLockedEventUnlocked:
         case DesktopGlobalApiUnlock:
             desktop_unlock(desktop);
             consumed = true;
             break;
         case DesktopLockedEventDoorsClosed:
+        case DesktopLockedEventCoversClosed:
             notification_message(desktop->notification, &sequence_display_backlight_off);
             consumed = true;
             break;

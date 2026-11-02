@@ -600,6 +600,45 @@ const NotificationSequence sequence_audiovisual_alert = {
     NULL,
 };
 
+const NotificationSequence sequence_button_click = {
+    &message_note_c6,
+    &message_delay_10,
+    &message_sound_off,
+    NULL,
+};
+
+const NotificationSequence sequence_wakeup = {
+    &message_note_e5,
+    &message_delay_50,
+    &message_sound_off,
+    NULL,
+};
+
+const NotificationSequence sequence_shutdown = {
+    &message_note_c5,
+    &message_delay_100,
+    &message_sound_off,
+    NULL,
+};
+
+const NotificationSequence sequence_low_battery = {
+    &message_note_a5,
+    &message_delay_50,
+    &message_sound_off,
+    &message_delay_100,
+    &message_note_a5,
+    &message_delay_50,
+    &message_sound_off,
+    NULL,
+};
+
+const NotificationSequence sequence_wifi_scan = {
+    &message_note_g5,
+    &message_delay_25,
+    &message_sound_off,
+    NULL,
+};
+
 const NotificationSequence sequence_lcd_contrast_update = {
     &message_lcd_contrast_update,
     NULL,

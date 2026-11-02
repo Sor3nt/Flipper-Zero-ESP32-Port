@@ -12,7 +12,10 @@ enum MainIndex {
     MainIndexChannelSsidSpam = 13,
     MainIndexChannelSmartDeauth = 14,
     MainIndexChannelEvilPortal = 15,
+    MainIndexDeauthAll = 16,
     MainIndexWebFs = 17,
+    MainIndexChannelLiveScan = 18,
+    // MainIndexChannelBleScan (19) dipindah ke app Bluetooth (ble_spam).
 };
 
 static void wlan_app_scene_main_submenu_cb(void* context, uint32_t index) {
@@ -23,16 +26,19 @@ static void wlan_app_scene_main_submenu_cb(void* context, uint32_t index) {
 void wlan_app_scene_main_on_enter(void* context) {
     WlanApp* app = context;
     submenu_reset(app->submenu);
-    submenu_set_header_centered(app->submenu, "WiFi");
+    // Links ausgerichteter Header (wie Sub-GHz/NFC/… — konsistente Optik).
+    submenu_set_header(app->submenu, "WiFi");
 
     // Channel-Aktionen sind immer sichtbar; Verbindungs-Aktionen sind state-abhängig.
     app->channel_mode_active = false;
     // Hub-Scene: ein evtl. abgebrochener Update-SD-Flow wird hier zurückgesetzt.
     app->webfs_flow = false;
     app->fw_update_flow = false;
+    // Deauth-Ziel-Picker-Flow endet spätestens hier (User ist zurück im Menü).
+    app->deauth_pick_flow = false;
 
     if(!app->connected && !app->target_selected) {
-        submenu_add_item_centered(
+        submenu_add_item(
             app->submenu, "Select Wifi", MainIndexSelectWifi, wlan_app_scene_main_submenu_cb, app);
     } else if(app->connected) {
         char label[48];
@@ -68,6 +74,13 @@ void wlan_app_scene_main_on_enter(void* context) {
         wlan_app_scene_main_submenu_cb, app);
     submenu_add_item(
         app->submenu, "Smart Deauth", MainIndexChannelSmartDeauth,
+        wlan_app_scene_main_submenu_cb, app);
+    submenu_add_item(
+        app->submenu, "WiFi Live Scan", MainIndexChannelLiveScan,
+        wlan_app_scene_main_submenu_cb, app);
+    // "BLE Wardriving" dipindah ke app Bluetooth (ble_spam) → tak lagi di menu WiFi.
+    submenu_add_item(
+        app->submenu, "Deauth All", MainIndexDeauthAll,
         wlan_app_scene_main_submenu_cb, app);
     submenu_add_item(
         app->submenu, "Evil Portal", MainIndexChannelEvilPortal,
@@ -121,9 +134,12 @@ bool wlan_app_scene_main_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case MainIndexChannelDeauth:
-            app->channel_mode_active = true;
-            if(app->channel_action_channel == 0) app->channel_action_channel = 1;
-            scene_manager_next_scene(app->scene_manager, WlanAppSceneNetworkDeauth);
+            // Neuer Flow: direkt scannen → AP wählen → Single-Target-Deauth.
+            // Die Connect-Scene übernimmt Scan + Liste; deauth_pick_flow lenkt
+            // die Auswahl in die Deauth- statt Connect-Scene.
+            app->channel_mode_active = false;
+            app->deauth_pick_flow = true;
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneConnect);
             consumed = true;
             break;
         case MainIndexChannelSniffer:
@@ -139,6 +155,14 @@ bool wlan_app_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainIndexChannelSmartDeauth:
             scene_manager_next_scene(app->scene_manager, WlanAppSceneSmartDeauth);
+            consumed = true;
+            break;
+        case MainIndexChannelLiveScan:
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneLiveScan);
+            consumed = true;
+            break;
+        case MainIndexDeauthAll:
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneDeauthAll);
             consumed = true;
             break;
         case MainIndexChannelEvilPortal:

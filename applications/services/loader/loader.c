@@ -354,6 +354,8 @@ static void
 
 static Loader* loader_alloc(void) {
     Loader* loader = malloc(sizeof(Loader));
+    furi_check(loader);
+    loader->app.light_sleep_inhibited = false;
     loader->pubsub = furi_pubsub_alloc();
     loader->queue = furi_message_queue_alloc(1, sizeof(LoaderMessage));
     loader->gui = furi_record_open(RECORD_GUI);
@@ -398,6 +400,9 @@ static const FlipperInternalApplication* loader_find_application_by_name(const c
 }
 
 static void loader_start_app_thread(Loader* loader, FlipperInternalApplicationFlag flags) {
+    furi_hal_power_light_sleep_inhibit_enter();
+    loader->app.light_sleep_inhibited = true;
+
     // setup heap trace
     FuriHalRtcHeapTrackMode mode = furi_hal_rtc_get_heap_track_mode();
     if(mode > FuriHalRtcHeapTrackModeNone) {
@@ -826,6 +831,11 @@ static void loader_do_app_closed(Loader* loader) {
     } else {
         furi_thread_free(loader->app.thread);
         loader->app.thread = NULL;
+    }
+
+    if(loader->app.light_sleep_inhibited) {
+        loader->app.light_sleep_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
     }
 
     furi_string_free(loader->app.launch_path);

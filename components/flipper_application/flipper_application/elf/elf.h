@@ -167,6 +167,7 @@ typedef struct {
 #define R_XTENSA_RELATIVE 5
 #define R_XTENSA_PLT 6
 #define R_XTENSA_ASM_EXPAND 11
+#define R_XTENSA_ASM_SIMPLIFY 12
 #define R_XTENSA_DIFF8 17
 #define R_XTENSA_DIFF16 18
 #define R_XTENSA_DIFF32 19

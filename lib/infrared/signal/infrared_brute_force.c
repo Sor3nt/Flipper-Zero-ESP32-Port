@@ -96,7 +96,6 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
     Storage* storage = furi_record_open(RECORD_STORAGE);
     FlipperFormat* ff = flipper_format_buffered_file_alloc(storage);
     FuriString* signal_name = furi_string_alloc();
-    InfraredSignal* signal = infrared_signal_alloc();
 
     do {
         if(!flipper_format_buffered_file_open_existing(ff, brute_force->db_filename)) {
@@ -104,22 +103,18 @@ InfraredErrorCode infrared_brute_force_calculate_messages(InfraredBruteForce* br
             break;
         }
 
-        bool signal_valid = false;
+        /* Index name -> file offset only. Parsing every body here was the
+         * main delay when opening Universal TV/AC/etc (full SD scan +
+         * decode of every signal). Bodies are read on transmit. */
         while(infrared_signal_read_name(ff, signal_name) == InfraredErrorCodeNone) {
             size_t signal_start = flipper_format_tell(ff);
-            error = infrared_signal_read_body(signal, ff);
-            signal_valid = (!INFRARED_ERROR_PRESENT(error)) && infrared_signal_is_valid(signal);
-            if(!signal_valid) break;
-
             InfraredBruteForceRecord* record =
                 InfraredBruteForceRecordDict_get(brute_force->records, signal_name);
-            furi_assert(record);
+            if(!record) continue;
             SignalPositionArray_push_back(record->signals, signal_start);
         }
-        if(!signal_valid) break;
     } while(false);
 
-    infrared_signal_free(signal);
     furi_string_free(signal_name);
 
     flipper_format_free(ff);

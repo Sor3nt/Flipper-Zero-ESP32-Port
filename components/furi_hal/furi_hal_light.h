@@ -37,6 +37,12 @@ void furi_hal_light_blink_start(Light light, uint8_t brightness, uint16_t on_tim
  */
 void furi_hal_light_blink_stop(void);
 
+/** Atomically send an all-black frame and block future WS2812 updates. */
+bool furi_hal_light_shutdown_ws2812(void);
+
+/** Send a black frame, hold the data line low, and retain color for restoration. */
+void furi_hal_light_set_ws2812_sleep(bool sleeping);
+
 /** Set color in hardware LED blinking mode
  *
  * @param      light  Light

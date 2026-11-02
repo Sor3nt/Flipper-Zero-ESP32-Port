@@ -34,6 +34,23 @@ typedef struct FuriStreamBuffer FuriStreamBuffer;
  */
 FuriStreamBuffer* furi_stream_buffer_alloc(size_t size, size_t trigger_level);
 
+/** Allocate a stream buffer, preferring internal RAM.
+ *
+ * Falls back to the default heap (possibly PSRAM) when internal RAM is
+ * fragmented, so it is NOT safe for ISRs that run while the flash cache is
+ * disabled (IRAM-safe RMT/GPTimer callbacks). Use
+ * furi_stream_buffer_try_alloc_internal() for those.
+ */
+FuriStreamBuffer* furi_stream_buffer_alloc_internal(size_t size, size_t trigger_level);
+
+/** Allocate a stream buffer strictly in internal RAM.
+ *
+ * Required for producers running in cache-disabled (IRAM-safe) ISRs.
+ *
+ * @return the stream buffer, or NULL if no internal block is available
+ */
+FuriStreamBuffer* furi_stream_buffer_try_alloc_internal(size_t size, size_t trigger_level);
+
 /**
  * @brief Free stream buffer instance
  * 
@@ -84,6 +101,19 @@ size_t furi_stream_buffer_send(
     const void* data,
     size_t length,
     uint32_t timeout);
+
+/** Send bytes from ISR context without event-loop notification. */
+size_t furi_stream_buffer_send_from_isr(
+    FuriStreamBuffer* stream_buffer,
+    const void* data,
+    size_t length,
+    bool* higher_priority_task_woken);
+
+/** Send bytes from ISR context and yield immediately when a higher-priority task wakes. */
+size_t furi_stream_buffer_send_from_isr_yield(
+    FuriStreamBuffer* stream_buffer,
+    const void* data,
+    size_t length);
 
 /**
  * @brief Receives bytes from a stream buffer.

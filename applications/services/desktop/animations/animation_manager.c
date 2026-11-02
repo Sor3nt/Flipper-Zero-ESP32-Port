@@ -11,6 +11,8 @@
 #include "views/one_shot_animation_view.h"
 #include "animation_storage.h"
 #include "animation_manager.h"
+#include "animation_storage_i.h"
+#include <momentum_settings.h>
 
 #define TAG "AnimationManager"
 
@@ -70,6 +72,27 @@ static bool animation_manager_is_valid_idle_animation(
     const DolphinStats* stats);
 static void animation_manager_switch_to_one_shot_view(AnimationManager* animation_manager);
 static void animation_manager_switch_to_animation_view(AnimationManager* animation_manager);
+
+/* Cycle Anims (Settings > Interface > Graphics): how long an idle animation
+ * stays before the next is picked. Returns milliseconds, or 0 = never switch. */
+static uint32_t animation_manager_idle_period_ms(const BubbleAnimation* animation) {
+    int32_t duration =
+        (momentum_settings.cycle_anims == MOMENTUM_CYCLE_ANIMS_META) ?
+            (int32_t)animation->duration :
+            momentum_settings.cycle_anims;
+    return (duration > 0) ? (uint32_t)duration * 1000 : 0;
+}
+
+static void animation_manager_start_idle_timer(
+    AnimationManager* animation_manager,
+    const BubbleAnimation* animation) {
+    uint32_t period = animation_manager_idle_period_ms(animation);
+    if(period > 0) {
+        furi_timer_start(animation_manager->idle_animation_timer, period);
+    } else {
+        furi_timer_stop(animation_manager->idle_animation_timer);
+    }
+}
 
 void animation_manager_set_context(AnimationManager* animation_manager, void* context) {
     furi_assert(animation_manager);
@@ -189,6 +212,85 @@ void animation_manager_new_idle_process(AnimationManager* animation_manager) {
     }
 }
 
+static StorageAnimation*
+    animation_manager_select_external_animation(AnimationManager* animation_manager) {
+    StorageAnimationList_t animation_list;
+    StorageAnimationList_init(animation_list);
+    animation_storage_fill_animation_list(&animation_list);
+
+    Dolphin* dolphin = furi_record_open(RECORD_DOLPHIN);
+    DolphinStats stats = dolphin_stats(dolphin);
+    furi_record_close(RECORD_DOLPHIN);
+
+    const char* current_name = animation_manager->current_animation->external ?
+                                   animation_storage_get_meta(
+                                       animation_manager->current_animation)
+                                       ->name :
+                                   NULL;
+    bool current_found = current_name == NULL;
+    StorageAnimation* first_candidate = NULL;
+    StorageAnimation* next_candidate = NULL;
+    StorageAnimationList_it_t it;
+    for(StorageAnimationList_it(it, animation_list); !StorageAnimationList_end_p(it);) {
+        StorageAnimation* storage_animation = *StorageAnimationList_ref(it);
+        const StorageAnimationManifestInfo* info =
+            animation_storage_get_meta(storage_animation);
+        bool valid = storage_animation->external &&
+                     animation_manager_is_valid_idle_animation(info, &stats);
+
+        if(!valid) {
+            animation_storage_free_storage_animation(&storage_animation);
+            StorageAnimationList_remove(animation_list, it);
+            continue;
+        }
+
+        const bool is_current = current_name && strcmp(info->name, current_name) == 0;
+        if(is_current) {
+            current_found = true;
+        } else {
+            if(!first_candidate) first_candidate = storage_animation;
+            if(current_found && !next_candidate) next_candidate = storage_animation;
+        }
+        StorageAnimationList_next(it);
+    }
+
+    StorageAnimation* selected = next_candidate ? next_candidate : first_candidate;
+
+    for
+        M_EACH(item, animation_list, StorageAnimationList_t) {
+            if(*item != selected) {
+                animation_storage_free_storage_animation(item);
+            }
+        }
+    StorageAnimationList_clear(animation_list);
+
+    if(!selected || !animation_storage_get_bubble_animation(selected)) {
+        if(selected) animation_storage_free_storage_animation(&selected);
+        return NULL;
+    }
+
+    return selected;
+}
+
+bool animation_manager_new_external_process(AnimationManager* animation_manager) {
+    furi_assert(animation_manager);
+
+    if(animation_manager->state != AnimationManagerStateIdle ||
+       !animation_manager->current_animation) {
+        return false;
+    }
+
+    StorageAnimation* new_animation =
+        animation_manager_select_external_animation(animation_manager);
+    if(!new_animation) return false;
+
+    animation_manager_replace_current_animation(animation_manager, new_animation);
+    const BubbleAnimation* animation =
+        animation_storage_get_bubble_animation(animation_manager->current_animation);
+    animation_manager_start_idle_timer(animation_manager, animation);
+    return true;
+}
+
 /* reaction to animation_manager->interact_callback() */
 bool animation_manager_interact_process(AnimationManager* animation_manager) {
     furi_assert(animation_manager);
@@ -221,12 +323,17 @@ bool animation_manager_interact_process(AnimationManager* animation_manager) {
 static void animation_manager_start_new_idle(AnimationManager* animation_manager) {
     furi_assert(animation_manager);
 
+    /* Selecting reads the manifest and all frames of the pick from the SD,
+     * which shares the SPI bus with the LCD: each frame commit gets split
+     * between SD reads and the screen shows torn stripes of two frames. Keep
+     * the current frame still until set_animation() restarts the timer. */
+    bubble_animation_hold_frame(animation_manager->animation_view);
     StorageAnimation* new_animation = animation_manager_select_idle_animation(animation_manager);
     animation_manager_replace_current_animation(animation_manager, new_animation);
     const BubbleAnimation* bubble_animation =
         animation_storage_get_bubble_animation(animation_manager->current_animation);
     animation_manager->state = AnimationManagerStateIdle;
-    furi_timer_start(animation_manager->idle_animation_timer, bubble_animation->duration * 1000);
+    animation_manager_start_idle_timer(animation_manager, bubble_animation);
 }
 
 static bool animation_manager_check_blocking(AnimationManager* animation_manager) {
@@ -382,11 +489,15 @@ static bool animation_manager_is_valid_idle_animation(
 
         result = (sd_status == FSE_NOT_READY);
     }
-    if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
-        result = false;
-    }
-    if((stats->level < info->min_level) || (stats->level > info->max_level)) {
-        result = false;
+    /* Unlock Anims (Settings > Interface > Graphics): ignore the level and
+     * butthurt gates so every animation in the manifest can appear. */
+    if(!momentum_settings.unlock_anims) {
+        if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
+            result = false;
+        }
+        if((stats->level < info->min_level) || (stats->level > info->max_level)) {
+            result = false;
+        }
     }
 
     return result;
@@ -581,8 +692,7 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
                     } else {
                         const BubbleAnimation* animation = animation_storage_get_bubble_animation(
                             animation_manager->current_animation);
-                        furi_timer_start(
-                            animation_manager->idle_animation_timer, animation->duration * 1000);
+                        animation_manager_start_idle_timer(animation_manager, animation);
                     }
                 }
             } else {

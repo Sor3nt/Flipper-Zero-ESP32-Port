@@ -17,6 +17,18 @@
 #define BOARD_PIN_BTN_DOWN      40
 #define BOARD_PIN_BTN_LEFT      39
 #define BOARD_PIN_BTN_RIGHT     38
+/* The driver emits physical Press/Release, then a Short event after Release.
+ * OK/Back Long events are inferred by apps from the press duration. */
+#define BOARD_INPUT_SHORT_AFTER_RELEASE 1
+/* Real D-pad: in the Sub-GHz Transmitter the arrows pick a remote's custom
+ * buttons, as on Flipper. Left off on encoder/touch boards (scrolling would
+ * transmit) and on Smoochie (arrows are navigation there). */
+#define BOARD_SUBGHZ_DPAD_CUSTOM_BUTTONS 1
+/* Hardware arrows are a real 4-way D-pad, not the T-Embed's 1-axis encoder.
+ * Disables the encoder adaptations in the GUI (ViewInputMode remap in
+ * view_dispatcher/view_holder, transposed text_input/button_menu keys,
+ * swapped button_panel Left/Right) so every arrow means what it shows. */
+#define BOARD_INPUT_DPAD 1
 #define BOARD_PIN_BATTERY_ADC   UINT16_MAX
 /* No battery divider: voltage/SoC come from the BQ27220 fuel gauge (charger
  * VBAT as fallback). The battery ADC is never initialized on this board. */
@@ -82,6 +94,11 @@
 #define BOARD_PIN_CC1101_SW1    UINT16_MAX
 #define BOARD_PIN_CC1101_SW0    UINT16_MAX
 #define BOARD_CC1101_SPI_SHARED 1
+/* Optional external CC1101 module (Sub-GHz > Radio Settings > Module). It shares the
+ * radio SPI bus above (MISO 8, MOSI 18, SCK 17); its CSn and GDO0 are two of the
+ * five header GPIOs below, chosen by the user and held only while a Sub-GHz session
+ * uses the module. No OTG/5 V rail is involved: it is powered from the header. */
+#define BOARD_SUBGHZ_EXT_MODULE 1
 
 /* ---- NRF24L01 (shared SPI bus) ---- */
 #define BOARD_PIN_NRF24_SCK     BOARD_PIN_CC1101_SCK
@@ -90,11 +107,15 @@
 #define BOARD_PIN_NRF24_CSN     13
 #define BOARD_PIN_NRF24_CE      14
 #define BOARD_HAS_NRF24         1
+/* Optional external NRF24 module (NRF24 > Radio Settings > Module). Same shared SPI bus;
+ * its CSN and CE are two of the five header GPIOs, chosen by the user and held only
+ * while an NRF24 scene runs (furi_hal_nrf24_session_begin/end). */
+#define BOARD_NRF24_EXT_MODULE  1
 
 /* ---- Infrared (RMT-based) ---- */
 #define BOARD_PIN_IR_TX         2
 #define BOARD_PIN_IR_RX         1
-#define BOARD_PIN_IR_TX_EXT     BOARD_PIN_EXT_GPIO_1 /* Shared with GPIO manual control; don't use concurrently. */
+#define BOARD_PIN_IR_TX_EXT     BOARD_PIN_EXT_GPIO_1 /* Infrared Settings > External. Reserved only while IR transmits; idle = input, pull-down. */
 
 /* ---- Shared external UART (UART1) ----
  * GPIO43/44 are shared by RFID, Expansion modules, and the USB-UART Bridge.

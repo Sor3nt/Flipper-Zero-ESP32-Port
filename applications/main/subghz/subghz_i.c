@@ -30,6 +30,9 @@ bool subghz_tx_start(SubGhz* subghz, FlipperFormat* flipper_format) {
     case SubGhzTxRxStartTxStateErrorOnlyRx:
         subghz_dialog_message_freq_error(subghz, true);
         break;
+    case SubGhzTxRxStartTxStateErrorAsyncTx:
+        dialog_message_show_storage_error(subghz->dialogs, "Radio failed to start TX");
+        break;
 
     default:
         return true;
@@ -70,6 +73,7 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
     SubGhzLoadKeyState load_key_state = SubGhzLoadKeyStateParseErr;
     FuriString* temp_str = furi_string_alloc();
     uint32_t temp_data32;
+    subghz->load_type_file = SubGhzLoadTypeFileNoLoad;
 
     do {
         stream_clean(fff_data_stream);
@@ -120,11 +124,13 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
         furi_string_set_str(
             temp_str, subghz_txrx_get_preset_name(subghz->txrx, furi_string_get_cstr(temp_str)));
         if(!strcmp(furi_string_get_cstr(temp_str), "")) {
+            FURI_LOG_E(TAG, "Preset is empty or invalid");
             break;
         }
         SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
 
-        if(!strcmp(furi_string_get_cstr(temp_str), "CUSTOM")) {
+        bool is_custom_preset = !strcmp(furi_string_get_cstr(temp_str), "CUSTOM");
+        if(is_custom_preset) {
             //TODO FL-3551: add Custom_preset_module
             //delete preset if it already exists
             subghz_setting_delete_custom_preset(setting, furi_string_get_cstr(temp_str));
@@ -134,6 +140,20 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
                 FURI_LOG_E(TAG, "Missing Custom preset");
                 break;
             }
+        }
+        bool preset_found = false;
+        size_t preset_count = subghz_setting_get_preset_count(setting);
+        for(size_t i = 0; i < preset_count; i++) {
+            if(!strcmp(
+                   subghz_setting_get_preset_name(setting, i),
+                   furi_string_get_cstr(temp_str))) {
+                preset_found = true;
+                break;
+            }
+        }
+        if(!preset_found) {
+            FURI_LOG_E(TAG, "Preset not found: %s", furi_string_get_cstr(temp_str));
+            break;
         }
         size_t preset_index =
             subghz_setting_get_inx_preset_by_name(setting, furi_string_get_cstr(temp_str));
@@ -189,6 +209,10 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
     furi_string_free(temp_str);
     flipper_format_free(fff_data_file);
     furi_record_close(RECORD_STORAGE);
+
+    if(load_key_state != SubGhzLoadKeyStateOK) {
+        stream_clean(fff_data_stream);
+    }
 
     switch(load_key_state) {
     case SubGhzLoadKeyStateParseErr:

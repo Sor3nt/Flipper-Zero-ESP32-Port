@@ -15,6 +15,24 @@ static SubGhzDeviceCC1101ExtState subghz_device_cc1101_ext = {
 };
 
 bool subghz_device_cc1101_ext_alloc(SubGhzDeviceConf* conf) {
+    if(furi_hal_subghz_ext_supported()) {
+        /* Boards with a real external module: take the chosen CS/GDO0 pads for the
+         * length of this session (released again in _free). */
+        if(subghz_device_cc1101_ext.initialized) return true;
+        const FuriHalSubGhzExtResult result = furi_hal_subghz_ext_attach();
+        if(result != FuriHalSubGhzExtOk) {
+            FURI_LOG_W(
+                "SubGhzDeviceCc1101Ext",
+                "External module not started: %s",
+                furi_hal_subghz_ext_result_text(result));
+            return false;
+        }
+        subghz_device_cc1101_ext.initialized = true;
+        subghz_device_cc1101_ext.extended_range = conf ? conf->extended_range : false;
+        subghz_device_cc1101_ext.amp_and_leds = conf ? conf->amp_and_leds : false;
+        return true;
+    }
+
     subghz_device_cc1101_ext.initialized = true;
     subghz_device_cc1101_ext.extended_range = conf ? conf->extended_range : false;
     subghz_device_cc1101_ext.amp_and_leds = conf ? conf->amp_and_leds : false;
@@ -29,7 +47,11 @@ void subghz_device_cc1101_ext_free(void) {
         return;
     }
 
-    furi_hal_subghz_shutdown();
+    if(furi_hal_subghz_ext_supported()) {
+        furi_hal_subghz_ext_detach();
+    } else {
+        furi_hal_subghz_shutdown();
+    }
     subghz_device_cc1101_ext.initialized = false;
 }
 
@@ -42,6 +64,10 @@ const GpioPin* subghz_device_cc1101_ext_get_data_gpio(void) {
 }
 
 bool subghz_device_cc1101_ext_is_connect(void) {
+    if(furi_hal_subghz_ext_supported()) {
+        /* Chosen in Sub-GHz > Radio Settings and actually answering on its pins. */
+        return furi_hal_subghz_ext_is_available();
+    }
     furi_hal_subghz_reset();
     return true;
 }
@@ -128,10 +154,10 @@ uint32_t subghz_device_cc1101_ext_set_frequency(uint32_t value) {
     return furi_hal_subghz_set_frequency(value);
 }
 
-void subghz_device_cc1101_ext_start_async_rx(
+bool subghz_device_cc1101_ext_start_async_rx(
     SubGhzDeviceCC1101ExtCaptureCallback callback,
     void* context) {
-    furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
+    return furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
 }
 
 void subghz_device_cc1101_ext_stop_async_rx(void) {

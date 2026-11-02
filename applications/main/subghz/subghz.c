@@ -5,6 +5,7 @@
 #include <lib/toolbox/path.h>
 #include <float_tools.h>
 #include <esp_heap_caps.h>
+#include <math.h>
 #include "subghz_i.h"
 
 #define TAG "SubGhzApp"
@@ -267,6 +268,8 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     subghz_txrx_set_frequency_offset(subghz->txrx, subghz->last_settings->frequency_offset);
 
     if(!alloc_for_tx_only) {
+        // Before the preset is built, so it gets the saved TX power, not index 0.
+        subghz->tx_power = subghz->last_settings->tx_power;
         subghz_txrx_set_preset_internal(
             subghz->txrx,
             subghz->last_settings->frequency,
@@ -282,7 +285,6 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     if(!alloc_for_tx_only) {
         subghz->ignore_filter = subghz->last_settings->ignore_filter;
         subghz->filter = subghz->last_settings->filter;
-        subghz->tx_power = subghz->last_settings->tx_power;
     } else {
         subghz->filter = SubGhzProtocolFlag_Decodable;
         subghz->ignore_filter = 0x0;
@@ -296,7 +298,19 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
         if(!float_is_equal(subghz->last_settings->rssi, 0)) {
             subghz_threshold_rssi_set(subghz->threshold_rssi, subghz->last_settings->rssi);
         } else {
-            subghz->last_settings->rssi = SUBGHZ_LAST_SETTING_FREQUENCY_ANALYZER_TRIGGER;
+            subghz->last_settings->rssi = SUBGHZ_RAW_THRESHOLD_MIN;
+        }
+
+        if(!isfinite(subghz->last_settings->frequency_analyzer_trigger) ||
+           subghz->last_settings->frequency_analyzer_trigger < -97.0f ||
+           subghz->last_settings->frequency_analyzer_trigger > -60.0f) {
+            FURI_LOG_W(
+                TAG,
+                "Invalid frequency analyzer trigger %.2f, restoring %.2f",
+                (double)subghz->last_settings->frequency_analyzer_trigger,
+                (double)SUBGHZ_LAST_SETTING_FREQUENCY_ANALYZER_TRIGGER);
+            subghz->last_settings->frequency_analyzer_trigger =
+                SUBGHZ_LAST_SETTING_FREQUENCY_ANALYZER_TRIGGER;
         }
     }
 #if SUBGHZ_MEASURE_LOADING
@@ -317,6 +331,14 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         rpc_system_app_send_exited(subghz->rpc_ctx);
         subghz_blink_stop(subghz);
         subghz->rpc_ctx = NULL;
+    }
+
+    if(subghz->decode_raw_file_worker_encoder) {
+        if(subghz_file_encoder_worker_is_running(subghz->decode_raw_file_worker_encoder)) {
+            subghz_file_encoder_worker_stop(subghz->decode_raw_file_worker_encoder);
+        }
+        subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+        subghz->decode_raw_file_worker_encoder = NULL;
     }
 
     subghz_txrx_stop(subghz->txrx);
@@ -447,16 +469,18 @@ int32_t subghz_app(void* p) {
 
     FURI_LOG_D(
         TAG,
-        "heap before alloc: internal=%zu spiram=%zu",
-        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        "heap before alloc: internal=%zu largest=%zu spiram=%zu",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     SubGhz* subghz = subghz_alloc(alloc_for_tx);
 
     FURI_LOG_D(
         TAG,
-        "heap after alloc:  internal=%zu spiram=%zu",
-        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        "heap after alloc:  internal=%zu largest=%zu spiram=%zu",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     if(alloc_for_tx) {
@@ -513,6 +537,13 @@ int32_t subghz_app(void* p) {
     furi_hal_power_suppress_charge_exit();
 
     subghz_free(subghz, alloc_for_tx);
+
+    FURI_LOG_D(
+        TAG,
+        "heap after free: internal=%zu largest=%zu spiram=%zu",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     return 0;
 }

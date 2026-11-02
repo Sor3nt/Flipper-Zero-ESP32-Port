@@ -22,6 +22,20 @@ void furi_hal_usb_hid_backend_stop(void) {
     if(s_user_cb) s_user_cb(false, s_user_ctx);
 }
 
+/* Part of the backend contract (furi_hal_usb_hid_backend.h): this backend never
+ * installs a USB stack, so there is nothing to release. */
+bool furi_hal_usb_hid_backend_release_stack(void) {
+    return true;
+}
+
+bool furi_hal_usb_backend_force_reenumeration(void) {
+    return true;
+}
+
+void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
+    (void)inhibited;
+}
+
 bool furi_hal_hid_is_connected(void) {
     return s_connected;
 }

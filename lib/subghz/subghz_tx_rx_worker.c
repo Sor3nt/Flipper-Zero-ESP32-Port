@@ -146,7 +146,7 @@ static int32_t subghz_tx_rx_worker_thread(void* context) {
     subghz_devices_set_frequency(instance->device, instance->frequency);
     subghz_devices_flush_rx(instance->device);
 
-    uint8_t data[SUBGHZ_TXRX_WORKER_MAX_TXRX_SIZE + 1] = {0};
+    uint8_t data[64] = {0};
     size_t size_tx = 0;
     uint8_t size_rx[1] = {0};
     uint8_t timeout_tx = 0;
@@ -173,23 +173,35 @@ static int32_t subghz_tx_rx_worker_thread(void* context) {
         } else {
             //receive
             if(subghz_tx_rx_worker_rx(instance, data, size_rx)) {
-                if(furi_stream_buffer_spaces_available(instance->stream_rx) >= size_rx[0]) {
+                if(size_rx[0] > SUBGHZ_TXRX_WORKER_MAX_TXRX_SIZE) {
+                    FURI_LOG_W(TAG, "RX packet too large: %u bytes", size_rx[0]);
+                    subghz_devices_flush_rx(instance->device);
+                    subghz_devices_set_rx(instance->device);
+                } else if(furi_stream_buffer_spaces_available(instance->stream_rx) >= size_rx[0]) {
                     if(instance->callback_have_read &&
                        furi_stream_buffer_bytes_available(instance->stream_rx) == 0) {
                         callback_rx = true;
                     }
-                    //TODO FL-3554: checking that it managed to write all the data to the RX buffer
-                    furi_stream_buffer_send(
+                    size_t sent = furi_stream_buffer_send(
                         instance->stream_rx,
                         &data,
                         size_rx[0],
                         SUBGHZ_TXRX_WORKER_TIMEOUT_READ_WRITE_BUF);
+                    if(sent != size_rx[0]) {
+                        FURI_LOG_W(
+                            TAG,
+                            "RX stream partial write: %u/%u bytes",
+                            (unsigned)sent,
+                            (unsigned)size_rx[0]);
+                        callback_rx = false;
+                        continue;
+                    }
                     if(callback_rx) {
                         instance->callback_have_read(instance->context_have_read);
                         callback_rx = false;
                     }
                 } else {
-                    //TODO FL-3555: RX buffer overflow
+                    FURI_LOG_W(TAG, "RX stream full, dropping %u-byte packet", size_rx[0]);
                 }
             }
         }
@@ -223,7 +235,9 @@ SubGhzTxRxWorker* subghz_tx_rx_worker_alloc(void) {
 
 void subghz_tx_rx_worker_free(SubGhzTxRxWorker* instance) {
     furi_check(instance);
-    furi_check(!instance->worker_running);
+    if(instance->worker_running) {
+        subghz_tx_rx_worker_stop(instance);
+    }
     furi_stream_buffer_free(instance->stream_tx);
     furi_stream_buffer_free(instance->stream_rx);
     furi_thread_free(instance->thread);
@@ -237,21 +251,17 @@ bool subghz_tx_rx_worker_start(
     uint32_t frequency) {
     furi_check(instance);
     furi_check(!instance->worker_running);
-    bool res = false;
     furi_stream_buffer_reset(instance->stream_tx);
     furi_stream_buffer_reset(instance->stream_rx);
 
+    if(!furi_hal_subghz_is_tx_allowed(frequency)) return false;
+
+    instance->frequency = frequency;
+    instance->device = device;
     instance->worker_running = true;
-
-    if(furi_hal_subghz_is_tx_allowed(frequency)) {
-        instance->frequency = frequency;
-        instance->device = device;
-        res = true;
-    }
-
     furi_thread_start(instance->thread);
 
-    return res;
+    return true;
 }
 
 void subghz_tx_rx_worker_stop(SubGhzTxRxWorker* instance) {

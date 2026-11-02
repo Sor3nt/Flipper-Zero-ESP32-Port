@@ -183,7 +183,10 @@ bool infrared_scene_universal_common_on_event(void* context, SceneManagerEvent e
 
             if(event_type == InfraredCustomEventTypeButtonSelected) {
                 uint32_t record_count;
-                if(infrared_brute_force_start(brute_force, event_value, &record_count)) {
+                if(!furi_hal_infrared_is_tx_output_free()) {
+                    /* Each send would be skipped silently: say why up front. */
+                    infrared_show_tx_error(infrared);
+                } else if(infrared_brute_force_start(brute_force, event_value, &record_count)) {
                     scene_manager_set_scene_state(infrared->scene_manager, scene_id, 0);
                     dolphin_deed(DolphinDeedIrSend);
                     infrared_scene_universal_common_show_popup(infrared, record_count);

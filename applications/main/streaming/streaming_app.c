@@ -4,6 +4,7 @@
 #include <furi.h>
 #include <storage/storage.h>
 #include <wifi.h>
+#include <wlan_hal.h>
 #include <wlan_app/views/wlan_lan_view.h>
 #include <string.h>
 #include <strings.h>
@@ -107,6 +108,10 @@ static void streaming_app_free(StreamingApp* app) {
     scene_manager_free(app->scene_manager);
 
     free(app->ap_records);
+
+    if(!wifi_is_enabled(app->wifi)) {
+        wlan_hal_stop();
+    }
 
     furi_record_close(RECORD_WIFI);
     furi_record_close(RECORD_GUI);

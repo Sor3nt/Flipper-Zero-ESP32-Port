@@ -48,7 +48,7 @@ static inline int16_t apply_gain(int16_t s, uint8_t vol) {
     return (int16_t)v;
 }
 
-static int32_t mp3_i2s_writer_task(void* ctx) {
+static int32_t __attribute__((unused)) mp3_i2s_writer_task(void* ctx) {
     (void)ctx;
 
     while(writer_run) {
@@ -94,6 +94,10 @@ static int32_t mp3_i2s_writer_task(void* ctx) {
 }
 
 bool mp3_i2s_init(uint32_t sample_rate) {
+#if !BOARD_HAS_SPEAKER
+    (void)sample_rate;
+    return false;
+#else
     if(i2s_tx) return true;
 
     tx_buf = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(int16_t),
@@ -160,6 +164,7 @@ err_chan:
 err_rb:
     heap_caps_free(tx_buf);           tx_buf = NULL;
     return false;
+#endif
 }
 
 void mp3_i2s_deinit(void) {

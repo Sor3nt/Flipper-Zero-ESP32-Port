@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
+#include <esp_attr.h>
 
 #define PS_TAG "WlanPortscan"
 
@@ -36,7 +37,7 @@ static bool s_thread_running = false;
 static volatile bool s_scanning = false;
 static volatile bool s_scan_complete = false;
 static volatile uint8_t s_progress = 0;
-static WlanPortscanEntry s_open_ports[WLAN_PORTSCAN_MAX_OPEN];
+static EXT_RAM_BSS_ATTR WlanPortscanEntry s_open_ports[WLAN_PORTSCAN_MAX_OPEN];
 static volatile uint8_t s_open_count = 0;
 
 static const char* port_service_name(uint16_t port) {

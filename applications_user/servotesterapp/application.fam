@@ -1,0 +1,16 @@
+App(
+    appid="servotesterapp",
+    name="Servo Tester",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="servotester_app_entry",
+    cdefines=["APP_SERVOTESTERAPP"],
+    requires=["gui"],
+    stack_size=8*1024,
+    order=50,
+    fap_icon="appicon.png",
+    fap_category="GPIO",
+    fap_author="M. Hasbini (ESP32 port)",
+    fap_weburl="https://github.com/kaklik/ServoTesterApp",
+    fap_version="0.2",
+    fap_description="RC Servo PWM generator for hardware tests on the external GPIO header."
+)

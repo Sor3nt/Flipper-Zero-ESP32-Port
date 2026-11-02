@@ -126,7 +126,11 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
                    fff_data_file, SUBGHZ_LAST_SETTING_FIELD_TX_POWER, &tx_power, 1)) {
                 flipper_format_rewind(fff_data_file);
             }
-            instance->tx_power = (uint8_t)(tx_power & 0xFF);
+            if(tx_power >= SUBGHZ_TXRX_TX_POWER_COUNT) {
+                FURI_LOG_W(TAG, "Invalid TX power index %lu, using default", tx_power);
+                tx_power = 0;
+            }
+            instance->tx_power = (uint8_t)tx_power;
             if(!flipper_format_read_float(
                    fff_data_file,
                    SUBGHZ_LAST_SETTING_FIELD_HOPPING_THRESHOLD,

@@ -21,8 +21,8 @@ static bool subghz_device_cc1101_int_interconnect_start_async_tx(void* callback,
     return furi_hal_subghz_start_async_tx((FuriHalSubGhzAsyncTxCallback)callback, context);
 }
 
-static void subghz_device_cc1101_int_interconnect_start_async_rx(void* callback, void* context) {
-    furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
+static bool subghz_device_cc1101_int_interconnect_start_async_rx(void* callback, void* context) {
+    return furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
 }
 
 static void subghz_device_cc1101_int_interconnect_load_preset(
@@ -60,6 +60,10 @@ static bool subghz_device_cc1101_int_interconnect_is_connect(void) {
     return true;
 }
 
+static void subghz_device_cc1101_int_interconnect_set_rx(void) {
+    (void)furi_hal_subghz_rx();
+}
+
 const SubGhzDeviceInterconnect subghz_device_cc1101_int_interconnect = {
     .begin = NULL,
     .end = furi_hal_subghz_shutdown,
@@ -79,7 +83,7 @@ const SubGhzDeviceInterconnect subghz_device_cc1101_int_interconnect = {
     .is_async_complete_tx = furi_hal_subghz_is_async_tx_complete,
     .stop_async_tx = furi_hal_subghz_stop_async_tx,
 
-    .set_rx = furi_hal_subghz_rx,
+    .set_rx = subghz_device_cc1101_int_interconnect_set_rx,
     .flush_rx = furi_hal_subghz_flush_rx,
     .start_async_rx = subghz_device_cc1101_int_interconnect_start_async_rx,
     .stop_async_rx = furi_hal_subghz_stop_async_rx,

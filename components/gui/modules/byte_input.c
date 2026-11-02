@@ -3,6 +3,7 @@
 #include "../elements.h"
 #include <furi.h>
 #include <assets_icons.h>
+#include <boards/board.h>
 
 /** ByteInput type */
 struct ByteInput {
@@ -741,6 +742,23 @@ static bool byte_input_view_input_callback(InputEvent* event, void* context) {
     ByteInput* byte_input = context;
     furi_assert(byte_input);
     bool consumed = false;
+
+#if defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD
+    /* The handlers are laid out for the T-Embed encoder: Up/Down step along
+     * the keys/bytes, Right moves a row up (towards the bytes) and Left a row
+     * down. On a D-pad Up/Down change row and Left/Right step along it. */
+    static const InputKey dpad_keys[InputKeyMAX] = {
+        [InputKeyUp] = InputKeyRight,
+        [InputKeyDown] = InputKeyLeft,
+        [InputKeyRight] = InputKeyDown,
+        [InputKeyLeft] = InputKeyUp,
+        [InputKeyOk] = InputKeyOk,
+        [InputKeyBack] = InputKeyBack,
+    };
+    InputEvent dpad_event = *event;
+    if(dpad_event.key < InputKeyMAX) dpad_event.key = dpad_keys[dpad_event.key];
+    event = &dpad_event;
+#endif
 
     if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
         switch(event->key) {

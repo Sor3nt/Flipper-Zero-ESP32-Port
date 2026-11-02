@@ -53,6 +53,7 @@ struct Gui {
     bool lockdown;
     bool lockdown_inhibit;
     bool direct_draw;
+    bool status_bar_background;
     ViewPortArray_t layers[GuiLayerMAX];
     Canvas* canvas;
 
@@ -60,6 +61,7 @@ struct Gui {
     FuriMessageQueue* input_queue;
     FuriPubSub* input_events;
     uint8_t ongoing_input;
+    uint8_t suppressed_input;
     ViewPort* ongoing_input_view_port;
 };
 

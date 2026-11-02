@@ -19,8 +19,9 @@ struct KeyStore {
 };
 
 KeyStore* key_store_alloc(Storage* s) {
-    KeyStore* ks = malloc(sizeof(KeyStore));
-    memset(ks, 0, sizeof(*ks));
+    if(!s) return NULL;
+    KeyStore* ks = calloc(1, sizeof(KeyStore));
+    if(!ks) return NULL;
     ks->storage = s;
     return ks;
 }
@@ -50,8 +51,10 @@ static uint16_t encode_manuf(const char* c) {
 }
 
 bool key_store_load(KeyStore* ks) {
+    if(!ks || !ks->storage) return false;
     storage_simply_mkdir(ks->storage, WMBUS_APP_DATA_DIR);
     File* f = storage_file_alloc(ks->storage);
+    if(!f) return false;
     bool ok = storage_file_open(f, WMBUS_APP_KEYS_FILE, FSAM_READ, FSOM_OPEN_EXISTING);
     if(!ok) { storage_file_free(f); return true; /* no file yet — fine */ }
     char line[128];
@@ -70,15 +73,24 @@ bool key_store_load(KeyStore* ks) {
                     char* c2 = strchr(c1, ',');
                     if(c2 && (size_t)(c2 - c1) == 8) {
                         *c2++ = 0;
-                        if(strlen(line) >= 3 && strlen(c2) >= 32) {
+                        bool manufacturer_valid = strlen(line) == 3;
+                        for(size_t i = 0; i < 3 && manufacturer_valid; i++) {
+                            manufacturer_valid = line[i] >= 'A' && line[i] <= 'Z';
+                        }
+                        if(manufacturer_valid && strlen(c2) == 32) {
                             uint16_t m = encode_manuf(line);
                             uint32_t id = 0;
+                            bool id_valid = true;
                             for(int i = 0; i < 8; i++) {
-                                int v = hex_nyb(c1[i]); if(v < 0) { id = 0; break; }
+                                int v = hex_nyb(c1[i]);
+                                if(v < 0) {
+                                    id_valid = false;
+                                    break;
+                                }
                                 id = (id << 4) | (uint32_t)v;
                             }
                             uint8_t k[16];
-                            if(parse_hex(c2, k, 16))
+                            if(id_valid && parse_hex(c2, k, 16))
                                 key_store_set(ks, m, id, k);
                         }
                     }
@@ -96,8 +108,10 @@ bool key_store_load(KeyStore* ks) {
 }
 
 bool key_store_save(KeyStore* ks) {
+    if(!ks || !ks->storage) return false;
     storage_simply_mkdir(ks->storage, WMBUS_APP_DATA_DIR);
     File* f = storage_file_alloc(ks->storage);
+    if(!f) return false;
     bool ok = storage_file_open(f, WMBUS_APP_KEYS_FILE, FSAM_WRITE, FSOM_CREATE_ALWAYS);
     if(!ok) { storage_file_free(f); return false; }
     const char* hdr = "# wM-Bus Inspector keys: MAN,ID,KEY (32 hex)\n";
@@ -120,6 +134,7 @@ bool key_store_save(KeyStore* ks) {
 }
 
 bool key_store_lookup(KeyStore* ks, uint16_t m, uint32_t id, uint8_t out[16]) {
+    if(!ks || !out) return false;
     for(int i = 0; i < KEY_STORE_MAX; i++)
         if(ks->entries[i].used && ks->entries[i].m == m && ks->entries[i].id == id) {
             memcpy(out, ks->entries[i].key, 16); return true;
@@ -128,6 +143,7 @@ bool key_store_lookup(KeyStore* ks, uint16_t m, uint32_t id, uint8_t out[16]) {
 }
 
 bool key_store_set(KeyStore* ks, uint16_t m, uint32_t id, const uint8_t k[16]) {
+    if(!ks || !k) return false;
     int free_slot = -1;
     for(int i = 0; i < KEY_STORE_MAX; i++) {
         if(ks->entries[i].used && ks->entries[i].m == m && ks->entries[i].id == id) {
@@ -144,6 +160,7 @@ bool key_store_set(KeyStore* ks, uint16_t m, uint32_t id, const uint8_t k[16]) {
 }
 
 void key_store_iter(KeyStore* ks, KeyStoreIterCb cb, void* ctx) {
+    if(!ks || !cb) return;
     for(int i = 0; i < KEY_STORE_MAX; i++)
         if(ks->entries[i].used)
             cb(ks->entries[i].m, ks->entries[i].id, ks->entries[i].key, ctx);

@@ -32,6 +32,8 @@ typedef void (*FuriHalUsbStateCallback)(FuriHalUsbStateEvent state, void* contex
 void furi_hal_usb_init(void);
 bool furi_hal_usb_set_config(FuriHalUsbInterface* new_if, void* ctx);
 FuriHalUsbInterface* furi_hal_usb_get_config(void);
+/* Release the inactive HID TinyUSB stack and return the shared PHY to Serial-JTAG. */
+bool furi_hal_usb_hid_release_stack(void);
 void furi_hal_usb_lock(void);
 void furi_hal_usb_unlock(void);
 bool furi_hal_usb_is_locked(void);

@@ -1,7 +1,10 @@
 #include "infrared_worker.h"
 
 #include <furi_hal_infrared.h>
+#include <furi_hal_power.h>
 #include <float_tools.h>
+#include <esp_attr.h>
+#include <esp_heap_caps.h>
 
 #include <core/check.h>
 #include <core/common_defines.h>
@@ -16,13 +19,24 @@
 #define INFRARED_WORKER_EXIT                0x08
 #define INFRARED_WORKER_TX_FILL_BUFFER      0x10
 #define INFRARED_WORKER_TX_MESSAGE_SENT     0x20
+#define INFRARED_WORKER_TX_UNDERRUN         0x40
+#define INFRARED_WORKER_TX_OVERFLOW         0x80
+#define INFRARED_WORKER_RX_FRAME_END       0x100
+#define INFRARED_WORKER_TX_ERROR            0x200
+#define INFRARED_WORKER_RX_ERROR            0x400
+
+#define INFRARED_WORKER_MIN_RAW_TIMINGS 8
+#define INFRARED_WORKER_MIN_RAW_DURATION_US 2000
 
 #define INFRARED_WORKER_ALL_RX_EVENTS                                    \
     (INFRARED_WORKER_RX_RECEIVED | INFRARED_WORKER_RX_TIMEOUT_RECEIVED | \
-     INFRARED_WORKER_OVERRUN | INFRARED_WORKER_EXIT)
+        INFRARED_WORKER_OVERRUN | INFRARED_WORKER_RX_FRAME_END | \
+        INFRARED_WORKER_RX_ERROR | INFRARED_WORKER_EXIT)
 
 #define INFRARED_WORKER_ALL_TX_EVENTS \
-    (INFRARED_WORKER_TX_FILL_BUFFER | INFRARED_WORKER_TX_MESSAGE_SENT | INFRARED_WORKER_EXIT)
+    (INFRARED_WORKER_TX_FILL_BUFFER | INFRARED_WORKER_TX_MESSAGE_SENT | \
+    INFRARED_WORKER_TX_UNDERRUN | INFRARED_WORKER_TX_OVERFLOW | \
+    INFRARED_WORKER_TX_ERROR | INFRARED_WORKER_EXIT)
 
 #define INFRARED_WORKER_ALL_EVENTS (INFRARED_WORKER_ALL_RX_EVENTS | INFRARED_WORKER_ALL_TX_EVENTS)
 
@@ -47,11 +61,16 @@ struct InfraredWorkerSignal {
             float duty_cycle;
         } raw;
     };
+
 };
 
 struct InfraredWorker {
     FuriThread* thread;
-    FuriStreamBuffer* stream;
+    /* Written by the RMT RX ISR, which also runs while the flash cache is off
+     * (CONFIG_RMT_ISR_IRAM_SAFE): must be internal RAM. Allocated per RX session. */
+    FuriStreamBuffer* rx_stream;
+    /* Only touched from task context (worker thread and HAL TX task). */
+    FuriStreamBuffer* tx_stream;
 
     InfraredWorkerSignal signal;
     InfraredWorkerState state;
@@ -60,6 +79,12 @@ struct InfraredWorker {
     NotificationApp* notification;
     bool blink_enable;
     bool decode_enable;
+    bool light_sleep_inhibited;
+
+    /* Outside the rx/tx union: the owner may leave it unset (the FAP API does not
+     * expose the setter), so alloc() must be able to leave it NULL for good. */
+    InfraredWorkerRxErrorCallback rx_error_callback;
+    void* rx_error_context;
 
     union {
         struct {
@@ -72,14 +97,32 @@ struct InfraredWorker {
             uint32_t tx_raw_cnt;
             bool need_reinitialization;
             bool steady_signal_sent;
+            volatile bool underrun;
+            volatile bool overflow;
+            volatile bool error;
         } tx;
         struct {
             InfraredWorkerReceivedSignalCallback received_signal_callback;
             void* received_signal_context;
-            bool overrun;
+            volatile bool overrun;
+            uint32_t frame_end_gap_us;
         } rx;
     };
 };
+
+static void infrared_worker_light_sleep_inhibit_begin(InfraredWorker* instance) {
+    if(!instance->light_sleep_inhibited) {
+        instance->light_sleep_inhibited = true;
+        furi_hal_power_light_sleep_inhibit_enter();
+    }
+}
+
+static void infrared_worker_light_sleep_inhibit_end(InfraredWorker* instance) {
+    if(instance->light_sleep_inhibited) {
+        instance->light_sleep_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
+    }
+}
 
 typedef struct {
     uint32_t duration;
@@ -88,30 +131,73 @@ typedef struct {
 } InfraredWorkerTiming;
 
 static int32_t infrared_worker_tx_thread(void* context);
+static void infrared_worker_process_timings(
+    InfraredWorker* instance,
+    uint32_t duration,
+    bool level);
 static FuriHalInfraredTxGetDataState
     infrared_worker_furi_hal_data_isr_callback(void* context, uint32_t* duration, bool* level);
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context);
+static void infrared_worker_furi_hal_overflow_isr_callback(void* context);
+static void infrared_worker_furi_hal_error_callback(void* context);
 
-static void infrared_worker_rx_timeout_callback(void* context) {
+static bool IRAM_ATTR infrared_worker_rx_timeout_callback(void* context) {
     InfraredWorker* instance = context;
-    uint32_t flags_set = furi_thread_flags_set(
-        furi_thread_get_id(instance->thread), INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
-    furi_check(flags_set & INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
+    return furi_thread_flags_set_from_isr(
+        (FuriThreadId)instance->thread, INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
 }
 
-static void infrared_worker_rx_callback(void* context, bool level, uint32_t duration) {
+static bool IRAM_ATTR infrared_worker_rx_callback(void* context, bool level, uint32_t duration) {
     InfraredWorker* instance = context;
 
-    furi_assert(duration != 0);
+    if(duration == 0) return false;
     LevelDuration level_duration = level_duration_make(level, duration);
+    bool higher_priority_task_woken = false;
 
-    size_t ret =
-        furi_stream_buffer_send(instance->stream, &level_duration, sizeof(LevelDuration), 0);
+    size_t ret = furi_stream_buffer_send_from_isr(
+        instance->rx_stream,
+        &level_duration,
+        sizeof(LevelDuration),
+        &higher_priority_task_woken);
     uint32_t events = (ret == sizeof(LevelDuration)) ? INFRARED_WORKER_RX_RECEIVED :
                                                        INFRARED_WORKER_OVERRUN;
+    if(ret != sizeof(LevelDuration)) {
+        instance->rx.overrun = true;
+    }
 
-    uint32_t flags_set = furi_thread_flags_set(furi_thread_get_id(instance->thread), events);
-    furi_check(flags_set & events);
+    higher_priority_task_woken |=
+        furi_thread_flags_set_from_isr((FuriThreadId)instance->thread, events);
+    return higher_priority_task_woken;
+}
+
+static bool IRAM_ATTR infrared_worker_rx_frame_end_callback(void* context, uint32_t gap_us) {
+    InfraredWorker* instance = context;
+    instance->rx.frame_end_gap_us = gap_us;
+    return furi_thread_flags_set_from_isr(
+        (FuriThreadId)instance->thread, INFRARED_WORKER_RX_FRAME_END);
+}
+
+static void infrared_worker_rx_error_callback(void* context) {
+    InfraredWorker* instance = context;
+    furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_RX_ERROR);
+}
+
+static void infrared_worker_process_frame_end(InfraredWorker* instance) {
+    /* An overrun invalidates the whole burst, including a frame-end event
+     * that may have been delivered in the same notification batch. */
+    if(instance->rx.overrun || !instance->decode_enable) return;
+
+    const InfraredMessage* message_decoded =
+        infrared_decode(
+            instance->infrared_decoder, false, instance->rx.frame_end_gap_us);
+    if(message_decoded) {
+        instance->signal.message = *message_decoded;
+        instance->signal.timings_cnt = 0;
+        instance->signal.decoded = true;
+        if(instance->rx.received_signal_callback)
+            instance->rx.received_signal_callback(
+                instance->rx.received_signal_context, &instance->signal);
+    }
 }
 
 static void infrared_worker_process_timeout(InfraredWorker* instance) {
@@ -129,10 +215,23 @@ static void infrared_worker_process_timeout(InfraredWorker* instance) {
         if((instance->signal.timings_cnt % 2) == 0) {
             --instance->signal.timings_cnt;
         }
+
+        uint64_t total_duration = 0;
+        for(size_t i = 0; i < instance->signal.timings_cnt; i++) {
+            total_duration += instance->signal.raw.timings[i];
+        }
+        if(instance->signal.timings_cnt < INFRARED_WORKER_MIN_RAW_TIMINGS ||
+           total_duration < INFRARED_WORKER_MIN_RAW_DURATION_US) {
+            infrared_reset_decoder(instance->infrared_decoder);
+            return;
+        }
     }
     if(instance->rx.received_signal_callback)
         instance->rx.received_signal_callback(
             instance->rx.received_signal_context, &instance->signal);
+    if(!message_decoded) {
+        infrared_reset_decoder(instance->infrared_decoder);
+    }
 }
 
 static void
@@ -148,6 +247,8 @@ static void
             instance->rx.received_signal_callback(
                 instance->rx.received_signal_context, &instance->signal);
     } else {
+        /* The HAL delivers the synthetic frame gap through the separate
+         * frame-end callback, so it must never enter raw timings. */
         /* Skip first timing if it starts from Space */
         if((instance->signal.timings_cnt == 0) && !level) {
             return;
@@ -175,6 +276,24 @@ static int32_t infrared_worker_rx_thread(void* thread_context) {
         events = furi_thread_flags_wait(INFRARED_WORKER_ALL_RX_EVENTS, 0, FuriWaitForever);
         furi_check(events & INFRARED_WORKER_ALL_RX_EVENTS); /* at least one caught */
 
+        if(events & INFRARED_WORKER_RX_ERROR) {
+            /* The HAL could not re-arm the receiver. Stopping it (and leaving the
+             * state machine) is rx_stop()'s job on the owner thread: doing it here
+             * raced with a concurrent rx_stop() and left this thread running
+             * unjoined, so the next rx_start()/free() hit a live thread. The owner
+             * is told through the error callback so it can call rx_stop(). */
+            FURI_LOG_E("IR", "RX stopped receiving after a hardware error");
+            furi_check(furi_stream_buffer_reset(instance->rx_stream) == FuriStatusOk);
+            infrared_reset_decoder(instance->infrared_decoder);
+            instance->signal.timings_cnt = 0;
+            instance->rx.overrun = false;
+            /* An EXIT in the same batch means the owner is already stopping. */
+            if(events & INFRARED_WORKER_EXIT) break;
+            InfraredWorkerRxErrorCallback error_callback = instance->rx_error_callback;
+            if(error_callback) error_callback(instance->rx_error_context);
+            continue;
+        }
+
         if(events & INFRARED_WORKER_RX_RECEIVED) {
             if(!instance->rx.overrun && instance->blink_enable &&
                ((furi_get_tick() - last_blink_time) > 80)) {
@@ -185,7 +304,7 @@ static int32_t infrared_worker_rx_thread(void* thread_context) {
                 notification_message(instance->notification, &sequence_display_backlight_on);
             while(sizeof(LevelDuration) ==
                   furi_stream_buffer_receive(
-                      instance->stream, &level_duration, sizeof(LevelDuration), 0)) {
+                      instance->rx_stream, &level_duration, sizeof(LevelDuration), 0)) {
                 if(!instance->rx.overrun) {
                     bool level = level_duration_get_level(level_duration);
                     uint32_t duration = level_duration_get_duration(level_duration);
@@ -195,10 +314,15 @@ static int32_t infrared_worker_rx_thread(void* thread_context) {
         }
         if(events & INFRARED_WORKER_OVERRUN) {
             printf("#");
+            furi_check(furi_stream_buffer_reset(instance->rx_stream) == FuriStatusOk);
             infrared_reset_decoder(instance->infrared_decoder);
             instance->signal.timings_cnt = 0;
+            instance->rx.overrun = false;
             if(instance->blink_enable)
                 notification_message(instance->notification, &sequence_set_red_255);
+        }
+        if(events & INFRARED_WORKER_RX_FRAME_END) {
+            infrared_worker_process_frame_end(instance);
         }
         if(events & INFRARED_WORKER_RX_TIMEOUT_RECEIVED) {
             if(instance->rx.overrun) {
@@ -227,23 +351,50 @@ void infrared_worker_rx_set_received_signal_callback(
     instance->rx.received_signal_context = context;
 }
 
+void infrared_worker_rx_set_error_callback(
+    InfraredWorker* instance,
+    InfraredWorkerRxErrorCallback callback,
+    void* context) {
+    furi_check(instance);
+
+    instance->rx_error_context = context;
+    instance->rx_error_callback = callback;
+}
+
 InfraredWorker* infrared_worker_alloc(void) {
-    InfraredWorker* instance = malloc(sizeof(InfraredWorker));
+    InfraredWorker* instance =
+        heap_caps_malloc(sizeof(InfraredWorker), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if(!instance) return NULL;
 
     instance->thread = furi_thread_alloc_ex("InfraredWorker", 4096, NULL, instance);
+    if(!instance->thread) goto cleanup_instance;
 
-    size_t buffer_size =
-        MAX(sizeof(InfraredWorkerTiming) * (MAX_TIMINGS_AMOUNT + 1),
-            sizeof(LevelDuration) * MAX_TIMINGS_AMOUNT);
-    instance->stream = furi_stream_buffer_alloc(buffer_size, sizeof(InfraredWorkerTiming));
+    instance->rx_stream = NULL;
+    instance->rx_error_callback = NULL;
+    instance->rx_error_context = NULL;
+    instance->tx_stream = furi_stream_buffer_alloc(
+        sizeof(InfraredWorkerTiming) * (MAX_TIMINGS_AMOUNT + 1), sizeof(InfraredWorkerTiming));
+    if(!instance->tx_stream) goto cleanup_thread;
     instance->infrared_decoder = infrared_alloc_decoder();
+    if(!instance->infrared_decoder) goto cleanup_stream;
     instance->infrared_encoder = infrared_alloc_encoder();
+    if(!instance->infrared_encoder) goto cleanup_decoder;
     instance->blink_enable = false;
     instance->decode_enable = true;
     instance->notification = furi_record_open(RECORD_NOTIFICATION);
     instance->state = InfraredWorkerStateIdle;
 
     return instance;
+
+cleanup_decoder:
+    infrared_free_decoder(instance->infrared_decoder);
+cleanup_stream:
+    furi_stream_buffer_free(instance->tx_stream);
+cleanup_thread:
+    furi_thread_free(instance->thread);
+cleanup_instance:
+    free(instance);
+    return NULL;
 }
 
 void infrared_worker_free(InfraredWorker* instance) {
@@ -253,17 +404,30 @@ void infrared_worker_free(InfraredWorker* instance) {
     furi_record_close(RECORD_NOTIFICATION);
     infrared_free_decoder(instance->infrared_decoder);
     infrared_free_encoder(instance->infrared_encoder);
-    furi_stream_buffer_free(instance->stream);
+    furi_check(instance->rx_stream == NULL);
+    furi_stream_buffer_free(instance->tx_stream);
     furi_thread_free(instance->thread);
 
     free(instance);
 }
 
-void infrared_worker_rx_start(InfraredWorker* instance) {
+bool infrared_worker_rx_start(InfraredWorker* instance) {
     furi_check(instance);
     furi_check(instance->state == InfraredWorkerStateIdle);
+    if(!furi_hal_infrared_is_available()) return false;
+    if(!furi_hal_infrared_claim_rx()) return false;
 
-    furi_stream_set_trigger_level(instance->stream, sizeof(LevelDuration));
+    instance->rx_stream = furi_stream_buffer_try_alloc_internal(
+        sizeof(LevelDuration) * MAX_TIMINGS_AMOUNT, sizeof(LevelDuration));
+    if(!instance->rx_stream) {
+        FURI_LOG_E("IR", "No internal RAM for the RX buffer");
+        furi_hal_infrared_release_claim();
+        return false;
+    }
+
+    infrared_reset_decoder(instance->infrared_decoder);
+    instance->signal.timings_cnt = 0;
+    instance->rx.overrun = false;
 
     furi_thread_set_callback(instance->thread, infrared_worker_rx_thread);
     furi_thread_start(instance->thread);
@@ -271,27 +435,49 @@ void infrared_worker_rx_start(InfraredWorker* instance) {
     furi_hal_infrared_async_rx_set_capture_isr_callback(infrared_worker_rx_callback, instance);
     furi_hal_infrared_async_rx_set_timeout_isr_callback(
         infrared_worker_rx_timeout_callback, instance);
-    furi_hal_infrared_async_rx_start();
+    furi_hal_infrared_async_rx_set_frame_end_isr_callback(
+        infrared_worker_rx_frame_end_callback, instance);
+    furi_hal_infrared_async_rx_set_error_callback(infrared_worker_rx_error_callback, instance);
     furi_hal_infrared_async_rx_set_timeout(INFRARED_WORKER_RX_TIMEOUT);
+    if(!furi_hal_infrared_async_rx_start()) {
+        furi_hal_infrared_async_rx_set_timeout_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_rx_set_capture_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_rx_set_frame_end_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_rx_set_error_callback(NULL, NULL);
+        furi_hal_infrared_async_rx_set_timeout(0);
+        furi_hal_infrared_release_claim();
+        furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_EXIT);
+        furi_thread_join(instance->thread);
+        furi_stream_buffer_free(instance->rx_stream);
+        instance->rx_stream = NULL;
+        return false;
+    }
 
-    instance->rx.overrun = false;
     instance->state = InfraredWorkerStateRunRx;
+    infrared_worker_light_sleep_inhibit_begin(instance);
+    return true;
 }
 
 void infrared_worker_rx_stop(InfraredWorker* instance) {
     furi_check(instance);
-    furi_check(instance->state == InfraredWorkerStateRunRx);
+    if(instance->state == InfraredWorkerStateIdle) return;
+    if(instance->state != InfraredWorkerStateRunRx) {
+        FURI_LOG_W("IR", "RX stop ignored: worker is not receiving");
+        return;
+    }
 
-    furi_hal_infrared_async_rx_set_timeout_isr_callback(NULL, NULL);
-    furi_hal_infrared_async_rx_set_capture_isr_callback(NULL, NULL);
     furi_hal_infrared_async_rx_stop();
 
     furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_EXIT);
     furi_thread_join(instance->thread);
 
-    furi_check(furi_stream_buffer_reset(instance->stream) == FuriStatusOk);
+    furi_stream_buffer_free(instance->rx_stream);
+    instance->rx_stream = NULL;
+    infrared_reset_decoder(instance->infrared_decoder);
+    instance->signal.timings_cnt = 0;
 
     instance->state = InfraredWorkerStateIdle;
+    infrared_worker_light_sleep_inhibit_end(instance);
 }
 
 bool infrared_worker_signal_is_decoded(const InfraredWorkerSignal* signal) {
@@ -330,25 +516,38 @@ void infrared_worker_rx_enable_signal_decoding(InfraredWorker* instance, bool en
     instance->decode_enable = enable;
 }
 
-void infrared_worker_tx_start(InfraredWorker* instance) {
+bool infrared_worker_tx_start(InfraredWorker* instance) {
     furi_check(instance);
     furi_check(instance->state == InfraredWorkerStateIdle);
     furi_check(instance->tx.get_signal_callback);
+    if(!furi_hal_infrared_is_available()) return false;
+    /* Fail here, where the caller can tell the user, not later in the TX thread. */
+    if(!furi_hal_infrared_is_tx_output_free()) return false;
+    if(!furi_hal_infrared_claim_tx()) return false;
 
     // size have to be greater than api hal infrared async tx buffer size
-    furi_stream_set_trigger_level(instance->stream, sizeof(InfraredWorkerTiming));
+    furi_stream_set_trigger_level(instance->tx_stream, sizeof(InfraredWorkerTiming));
 
     furi_thread_set_callback(instance->thread, infrared_worker_tx_thread);
 
     instance->tx.steady_signal_sent = false;
     instance->tx.need_reinitialization = false;
+    instance->tx.underrun = false;
+    instance->tx.overflow = false;
+    instance->tx.error = false;
     furi_hal_infrared_async_tx_set_data_isr_callback(
         infrared_worker_furi_hal_data_isr_callback, instance);
     furi_hal_infrared_async_tx_set_signal_sent_isr_callback(
         infrared_worker_furi_hal_message_sent_isr_callback, instance);
+    furi_hal_infrared_async_tx_set_overflow_isr_callback(
+        infrared_worker_furi_hal_overflow_isr_callback, instance);
+    furi_hal_infrared_async_tx_set_error_callback(
+        infrared_worker_furi_hal_error_callback, instance);
 
     instance->state = InfraredWorkerStateStartTx;
+    infrared_worker_light_sleep_inhibit_begin(instance);
     furi_thread_start(instance->thread);
+    return true;
 }
 
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context) {
@@ -356,6 +555,20 @@ static void infrared_worker_furi_hal_message_sent_isr_callback(void* context) {
     /* ESP32 port: same task-context race as data_callback — see comment there. */
     furi_thread_flags_set(
         furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_MESSAGE_SENT);
+}
+
+static void infrared_worker_furi_hal_overflow_isr_callback(void* context) {
+    InfraredWorker* instance = context;
+    instance->tx.overflow = true;
+    furi_thread_flags_set(
+        furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_OVERFLOW);
+}
+
+static void infrared_worker_furi_hal_error_callback(void* context) {
+    InfraredWorker* instance = context;
+    instance->tx.error = true;
+    furi_thread_flags_set(
+        furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_ERROR);
 }
 
 static FuriHalInfraredTxGetDataState
@@ -369,16 +582,19 @@ static FuriHalInfraredTxGetDataState
     FuriHalInfraredTxGetDataState state;
 
     if(sizeof(InfraredWorkerTiming) ==
-       furi_stream_buffer_receive(instance->stream, &timing, sizeof(InfraredWorkerTiming), 0)) {
+       furi_stream_buffer_receive(instance->tx_stream, &timing, sizeof(InfraredWorkerTiming), 0)) {
         *level = timing.level;
         *duration = timing.duration;
         state = timing.state;
     } else {
-        // Why bother if we crash anyway?..
+        FURI_LOG_W("IR", "TX underrun - aborting transmission");
+        instance->tx.underrun = true;
         *level = 0;
         *duration = 100;
-        state = FuriHalInfraredTxGetDataStateDone;
-        furi_crash();
+        state = FuriHalInfraredTxGetDataStateLastDone;
+        furi_thread_flags_set(
+            furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_UNDERRUN);
+        return state;
     }
 
     /* ESP32 port: data_callback runs from ir_tx_task (priority 15), not ISR.
@@ -437,7 +653,7 @@ static bool infrared_worker_tx_fill_buffer(InfraredWorker* instance) {
     InfraredWorkerTiming timing;
     InfraredStatus status = InfraredStatusError;
 
-    while(!furi_stream_buffer_is_full(instance->stream) && !instance->tx.need_reinitialization &&
+    while(!furi_stream_buffer_is_full(instance->tx_stream) && !instance->tx.need_reinitialization &&
           new_data_available) {
         if(instance->signal.decoded) {
             status = infrared_encode(instance->infrared_encoder, &timing.duration, &timing.level);
@@ -470,7 +686,7 @@ static bool infrared_worker_tx_fill_buffer(InfraredWorker* instance) {
             furi_crash();
         }
         uint32_t written_size =
-            furi_stream_buffer_send(instance->stream, &timing, sizeof(InfraredWorkerTiming), 0);
+            furi_stream_buffer_send(instance->tx_stream, &timing, sizeof(InfraredWorkerTiming), 0);
         furi_assert(sizeof(InfraredWorkerTiming) == written_size);
         (void)written_size;
     }
@@ -492,15 +708,36 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
     bool exit_pending = false;
 
     bool running = infrared_get_new_signal(instance);
-    furi_assert(running);
+    if(!running) {
+        furi_hal_infrared_async_tx_set_data_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_tx_set_signal_sent_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_tx_set_overflow_isr_callback(NULL, NULL);
+        furi_hal_infrared_async_tx_set_error_callback(NULL, NULL);
+        furi_hal_infrared_release_claim();
+        /* Not Idle: tx_stop() must still join this thread before it can restart. */
+        instance->state = InfraredWorkerStateStopTx;
+        return 0;
+    }
 
     while(running) {
         switch(instance->state) {
         case InfraredWorkerStateStartTx:
-            --repeats_left; /* The first message does not result in TX_MESSAGE_SENT event for some reason */
+            if(repeats_left > 0) {
+                --repeats_left;
+            } /* The first message does not result in TX_MESSAGE_SENT event. */
             instance->tx.need_reinitialization = false;
             const bool new_data_available = infrared_worker_tx_fill_buffer(instance);
-            furi_hal_infrared_async_tx_start(instance->tx.frequency, instance->tx.duty_cycle);
+            if(!furi_hal_infrared_async_tx_start(
+                   instance->tx.frequency, instance->tx.duty_cycle)) {
+                instance->tx.error = true;
+                furi_hal_infrared_async_tx_set_data_isr_callback(NULL, NULL);
+                furi_hal_infrared_async_tx_set_signal_sent_isr_callback(NULL, NULL);
+                furi_hal_infrared_async_tx_set_overflow_isr_callback(NULL, NULL);
+                furi_hal_infrared_async_tx_set_error_callback(NULL, NULL);
+                furi_hal_infrared_release_claim();
+                instance->state = InfraredWorkerStateStopTx;
+                break;
+            }
 
             if(!new_data_available) {
                 instance->state = InfraredWorkerStateStopTx;
@@ -512,7 +749,9 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
 
             break;
         case InfraredWorkerStateStopTx:
-            furi_hal_infrared_async_tx_stop();
+            if(furi_hal_infrared_is_busy()) {
+                furi_hal_infrared_async_tx_stop();
+            }
             running = false;
             break;
         case InfraredWorkerStateWaitTxEnd:
@@ -535,7 +774,10 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
                 exit_pending = true;
             }
 
-            if(events & INFRARED_WORKER_TX_FILL_BUFFER) {
+            if((events & INFRARED_WORKER_TX_FILL_BUFFER) &&
+               !(events & INFRARED_WORKER_TX_UNDERRUN) &&
+                    !(events & INFRARED_WORKER_TX_OVERFLOW) &&
+                    !(events & INFRARED_WORKER_TX_ERROR)) {
                 infrared_worker_tx_fill_buffer(instance);
 
                 if(instance->tx.need_reinitialization) {
@@ -543,7 +785,20 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
                 }
             }
 
-            if(events & INFRARED_WORKER_TX_MESSAGE_SENT) {
+            if(events & INFRARED_WORKER_TX_UNDERRUN) {
+                instance->state = InfraredWorkerStateStopTx;
+            }
+
+            if(events & INFRARED_WORKER_TX_OVERFLOW) {
+                instance->state = InfraredWorkerStateStopTx;
+            }
+
+            if(events & INFRARED_WORKER_TX_ERROR) {
+                instance->state = InfraredWorkerStateStopTx;
+            }
+
+            if((events & INFRARED_WORKER_TX_MESSAGE_SENT) &&
+                    !instance->tx.underrun && !instance->tx.overflow && !instance->tx.error) {
                 if(repeats_left > 0) {
                     --repeats_left;
                 }
@@ -589,17 +844,19 @@ void infrared_worker_tx_set_signal_sent_callback(
 
 void infrared_worker_tx_stop(InfraredWorker* instance) {
     furi_check(instance);
-    furi_check(instance->state != InfraredWorkerStateRunRx);
+    if(instance->state == InfraredWorkerStateIdle ||
+       instance->state == InfraredWorkerStateRunRx) {
+        return;
+    }
 
     furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_EXIT);
     furi_thread_join(instance->thread);
-    furi_hal_infrared_async_tx_set_data_isr_callback(NULL, NULL);
-    furi_hal_infrared_async_tx_set_signal_sent_isr_callback(NULL, NULL);
 
     instance->signal.timings_cnt = 0;
-    furi_check(furi_stream_buffer_reset(instance->stream) == FuriStatusOk);
+    furi_check(furi_stream_buffer_reset(instance->tx_stream) == FuriStatusOk);
 
     instance->state = InfraredWorkerStateIdle;
+    infrared_worker_light_sleep_inhibit_end(instance);
 }
 
 void infrared_worker_set_decoded_signal(InfraredWorker* instance, const InfraredMessage* message) {

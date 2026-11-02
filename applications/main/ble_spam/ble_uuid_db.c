@@ -293,7 +293,7 @@ void ble_uuid_db_deinit(void) {
     s_initialized = false;
 }
 
-static const char* map_lookup(const uuid_map_t* map, const esp_bt_uuid_t* uuid) {
+static const char* map_lookup(const uuid_map_t* map, const BleUuid* uuid) {
     if(!map->entries || map->count == 0) return NULL;
 
     if(uuid->len == ESP_UUID_LEN_16) {
@@ -312,7 +312,7 @@ static const char* map_lookup(const uuid_map_t* map, const esp_bt_uuid_t* uuid) 
     return NULL;
 }
 
-const char* ble_uuid_db_lookup_service(const esp_bt_uuid_t* uuid) {
+const char* ble_uuid_db_lookup_service(const BleUuid* uuid) {
     const char* hit = map_lookup(&s_services, uuid);
     if(hit) return hit;
     hit = map_lookup(&s_members, uuid);
@@ -325,7 +325,7 @@ const char* ble_uuid_db_lookup_service(const esp_bt_uuid_t* uuid) {
     return NULL;
 }
 
-const char* ble_uuid_db_lookup_char(const esp_bt_uuid_t* uuid) {
+const char* ble_uuid_db_lookup_char(const BleUuid* uuid) {
     const char* hit = map_lookup(&s_chars, uuid);
     if(hit) return hit;
 

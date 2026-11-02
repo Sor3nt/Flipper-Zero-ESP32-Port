@@ -324,10 +324,21 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
                             subghz_scene_read_raw_usb_export_callback,
                             NULL);
                     }
-                    dolphin_deed(DolphinDeedSubGhzRawRec);
-                    subghz_txrx_rx_start(subghz->txrx);
-                    subghz->state_notifications = SubGhzNotificationStateRx;
-                    subghz_rx_key_state_set(subghz, SubGhzRxKeyStateAddKey);
+                    if(subghz_txrx_rx_start(subghz->txrx)) {
+                        dolphin_deed(DolphinDeedSubGhzRawRec);
+                        subghz->state_notifications = SubGhzNotificationStateRx;
+                        subghz_rx_key_state_set(subghz, SubGhzRxKeyStateAddKey);
+                    } else {
+                        // Radio did not enter RX: don't show a recording that
+                        // captures nothing. Close the (empty) file and report it.
+                        if(subghz->export_to_usb) {
+                            subghz_usb_export_stop();
+                            subghz_protocol_decoder_raw_set_data_callback(decoder_raw, NULL, NULL);
+                        }
+                        subghz_protocol_raw_save_to_file_stop(decoder_raw);
+                        furi_string_set(subghz->error_str, "Radio failed\nto start RX");
+                        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneShowError);
+                    }
                 } else {
                     furi_string_set(subghz->error_str, "Function requires\nan SD card.");
                     scene_manager_next_scene(subghz->scene_manager, SubGhzSceneShowError);
@@ -371,7 +382,6 @@ bool subghz_scene_read_raw_on_event(void* context, SceneManagerEvent event) {
             break;
         case SubGhzNotificationStateTx:
             notification_message(subghz->notifications, &sequence_blink_magenta_10);
-            subghz_read_raw_update_sin(subghz->subghz_read_raw);
             break;
         default:
             break;
@@ -385,6 +395,20 @@ void subghz_scene_read_raw_on_exit(void* context) {
 
     //Stop CC1101
     subghz_txrx_stop(subghz->txrx);
+
+    // Leaving while still recording (e.g. app closed via RPC/loader): the Back and
+    // IDLE events close the file, other exits did not, leaving it unflushed and
+    // leaking the buffer. RX is stopped above, so no more feed() calls race this.
+    SubGhzProtocolDecoderBase* decoder = subghz_txrx_get_decoder(subghz->txrx);
+    if(decoder && decoder->protocol &&
+       !strcmp(decoder->protocol->name, SUBGHZ_PROTOCOL_RAW_NAME)) {
+        SubGhzProtocolDecoderRAW* decoder_raw = (SubGhzProtocolDecoderRAW*)decoder;
+        if(subghz->export_to_usb && subghz->state_notifications == SubGhzNotificationStateRx) {
+            subghz_usb_export_stop();
+            subghz_protocol_decoder_raw_set_data_callback(decoder_raw, NULL, NULL);
+        }
+        subghz_protocol_raw_save_to_file_stop(decoder_raw);
+    }
     subghz->state_notifications = SubGhzNotificationStateIDLE;
     notification_message(subghz->notifications, &sequence_reset_rgb);
 

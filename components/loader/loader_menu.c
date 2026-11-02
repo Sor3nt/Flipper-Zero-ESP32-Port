@@ -15,6 +15,9 @@
 #include "loader.h"
 #include "loader_menu.h"
 #include "menu_custom.h"
+#include <momentum_settings.h>
+
+#define LOADER_ASSET_PACKS_MAX 64
 
 /* Desktop settings mirror: layout-compatible with
  * applications/services/desktop/desktop_settings.h so we can call the
@@ -32,6 +35,7 @@ typedef struct {
     uint8_t display_clock;
     LoaderMenuFavoriteApp favorite_apps[5];
     LoaderMenuFavoriteApp dummy_apps[9];
+    uint8_t display_status_bar_background;
 } LoaderMenuDesktopSettings;
 
 typedef struct LoaderMenuDesktop LoaderMenuDesktop;
@@ -41,6 +45,8 @@ typedef struct LoaderMenuPower LoaderMenuPower;
 #define LOADER_DISPLAY_BATTERY_BAR              0
 #define LOADER_DISPLAY_BATTERY_PERCENT          1
 #define LOADER_DISPLAY_BATTERY_INVERTED_PERCENT 2
+#define LOADER_DISPLAY_BATTERY_RETRO_3          3
+#define LOADER_DISPLAY_BATTERY_RETRO_5          4
 #define LOADER_DISPLAY_BATTERY_BAR_PERCENT      5
 
 void desktop_settings_load(LoaderMenuDesktopSettings* settings);
@@ -49,6 +55,7 @@ void desktop_api_get_settings(LoaderMenuDesktop* instance, LoaderMenuDesktopSett
 void desktop_api_set_settings(
     LoaderMenuDesktop* instance,
     const LoaderMenuDesktopSettings* settings);
+void desktop_api_reload_animation(LoaderMenuDesktop* instance);
 void power_trigger_ui_update(LoaderMenuPower* power);
 
 #define LOADER_RECORD_DESKTOP "desktop"
@@ -113,6 +120,7 @@ typedef enum {
     LoaderMenuViewInterfaceMain,
     LoaderMenuViewInterfaceLock,
     LoaderMenuViewInterfaceStatus,
+    LoaderMenuViewInterfaceGraphics,
     LoaderMenuViewAdd,
     LoaderMenuViewAddMain,
     LoaderMenuViewRemove,
@@ -161,6 +169,10 @@ typedef struct {
     VariableItemList* interface_main_list;
     VariableItemList* interface_lock_list;
     VariableItemList* interface_status_list;
+    VariableItemList* interface_graphics_list;
+    FuriString* asset_pack_names[LOADER_ASSET_PACKS_MAX];
+    size_t asset_pack_count; // number of packs found on SD
+    size_t asset_pack_index; // 0 = Default, else name[index-1]
     Submenu* add_menu;
     Submenu* add_main_menu;
     Submenu* remove_menu;
@@ -487,12 +499,22 @@ static void loader_menu_interface_go_status(void* context, uint32_t index) {
     loader_menu_switch_to_view(app, LoaderMenuViewInterfaceStatus);
 }
 
+static void loader_menu_build_interface_graphics(LoaderMenuApp* app);
+
+static void loader_menu_interface_go_graphics(void* context, uint32_t index) {
+    UNUSED(index);
+    LoaderMenuApp* app = context;
+    loader_menu_build_interface_graphics(app);
+    loader_menu_switch_to_view(app, LoaderMenuViewInterfaceGraphics);
+}
+
 static void loader_menu_build_interface(LoaderMenuApp* app) {
     submenu_reset(app->interface_menu);
     submenu_set_header(app->interface_menu, "Interface:");
-    submenu_add_item(app->interface_menu, "Main Menu", 0, loader_menu_interface_go_main, app);
-    submenu_add_item(app->interface_menu, "Lock Screen", 1, loader_menu_interface_go_lock, app);
-    submenu_add_item(app->interface_menu, "Status Bar", 2, loader_menu_interface_go_status, app);
+    submenu_add_item(app->interface_menu, "Graphics", 0, loader_menu_interface_go_graphics, app);
+    submenu_add_item(app->interface_menu, "Main Menu", 1, loader_menu_interface_go_main, app);
+    submenu_add_item(app->interface_menu, "Lock Screen", 2, loader_menu_interface_go_lock, app);
+    submenu_add_item(app->interface_menu, "Status Bar", 3, loader_menu_interface_go_status, app);
 }
 
 /* ---------------------------------------------------------------- */
@@ -501,8 +523,14 @@ static void loader_menu_build_interface(LoaderMenuApp* app) {
 
 static const char* const loader_menu_menu_style_text[MenuStyleCount] = {
     "List",
-    "DSi",
     "Wii",
+    "DSi",
+    "PS4",
+    "Vertical",
+    "C64",
+    "Compact",
+    "MNTM",
+    "CoverFlow",
 };
 
 static void loader_menu_main_menu_style_changed(VariableItem* item) {
@@ -548,43 +576,76 @@ static void loader_menu_build_interface_main(LoaderMenuApp* app) {
 /* Interface -> Lock screen tab                                      */
 /* ---------------------------------------------------------------- */
 
-static const char* const loader_menu_lock_style_text[LockScreenStyleCount] = {
-    "Default",
-    "Momentum",
-};
+/* Each lockscreen toggle is an ON/OFF item bound to one momentum_settings bool.
+ * The bool to flip is carried as the item's context offset. */
+typedef struct {
+    const char* label;
+    size_t offset; // offsetof(MomentumSettings, field)
+} LoaderMenuLockToggle;
 
-static void loader_menu_lock_style_changed(VariableItem* item) {
-    uint32_t index = variable_item_get_current_value_index(item);
-    variable_item_set_current_value_text(item, loader_menu_lock_style_text[index]);
-    lock_screen_set_style((LockScreenStyle)index);
+#define LOCK_TOGGLE(lbl, field) {lbl, offsetof(MomentumSettings, field)}
+
+static const LoaderMenuLockToggle loader_menu_lock_toggles[] = {
+    LOCK_TOGGLE("Lock on Boot if PIN set", lock_on_boot),
+    LOCK_TOGGLE("Format on 10 Bad PINs", bad_pins_format),
+    LOCK_TOGGLE("Allow USB RPC While Locked", allow_locked_rpc_usb),
+    LOCK_TOGGLE("Allow BLE RPC While Locked", allow_locked_rpc_ble),
+    LOCK_TOGGLE("Allow Poweroff", lockscreen_poweroff),
+    LOCK_TOGGLE("Show Time", lockscreen_time),
+    LOCK_TOGGLE("Show Seconds", lockscreen_seconds),
+    LOCK_TOGGLE("Show Date", lockscreen_date),
+    LOCK_TOGGLE("Show Statusbar", lockscreen_statusbar),
+    LOCK_TOGGLE("Unlock Prompt", lockscreen_prompt),
+    LOCK_TOGGLE("Transparent (see anim)", lockscreen_transparent),
+    LOCK_TOGGLE("Skip Sliding Animation", lockscreen_skip_animation),
+};
+#define LOADER_MENU_LOCK_TOGGLE_COUNT \
+    (sizeof(loader_menu_lock_toggles) / sizeof(loader_menu_lock_toggles[0]))
+
+static bool* loader_menu_lock_field(size_t index) {
+    return (bool*)((uint8_t*)&momentum_settings + loader_menu_lock_toggles[index].offset);
+}
+
+static void loader_menu_lock_toggle_changed(VariableItem* item) {
+    uint32_t idx = (uint32_t)(uintptr_t)variable_item_get_context(item);
+    bool value = variable_item_get_current_value_index(item) != 0;
+    variable_item_set_current_value_text(item, value ? "ON" : "OFF");
+    *loader_menu_lock_field(idx) = value;
+    momentum_settings_save();
 }
 
 static void loader_menu_build_interface_lock(LoaderMenuApp* app) {
     variable_item_list_reset(app->interface_lock_list);
     variable_item_list_set_header(app->interface_lock_list, "Lock Screen:");
 
-    VariableItem* item = variable_item_list_add(
-        app->interface_lock_list, "Style", LockScreenStyleCount, loader_menu_lock_style_changed, app);
-    uint32_t style = (uint32_t)lock_screen_get_style();
-    if(style >= LockScreenStyleCount) {
-        style = 0;
+    for(size_t i = 0; i < LOADER_MENU_LOCK_TOGGLE_COUNT; i++) {
+        VariableItem* item = variable_item_list_add(
+            app->interface_lock_list,
+            loader_menu_lock_toggles[i].label,
+            2,
+            loader_menu_lock_toggle_changed,
+            (void*)(uintptr_t)i);
+        bool value = *loader_menu_lock_field(i);
+        variable_item_set_current_value_index(item, value ? 1 : 0);
+        variable_item_set_current_value_text(item, value ? "ON" : "OFF");
     }
-    variable_item_set_current_value_index(item, (uint8_t)style);
-    variable_item_set_current_value_text(item, loader_menu_lock_style_text[style]);
 }
 
 /* ---------------------------------------------------------------- */
 /* Interface -> Status bar tab                                       */
 /* ---------------------------------------------------------------- */
 
-#define LOADER_BATTERY_VIEW_COUNT 5
+#define LOADER_BATTERY_VIEW_COUNT 7
 #define LOADER_CLOCK_ENABLE_COUNT 2
+#define LOADER_STATUS_BAR_BG_COUNT 2
 
 static const char* loader_menu_battery_view_text[LOADER_BATTERY_VIEW_COUNT] = {
     "OFF",
     "Bar",
     "%",
     "Inv. %",
+    "Retro 3",
+    "Retro 5",
     "Bar %",
 };
 
@@ -593,10 +654,48 @@ static const uint32_t loader_menu_battery_view_value[LOADER_BATTERY_VIEW_COUNT] 
     LOADER_DISPLAY_BATTERY_BAR,
     LOADER_DISPLAY_BATTERY_PERCENT,
     LOADER_DISPLAY_BATTERY_INVERTED_PERCENT,
+    LOADER_DISPLAY_BATTERY_RETRO_3,
+    LOADER_DISPLAY_BATTERY_RETRO_5,
     LOADER_DISPLAY_BATTERY_BAR_PERCENT,
 };
 
+/* Status bar icon show/hide toggles (momentum_settings.statusbar_hidden). */
+typedef struct {
+    const char* label;
+    ViewPortStatusBarIcon icon;
+} LoaderMenuStatusIconToggle;
+
+static const LoaderMenuStatusIconToggle loader_menu_status_icon_toggles[] = {
+    {"SD Card Icon", ViewPortStatusBarIconSdCard},
+    {"Bluetooth Icon", ViewPortStatusBarIconBluetooth},
+    {"BLE Beacon Icon", ViewPortStatusBarIconBleBeacon},
+    {"WiFi Icon", ViewPortStatusBarIconWifi},
+    {"RPC Session Icon", ViewPortStatusBarIconRpc},
+};
+#define LOADER_MENU_STATUS_ICON_COUNT \
+    (sizeof(loader_menu_status_icon_toggles) / sizeof(loader_menu_status_icon_toggles[0]))
+
+static void loader_menu_status_icon_changed(VariableItem* item) {
+    uint32_t idx = (uint32_t)(uintptr_t)variable_item_get_context(item);
+    bool visible = variable_item_get_current_value_index(item) != 0;
+    variable_item_set_current_value_text(item, visible ? "ON" : "OFF");
+    momentum_settings_set_statusbar_icon_visible(
+        loader_menu_status_icon_toggles[idx].icon, visible);
+    momentum_settings_save();
+    /* Nudge the status bar to redraw with the new visibility. */
+    if(furi_record_exists(LOADER_RECORD_POWER)) {
+        LoaderMenuPower* power = furi_record_open(LOADER_RECORD_POWER);
+        power_trigger_ui_update(power);
+        furi_record_close(LOADER_RECORD_POWER);
+    }
+}
+
 static const char* loader_menu_clock_enable_text[LOADER_CLOCK_ENABLE_COUNT] = {
+    "OFF",
+    "ON",
+};
+
+static const char* loader_menu_status_bar_bg_text[LOADER_STATUS_BAR_BG_COUNT] = {
     "OFF",
     "ON",
 };
@@ -641,6 +740,27 @@ static void loader_menu_clock_enabled_changed(VariableItem* item) {
     }
 }
 
+static void loader_menu_status_bar_bg_changed(VariableItem* item) {
+    uint32_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, loader_menu_status_bar_bg_text[index]);
+
+    if(furi_record_exists(LOADER_RECORD_DESKTOP)) {
+        LoaderMenuDesktop* desktop = furi_record_open(LOADER_RECORD_DESKTOP);
+        LoaderMenuDesktopSettings* settings = malloc(sizeof(LoaderMenuDesktopSettings));
+        desktop_api_get_settings(desktop, settings);
+        settings->display_status_bar_background = (uint8_t)index;
+        desktop_api_set_settings(desktop, settings);
+        free(settings);
+        furi_record_close(LOADER_RECORD_DESKTOP);
+    } else {
+        LoaderMenuDesktopSettings* settings = malloc(sizeof(LoaderMenuDesktopSettings));
+        desktop_settings_load(settings);
+        settings->display_status_bar_background = (uint8_t)index;
+        desktop_settings_save(settings);
+        free(settings);
+    }
+}
+
 static void loader_menu_build_interface_status(LoaderMenuApp* app) {
     variable_item_list_reset(app->interface_status_list);
     variable_item_list_set_header(app->interface_status_list, "Status Bar:");
@@ -674,7 +794,200 @@ static void loader_menu_build_interface_status(LoaderMenuApp* app) {
     variable_item_set_current_value_index(item, (uint8_t)c);
     variable_item_set_current_value_text(item, loader_menu_clock_enable_text[c]);
 
+    item = variable_item_list_add(
+        app->interface_status_list,
+        "Bar Background",
+        LOADER_STATUS_BAR_BG_COUNT,
+        loader_menu_status_bar_bg_changed,
+        app);
+    uint32_t bg = (settings->display_status_bar_background != 0) ? 1 : 0;
+    variable_item_set_current_value_index(item, (uint8_t)bg);
+    variable_item_set_current_value_text(item, loader_menu_status_bar_bg_text[bg]);
+
     free(settings);
+
+    for(size_t i = 0; i < LOADER_MENU_STATUS_ICON_COUNT; i++) {
+        VariableItem* icon_item = variable_item_list_add(
+            app->interface_status_list,
+            loader_menu_status_icon_toggles[i].label,
+            2,
+            loader_menu_status_icon_changed,
+            (void*)(uintptr_t)i);
+        bool visible =
+            momentum_settings_statusbar_icon_visible(loader_menu_status_icon_toggles[i].icon);
+        variable_item_set_current_value_index(icon_item, visible ? 1 : 0);
+        variable_item_set_current_value_text(icon_item, visible ? "ON" : "OFF");
+    }
+}
+
+/* ---------------------------------------------------------------- */
+/* Interface -> Graphics tab (asset pack + animation settings)       */
+/* ---------------------------------------------------------------- */
+
+static const char* const loader_menu_anim_speed_text[] = {
+    "25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%", "225%", "250%", "275%", "300%",
+};
+static const uint32_t loader_menu_anim_speed_value[] = {
+    25, 50, 75, 100, 125, 150, 175, 200, 225, 250, 275, 300,
+};
+#define LOADER_ANIM_SPEED_COUNT \
+    (sizeof(loader_menu_anim_speed_value) / sizeof(loader_menu_anim_speed_value[0]))
+
+static const char* const loader_menu_cycle_anims_text[] = {
+    "OFF",  "Meta.txt", "15 S",  "30 S", "1 M",  "2 M",  "5 M", "10 M",
+    "15 M", "30 M",     "1 H",   "2 H",  "6 H",  "12 H", "24 H",
+};
+static const int32_t loader_menu_cycle_anims_value[] = {
+    -1,  0,    15,   30,   60,    120,   300,   600,
+    900, 1800, 3600, 7200, 21600, 43200, 86400,
+};
+#define LOADER_CYCLE_ANIMS_COUNT \
+    (sizeof(loader_menu_cycle_anims_value) / sizeof(loader_menu_cycle_anims_value[0]))
+
+/* Scan /ext/asset_packs for directories; fill app->asset_pack_names. */
+static void loader_menu_scan_asset_packs(LoaderMenuApp* app) {
+    for(size_t i = 0; i < app->asset_pack_count; i++) {
+        furi_string_free(app->asset_pack_names[i]);
+        app->asset_pack_names[i] = NULL;
+    }
+    app->asset_pack_count = 0;
+    app->asset_pack_index = 0;
+
+    char selected[ASSET_PACKS_NAME_LEN];
+    momentum_settings_get_asset_pack(selected, sizeof(selected));
+
+    File* dir = storage_file_alloc(app->storage);
+    FileInfo info;
+    char* name = malloc(ASSET_PACKS_NAME_LEN);
+    if(storage_dir_open(dir, ASSET_PACKS_PATH)) {
+        while(storage_dir_read(dir, &info, name, ASSET_PACKS_NAME_LEN) &&
+              app->asset_pack_count < LOADER_ASSET_PACKS_MAX) {
+            if((info.flags & FSF_DIRECTORY) && name[0] != '.') {
+                app->asset_pack_names[app->asset_pack_count] = furi_string_alloc_set_str(name);
+                if(selected[0] != '\0' && strcmp(name, selected) == 0) {
+                    app->asset_pack_index = app->asset_pack_count + 1;
+                }
+                app->asset_pack_count++;
+            }
+        }
+    }
+    free(name);
+    storage_dir_close(dir);
+    storage_file_free(dir);
+}
+
+/* Ask the desktop to switch to a fresh idle animation now so a Graphics change
+ * is visible immediately instead of at the next cycle timer. */
+static void loader_menu_reload_animation(void) {
+    if(furi_record_exists(LOADER_RECORD_DESKTOP)) {
+        LoaderMenuDesktop* desktop = furi_record_open(LOADER_RECORD_DESKTOP);
+        desktop_api_reload_animation(desktop);
+        furi_record_close(LOADER_RECORD_DESKTOP);
+    }
+}
+
+/* Graphics changes only touch the in-RAM settings; the SD save and the desktop
+ * animation reload happen once, when the tab is left. Doing both per Left/Right
+ * press (and per key repeat) queued one full reload per step — manifest parse
+ * plus every frame of the picked animation — all on the SPI bus shared with
+ * the LCD: the menu lagged, and back on the desktop the screen updated in torn
+ * stripes while the leftover reloads were still reading the SD card. */
+static bool loader_menu_graphics_dirty = false;
+
+static void loader_menu_graphics_apply(void) {
+    if(!loader_menu_graphics_dirty) return;
+    loader_menu_graphics_dirty = false;
+    momentum_settings_save();
+    loader_menu_reload_animation();
+}
+
+static void loader_menu_asset_pack_changed(VariableItem* item) {
+    LoaderMenuApp* app = variable_item_get_context(item);
+    uint32_t index = variable_item_get_current_value_index(item);
+    const char* text =
+        (index == 0) ? "Default" : furi_string_get_cstr(app->asset_pack_names[index - 1]);
+    variable_item_set_current_value_text(item, text);
+    app->asset_pack_index = index;
+    momentum_settings_set_asset_pack(index == 0 ? "" : text);
+    loader_menu_graphics_dirty = true;
+}
+
+static void loader_menu_anim_speed_changed(VariableItem* item) {
+    uint32_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, loader_menu_anim_speed_text[index]);
+    momentum_settings.anim_speed = loader_menu_anim_speed_value[index];
+    loader_menu_graphics_dirty = true;
+}
+
+static void loader_menu_cycle_anims_changed(VariableItem* item) {
+    uint32_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, loader_menu_cycle_anims_text[index]);
+    momentum_settings.cycle_anims = loader_menu_cycle_anims_value[index];
+    loader_menu_graphics_dirty = true;
+}
+
+static void loader_menu_unlock_anims_changed(VariableItem* item) {
+    bool value = variable_item_get_current_value_index(item) != 0;
+    variable_item_set_current_value_text(item, value ? "ON" : "OFF");
+    momentum_settings.unlock_anims = value;
+    loader_menu_graphics_dirty = true;
+}
+
+static void loader_menu_build_interface_graphics(LoaderMenuApp* app) {
+    variable_item_list_reset(app->interface_graphics_list);
+    variable_item_list_set_header(app->interface_graphics_list, "Graphics:");
+
+    loader_menu_scan_asset_packs(app);
+
+    VariableItem* item = variable_item_list_add(
+        app->interface_graphics_list,
+        "Asset Pack",
+        (uint8_t)(app->asset_pack_count + 1),
+        loader_menu_asset_pack_changed,
+        app);
+    uint32_t pack_idx = app->asset_pack_index;
+    if(pack_idx > app->asset_pack_count) pack_idx = 0;
+    variable_item_set_current_value_index(item, (uint8_t)pack_idx);
+    variable_item_set_current_value_text(
+        item,
+        pack_idx == 0 ? "Default" : furi_string_get_cstr(app->asset_pack_names[pack_idx - 1]));
+
+    item = variable_item_list_add(
+        app->interface_graphics_list,
+        "Anim Speed",
+        LOADER_ANIM_SPEED_COUNT,
+        loader_menu_anim_speed_changed,
+        app);
+    uint32_t sv = 3; // default 100%
+    for(uint32_t i = 0; i < LOADER_ANIM_SPEED_COUNT; i++) {
+        if(loader_menu_anim_speed_value[i] == momentum_settings.anim_speed) {
+            sv = i;
+            break;
+        }
+    }
+    variable_item_set_current_value_index(item, (uint8_t)sv);
+    variable_item_set_current_value_text(item, loader_menu_anim_speed_text[sv]);
+
+    item = variable_item_list_add(
+        app->interface_graphics_list,
+        "Cycle Anims",
+        LOADER_CYCLE_ANIMS_COUNT,
+        loader_menu_cycle_anims_changed,
+        app);
+    uint32_t cv = 1; // default Meta.txt
+    for(uint32_t i = 0; i < LOADER_CYCLE_ANIMS_COUNT; i++) {
+        if(loader_menu_cycle_anims_value[i] == momentum_settings.cycle_anims) {
+            cv = i;
+            break;
+        }
+    }
+    variable_item_set_current_value_index(item, (uint8_t)cv);
+    variable_item_set_current_value_text(item, loader_menu_cycle_anims_text[cv]);
+
+    item = variable_item_list_add(
+        app->interface_graphics_list, "Unlock Anims", 2, loader_menu_unlock_anims_changed, app);
+    variable_item_set_current_value_index(item, momentum_settings.unlock_anims ? 1 : 0);
+    variable_item_set_current_value_text(item, momentum_settings.unlock_anims ? "ON" : "OFF");
 }
 
 /* ---------------------------------------------------------------- */
@@ -903,6 +1216,12 @@ static uint32_t loader_menu_switch_to_interface(void* context) {
     return LoaderMenuViewInterface;
 }
 
+static uint32_t loader_menu_graphics_previous(void* context) {
+    UNUSED(context);
+    loader_menu_graphics_apply();
+    return LoaderMenuViewInterface;
+}
+
 static uint32_t loader_menu_switch_to_add(void* context) {
     UNUSED(context);
     return LoaderMenuViewAdd;
@@ -922,6 +1241,7 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     app->gui = furi_record_open(RECORD_GUI);
     app->storage = furi_record_open(RECORD_STORAGE);
     app->dialogs = furi_record_open(RECORD_DIALOGS);
+    momentum_settings_load();
     app->view_dispatcher = view_dispatcher_alloc();
     app->primary_menu = menu_alloc();
     app->settings_menu = submenu_alloc();
@@ -929,6 +1249,12 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     app->interface_main_list = variable_item_list_alloc();
     app->interface_lock_list = variable_item_list_alloc();
     app->interface_status_list = variable_item_list_alloc();
+    app->interface_graphics_list = variable_item_list_alloc();
+    app->asset_pack_count = 0;
+    app->asset_pack_index = 0;
+    for(size_t i = 0; i < LOADER_ASSET_PACKS_MAX; i++) {
+        app->asset_pack_names[i] = NULL;
+    }
     app->add_menu = submenu_alloc();
     app->add_main_menu = submenu_alloc();
     app->remove_menu = submenu_alloc();
@@ -946,6 +1272,7 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     loader_menu_build_interface_main(app);
     loader_menu_build_interface_lock(app);
     loader_menu_build_interface_status(app);
+    /* Graphics is built when its tab opens: it scans /ext/asset_packs on the SD. */
     loader_menu_build_add_menu(app);
     loader_menu_build_add_main(app);
     loader_menu_build_remove(app);
@@ -986,6 +1313,12 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
     view_dispatcher_add_view(
         app->view_dispatcher, LoaderMenuViewInterfaceStatus, interface_status_view);
 
+    View* interface_graphics_view = variable_item_list_get_view(app->interface_graphics_list);
+    view_set_context(interface_graphics_view, app->interface_graphics_list);
+    view_set_previous_callback(interface_graphics_view, loader_menu_graphics_previous);
+    view_dispatcher_add_view(
+        app->view_dispatcher, LoaderMenuViewInterfaceGraphics, interface_graphics_view);
+
     // Add menu
     View* add_view = submenu_get_view(app->add_menu);
     view_set_context(add_view, app->add_menu);
@@ -1012,12 +1345,16 @@ static LoaderMenuApp* loader_menu_app_alloc(LoaderMenu* loader_menu) {
 }
 
 static void loader_menu_app_free(LoaderMenuApp* app) {
+    /* Menu torn down without backing out of the Graphics tab. */
+    loader_menu_graphics_apply();
+
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewPrimary);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewSettings);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewInterface);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewInterfaceMain);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewInterfaceLock);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewInterfaceStatus);
+    view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewInterfaceGraphics);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewAdd);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewAddMain);
     view_dispatcher_remove_view(app->view_dispatcher, LoaderMenuViewRemove);
@@ -1029,6 +1366,10 @@ static void loader_menu_app_free(LoaderMenuApp* app) {
     variable_item_list_free(app->interface_main_list);
     variable_item_list_free(app->interface_lock_list);
     variable_item_list_free(app->interface_status_list);
+    variable_item_list_free(app->interface_graphics_list);
+    for(size_t i = 0; i < app->asset_pack_count; i++) {
+        furi_string_free(app->asset_pack_names[i]);
+    }
     submenu_free(app->add_menu);
     submenu_free(app->add_main_menu);
     submenu_free(app->remove_menu);

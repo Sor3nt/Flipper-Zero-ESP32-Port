@@ -3,7 +3,7 @@ App(
     name="U2F",
     apptype=FlipperAppType.MENUEXTERNAL,
     entry_point="u2f_app",
-    stack_size=2 * 1024,
+    stack_size=8 * 1024,
     icon="A_U2F_14",
     order=80,
     resources="resources",

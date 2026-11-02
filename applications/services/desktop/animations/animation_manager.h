@@ -95,6 +95,9 @@ void animation_manager_set_new_idle_callback(
  */
 void animation_manager_new_idle_process(AnimationManager* animation_manager);
 
+/** Select another SD-card animation without changing internal animation selection. */
+bool animation_manager_new_external_process(AnimationManager* animation_manager);
+
 /**
  * Set callback for Animation Manager for deferred calls
  * for animation_manager_check_blocking_process().

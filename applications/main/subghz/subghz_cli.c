@@ -356,15 +356,20 @@ void subghz_cli_command_rx(PipeSide* pipe, FuriString* args, void* context) {
     furi_hal_power_suppress_charge_enter();
 
     // Prepare and start RX
-    subghz_devices_start_async_rx(device, subghz_cli_command_rx_capture_callback, instance);
+    const bool rx_started = subghz_devices_start_async_rx(
+        device, subghz_cli_command_rx_capture_callback, instance);
 
     // Wait for packets to arrive
-    printf(
-        "Listening at frequency: %lu device: %lu. Press CTRL+C to stop\r\n",
-        frequency,
-        device_ind);
+    if(rx_started) {
+        printf(
+            "Listening at frequency: %lu device: %lu. Press CTRL+C to stop\r\n",
+            frequency,
+            device_ind);
+    } else {
+        printf("Failed to start RX on device %lu (radio not ready)\r\n", device_ind);
+    }
     LevelDuration level_duration;
-    while(!cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
+    while(rx_started && !cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
         int ret = furi_stream_buffer_receive(
             instance->stream, &level_duration, sizeof(LevelDuration), 10);
         if(ret == sizeof(LevelDuration)) {
@@ -429,13 +434,18 @@ void subghz_cli_command_rx_raw(PipeSide* pipe, FuriString* args, void* context) 
     furi_hal_power_suppress_charge_enter();
 
     // Prepare and start RX
-    furi_hal_subghz_start_async_rx(subghz_cli_command_rx_capture_callback, instance);
+    const bool rx_started =
+        furi_hal_subghz_start_async_rx(subghz_cli_command_rx_capture_callback, instance);
 
     // Wait for packets to arrive
-    printf("Listening at %lu. Press CTRL+C to stop\r\n", frequency);
+    if(rx_started) {
+        printf("Listening at %lu. Press CTRL+C to stop\r\n", frequency);
+    } else {
+        printf("Failed to start RX (radio not ready)\r\n");
+    }
     LevelDuration level_duration;
     size_t counter = 0;
-    while(!cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
+    while(rx_started && !cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
         int ret = furi_stream_buffer_receive(
             instance->stream, &level_duration, sizeof(LevelDuration), 10);
         if(ret == 0) {
@@ -528,6 +538,14 @@ void subghz_cli_command_decode_raw(PipeSide* pipe, FuriString* args, void* conte
         subghz_receiver_set_rx_callback(receiver, subghz_cli_command_rx_callback, instance);
 
         SubGhzFileEncoderWorker* file_worker_encoder = subghz_file_encoder_worker_alloc();
+        if(!file_worker_encoder) {
+            printf("subghz decode_raw \033[0;31mOut of memory\033[0m\r\n");
+            subghz_receiver_free(receiver);
+            subghz_environment_free(environment);
+            free(instance);
+            furi_string_free(file_name);
+            return;
+        }
         if(subghz_file_encoder_worker_start(
                file_worker_encoder, furi_string_get_cstr(file_name), NULL)) {
             //the worker needs a file in order to open and read part of the file

@@ -11,6 +11,8 @@ typedef enum {
     U2fMsgRegister,
     U2fMsgAuth,
     U2fMsgSuccess,
+    U2fMsgRegisterSuccess,
+    U2fMsgUsbError,
     U2fMsgError,
 } U2fViewMsg;
 

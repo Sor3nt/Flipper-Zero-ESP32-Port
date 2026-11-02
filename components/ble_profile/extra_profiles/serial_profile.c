@@ -30,7 +30,7 @@ static void serial_profile_fill_default_gap_config(GapConfig* config) {
     /* MAC left as all-zeros → use public BLE address (no random addr) */
 
     config->bonding_mode = true;
-    config->pairing_method = GapPairingPinCodeVerifyYesNo;
+    config->pairing_method = GapPairingPinCodeDisplayOnly;
     snprintf(
         config->adv_name,
         sizeof(config->adv_name),
@@ -71,11 +71,13 @@ static FuriHalBleProfileBase* serial_profile_start(FuriHalBleProfileParams profi
     return ble_profile_serial_start_with_config(ble_profile_serial, &config);
 }
 
-static void serial_profile_stop(FuriHalBleProfileBase* profile) {
+static bool serial_profile_stop(FuriHalBleProfileBase* profile) {
     BleProfileSerial* sp = (BleProfileSerial*)profile;
-    if(!sp) return;
-    if(sp->serial) ble_serial_free(sp->serial);
+    if(!sp) return true;
+    bool stopped = true;
+    if(sp->serial) stopped = ble_serial_free(sp->serial);
     free(sp);
+    return stopped;
 }
 
 static void serial_profile_get_config(GapConfig* config, FuriHalBleProfileParams profile_params) {

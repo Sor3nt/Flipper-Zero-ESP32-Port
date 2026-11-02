@@ -13,6 +13,7 @@
 #include <storage/storage.h>
 #include <furi_hal_rtc.h>
 #include <datetime/datetime.h>
+#include <esp_attr.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,8 +26,8 @@
 
 static Storage* s_lc_storage = NULL;
 static File* s_lc_file = NULL;
-static WlanCredEntry s_lc_scratch[LC_SCRATCH]; // Drain-Puffer (GUI-Stack ist knapp → static)
-static WlanCredEntry s_lc_snap[WLAN_CRED_RING_SIZE];
+static EXT_RAM_BSS_ATTR WlanCredEntry s_lc_scratch[LC_SCRATCH]; // Drain-Puffer (GUI-Stack ist knapp → static)
+static EXT_RAM_BSS_ATTR WlanCredEntry s_lc_snap[WLAN_CRED_RING_SIZE];
 static bool s_lc_active; // true wenn Monitor läuft (sonst Fehlerbildschirm)
 static uint16_t s_lc_restoring_ticks; // > 0 während "Restoring..."-Overlay nach Back-Press
 

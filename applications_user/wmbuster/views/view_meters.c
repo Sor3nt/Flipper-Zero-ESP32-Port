@@ -225,10 +225,14 @@ static void rebuild(WmbusApp* app) {
     scan_canvas_set_rows(app->scan_canvas, rows, n);
 
     char band[16];
+    uint32_t total_telegrams;
     format_band(app, band, sizeof(band));
+    furi_mutex_acquire(app->lock, FuriWaitForever);
+    total_telegrams = app->total_telegrams;
+    furi_mutex_release(app->lock);
     scan_canvas_set_meta(app->scan_canvas, band,
                          filter_label(filter), sort_label(sort),
-                         app->total_telegrams, "");
+                         total_telegrams, "");
 }
 
 /* ---- Scene plumbing ---- */
@@ -238,9 +242,11 @@ void wmbus_view_meters_enter(void* ctx) {
     scan_canvas_set_tap_callback(app->scan_canvas, on_pick, app);
     rebuild(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, WmbusViewScan);
-    wmbus_scanning_start(app);
+    furi_mutex_acquire(app->lock, FuriWaitForever);
     app->on_meters_view = true;
     app->last_shown_seq = app->telegram_seq;
+    furi_mutex_release(app->lock);
+    wmbus_scanning_start(app);
 }
 
 void wmbus_view_meters_refresh(WmbusApp* app) {
@@ -255,7 +261,9 @@ bool wmbus_view_meters_event(void* ctx, SceneManagerEvent ev) {
 
 void wmbus_view_meters_exit(void* ctx) {
     WmbusApp* app = ctx;
+    furi_mutex_acquire(app->lock, FuriWaitForever);
     app->on_meters_view = false;
+    furi_mutex_release(app->lock);
     /* Worker keeps running across navigation; only the LED/notification
      * cue is gated by the scan_active flag in wmbus_app.c. */
 }

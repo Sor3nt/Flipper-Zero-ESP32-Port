@@ -24,6 +24,8 @@
  *
 */
 static void subbrute_radio_device_loader_power_on() {
+    /* A header-powered external module needs no 5 V (OTG) rail. */
+    if(furi_hal_subghz_ext_supported()) return;
     uint8_t attempts = 5;
     while(--attempts > 0) {
         if(furi_hal_power_enable_otg()) {
@@ -49,6 +51,7 @@ static void subbrute_radio_device_loader_power_on() {
  *
  */
 static void subbrute_radio_device_loader_power_off() {
+    if(furi_hal_subghz_ext_supported()) return;
     if(furi_hal_power_is_otg_enabled()) {
         furi_hal_power_disable_otg();
     }
@@ -96,7 +99,10 @@ const SubGhzDevice* subbrute_radio_device_loader_set(
        subbrute_radio_device_loader_is_connect_external(SUBGHZ_DEVICE_CC1101_EXT_NAME)) {
         subbrute_radio_device_loader_power_on();
         radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_EXT_NAME);
-        subghz_devices_begin(radio_device);
+        if(!subghz_devices_begin(radio_device)) {
+            /* The module could not be started (pad taken since the probe): stay internal. */
+            radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
+        }
     } else if(current_radio_device == NULL) {
         radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
     } else {

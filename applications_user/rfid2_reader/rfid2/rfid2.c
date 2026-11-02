@@ -76,16 +76,33 @@ uint8_t rfid2_version(void) {
 int rfid2_scan(uint8_t* out, int max) {
     if(!i2c_bus_up()) return -1;
     int n = 0;
-    uint8_t dummy = 0;
     char list[128];
     int off = 0;
     list[0] = 0;
     for(uint8_t a = 0x08; a <= 0x77 && n < max; a++) {
-        // a 1-byte write; ESP_OK means the address was ACKed = device present
-        if(i2c_master_write_to_device(RFID2_I2C_PORT, a, &dummy, 1, pdMS_TO_TICKS(8)) == ESP_OK) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        if(!cmd) {
+            ESP_LOGE(TAG, "Failed to allocate I2C scan command");
+            return -1;
+        }
+
+        esp_err_t err = i2c_master_start(cmd);
+        if(err == ESP_OK) {
+            err = i2c_master_write_byte(
+                cmd, (uint8_t)((a << 1) | I2C_MASTER_WRITE), true);
+        }
+        if(err == ESP_OK) err = i2c_master_stop(cmd);
+        if(err == ESP_OK) {
+            err = i2c_master_cmd_begin(RFID2_I2C_PORT, cmd, pdMS_TO_TICKS(8));
+        }
+        i2c_cmd_link_delete(cmd);
+
+        if(err == ESP_OK) {
             out[n++] = a;
             if(off < (int)sizeof(list) - 6)
                 off += snprintf(list + off, sizeof(list) - off, "0x%02X ", a);
+        } else if(err != ESP_FAIL && err != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "I2C probe at 0x%02X failed: %s", a, esp_err_to_name(err));
         }
     }
     ESP_LOGI(TAG, "scan: SDA=%d SCL=%d found %d device(s): [ %s]",
@@ -94,6 +111,13 @@ int rfid2_scan(uint8_t* out, int max) {
 }
 
 static bool i2c_bus_up(void) {
+#if defined(BOARD_EXT_I2C_PORT) || \
+    (defined(BOARD_PIN_QWIIC_SDA) && defined(BOARD_PIN_QWIIC_SCL) && \
+     defined(BOARD_NFC_I2C_PORT))
+    // The external bus is initialized and shared by the firmware. Reconfiguring
+    // it here can disrupt power-management or NFC transactions.
+    return true;
+#else
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = RFID2_SDA_PIN,
@@ -102,14 +126,19 @@ static bool i2c_bus_up(void) {
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 100000,
     };
-    // The Grove bus (I2C_NUM_1, G2/G1) is normally already up — the PN532 NFC HAL
-    // installs it at boot on the SAME pins. Configure best-effort and DON'T gate on
-    // the result: the legacy i2c driver returns an error (ESP_FAIL) when the driver
-    // already exists, but the bus still works. Real problems surface as failed reads
-    // (version reads back 0x00). Both param_config and install here are best-effort.
-    i2c_param_config(RFID2_I2C_PORT, &conf);
-    i2c_driver_install(RFID2_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
+    esp_err_t err = i2c_param_config(RFID2_I2C_PORT, &conf);
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C configuration failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    err = i2c_driver_install(RFID2_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
+    if(err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "I2C driver install failed: %s", esp_err_to_name(err));
+        return false;
+    }
     return true;
+#endif
 }
 
 bool rfid2_init(void) {

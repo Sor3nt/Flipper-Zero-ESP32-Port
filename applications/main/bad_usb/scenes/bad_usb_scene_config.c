@@ -7,7 +7,6 @@ enum ConfigIndex {
 
 enum ConfigIndexBle {
     ConfigIndexBlePersistPairing = ConfigIndexConnection + 1,
-    ConfigIndexBlePairingMode,
     ConfigIndexBleSetDeviceName,
     ConfigIndexBleSetMacAddress,
     ConfigIndexBleRandomizeMacAddress,
@@ -46,23 +45,6 @@ void bad_usb_scene_config_ble_persist_pairing_callback(VariableItem* item) {
     variable_item_set_current_value_text(item, value ? "ON" : "OFF");
 }
 
-const char* const ble_pairing_mode_names[GapPairingCount] = {
-    "YesNo",
-    "PIN Type",
-    "PIN Y/N",
-};
-void bad_usb_scene_config_ble_pairing_mode_callback(VariableItem* item) {
-    BadUsbApp* bad_usb = variable_item_get_context(item);
-    uint8_t index = variable_item_get_current_value_index(item);
-    const BadUsbHidApi* hid = bad_usb_hid_get_interface(bad_usb->interface);
-    // Apply to current script config
-    bad_usb->script_hid_cfg.ble.pairing = index;
-    hid->adjust_config(&bad_usb->script_hid_cfg);
-    // Set in user config to save in settings file
-    bad_usb->user_hid_cfg.ble.pairing = index;
-    variable_item_set_current_value_text(item, ble_pairing_mode_names[index]);
-}
-
 void bad_usb_scene_config_select_callback(void* context, uint32_t index) {
     BadUsbApp* bad_usb = context;
 
@@ -99,15 +81,6 @@ static void draw_menu(BadUsbApp* bad_usb) {
             bad_usb);
         variable_item_set_current_value_index(item, ble_hid_cfg->bonding);
         variable_item_set_current_value_text(item, ble_hid_cfg->bonding ? "ON" : "OFF");
-
-        item = variable_item_list_add(
-            var_item_list,
-            "Pairing Mode",
-            GapPairingCount,
-            bad_usb_scene_config_ble_pairing_mode_callback,
-            bad_usb);
-        variable_item_set_current_value_index(item, ble_hid_cfg->pairing);
-        variable_item_set_current_value_text(item, ble_pairing_mode_names[ble_hid_cfg->pairing]);
 
         variable_item_list_add(var_item_list, "Set Device Name", 0, NULL, NULL);
 

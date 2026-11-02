@@ -93,6 +93,9 @@ unsigned char* base64_decode(const unsigned char* src, size_t len, size_t* out_l
     size_t i, count, olen;
     int pad = 0;
 
+    if(out_len) *out_len = 0;
+    if(!src || !out_len) return NULL;
+
     os_memset(dtable, 0x80, 256);
     for(i = 0; i < sizeof(base64_table) - 1; i++) dtable[base64_table[i]] = (unsigned char)i;
     dtable['='] = 0;

@@ -52,6 +52,15 @@ FuriHalBleProfileBase* bt_profile_start(
  */
 bool bt_profile_restore_default(Bt* bt);
 
+/** Queue restoration of the default BLE profile without waiting for GATT startup.
+ *
+ * Use from app shutdown paths that must return to the UI promptly. The BT
+ * service owns the queued operation and may finish it after the caller exits.
+ *
+ * @param bt        Bt instance
+ */
+void bt_profile_restore_default_async(Bt* bt);
+
 /** Disconnect from Central
  *
  * @param bt        Bt instance

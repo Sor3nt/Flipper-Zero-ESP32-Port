@@ -57,10 +57,12 @@ struct U2fHid_packet {
 struct U2fHid {
     FuriThread* thread;
     FuriTimer* lock_timer;
+    FuriHalUsbInterface* usb_mode_prev;
     uint8_t seq_id_last;
     uint16_t req_buf_ptr;
     uint32_t req_len_left;
     uint32_t lock_cid;
+    uint32_t lock_expiry_tick;
     bool lock;
     U2fData* u2f_instance;
     struct U2fHid_packet packet;
@@ -70,12 +72,13 @@ static void u2f_hid_event_callback(HidU2fEvent ev, void* context) {
     furi_assert(context);
     U2fHid* u2f_hid = context;
 
-    if(ev == HidU2fDisconnected)
+    if(ev == HidU2fDisconnected) {
         furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtDisconnect);
-    else if(ev == HidU2fConnected)
+    } else if(ev == HidU2fConnected) {
         furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtConnect);
-    else if(ev == HidU2fRequest)
+    } else if(ev == HidU2fRequest) {
         furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtRequest);
+    }
 }
 
 static void u2f_hid_lock_timeout_callback(void* context) {
@@ -85,7 +88,17 @@ static void u2f_hid_lock_timeout_callback(void* context) {
     furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtUnlock);
 }
 
-static void u2f_hid_send_response(U2fHid* u2f_hid) {
+static bool u2f_hid_send_packet(const U2fHid* u2f_hid, const uint8_t* packet_buf) {
+    if(furi_hal_hid_u2f_send_response(packet_buf, HID_U2F_PACKET_LEN)) return true;
+    FURI_LOG_W(
+        WORKER_TAG,
+        "Response packet dropped cid=%lX cmd=%x",
+        u2f_hid->packet.cid,
+        u2f_hid->packet.cmd);
+    return false;
+}
+
+static bool u2f_hid_send_response(U2fHid* u2f_hid) {
     uint8_t packet_buf[HID_U2F_PACKET_LEN];
     uint16_t len_remain = u2f_hid->packet.len;
     uint8_t len_cur = 0;
@@ -101,7 +114,7 @@ static void u2f_hid_send_response(U2fHid* u2f_hid) {
     packet_buf[6] = (u2f_hid->packet.len & 0xFF);
     len_cur = (len_remain < (HID_U2F_PACKET_LEN - 7)) ? (len_remain) : (HID_U2F_PACKET_LEN - 7);
     if(len_cur > 0) memcpy(&packet_buf[7], u2f_hid->packet.payload, len_cur);
-    furi_hal_hid_u2f_send_response(packet_buf, HID_U2F_PACKET_LEN);
+    if(!u2f_hid_send_packet(u2f_hid, packet_buf)) return false;
     data_ptr = len_cur;
     len_remain -= len_cur;
 
@@ -112,11 +125,12 @@ static void u2f_hid_send_response(U2fHid* u2f_hid) {
         len_cur = (len_remain < (HID_U2F_PACKET_LEN - 5)) ? (len_remain) :
                                                             (HID_U2F_PACKET_LEN - 5);
         memcpy(&packet_buf[5], &(u2f_hid->packet.payload[data_ptr]), len_cur);
-        furi_hal_hid_u2f_send_response(packet_buf, HID_U2F_PACKET_LEN);
+        if(!u2f_hid_send_packet(u2f_hid, packet_buf)) return false;
         seq_cnt++;
         len_remain -= len_cur;
         data_ptr += len_cur;
     }
+    return true;
 }
 
 static void u2f_hid_send_error(U2fHid* u2f_hid, uint8_t error) {
@@ -134,11 +148,15 @@ static bool u2f_hid_parse_request(U2fHid* u2f_hid) {
         u2f_hid->packet.cmd,
         u2f_hid->packet.len);
 
+    if(u2f_hid->lock && u2f_hid->packet.cid != u2f_hid->lock_cid) {
+        u2f_hid_send_error(u2f_hid, U2F_HID_ERR_CHANNEL_BUSY);
+        return true;
+    }
+
     if(u2f_hid->packet.cmd == U2F_HID_PING) { // PING - echo request back
         u2f_hid_send_response(u2f_hid);
 
     } else if(u2f_hid->packet.cmd == U2F_HID_MSG) { // MSG - U2F message
-        if((u2f_hid->lock == true) && (u2f_hid->packet.cid != u2f_hid->lock_cid)) return false;
         uint16_t resp_len =
             u2f_msg_parse(u2f_hid->u2f_instance, u2f_hid->packet.payload, u2f_hid->packet.len);
         if(resp_len > 0) {
@@ -148,24 +166,50 @@ static bool u2f_hid_parse_request(U2fHid* u2f_hid) {
             return false;
 
     } else if(u2f_hid->packet.cmd == U2F_HID_LOCK) { // LOCK - lock all channels except current
-        if(u2f_hid->packet.len != 1) return false;
+        if(u2f_hid->packet.len != 1) {
+            u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_LEN);
+            return true;
+        }
         uint8_t lock_timeout = u2f_hid->packet.payload[0];
+        if(lock_timeout > 10) {
+            u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_PAR);
+            return true;
+        }
+        if(u2f_hid->lock && u2f_hid->lock_cid != u2f_hid->packet.cid) {
+            u2f_hid_send_error(u2f_hid, U2F_HID_ERR_CHANNEL_BUSY);
+            return true;
+        }
         if(lock_timeout == 0) { // Lock off
+            furi_timer_stop(u2f_hid->lock_timer);
             u2f_hid->lock = false;
             u2f_hid->lock_cid = 0;
+            u2f_hid->lock_expiry_tick = 0;
         } else { // Lock on
             u2f_hid->lock = true;
             u2f_hid->lock_cid = u2f_hid->packet.cid;
-            furi_timer_start(u2f_hid->lock_timer, lock_timeout * 1000);
+            uint32_t timeout_ticks = furi_ms_to_ticks((uint32_t)lock_timeout * 1000U);
+            u2f_hid->lock_expiry_tick = furi_get_tick() + timeout_ticks;
+            furi_timer_start(u2f_hid->lock_timer, timeout_ticks);
         }
+        u2f_hid->packet.len = 0;
+        u2f_hid_send_response(u2f_hid);
 
     } else if(u2f_hid->packet.cmd == U2F_HID_INIT) { // INIT - channel initialization request
-        if((u2f_hid->packet.len != 8) || (u2f_hid->packet.cid != U2F_HID_BROADCAST_CID) ||
-           (u2f_hid->lock == true))
-            return false;
+        if(u2f_hid->packet.len != 8) {
+            u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_LEN);
+            return true;
+        }
+        // CID 0 is reserved. Broadcast INIT allocates a new channel; INIT on an already
+        // allocated channel is a resync and is answered with that same CID.
+        if(u2f_hid->packet.cid == 0) return false;
+        uint32_t channel_cid = u2f_hid->packet.cid;
+        if(channel_cid == U2F_HID_BROADCAST_CID) {
+            do {
+                channel_cid = furi_hal_random_get();
+            } while(channel_cid == 0 || channel_cid == U2F_HID_BROADCAST_CID);
+        }
         u2f_hid->packet.len = 17;
-        uint32_t random_cid = furi_hal_random_get();
-        memcpy(&(u2f_hid->packet.payload[8]), &random_cid, sizeof(uint32_t)); //-V1086
+        memcpy(&(u2f_hid->packet.payload[8]), &channel_cid, sizeof(uint32_t)); //-V1086
         u2f_hid->packet.payload[12] = 2; // Protocol version
         u2f_hid->packet.payload[13] = 1; // Device version major
         u2f_hid->packet.payload[14] = 0; // Device version minor
@@ -189,45 +233,61 @@ static int32_t u2f_hid_worker(void* context) {
 
     FURI_LOG_D(WORKER_TAG, "Init");
 
-    FuriHalUsbInterface* usb_mode_prev = furi_hal_usb_get_config();
-    furi_check(furi_hal_usb_set_config(&usb_hid_u2f, NULL) == true);
-
-    u2f_hid->lock_timer =
-        furi_timer_alloc(u2f_hid_lock_timeout_callback, FuriTimerTypeOnce, u2f_hid);
-
     furi_hal_hid_u2f_set_callback(u2f_hid_event_callback, u2f_hid);
 
     while(1) {
         uint32_t flags = furi_thread_flags_wait(
-            WorkerEvtStop | WorkerEvtConnect | WorkerEvtDisconnect | WorkerEvtRequest,
+            WorkerEvtStop | WorkerEvtConnect | WorkerEvtDisconnect | WorkerEvtRequest |
+                WorkerEvtUnlock,
             FuriFlagWaitAny,
             FuriWaitForever);
         furi_check(!(flags & FuriFlagError));
         if(flags & WorkerEvtStop) break;
-        if(flags & WorkerEvtConnect) {
-            u2f_set_state(u2f_hid->u2f_instance, 1);
-            FURI_LOG_D(WORKER_TAG, "Connect");
+        if(flags & (WorkerEvtConnect | WorkerEvtDisconnect)) {
+            bool connected = furi_hal_usb_u2f_backend_is_mounted();
+            if(!connected) {
+                u2f_hid->req_len_left = 0;
+                u2f_hid->req_buf_ptr = 0;
+                u2f_hid->seq_id_last = 0;
+                u2f_hid->lock = false;
+                u2f_hid->lock_cid = 0;
+                u2f_hid->lock_expiry_tick = 0;
+                furi_timer_stop(u2f_hid->lock_timer);
+            }
+            u2f_set_state(u2f_hid->u2f_instance, connected);
+            FURI_LOG_D(WORKER_TAG, "%s", connected ? "Connect" : "Disconnect");
         }
-        if(flags & WorkerEvtDisconnect) {
-            u2f_set_state(u2f_hid->u2f_instance, 0);
-            FURI_LOG_D(WORKER_TAG, "Disconnect");
+        if(flags & WorkerEvtUnlock) {
+            if(u2f_hid->lock) {
+                int32_t remaining =
+                    (int32_t)(u2f_hid->lock_expiry_tick - furi_get_tick());
+                if(remaining <= 0) {
+                    u2f_hid->lock = false;
+                    u2f_hid->lock_cid = 0;
+                    u2f_hid->lock_expiry_tick = 0;
+                } else {
+                    furi_timer_start(u2f_hid->lock_timer, (uint32_t)remaining);
+                }
+            }
         }
         if(flags & WorkerEvtRequest) {
-            uint32_t len_cur = furi_hal_hid_u2f_get_request(packet_buf);
-            do {
-                if(len_cur == 0) {
-                    break;
-                }
+            uint32_t len_cur;
+            while((len_cur = furi_hal_hid_u2f_get_request(packet_buf)) != 0) {
+                bool request_complete = false;
                 if((packet_buf[4] & U2F_HID_TYPE_MASK) == U2F_HID_TYPE_INIT) {
                     if(len_cur < 7) {
                         u2f_hid->req_len_left = 0;
-                        break; // Wrong chunk len
+                        memcpy(&(u2f_hid->packet.cid), packet_buf, sizeof(uint32_t));
+                        u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_LEN);
+                        continue;
                     }
                     // Init packet
                     u2f_hid->packet.len = (packet_buf[5] << 8) | (packet_buf[6]);
+                    memcpy(&(u2f_hid->packet.cid), packet_buf, 4);
                     if(u2f_hid->packet.len > U2F_HID_MAX_PAYLOAD_LEN) {
                         u2f_hid->req_len_left = 0;
-                        break; // Wrong packet len
+                        u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_LEN);
+                        continue;
                     }
                     if(u2f_hid->packet.len > (len_cur - 7)) {
                         u2f_hid->req_len_left = u2f_hid->packet.len - (len_cur - 7);
@@ -236,56 +296,60 @@ static int32_t u2f_hid_worker(void* context) {
                         u2f_hid->req_len_left = 0;
                         len_cur = u2f_hid->packet.len;
                     }
-                    memcpy(&(u2f_hid->packet.cid), packet_buf, 4);
                     u2f_hid->packet.cmd = packet_buf[4];
                     u2f_hid->seq_id_last = 0;
                     u2f_hid->req_buf_ptr = len_cur;
                     if(len_cur > 0) memcpy(u2f_hid->packet.payload, &packet_buf[7], len_cur);
+                    request_complete = u2f_hid->req_len_left == 0;
                 } else {
                     if(len_cur < 5) {
                         u2f_hid->req_len_left = 0;
-                        break; // Wrong chunk len
+                        memcpy(&(u2f_hid->packet.cid), packet_buf, sizeof(uint32_t));
+                        u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_LEN);
+                        continue;
                     }
                     // Continuation packet
-                    if(u2f_hid->req_len_left > 0) {
-                        uint32_t cid_temp = 0;
-                        memcpy(&cid_temp, packet_buf, 4);
-                        uint8_t seq_temp = packet_buf[4];
-                        if((cid_temp == u2f_hid->packet.cid) &&
-                           (seq_temp == u2f_hid->seq_id_last)) {
-                            if(u2f_hid->req_len_left > (len_cur - 5)) {
-                                len_cur = len_cur - 5;
-                                u2f_hid->req_len_left -= len_cur;
-                            } else {
-                                len_cur = u2f_hid->req_len_left;
-                                u2f_hid->req_len_left = 0;
-                            }
-                            memcpy(
-                                &(u2f_hid->packet.payload[u2f_hid->req_buf_ptr]),
-                                &packet_buf[5],
-                                len_cur);
-                            u2f_hid->req_buf_ptr += len_cur;
-                            u2f_hid->seq_id_last++;
-                        }
+                    uint32_t cid_temp = 0;
+                    memcpy(&cid_temp, packet_buf, sizeof(cid_temp));
+                    if(u2f_hid->req_len_left == 0 || cid_temp != u2f_hid->packet.cid ||
+                       packet_buf[4] != u2f_hid->seq_id_last) {
+                        u2f_hid->req_len_left = 0;
+                        u2f_hid->packet.cid = cid_temp;
+                        u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_SEQ);
+                        continue;
                     }
+
+                    uint32_t payload_len = len_cur - 5;
+                    if(u2f_hid->req_len_left > payload_len) {
+                        len_cur = payload_len;
+                        u2f_hid->req_len_left -= payload_len;
+                    } else {
+                        len_cur = u2f_hid->req_len_left;
+                        u2f_hid->req_len_left = 0;
+                    }
+                    memcpy(
+                        &(u2f_hid->packet.payload[u2f_hid->req_buf_ptr]),
+                        &packet_buf[5],
+                        len_cur);
+                    u2f_hid->req_buf_ptr += len_cur;
+                    u2f_hid->seq_id_last++;
+                    request_complete = u2f_hid->req_len_left == 0;
                 }
-                if(u2f_hid->req_len_left == 0) {
+                if(request_complete) {
                     if(u2f_hid_parse_request(u2f_hid) == false) {
                         u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_CMD);
                     }
                 }
-            } while(0);
-        }
-        if(flags & WorkerEvtUnlock) {
-            u2f_hid->lock = false;
-            u2f_hid->lock_cid = 0;
+            }
         }
     }
     furi_timer_stop(u2f_hid->lock_timer);
     furi_timer_free(u2f_hid->lock_timer);
 
     furi_hal_hid_u2f_set_callback(NULL, NULL);
-    furi_hal_usb_set_config(usb_mode_prev, NULL);
+    if(!furi_hal_usb_set_config(u2f_hid->usb_mode_prev, NULL)) {
+        FURI_LOG_E(WORKER_TAG, "Unable to restore the previous USB configuration");
+    }
     FURI_LOG_D(WORKER_TAG, "End");
 
     return 0;
@@ -293,10 +357,28 @@ static int32_t u2f_hid_worker(void* context) {
 
 U2fHid* u2f_hid_start(U2fData* u2f_inst) {
     U2fHid* u2f_hid = malloc(sizeof(U2fHid));
+    if(!u2f_hid) return NULL;
+    memset(u2f_hid, 0, sizeof(U2fHid));
 
     u2f_hid->u2f_instance = u2f_inst;
+    u2f_hid->usb_mode_prev = furi_hal_usb_get_config();
+    u2f_hid->lock_timer =
+        furi_timer_alloc(u2f_hid_lock_timeout_callback, FuriTimerTypeOnce, u2f_hid);
+    u2f_hid->thread =
+        furi_thread_alloc_ex("U2fHidWorker", 8 * 1024, u2f_hid_worker, u2f_hid);
+    if(!u2f_hid->lock_timer || !u2f_hid->thread) {
+        if(u2f_hid->lock_timer) furi_timer_free(u2f_hid->lock_timer);
+        if(u2f_hid->thread) furi_thread_free(u2f_hid->thread);
+        free(u2f_hid);
+        return NULL;
+    }
 
-    u2f_hid->thread = furi_thread_alloc_ex("U2fHidWorker", 2048, u2f_hid_worker, u2f_hid);
+    if(!furi_hal_usb_set_config(&usb_hid_u2f, NULL)) {
+        furi_timer_free(u2f_hid->lock_timer);
+        furi_thread_free(u2f_hid->thread);
+        free(u2f_hid);
+        return NULL;
+    }
     furi_thread_start(u2f_hid->thread);
     return u2f_hid;
 }
@@ -305,6 +387,7 @@ void u2f_hid_stop(U2fHid* u2f_hid) {
     furi_assert(u2f_hid);
     furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtStop);
     furi_thread_join(u2f_hid->thread);
+    u2f_shutdown(u2f_hid->u2f_instance);
     furi_thread_free(u2f_hid->thread);
     free(u2f_hid);
 }

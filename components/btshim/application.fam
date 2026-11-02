@@ -3,7 +3,7 @@ App(
     name="BtSrv",
     apptype=FlipperAppType.SERVICE,
     entry_point="bt_srv",
-    requires=["storage"],
+    requires=["storage", "rpc_start"],
     stack_size=4 * 1024,
     order=45,
 )

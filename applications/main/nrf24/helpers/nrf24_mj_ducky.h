@@ -52,9 +52,14 @@ MjScript* mj_script_open(struct Storage* storage, const char* path);
 void mj_script_close(MjScript* s);
 
 /* Run a single line. Updates `current_line` and (on warning) `last_warning`.
- * The caller is responsible for holding nrf24_hw_acquire across the call.
- * `abort` is polled inside long delays; if non-NULL and *abort becomes true
- * the line is aborted early and the function returns.
+ * Do NOT wrap this call in nrf24_hw_acquire()/release(): a line can be a
+ * DELAY of up to 60 s or a STRING of up to the 64 KB script cap (10 ms per
+ * character), and the radio-touching helpers it calls into
+ * (mj_inject_keystroke/mj_inject_string/mj_setup_tx_for_target) already claim
+ * the bus themselves for just the SPI burst. Holding it across the whole
+ * line would freeze the shared-SPI display/input for that line's full
+ * duration. `abort` is polled inside long delays; if non-NULL and *abort
+ * becomes true the line is aborted early and the function returns.
  * Returns true while the script has more lines, false on EOF/error. */
 bool mj_script_step(MjScript* s, const MjTarget* target, volatile bool* abort);
 

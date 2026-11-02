@@ -63,6 +63,9 @@ typedef struct {
  */
 void power_off(Power* power);
 
+/** Show the power-off confirmation view without starting shutdown. */
+void power_show_poweroff_confirmation(Power* power);
+
 /** Reboot device
  *
  * @param mode      PowerBootMode

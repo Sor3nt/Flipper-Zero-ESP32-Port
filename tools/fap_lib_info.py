@@ -81,7 +81,7 @@ def main():
         for pat in lib["sources"]:
             matches = sorted(glob.glob(os.path.join(lib_root, pat)))
             for m in matches:
-                rel = os.path.relpath(m, app_dir)
+                rel = os.path.relpath(m, app_dir).replace(os.sep, "/")
                 out.append(f"SOURCE\t{rel}")
         for d in lib["cdefines"]:
             out.append(f"CDEFINE\t{d}")
@@ -90,7 +90,9 @@ def main():
         for fl in lib["cflags"]:
             out.append(f"CFLAG\t{fl}")
 
-    sys.stdout.write("\n".join(out) + ("\n" if out else ""))
+    # Bytes, not text: Windows text-mode stdout would emit CRLF and bash `read` would
+    # keep the trailing \r in every path.
+    sys.stdout.buffer.write(("\n".join(out) + ("\n" if out else "")).encode())
     return 0
 
 

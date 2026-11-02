@@ -33,6 +33,13 @@ typedef void (*InfraredWorkerMessageSentCallback)(void* context);
 typedef void (
     *InfraredWorkerReceivedSignalCallback)(void* context, InfraredWorkerSignal* received_signal);
 
+/** Callback type to call by InfraredWorker thread when the receiver stopped
+ * working while a session was active (the HAL could not re-arm it). The session
+ * is dead from then on: the owner is expected to call infrared_worker_rx_stop().
+ * It runs on the worker thread, so do not stop the worker from inside it; post
+ * an event to the owner's own thread instead. */
+typedef void (*InfraredWorkerRxErrorCallback)(void* context);
+
 /** Allocate InfraredWorker
  *
  * @return just created instance of InfraredWorker
@@ -49,7 +56,7 @@ void infrared_worker_free(InfraredWorker* instance);
  *
  * @param[in]   instance - InfraredWorker instance
  */
-void infrared_worker_rx_start(InfraredWorker* instance);
+bool infrared_worker_rx_start(InfraredWorker* instance);
 
 /** Stop InfraredWorker thread, deinitialize furi_hal.
  *
@@ -66,6 +73,18 @@ void infrared_worker_rx_stop(InfraredWorker* instance);
 void infrared_worker_rx_set_received_signal_callback(
     InfraredWorker* instance,
     InfraredWorkerReceivedSignalCallback callback,
+    void* context);
+
+/** Set the callback reported when the receiver dies mid-session. Set it before
+ * infrared_worker_rx_start(); it is not cleared by infrared_worker_rx_stop().
+ *
+ * @param[in]   instance - InfraredWorker instance
+ * @param[in]   callback - InfraredWorkerRxErrorCallback callback, NULL to unset
+ * @param[in]   context - context to pass to the callback
+ */
+void infrared_worker_rx_set_error_callback(
+    InfraredWorker* instance,
+    InfraredWorkerRxErrorCallback callback,
     void* context);
 
 /** Enable blinking on receiving any signal on IR port.
@@ -97,7 +116,7 @@ bool infrared_worker_signal_is_decoded(const InfraredWorkerSignal* signal);
  *
  * @param[in]   instance - InfraredWorker instance
  */
-void infrared_worker_tx_start(InfraredWorker* instance);
+bool infrared_worker_tx_start(InfraredWorker* instance);
 
 /** Stop transmitting signal. Waits for end of current signal and stops transmission.
  *

@@ -13,6 +13,7 @@
 #include <lwip/tcpip.h>
 #include <lwip/prot/ethernet.h>
 #include <lwip/prot/etharp.h>
+#include <esp_attr.h>
 #include <string.h>
 
 #define TAG "WlanNetcut"
@@ -80,7 +81,7 @@ struct WlanNetcut {
 static WlanNetcut* s_hook_engine = NULL;
 static struct netif* s_hooked_netif = NULL;
 static netif_input_fn s_original_input = NULL;
-static uint8_t s_fwd_buf[NETCUT_FWD_BUF_SIZE];
+static EXT_RAM_BSS_ATTR uint8_t s_fwd_buf[NETCUT_FWD_BUF_SIZE];
 // Optionaler Live-Credential-Dissektor (siehe wlan_netcut_set_cred_sniff).
 static WlanCredSniff* s_hook_cred = NULL;
 

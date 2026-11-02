@@ -142,6 +142,11 @@ extern const NotificationSequence sequence_success;
 extern const NotificationSequence sequence_semi_success;
 extern const NotificationSequence sequence_error;
 extern const NotificationSequence sequence_audiovisual_alert;
+extern const NotificationSequence sequence_button_click;
+extern const NotificationSequence sequence_wakeup;
+extern const NotificationSequence sequence_shutdown;
+extern const NotificationSequence sequence_low_battery;
+extern const NotificationSequence sequence_wifi_scan;
 
 // LCD
 extern const NotificationSequence sequence_lcd_contrast_update;

@@ -6,8 +6,12 @@ void infrared_scene_debug_on_enter(void* context) {
 
     infrared_worker_rx_set_received_signal_callback(
         worker, infrared_signal_received_callback, context);
+    infrared_worker_rx_set_error_callback(worker, infrared_rx_error_callback, context);
     infrared_worker_rx_enable_blink_on_receiving(worker, true);
-    infrared_worker_rx_start(worker);
+    if(!infrared_worker_rx_start(worker)) {
+        infrared_show_error_message(infrared, "Infrared receiver unavailable");
+        return;
+    }
 
     infrared_debug_view_set_text(infrared->debug_view, "Received signals\nwill appear here");
     view_dispatcher_switch_to_view(infrared->view_dispatcher, InfraredViewDebugView);
@@ -54,6 +58,11 @@ bool infrared_scene_debug_on_event(void* context, SceneManagerEvent event) {
                     message->repeat ? " R" : "");
             }
             consumed = true;
+        } else if(event.event == InfraredCustomEventTypeRxError) {
+            /* The receiver is dead; on_exit() stops the worker. */
+            infrared_show_error_message(infrared, "Infrared receiver\nstopped working");
+            scene_manager_previous_scene(infrared->scene_manager);
+            consumed = true;
         }
     }
 
@@ -63,6 +72,7 @@ bool infrared_scene_debug_on_event(void* context, SceneManagerEvent event) {
 void infrared_scene_debug_on_exit(void* context) {
     InfraredApp* infrared = context;
     InfraredWorker* worker = infrared->worker;
+    infrared_worker_rx_set_error_callback(worker, NULL, NULL);
     infrared_worker_rx_stop(worker);
     infrared_worker_rx_enable_blink_on_receiving(worker, false);
     infrared_worker_rx_set_received_signal_callback(worker, NULL, NULL);

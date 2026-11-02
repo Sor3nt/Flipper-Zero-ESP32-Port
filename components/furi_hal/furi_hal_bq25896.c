@@ -137,6 +137,11 @@ static bool bq25896_update_reg(uint8_t reg, uint8_t mask, uint8_t val) {
 static uint8_t bq25896_chrg_stat(void) {
     uint8_t r = 0;
     const TickType_t now = xTaskGetTickCount();
+    /* is_charging() and is_charging_done() are queried back to back every
+     * power tick; one REG0B read serves both. */
+    if(bq25896_chrg_stat_tick && (TickType_t)(now - bq25896_chrg_stat_tick) < pdMS_TO_TICKS(500)) {
+        return bq25896_last_chrg_stat;
+    }
     if(bq25896_read_reg(REG0B, &r)) {
         bq25896_last_chrg_stat = (uint8_t)((r >> 3) & 0x03U);
         bq25896_chrg_stat_tick = now;

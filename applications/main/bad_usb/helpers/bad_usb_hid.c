@@ -8,6 +8,8 @@
 #define TAG "BadUSB HID"
 #define HID_BT_KEYS_STORAGE_NAME ".bt_hid.keys"
 
+static bool ble_profile_dirty;
+
 bool bad_usb_hid_supports_usb(void) {
 #if defined(SOC_USB_OTG_SUPPORTED) && SOC_USB_OTG_SUPPORTED
     return true;
@@ -21,19 +23,21 @@ void hid_usb_adjust_config(BadUsbHidConfig* hid_cfg) {
     if(hid_cfg->usb.pid == 0) hid_cfg->usb.pid = HID_PID_DEFAULT;
 }
 
-void* hid_usb_init(BadUsbHidConfig* hid_cfg) {
+bool hid_usb_init(BadUsbHidConfig* hid_cfg, void** inst) {
+    furi_assert(inst);
+    *inst = NULL;
     hid_usb_adjust_config(hid_cfg);
     if(!bad_usb_hid_supports_usb()) {
         FURI_LOG_W(TAG, "USB HID is not supported on this target");
-        return NULL;
+        return false;
     }
 
     if(!furi_hal_usb_set_config(&usb_hid, &hid_cfg->usb)) {
         FURI_LOG_W(TAG, "Failed to enable USB HID");
-        return NULL;
+        return false;
     }
 
-    return NULL;
+    return true;
 }
 
 void hid_usb_deinit(void* inst) {
@@ -43,6 +47,12 @@ void hid_usb_deinit(void* inst) {
     }
 
     furi_check(furi_hal_usb_set_config(NULL, NULL));
+    /* Leaving usb_hid only changes the active interface; esp_tinyusb remains
+     * installed. BadUSB can sit on file selection after stopping a script, so
+     * release the stack here to detach USB immediately, not only on app exit. */
+    if(!furi_hal_usb_hid_release_stack()) {
+        FURI_LOG_E(TAG, "Failed to release the USB HID stack after stop");
+    }
 }
 
 void hid_usb_set_state_callback(void* inst, HidStateCallback cb, void* context) {
@@ -147,7 +157,7 @@ typedef struct {
     FuriHalBleProfileBase* profile;
     HidStateCallback state_callback;
     void* callback_context;
-    bool is_connected;
+    volatile bool is_connected;
 } BleHidInstance;
 
 static void hid_ble_reverse_mac(uint8_t dst[GAP_MAC_ADDR_SIZE], const uint8_t src[GAP_MAC_ADDR_SIZE]) {
@@ -196,8 +206,14 @@ void hid_ble_adjust_config(BadUsbHidConfig* hid_cfg) {
     }
 }
 
-void* hid_ble_init(BadUsbHidConfig* hid_cfg) {
+bool hid_ble_init(BadUsbHidConfig* hid_cfg, void** inst) {
+    furi_assert(inst);
+    *inst = NULL;
     BleHidInstance* ble_hid = calloc(1, sizeof(BleHidInstance));
+    if(!ble_hid) {
+        FURI_LOG_E(TAG, "Failed to allocate BLE HID instance");
+        return false;
+    }
 
     hid_ble_adjust_config(hid_cfg);
     FURI_LOG_I(
@@ -215,39 +231,96 @@ void* hid_ble_init(BadUsbHidConfig* hid_cfg) {
     ble_hid->bt = furi_record_open(RECORD_BT);
     bt_disconnect(ble_hid->bt);
 
-    furi_delay_ms(200);
     bt_keys_storage_set_storage_path(ble_hid->bt, APP_DATA_PATH(HID_BT_KEYS_STORAGE_NAME));
+    /* bt_profile_start stops the active profile before attempting the new one. */
+    ble_profile_dirty = true;
     ble_hid->profile = bt_profile_start(ble_hid->bt, ble_profile_hid_ext, &hid_cfg->ble);
     if(!ble_hid->profile) {
         FURI_LOG_E(TAG, "Failed to initialize BLE HID backend");
+        /* Undo the app-local keys path we set above so the global BT service
+         * does not keep loading/saving bonds from BadUSB's private file after
+         * a failed start. Mirror the cleanup hid_ble_deinit does on success. */
+        bt_keys_storage_set_default_path(ble_hid->bt);
         furi_record_close(RECORD_BT);
         free(ble_hid);
-        return NULL;
+        return false;
     }
     FURI_LOG_I(TAG, "hid_ble_init profile started");
 
+    /* Install the callback before advertising. A fast host can connect as soon
+     * as advertising begins; registering afterwards can lose the only
+     * connected transition, leaving BadUSB waiting in NotConnected/WillRun. */
+    bt_set_status_changed_callback(ble_hid->bt, hid_ble_connection_status_callback, ble_hid);
     if(bt_is_enabled(ble_hid->bt)) {
         furi_hal_bt_start_advertising();
     }
-
-    bt_set_status_changed_callback(ble_hid->bt, hid_ble_connection_status_callback, ble_hid);
-    return ble_hid;
+    *inst = ble_hid;
+    return true;
 }
 
 void hid_ble_deinit(void* inst) {
     BleHidInstance* ble_hid = inst;
-    furi_assert(ble_hid);
+    /* inst is NULL when hid_ble_init() failed (bt_profile_start returned NULL):
+     * it frees its instance and returns NULL, but the worker's teardown still
+     * calls deinit(hid_inst). furi_assert() only traps in FURI_DEBUG builds; a
+     * release build fell through to ble_hid->bt and dereferenced NULL. Bail out
+     * instead, matching every other hid_ble_* accessor and hid_usb_deinit. */
+    if(!ble_hid) {
+        FURI_LOG_W(TAG, "hid_ble_deinit skipped: instance is NULL");
+        return;
+    }
 
+    uint32_t deinit_start = furi_get_tick();
+    FURI_LOG_I(TAG, "hid_ble_deinit begin connected=%d", ble_hid->is_connected);
     if(ble_hid->bt) {
+        bool was_connected = ble_hid->is_connected;
+        FURI_LOG_I(TAG, "hid_ble_deinit unregister status callback begin");
         bt_set_status_changed_callback(ble_hid->bt, NULL, NULL);
-        bt_disconnect(ble_hid->bt);
-        furi_delay_ms(200);
+        FURI_LOG_I(TAG, "hid_ble_deinit unregister status callback end");
+        if(was_connected) {
+            FURI_LOG_I(TAG, "hid_ble_deinit disconnect begin");
+            bt_disconnect(ble_hid->bt);
+            /* Allow the BLE stack to persist the just-disconnected bond. */
+            furi_delay_ms(200);
+            FURI_LOG_I(TAG, "hid_ble_deinit disconnect end");
+        }
+        FURI_LOG_I(TAG, "hid_ble_deinit stop advertising begin");
+        furi_hal_bt_stop_advertising();
+        FURI_LOG_I(TAG, "hid_ble_deinit stop advertising end");
+        FURI_LOG_I(TAG, "hid_ble_deinit reset keys path begin");
         bt_keys_storage_set_default_path(ble_hid->bt);
-        bt_profile_restore_default(ble_hid->bt);
+        FURI_LOG_I(TAG, "hid_ble_deinit reset keys path end");
+        /* A script can switch from BLE to USB without closing BadUSB. Restore
+         * the serial profile here so the HID GATT server does not remain the
+         * active profile while USB HID is in use. Queue it on the BT service:
+         * profile teardown/startup performs asynchronous GATT work and must
+         * not block the BadUSB worker or Back handling. */
+        if(ble_profile_dirty) {
+            bt_profile_restore_default_async(ble_hid->bt);
+            ble_profile_dirty = false;
+            FURI_LOG_I(TAG, "Default BLE profile restoration queued on HID deinit");
+        }
+        FURI_LOG_I(TAG, "hid_ble_deinit close BT record begin");
         furi_record_close(RECORD_BT);
+        FURI_LOG_I(TAG, "hid_ble_deinit close BT record end");
     }
 
     free(ble_hid);
+    FURI_LOG_I(
+        TAG,
+        "hid_ble_deinit end duration=%lu ms",
+        (unsigned long)(furi_get_tick() - deinit_start));
+}
+
+void bad_usb_hid_ble_restore_default(void) {
+    if(!ble_profile_dirty) return;
+
+    Bt* bt = furi_record_open(RECORD_BT);
+    bt_keys_storage_set_default_path(bt);
+    bt_profile_restore_default_async(bt);
+    ble_profile_dirty = false;
+    furi_record_close(RECORD_BT);
+    FURI_LOG_I(TAG, "Default BLE profile restoration queued");
 }
 
 void hid_ble_set_state_callback(void* inst, HidStateCallback cb, void* context) {

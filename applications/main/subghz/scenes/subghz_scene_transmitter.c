@@ -4,7 +4,7 @@
 
 #include <lib/subghz/blocks/custom_btn.h>
 
-#include <lib/subghz/devices/devices.c>
+#include <lib/subghz/devices/devices.h>
 #include "applications/main/subghz/helpers/subghz_txrx_i.h"
 #include "lib/subghz/blocks/generic.h"
 
@@ -91,8 +91,13 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
             subghz_block_generic_global.endless_tx = false;
             return true;
         } else if(event.event == SubGhzCustomEventViewTransmitterBack) {
-            scene_manager_search_and_switch_to_previous_scene(
-                subghz->scene_manager, SubGhzSceneStart);
+            // Opened straight from a file (Archive) there is no Start scene to go
+            // back to; exit the app then instead of swallowing Back for good.
+            if(!scene_manager_search_and_switch_to_previous_scene(
+                   subghz->scene_manager, SubGhzSceneStart)) {
+                scene_manager_stop(subghz->scene_manager);
+                view_dispatcher_stop(subghz->view_dispatcher);
+            }
             return true;
         } else if(event.event == SubGhzCustomEventViewTransmitterError) {
             furi_string_set(subghz->error_str, "Protocol not\nfound!");
@@ -130,7 +135,9 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
 
 void subghz_scene_transmitter_on_exit(void* context) {
     SubGhz* subghz = context;
+    subghz_block_generic_global.endless_tx = false;
     subghz->state_notifications = SubGhzNotificationStateIDLE;
 
+    subghz_txrx_stop(subghz->txrx);
     subghz_txrx_reset_dynamic_and_custom_btns(subghz->txrx);
 }

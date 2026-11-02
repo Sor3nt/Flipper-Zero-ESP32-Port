@@ -39,7 +39,7 @@ typedef struct FuriHalBleProfileBase {
 
 typedef struct FuriHalBleProfileTemplate {
     FuriHalBleProfileBase* (*start)(FuriHalBleProfileParams profile_params);
-    void (*stop)(FuriHalBleProfileBase* profile);
+    bool (*stop)(FuriHalBleProfileBase* profile);
     void (*get_gap_config)(GapConfig* config, FuriHalBleProfileParams profile_params);
 } FuriHalBleProfileTemplate;
 

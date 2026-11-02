@@ -6,6 +6,7 @@
 #include "gpio_custom_event.h"
 #include "usb_uart_bridge.h"
 #include <power/power_service/power.h>
+#include "../infrared/infrared_app.h"
 
 #include <gui/gui.h>
 #include <gui/view_dispatcher.h>
@@ -29,9 +30,11 @@ struct GpioApp {
     Widget* widget;
     DialogEx* dialog;
     Power* power;
+    InfraredSettings infrared_settings;
+    UsbUartConfig usb_uart_state_config;
+    UsbUartState usb_uart_state;
 
     VariableItemList* var_item_list;
-    VariableItem* var_item_flow;
     GpioTest* gpio_test;
     GpioUsbUart* gpio_usb_uart;
     GPIOItems* gpio_items;

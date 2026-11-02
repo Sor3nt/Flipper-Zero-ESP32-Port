@@ -72,6 +72,12 @@ static GpioParseReturn gpio_command_parse(FuriString* args, size_t* pin_num, uin
     return ret;
 }
 
+static bool gpio_pin_is_reserved(size_t num) {
+    const char* owner = furi_hal_gpio_get_reservation(gpio_pins[num].pin);
+    if(owner) printf("Err: pin %s is in use by %s.", gpio_pins[num].name, owner);
+    return owner != NULL;
+}
+
 void cli_command_gpio_mode(PipeSide* pipe, FuriString* args, void* context) {
     UNUSED(pipe);
     UNUSED(context);
@@ -91,6 +97,8 @@ void cli_command_gpio_mode(PipeSide* pipe, FuriString* args, void* context) {
         printf("Value is invalid. Enter 1 for input or 0 for output");
         return;
     }
+
+    if(gpio_pin_is_reserved(num)) return;
 
     if(gpio_pins[num].debug) { //-V779
         printf(
@@ -151,6 +159,8 @@ void cli_command_gpio_set(PipeSide* pipe, FuriString* args, void* context) {
         printf("Value is invalid. Enter 1 for high or 0 for low");
         return;
     }
+
+    if(gpio_pin_is_reserved(num)) return;
 
     if(LL_GPIO_MODE_OUTPUT != //-V779
        LL_GPIO_GetPinMode(gpio_pins[num].pin->port, gpio_pins[num].pin->pin)) {

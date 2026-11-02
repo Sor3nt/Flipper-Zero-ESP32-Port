@@ -67,7 +67,7 @@ const int32_t debug_counter_val[DEBUG_COUNTER_COUNT] = {
 };
 
 //TX Power
-#define TX_POWER_COUNT 9
+#define TX_POWER_COUNT SUBGHZ_TXRX_TX_POWER_COUNT
 const char* const tx_power_text[TX_POWER_COUNT] = {
     "Preset",
     "10dBm +",
@@ -164,6 +164,232 @@ static void subghz_scene_receiver_config_set_timestamp_file_names(VariableItem* 
     subghz_last_settings_save(subghz->last_settings);
 }
 
+/* ---- External CC1101 module (boards with furi_hal_subghz_ext_supported()) ----
+ * Module = which radio Sub-GHz uses; Ext CS / Ext GDO0 = which two header GPIOs the
+ * module is wired to (MISO/MOSI/SCK are the board radio's shared SPI bus). The pins are
+ * only stored here - they are claimed while the module is the active radio, i.e. for
+ * the time the Sub-GHz app runs with Module = External, and free otherwise. */
+
+static VariableItem* ext_module_item;
+static VariableItem* ext_cs_item;
+static VariableItem* ext_g0_item;
+static uint8_t ext_cs_index;
+static uint8_t ext_g0_index;
+/* The change callbacks only update the on-screen value and stash the request
+ * here; the blocking probe/attach and any dialog run later from on_event. */
+static uint8_t ext_pending_module_index;
+static uint8_t ext_cs_prev;
+static uint8_t ext_g0_prev;
+
+static uint8_t subghz_scene_radio_settings_ext_pin_at(uint8_t index) {
+    return (uint8_t)gpio_pins[index].pin->pin;
+}
+
+static uint8_t subghz_scene_radio_settings_ext_index_of(uint8_t pin) {
+    for(size_t i = 0; i < gpio_pins_count; i++) {
+        if(gpio_pins[i].pin->pin == pin) return (uint8_t)i;
+    }
+    return 0;
+}
+
+static const char* subghz_scene_radio_settings_ext_error_text(FuriHalSubGhzExtResult result) {
+    switch(result) {
+    case FuriHalSubGhzExtNotDetected:
+        return "No CC1101 found\non the chosen pins";
+    case FuriHalSubGhzExtPinInUse:
+        return "A pin is used by\nanother feature";
+    case FuriHalSubGhzExtBusy:
+        return "The radio is busy";
+    case FuriHalSubGhzExtBadConfig:
+        return "CS and GDO0 must\nbe different pins";
+    default:
+        return "Not available";
+    }
+}
+
+static void subghz_scene_radio_settings_ext_show_error_text(SubGhz* subghz, const char* text) {
+    DialogMessage* message = dialog_message_alloc();
+    dialog_message_set_header(message, "External module", 64, 4, AlignCenter, AlignTop);
+    dialog_message_set_text(message, text, 64, 32, AlignCenter, AlignCenter);
+    dialog_message_set_buttons(message, NULL, "OK", NULL);
+    dialog_message_show(subghz->dialogs, message);
+    dialog_message_free(message);
+}
+
+static void subghz_scene_radio_settings_ext_show_error(SubGhz* subghz, FuriHalSubGhzExtResult result) {
+    subghz_scene_radio_settings_ext_show_error_text(
+        subghz, subghz_scene_radio_settings_ext_error_text(result));
+}
+
+static void subghz_scene_radio_settings_ext_module_text(VariableItem* item, uint8_t index) {
+    variable_item_set_current_value_text(item, radio_device_text[index ? 1 : 0]);
+}
+
+/* Fall back to the board radio, forget the External choice and tell the user why. */
+static void subghz_scene_radio_settings_ext_failed(SubGhz* subghz, FuriHalSubGhzExtResult result) {
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_get_config(&config);
+    subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeInternal);
+    config.use_external = false;
+    furi_hal_subghz_ext_set_config(&config);
+    if(ext_module_item) {
+        variable_item_set_current_value_index(ext_module_item, 0);
+        subghz_scene_radio_settings_ext_module_text(ext_module_item, 0);
+    }
+    subghz_scene_radio_settings_ext_show_error(subghz, result);
+}
+
+/* Heavy path: blocking probe/attach + possible modal dialog. Must run from
+ * on_event, never from the VariableItem change callback. */
+static void subghz_scene_radio_settings_apply_module(SubGhz* subghz, uint8_t index) {
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_get_config(&config);
+
+    if(index == 0) {
+        /* Releases the module and its pins; the board radio is used from here on. */
+        subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeInternal);
+        config.use_external = false;
+        furi_hal_subghz_ext_set_config(&config);
+        return;
+    }
+
+    /* Probe first so the user gets the real reason when it does not work. */
+    const FuriHalSubGhzExtResult probe = furi_hal_subghz_ext_probe();
+    if(probe != FuriHalSubGhzExtOk) {
+        subghz_scene_radio_settings_ext_failed(subghz, probe);
+        return;
+    }
+    config.use_external = true;
+    furi_hal_subghz_ext_set_config(&config);
+    if(subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeExternalCC1101) !=
+       SubGhzRadioDeviceTypeExternalCC1101) {
+        subghz_scene_radio_settings_ext_failed(subghz, FuriHalSubGhzExtBusy);
+    }
+}
+
+static void subghz_scene_radio_settings_set_module(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    /* Only the cheap on-screen update happens here; the probe/attach runs from
+     * on_event so the list's input dispatch isn't blocked and no modal dialog is
+     * opened from inside it. */
+    subghz_scene_radio_settings_ext_module_text(item, index);
+    ext_pending_module_index = index;
+    view_dispatcher_send_custom_event(
+        subghz->view_dispatcher, SubGhzCustomEventSceneSettingExtModule);
+}
+
+/* Step over the pad the other signal uses, in the direction the user was moving. */
+static uint8_t subghz_scene_radio_settings_ext_pick(uint8_t index, uint8_t previous, uint8_t other) {
+    const size_t count = gpio_pins_count;
+    const bool forward = ((index + count - previous) % count) == 1;
+    for(size_t guard = 0; guard < count && index == other; guard++) {
+        index = forward ? (uint8_t)((index + 1) % count) : (uint8_t)((index + count - 1) % count);
+    }
+    return index;
+}
+
+/* Returns false when the pin was NOT persisted (the module is attached and held, or the
+ * chosen pin is claimed by another external module, e.g. NRF24's). The caller must then put
+ * the displayed index/text back, or the screen would show a pin that was never saved. */
+static bool subghz_scene_radio_settings_ext_apply_pins(SubGhz* subghz, bool cs_changed) {
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_get_config(&config);
+    const bool was_external =
+        subghz_txrx_radio_device_get(subghz->txrx) == SubGhzRadioDeviceTypeExternalCC1101;
+
+    /* The pins can only change while the module is released. */
+    if(was_external) subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeInternal);
+    if(cs_changed) {
+        config.cs_pin = subghz_scene_radio_settings_ext_pin_at(ext_cs_index);
+    } else {
+        config.g0_pin = subghz_scene_radio_settings_ext_pin_at(ext_g0_index);
+    }
+    if(!furi_hal_subghz_ext_set_config(&config)) {
+        if(was_external) {
+            /* Put the module back exactly as it was before this pick. */
+            subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeExternalCC1101);
+        }
+        subghz_scene_radio_settings_ext_show_error_text(subghz, "Pin busy or used\nby another feature");
+        return false;
+    }
+
+    if(was_external &&
+       subghz_txrx_radio_device_set(subghz->txrx, SubGhzRadioDeviceTypeExternalCC1101) !=
+           SubGhzRadioDeviceTypeExternalCC1101) {
+        subghz_scene_radio_settings_ext_failed(subghz, furi_hal_subghz_ext_probe());
+    }
+    return true;
+}
+
+static void subghz_scene_radio_settings_set_ext_cs(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    ext_cs_prev = ext_cs_index;
+    ext_cs_index = subghz_scene_radio_settings_ext_pick(
+        variable_item_get_current_value_index(item), ext_cs_index, ext_g0_index);
+    variable_item_set_current_value_index(item, ext_cs_index);
+    variable_item_set_current_value_text(item, gpio_pins[ext_cs_index].name);
+    /* Persist + re-attach (and any error dialog) deferred to on_event. */
+    view_dispatcher_send_custom_event(
+        subghz->view_dispatcher, SubGhzCustomEventSceneSettingExtCs);
+}
+
+static void subghz_scene_radio_settings_set_ext_g0(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    ext_g0_prev = ext_g0_index;
+    ext_g0_index = subghz_scene_radio_settings_ext_pick(
+        variable_item_get_current_value_index(item), ext_g0_index, ext_cs_index);
+    variable_item_set_current_value_index(item, ext_g0_index);
+    variable_item_set_current_value_text(item, gpio_pins[ext_g0_index].name);
+    /* Persist + re-attach (and any error dialog) deferred to on_event. */
+    view_dispatcher_send_custom_event(
+        subghz->view_dispatcher, SubGhzCustomEventSceneSettingExtG0);
+}
+
+static void subghz_scene_radio_settings_add_ext_items(SubGhz* subghz) {
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_get_config(&config);
+
+    const uint8_t module_index =
+        (subghz_txrx_radio_device_get(subghz->txrx) == SubGhzRadioDeviceTypeExternalCC1101 ||
+         config.use_external) ?
+            1 :
+            0;
+    ext_module_item = variable_item_list_add(
+        subghz->variable_item_list,
+        "Module",
+        RADIO_DEVICE_COUNT,
+        subghz_scene_radio_settings_set_module,
+        subghz);
+    variable_item_set_current_value_index(ext_module_item, module_index);
+    if(module_index == 1 &&
+       subghz_txrx_radio_device_get(subghz->txrx) != SubGhzRadioDeviceTypeExternalCC1101) {
+        /* Chosen earlier but not answering now (unplugged, pin taken). */
+        variable_item_set_current_value_text(ext_module_item, "Ext: not found");
+    } else {
+        subghz_scene_radio_settings_ext_module_text(ext_module_item, module_index);
+    }
+
+    ext_cs_index = subghz_scene_radio_settings_ext_index_of(config.cs_pin);
+    ext_g0_index = subghz_scene_radio_settings_ext_index_of(config.g0_pin);
+    ext_cs_item = variable_item_list_add(
+        subghz->variable_item_list,
+        "Ext CS pin",
+        gpio_pins_count,
+        subghz_scene_radio_settings_set_ext_cs,
+        subghz);
+    variable_item_set_current_value_index(ext_cs_item, ext_cs_index);
+    variable_item_set_current_value_text(ext_cs_item, gpio_pins[ext_cs_index].name);
+    ext_g0_item = variable_item_list_add(
+        subghz->variable_item_list,
+        "Ext GDO0 pin",
+        gpio_pins_count,
+        subghz_scene_radio_settings_set_ext_g0,
+        subghz);
+    variable_item_set_current_value_index(ext_g0_item, ext_g0_index);
+    variable_item_set_current_value_text(ext_g0_item, gpio_pins[ext_g0_index].name);
+}
+
 void subghz_scene_radio_settings_on_enter(void* context) {
     SubGhz* subghz = context;
 
@@ -171,7 +397,9 @@ void subghz_scene_radio_settings_on_enter(void* context) {
     int32_t value_index;
     VariableItem* item;
 
-    // Module selection removed — ESP32 port has no external CC1101 option
+    if(furi_hal_subghz_ext_supported()) {
+        subghz_scene_radio_settings_add_ext_items(subghz);
+    }
 
     //Add TX Power
     item = variable_item_list_add(
@@ -181,7 +409,7 @@ void subghz_scene_radio_settings_on_enter(void* context) {
         subghz_scene_radio_settings_set_tx_power,
         subghz);
 
-    value_index = subghz->tx_power;
+    value_index = subghz->tx_power < TX_POWER_COUNT ? subghz->tx_power : 0;
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, tx_power_text[value_index]);
 
@@ -258,14 +486,46 @@ void subghz_scene_radio_settings_on_enter(void* context) {
 
 bool subghz_scene_radio_settings_on_event(void* context, SceneManagerEvent event) {
     SubGhz* subghz = context;
-    UNUSED(subghz);
-    UNUSED(event);
+
+    if(event.type == SceneManagerEventTypeCustom) {
+        switch(event.event) {
+        case SubGhzCustomEventSceneSettingExtModule:
+            subghz_scene_radio_settings_apply_module(subghz, ext_pending_module_index);
+            return true;
+        case SubGhzCustomEventSceneSettingExtCs:
+            if(!subghz_scene_radio_settings_ext_apply_pins(subghz, true)) {
+                /* Rejected: put the shown pin back to what was actually saved. */
+                ext_cs_index = ext_cs_prev;
+                if(ext_cs_item) {
+                    variable_item_set_current_value_index(ext_cs_item, ext_cs_index);
+                    variable_item_set_current_value_text(
+                        ext_cs_item, gpio_pins[ext_cs_index].name);
+                }
+            }
+            return true;
+        case SubGhzCustomEventSceneSettingExtG0:
+            if(!subghz_scene_radio_settings_ext_apply_pins(subghz, false)) {
+                ext_g0_index = ext_g0_prev;
+                if(ext_g0_item) {
+                    variable_item_set_current_value_index(ext_g0_item, ext_g0_index);
+                    variable_item_set_current_value_text(
+                        ext_g0_item, gpio_pins[ext_g0_index].name);
+                }
+            }
+            return true;
+        default:
+            break;
+        }
+    }
 
     return false;
 }
 
 void subghz_scene_radio_settings_on_exit(void* context) {
     SubGhz* subghz = context;
+    ext_module_item = NULL;
+    ext_cs_item = NULL;
+    ext_g0_item = NULL;
     variable_item_list_set_selected_item(subghz->variable_item_list, 0);
     variable_item_list_reset(subghz->variable_item_list);
 }

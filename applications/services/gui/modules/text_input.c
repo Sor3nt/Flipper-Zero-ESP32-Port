@@ -14,6 +14,12 @@ typedef struct {
     const uint8_t y;
 } TextInputKey;
 
+typedef enum {
+    TextInputCaseModeAuto,
+    TextInputCaseModeUpper,
+    TextInputCaseModeLower,
+} TextInputCaseMode;
+
 typedef struct {
     const char* header;
     char* text_buffer;
@@ -29,6 +35,8 @@ typedef struct {
 
     uint8_t selected_row;
     uint8_t selected_column;
+    TextInputCaseMode case_mode;
+    bool case_selector_selected;
 
     TextInputValidatorCallback validator_callback;
     void* validator_callback_context;
@@ -40,6 +48,7 @@ static const uint8_t keyboard_origin_x = 1;
 static const uint8_t keyboard_origin_y = 29;
 static const uint8_t keyboard_row_count = 3;
 
+#define TEXT_INPUT_TEXT_WIDTH_OFFSET 32
 #define ENTER_KEY     '\r'
 #define BACKSPACE_KEY '\b'
 
@@ -160,10 +169,26 @@ static void text_input_backspace_cb(TextInputModel* model) {
     }
 }
 
+static bool text_input_toggle_selected_case(TextInputModel* model) {
+    if(model->cursor_select || model->case_selector_selected ||
+       !char_is_lowercase(get_selected_char(model))) {
+        return false;
+    }
+
+    const size_t text_length = strlen(model->text_buffer);
+    const bool displayed_uppercase =
+        model->case_mode == TextInputCaseModeUpper ||
+        (model->case_mode == TextInputCaseModeAuto &&
+         (model->clear_default_text || text_length == 0));
+    model->case_mode =
+        displayed_uppercase ? TextInputCaseModeLower : TextInputCaseModeUpper;
+    return true;
+}
+
 static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
     TextInputModel* model = _model;
     uint8_t text_length = model->text_buffer ? strlen(model->text_buffer) : 0;
-    uint8_t needed_string_width = canvas_width(canvas) - 8;
+    uint8_t needed_string_width = canvas_width(canvas) - TEXT_INPUT_TEXT_WIDTH_OFFSET;
     uint8_t start_pos = 4;
 
     model->cursor_pos = model->cursor_pos > text_length ? text_length : model->cursor_pos;
@@ -175,15 +200,19 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
     canvas_draw_str(canvas, 2, 8, model->header);
     elements_slightly_rounded_frame(canvas, 1, 12, 126, 15);
 
-    char buf[text_length + 1];
+    char buf[text_length + 5];
+    buf[0] = '\0';
     if(model->text_buffer) {
         strlcpy(buf, model->text_buffer, sizeof(buf));
     }
     char* str = buf;
 
     if(model->clear_default_text) {
-        elements_slightly_rounded_box(
-            canvas, start_pos - 1, 14, canvas_string_width(canvas, str) + 2, 10);
+        uint8_t box_width = canvas_string_width(canvas, str) + 2;
+        if(box_width > needed_string_width) {
+            box_width = needed_string_width;
+        }
+        elements_slightly_rounded_box(canvas, start_pos - 1, 14, box_width, 10);
         canvas_set_color(canvas, ColorWhite);
     } else {
         char* move = str + cursor_pos;
@@ -213,6 +242,21 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
     }
 
     canvas_draw_str(canvas, start_pos, 22, str);
+    canvas_set_font(canvas, FontSecondary);
+    const char* case_mode_label = "aA";
+    if(model->case_mode == TextInputCaseModeUpper) {
+        case_mode_label = "ABC";
+    } else if(model->case_mode == TextInputCaseModeLower) {
+        case_mode_label = "abc";
+    }
+    canvas_draw_line(canvas, 103, 14, 103, 25);
+    if(model->case_selector_selected) {
+        canvas_draw_box(canvas, 105, 14, 21, 11);
+        canvas_set_color(canvas, ColorWhite);
+    }
+    canvas_draw_str(canvas, 108, 22, case_mode_label);
+    canvas_set_color(canvas, ColorBlack);
+    canvas_set_font(canvas, FontPrimary);
 
     canvas_set_font(canvas, FontKeyboard);
 
@@ -268,19 +312,19 @@ static void text_input_view_draw_callback(Canvas* canvas, void* _model) {
                     canvas_set_color(canvas, ColorBlack);
                 }
 
-                if(model->clear_default_text || text_length == 0) {
-                    canvas_draw_glyph(
-                        canvas,
-                        keyboard_origin_x + keys[column].x,
-                        keyboard_origin_y + keys[column].y,
-                        char_to_uppercase(keys[column].text));
-                } else {
-                    canvas_draw_glyph(
-                        canvas,
-                        keyboard_origin_x + keys[column].x,
-                        keyboard_origin_y + keys[column].y,
-                        keys[column].text);
+                bool show_uppercase =
+                    model->case_mode == TextInputCaseModeUpper ||
+                    (model->case_mode == TextInputCaseModeAuto &&
+                     (model->clear_default_text || text_length == 0));
+                char key_character = keys[column].text;
+                if(show_uppercase) {
+                    key_character = char_to_uppercase(key_character);
                 }
+                canvas_draw_glyph(
+                    canvas,
+                    keyboard_origin_x + keys[column].x,
+                    keyboard_origin_y + keys[column].y,
+                    key_character);
             }
         }
     }
@@ -306,6 +350,7 @@ static void text_input_handle_up(TextInput* text_input, TextInputModel* model) {
         }
     } else {
         model->cursor_select = true;
+        model->case_selector_selected = false;
         model->clear_default_text = false;
     }
 }
@@ -313,6 +358,7 @@ static void text_input_handle_up(TextInput* text_input, TextInputModel* model) {
 static void text_input_handle_down(TextInput* text_input, TextInputModel* model) {
     UNUSED(text_input);
     if(model->cursor_select) {
+        model->case_selector_selected = false;
         model->cursor_select = false;
     } else if(model->selected_row < keyboard_row_count - 1) {
         model->selected_row++;
@@ -325,9 +371,14 @@ static void text_input_handle_down(TextInput* text_input, TextInputModel* model)
 static void text_input_handle_left(TextInput* text_input, TextInputModel* model) {
     UNUSED(text_input);
     if(model->cursor_select) {
-        model->clear_default_text = false;
-        if(model->cursor_pos > 0) {
-            model->cursor_pos = CLAMP(model->cursor_pos - 1, strlen(model->text_buffer), 0u);
+        if(model->case_selector_selected) {
+            model->case_selector_selected = false;
+            model->cursor_pos = strlen(model->text_buffer);
+        } else {
+            model->clear_default_text = false;
+            if(model->cursor_pos > 0) {
+                model->cursor_pos = CLAMP(model->cursor_pos - 1, strlen(model->text_buffer), 0u);
+            }
         }
     } else if(model->selected_column > 0) {
         model->selected_column--;
@@ -339,8 +390,14 @@ static void text_input_handle_left(TextInput* text_input, TextInputModel* model)
 static void text_input_handle_right(TextInput* text_input, TextInputModel* model) {
     UNUSED(text_input);
     if(model->cursor_select) {
-        model->clear_default_text = false;
-        model->cursor_pos = CLAMP(model->cursor_pos + 1, strlen(model->text_buffer), 0u);
+        if(model->case_selector_selected) {
+            model->case_selector_selected = false;
+        } else if(model->cursor_pos == strlen(model->text_buffer)) {
+            model->case_selector_selected = true;
+        } else {
+            model->clear_default_text = false;
+            model->cursor_pos = CLAMP(model->cursor_pos + 1, strlen(model->text_buffer), 0u);
+        }
     } else if(model->selected_column < get_row_size(model->selected_row) - 1) {
         model->selected_column++;
     } else {
@@ -349,6 +406,18 @@ static void text_input_handle_right(TextInput* text_input, TextInputModel* model
 }
 
 static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, InputType type) {
+    if(model->case_selector_selected) {
+        if(type == InputTypeShort) {
+            if(model->case_mode == TextInputCaseModeAuto) {
+                model->case_mode = TextInputCaseModeUpper;
+            } else if(model->case_mode == TextInputCaseModeUpper) {
+                model->case_mode = TextInputCaseModeLower;
+            } else {
+                model->case_mode = TextInputCaseModeAuto;
+            }
+        }
+        return;
+    }
     if(model->cursor_select) {
         model->clear_default_text = !model->clear_default_text;
         return;
@@ -375,7 +444,9 @@ static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, I
                 text_length = 0;
             }
             if(text_length < (model->text_buffer_size - 1)) {
-                if(shift != (text_length == 0)) {
+                if((model->case_mode == TextInputCaseModeAuto &&
+                    (shift != (text_length == 0))) ||
+                   model->case_mode == TextInputCaseModeUpper) {
                     selected = char_to_uppercase(selected);
                 }
                 if(model->clear_default_text) {
@@ -445,7 +516,9 @@ static bool text_input_view_input_callback(InputEvent* event, void* context) {
             text_input_handle_right(text_input, model);
             break;
         case InputKeyOk:
-            text_input_handle_ok(text_input, model, event->type);
+            if(!text_input_toggle_selected_case(model)) {
+                text_input_handle_ok(text_input, model, event->type);
+            }
             break;
         case InputKeyBack:
             text_input_backspace_cb(model);
@@ -551,6 +624,8 @@ void text_input_reset(TextInput* text_input) {
             model->header = "";
             model->selected_row = 0;
             model->selected_column = 0;
+            model->case_mode = TextInputCaseModeAuto;
+            model->case_selector_selected = false;
             model->minimum_length = 1;
             model->clear_default_text = false;
             model->cursor_pos = 0;

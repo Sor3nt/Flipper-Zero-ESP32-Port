@@ -3,10 +3,8 @@
 // M5Stack Unit RFID2 driver — WS1850S (MFRC522-register-compatible), 13.56 MHz,
 // I2C @ 0x28. Reads ISO14443-A card UIDs (MIFARE Classic/Ultralight, NTAG).
 //
-// Connects to the Cardputer-ADV side Grove PORT (HY2.0): SDA=G2, SCL=G1 — a
-// SEPARATE I2C bus from the internal keyboard bus (G8/G9). The driver initializes
-// this bus itself on a free I2C peripheral. (G1 is shared with IR-RX, so don't use
-// IR while the RFID2 is plugged in.)
+// Connects to the board's external/Qwiic I2C pins. This bus may be shared with
+// power management and NFC, so the firmware owns its initialization.
 //
 // NOT hardware-tested — standard MFRC522 sequences; validate on the unit.
 
@@ -19,17 +17,21 @@
 #include <boards/board.h> // BOARD_PIN_QWIIC_* Grove pins (board-specific)
 
 #define RFID2_I2C_ADDR 0x28
-#define RFID2_I2C_PORT I2C_NUM_1 // dedicated bus for the Grove port
-// Grove I2C pins come from the board's QWIIC/Grove defines so this driver lands
-// on the right connector per board (Cardputer-ADV → G2/G1; StickS3 → G9/G10, which
-// keeps it OFF the StickS3 radio pins G2=CC1101_CSN / G1=nRF24_CE). Falls back to
-// the Cardputer-ADV Grove pins on boards that don't define QWIIC.
+#if defined(BOARD_EXT_I2C_PORT)
+#define RFID2_I2C_PORT BOARD_EXT_I2C_PORT
+#elif defined(BOARD_PIN_QWIIC_SDA) && defined(BOARD_PIN_QWIIC_SCL) && \
+    defined(BOARD_NFC_I2C_PORT)
+#define RFID2_I2C_PORT BOARD_NFC_I2C_PORT
+#else
+#define RFID2_I2C_PORT I2C_NUM_1
+#endif
+
 #if defined(BOARD_PIN_QWIIC_SDA) && defined(BOARD_PIN_QWIIC_SCL)
 #define RFID2_SDA_PIN  BOARD_PIN_QWIIC_SDA
 #define RFID2_SCL_PIN  BOARD_PIN_QWIIC_SCL
 #else
-#define RFID2_SDA_PIN  2 // Cardputer-ADV Grove SDA (G2)
-#define RFID2_SCL_PIN  1 // Cardputer-ADV Grove SCL (G1)
+#define RFID2_SDA_PIN  2
+#define RFID2_SCL_PIN  1
 #endif
 
 /** Soft-reset + configure the reader and turn the antenna on. false on failure. */

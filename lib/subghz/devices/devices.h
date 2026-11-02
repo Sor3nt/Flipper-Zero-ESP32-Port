@@ -36,7 +36,8 @@ void subghz_devices_stop_async_tx(const SubGhzDevice* device);
 
 void subghz_devices_set_rx(const SubGhzDevice* device);
 void subghz_devices_flush_rx(const SubGhzDevice* device);
-void subghz_devices_start_async_rx(const SubGhzDevice* device, void* callback, void* context);
+/** Start asynchronous RX. Returns false if the radio did not enter RX. */
+bool subghz_devices_start_async_rx(const SubGhzDevice* device, void* callback, void* context);
 void subghz_devices_stop_async_rx(const SubGhzDevice* device);
 
 float subghz_devices_get_rssi(const SubGhzDevice* device);

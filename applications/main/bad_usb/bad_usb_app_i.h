@@ -29,6 +29,13 @@ typedef enum {
     BadUsbAppErrorCloseRpc,
 } BadUsbAppError;
 
+typedef enum {
+    BadUsbShutdownNone,
+    BadUsbShutdownExit,
+    BadUsbShutdownPreviousScene,
+    BadUsbShutdownConfig,
+} BadUsbShutdownAction;
+
 struct BadUsbApp {
     Gui* gui;
     ViewDispatcher* view_dispatcher;
@@ -52,6 +59,9 @@ struct BadUsbApp {
     BadUsbScript* bad_usb_script;
 
     BadUsbHidInterface interface;
+    BadUsbShutdownAction shutdown_action;
+    uint32_t shutdown_started_tick;
+    bool shutdown_warning_logged;
     BadUsbHidConfig user_hid_cfg;
     BadUsbHidConfig script_hid_cfg;
     FuriHalUsbInterface* usb_if_prev;
@@ -67,3 +77,4 @@ typedef enum {
 } BadUsbAppView;
 
 void bad_usb_set_interface(BadUsbApp* app, BadUsbHidInterface interface);
+void bad_usb_app_stop_script_async(BadUsbApp* app, BadUsbShutdownAction action);

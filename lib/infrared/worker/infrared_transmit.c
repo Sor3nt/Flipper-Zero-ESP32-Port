@@ -43,14 +43,19 @@ void infrared_send_raw_ext(
     uint32_t frequency,
     float duty_cycle) {
     furi_check(timings);
+    furi_check(timings_cnt > 0);
 
     infrared_tx_raw_start_from_mark = start_from_mark;
     infrared_tx_raw_timings_index = 0;
     infrared_tx_raw_timings_number = timings_cnt;
     infrared_tx_raw_add_silence = start_from_mark;
+    furi_check(furi_hal_infrared_claim_tx());
     furi_hal_infrared_async_tx_set_data_isr_callback(
         infrared_get_raw_data_callback, (void*)timings);
-    furi_hal_infrared_async_tx_start(frequency, duty_cycle);
+    if(!furi_hal_infrared_async_tx_start(frequency, duty_cycle)) {
+        furi_hal_infrared_release_claim();
+        return;
+    }
     furi_hal_infrared_async_tx_wait_termination();
 
     furi_check(!furi_hal_infrared_is_busy());
@@ -100,6 +105,7 @@ void infrared_send(const InfraredMessage* message, int times) {
     furi_check(infrared_is_protocol_valid(message->protocol));
 
     InfraredEncoderHandler* handler = infrared_alloc_encoder();
+    furi_check(handler);
     infrared_reset_encoder(handler, message);
     infrared_tx_number_of_transmissions =
         MAX((int)infrared_get_protocol_min_repeat_count(message->protocol), times);
@@ -107,8 +113,13 @@ void infrared_send(const InfraredMessage* message, int times) {
     uint32_t frequency = infrared_get_protocol_frequency(message->protocol);
     float duty_cycle = infrared_get_protocol_duty_cycle(message->protocol);
 
+    furi_check(furi_hal_infrared_claim_tx());
     furi_hal_infrared_async_tx_set_data_isr_callback(infrared_get_data_callback, handler);
-    furi_hal_infrared_async_tx_start(frequency, duty_cycle);
+    if(!furi_hal_infrared_async_tx_start(frequency, duty_cycle)) {
+        furi_hal_infrared_release_claim();
+        infrared_free_encoder(handler);
+        return;
+    }
     furi_hal_infrared_async_tx_wait_termination();
 
     infrared_free_encoder(handler);

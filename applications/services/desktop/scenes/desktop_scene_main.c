@@ -184,6 +184,10 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             animation_manager_new_idle_process(desktop->animation_manager);
             consumed = true;
             break;
+        case DesktopAnimationEventNewExternalAnimation:
+            animation_manager_new_external_process(desktop->animation_manager);
+            consumed = true;
+            break;
         case DesktopAnimationEventInteractAnimation:
             if(!animation_manager_interact_process(desktop->animation_manager)) {
                 if(!desktop->settings.dummy_mode) {

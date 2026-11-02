@@ -13,6 +13,14 @@
 
 #define MJ_DUCKY_INTER_KEY_MS 10
 
+/* A real BadUSB script is a few KB. Refuse anything far larger up front so a
+ * malformed/huge file (or one with no newline at all) can't exhaust the heap
+ * inside stream_read_line(), which buffers a whole line into a growing
+ * FuriString. The file-size cap already bounds the worst-case line length, so
+ * no separate per-line cap is needed (and a per-line cap risked silently
+ * dropping a legitimately long STRING payload). */
+#define MJ_MAX_SCRIPT_BYTES (64u * 1024u)
+
 /* Count lines once at open time so the UI can show progress. */
 static size_t count_lines(Storage* storage, const char* path) {
     Stream* s = buffered_file_stream_alloc(storage);
@@ -32,10 +40,12 @@ static size_t count_lines(Storage* storage, const char* path) {
 
 MjScript* mj_script_open(Storage* storage, const char* path) {
     MjScript* s = malloc(sizeof(MjScript));
+    if(!s) {
+        FURI_LOG_E(TAG, "no memory for script");
+        return NULL;
+    }
     memset(s, 0, sizeof(*s));
     s->storage = storage;
-
-    s->total_lines = count_lines(storage, path);
 
     Stream* stream = buffered_file_stream_alloc(storage);
     if(!buffered_file_stream_open(stream, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
@@ -45,6 +55,20 @@ MjScript* mj_script_open(Storage* storage, const char* path) {
         free(s);
         return NULL;
     }
+
+    /* Reject pathologically large files before counting lines or streaming:
+     * both read line-by-line into a growing FuriString, so a multi-MB file (or
+     * one with no newline at all) would exhaust the heap first. */
+    size_t size = stream_size(stream);
+    if(size > MJ_MAX_SCRIPT_BYTES) {
+        FURI_LOG_W(TAG, "script too large (%u bytes): %s", (unsigned)size, path);
+        buffered_file_stream_close(stream);
+        stream_free(stream);
+        free(s);
+        return NULL;
+    }
+
+    s->total_lines = count_lines(storage, path);
     s->stream = stream;
     s->line_buf = furi_string_alloc();
     s->default_delay_ms = 0;

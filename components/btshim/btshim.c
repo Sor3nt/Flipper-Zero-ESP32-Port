@@ -17,11 +17,17 @@
 #include <ble_profile/extra_profiles/serial_profile.h>
 #include <rpc/rpc.h>
 #include <esp_log.h>
-#include <esp_bt.h>
 #include <esp_heap_caps.h>
+#include <sdkconfig.h>
+#if CONFIG_BT_NIMBLE_ENABLED
+#include <ble_core.h>
+#else
+#include <esp_bt.h>
 #include <esp_bt_main.h>
 #include <esp_gap_ble_api.h>
+#endif
 #include <ble_serial.h>
+
 
 #define BT_RPC_EVENT_BUFF_SENT    (1UL << 0)
 #define BT_RPC_EVENT_DISCONNECTED (1UL << 1)
@@ -47,26 +53,34 @@
 
 /* ---- Statusbar ---- */
 
+/* Beacon and Bluetooth state are separate view ports so each can be hidden in
+ * Settings > Interface > Status Bar. The GUI puts the same 2 px gap between
+ * them that the combined icon used (ICON_SPACER). */
+static void bt_draw_beacon_statusbar_callback(Canvas* canvas, void* context) {
+    UNUSED(context);
+    canvas_draw_icon(canvas, 0, 0, &I_BLE_beacon_7x8);
+}
+
 static void bt_draw_statusbar_callback(Canvas* canvas, void* context) {
     furi_assert(context);
 
     Bt* bt = context;
-    uint8_t draw_offset = 0;
-    if(bt->beacon_active) {
-        canvas_draw_icon(canvas, 0, 0, &I_BLE_beacon_7x8);
-        draw_offset += icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
-    }
     if(bt->status == BtStatusAdvertising) {
-        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Idle_5x8);
+        canvas_draw_icon(canvas, 0, 0, &I_Bluetooth_Idle_5x8);
     } else if(bt->status == BtStatusConnected) {
-        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Connected_16x8);
+        canvas_draw_icon(canvas, 0, 0, &I_Bluetooth_Connected_16x8);
     }
 }
 
-static ViewPort* bt_statusbar_view_port_alloc(Bt* bt) {
+static ViewPort* bt_statusbar_view_port_alloc(
+    Bt* bt,
+    ViewPortDrawCallback callback,
+    uint8_t width,
+    ViewPortStatusBarIcon icon) {
     ViewPort* statusbar_view_port = view_port_alloc();
-    view_port_set_width(statusbar_view_port, 5);
-    view_port_draw_callback_set(statusbar_view_port, bt_draw_statusbar_callback, bt);
+    view_port_set_width(statusbar_view_port, width);
+    view_port_draw_callback_set(statusbar_view_port, callback, bt);
+    view_port_set_statusbar_icon(statusbar_view_port, icon);
     view_port_enabled_set(statusbar_view_port, false);
     return statusbar_view_port;
 }
@@ -76,6 +90,18 @@ static ViewPort* bt_statusbar_view_port_alloc(Bt* bt) {
 static void bt_pin_code_view_port_draw_callback(Canvas* canvas, void* context) {
     furi_assert(context);
     Bt* bt = context;
+    if(bt->pairing_stalled) {
+        canvas_clear(canvas);
+        elements_multiline_text_aligned(
+            canvas,
+            64,
+            4,
+            AlignCenter,
+            AlignTop,
+            "PAIRING NOT STARTED\nForget Flipper in QFlipper\nand phone Bluetooth settings.\nDevice: Settings > Bluetooth\n> Forget All");
+        elements_button_left(canvas, "Back");
+        return;
+    }
     char pin_code_info[24];
     canvas_draw_icon(canvas, 0, 0, &I_BLE_Pairing_128x64);
     snprintf(pin_code_info, sizeof(pin_code_info), "Pairing code\n%06lu", bt->pin_code);
@@ -103,22 +129,41 @@ static ViewPort* bt_pin_code_view_port_alloc(Bt* bt) {
 
 static void bt_pin_code_show(Bt* bt, uint32_t pin_code) {
     bt->pin_code = pin_code;
+    bt->pairing_stalled = false;
     if(!bt->pin_code_view_port) {
         bt->pin_code_view_port = bt_pin_code_view_port_alloc(bt);
         gui_add_view_port(bt->gui, bt->pin_code_view_port, GuiLayerFullscreen);
     }
     notification_message(bt->notification, &sequence_display_backlight_on);
-    if(bt->suppress_pin_screen) return;
+    BT_LOG_I("Pairing passkey UI requested (suppressed=%u)", bt->suppress_pin_screen);
+    if(bt->suppress_pin_screen) {
+        BT_LOG_W("Pairing passkey display suppressed");
+        return;
+    }
 
     gui_view_port_send_to_front(bt->gui, bt->pin_code_view_port);
     view_port_enabled_set(bt->pin_code_view_port, true);
+    BT_LOG_I("Pairing passkey viewport enabled");
 }
 
 static void bt_pin_code_hide(Bt* bt) {
     bt->pin_code = 0;
+    bt->pairing_stalled = false;
     if(bt->pin_code_view_port && view_port_is_enabled(bt->pin_code_view_port)) {
         view_port_enabled_set(bt->pin_code_view_port, false);
     }
+}
+
+static void bt_pairing_stalled_show(Bt* bt) {
+    bt->pin_code = 0;
+    bt->pairing_stalled = true;
+    if(!bt->pin_code_view_port) {
+        bt->pin_code_view_port = bt_pin_code_view_port_alloc(bt);
+        gui_add_view_port(bt->gui, bt->pin_code_view_port, GuiLayerFullscreen);
+    }
+    notification_message(bt->notification, &sequence_display_backlight_on);
+    gui_view_port_send_to_front(bt->gui, bt->pin_code_view_port);
+    view_port_enabled_set(bt->pin_code_view_port, true);
 }
 
 /* ---- Storage callback for key reload ---- */
@@ -141,9 +186,11 @@ static void bt_storage_callback(const void* message, void* context) {
 /* ---- Allocation ---- */
 
 static Bt* bt_alloc(void) {
-    Bt* bt = malloc(sizeof(Bt));
+    Bt* bt = calloc(1, sizeof(Bt));
+    furi_check(bt);
 
     bt->max_packet_size = BT_DEFAULT_MTU;
+    bt->status = BtStatusOff;
     bt->current_profile = NULL;
 
     /* Keys storage (stub on ESP32) */
@@ -152,14 +199,25 @@ static Bt* bt_alloc(void) {
     /* Message queue */
     bt->message_queue = furi_message_queue_alloc(8, sizeof(BtMessage));
 
-    /* Statusbar view port */
-    bt->statusbar_view_port = bt_statusbar_view_port_alloc(bt);
+    /* Statusbar view ports */
+    bt->beacon_view_port = bt_statusbar_view_port_alloc(
+        bt,
+        bt_draw_beacon_statusbar_callback,
+        icon_get_width(&I_BLE_beacon_7x8),
+        ViewPortStatusBarIconBleBeacon);
+    bt->statusbar_view_port = bt_statusbar_view_port_alloc(
+        bt,
+        bt_draw_statusbar_callback,
+        icon_get_width(&I_Bluetooth_Idle_5x8),
+        ViewPortStatusBarIconBluetooth);
 
     /* Notification */
     bt->notification = furi_record_open(RECORD_NOTIFICATION);
 
     /* GUI */
     bt->gui = furi_record_open(RECORD_GUI);
+    /* Beacon first: it is drawn left of the Bluetooth state, as before. */
+    gui_add_view_port(bt->gui, bt->beacon_view_port, GuiLayerStatusBarLeft);
     gui_add_view_port(bt->gui, bt->statusbar_view_port, GuiLayerStatusBarLeft);
 
     /* The rpc_start service creates RECORD_RPC before the BT service starts. */
@@ -170,6 +228,9 @@ static Bt* bt_alloc(void) {
     bt->rx_stream = furi_stream_buffer_alloc(BT_RX_STREAM_SIZE, 1);
 
     bt->pin = 0;
+    bt->sleep_suspended = false;
+    bt->stack_recovery_requested = false;
+    bt->stack_recovery_pending = false;
 
     return bt;
 }
@@ -234,7 +295,6 @@ static uint16_t bt_serial_event_callback(SerialServiceEvent event, void* context
         furi_thread_flags_set(furi_thread_get_id(bt->rx_thread), BT_RX_EVENT_DATA);
         ret = furi_stream_buffer_spaces_available(bt->rx_stream);
     } else if(event.event == SerialServiceEventTypeDataSent) {
-        BT_LOG_I("TX confirmed");
         furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_BUFF_SENT);
     } else if(event.event == SerialServiceEventTypesBleResetRequest) {
         FURI_LOG_I(TAG, "BLE restart request received");
@@ -246,7 +306,8 @@ static void bt_rpc_send_bytes_callback(void* context, uint8_t* bytes, size_t byt
     furi_assert(context);
     Bt* bt = context;
 
-    BT_LOG_I("TX send %zu bytes, max_pkt=%u", bytes_len, bt->max_packet_size);
+    /* Hot path: every RPC response goes through here, the UART would cost more than the radio. */
+    BT_LOG_D("TX send %zu bytes, max_pkt=%u", bytes_len, bt->max_packet_size);
 
     if(furi_event_flag_get(bt->rpc_event) & BT_RPC_EVENT_DISCONNECTED) {
         BT_LOG_W("TX aborted: disconnected");
@@ -290,7 +351,7 @@ static void bt_rpc_send_bytes_callback(void* context, uint8_t* bytes, size_t byt
             furi_event_flag_clear(bt->rpc_event, BT_RPC_EVENT_ALL & (~BT_RPC_EVENT_DISCONNECTED));
         }
     }
-    BT_LOG_I("TX done, sent %zu/%zu", bytes_sent, bytes_len);
+    BT_LOG_D("TX done, sent %zu/%zu", bytes_sent, bytes_len);
 }
 
 static void bt_serial_buffer_is_empty_callback(void* context) {
@@ -365,15 +426,18 @@ static bool bt_on_gap_event_callback(GapEvent event, void* context) {
     furi_assert(context);
     Bt* bt = context;
     bool ret = false;
-    bt->pin = 0;
     bool do_update_status = false;
 
     if(event.type == GapEventTypeConnected) {
+        bt->pin = 0;
+        bt->pairing_stalled = false;
         bt->status = BtStatusConnected;
         do_update_status = true;
         bt_open_rpc_connection(bt);
         ret = true;
     } else if(event.type == GapEventTypeDisconnected) {
+        bt->pin = 0;
+        bt->pairing_stalled = false;
         bt_close_rpc_connection(bt);
         bt->status = BtStatusOff;
         do_update_status = true;
@@ -387,11 +451,32 @@ static bool bt_on_gap_event_callback(GapEvent event, void* context) {
         do_update_status = true;
         ret = true;
     } else if(event.type == GapEventTypePinCodeShow) {
+        BT_LOG_I("Passkey display event received; queueing viewport update");
         bt->pin = event.data.pin_code;
         BtMessage message = {
             .type = BtMessageTypePinCodeShow, .data.pin_code = event.data.pin_code};
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+        if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+            BT_LOG_E("Passkey display event dropped: BT message queue full");
+            bt->pin = 0;
+            return false;
+        }
+        ret = true;
+    } else if(event.type == GapEventTypePairingStalled) {
+        BT_LOG_W("Pairing stalled event received; queueing user guidance");
+        BtMessage message = {.type = BtMessageTypePairingStalled};
+        if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+            BT_LOG_E("Pairing-stalled UI event dropped: BT message queue full");
+            return false;
+        }
+        ret = true;
+    } else if(event.type == GapEventTypePairingDone) {
+        BT_LOG_I("Pairing completion event received; queueing passkey hide");
+        bt->pin = 0;
+        BtMessage message = {.type = BtMessageTypePairingDone};
+        if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+            BT_LOG_E("Pairing completion UI event dropped: BT message queue full");
+            return false;
+        }
         ret = true;
     } else if(event.type == GapEventTypeUpdateMTU) {
         bt->max_packet_size = event.data.max_packet_size;
@@ -428,14 +513,13 @@ static void bt_on_key_storage_change_callback(uint8_t* addr, uint16_t size, void
 /* ---- Statusbar update ---- */
 
 static void bt_statusbar_update(Bt* bt) {
+    view_port_enabled_set(bt->beacon_view_port, bt->beacon_active);
+
     uint8_t active_icon_width = 0;
-    if(bt->beacon_active) {
-        active_icon_width = icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
-    }
     if(bt->status == BtStatusAdvertising) {
-        active_icon_width += icon_get_width(&I_Bluetooth_Idle_5x8);
+        active_icon_width = icon_get_width(&I_Bluetooth_Idle_5x8);
     } else if(bt->status == BtStatusConnected) {
-        active_icon_width += icon_get_width(&I_Bluetooth_Connected_16x8);
+        active_icon_width = icon_get_width(&I_Bluetooth_Connected_16x8);
     }
 
     if(active_icon_width > 0) {
@@ -448,11 +532,44 @@ static void bt_statusbar_update(Bt* bt) {
 
 /* ---- Profile management ---- */
 
+static bool bt_handle_stop_stack(Bt* bt);
+static void bt_handle_start_stack(Bt* bt);
+
+static void bt_queue_stack_recovery_if_needed(Bt* bt) {
+    if(!bt->stack_recovery_requested || bt->stack_recovery_pending) return;
+
+    BtMessage recovery = {.type = BtMessageTypeRecoverStack};
+    if(furi_message_queue_put(bt->message_queue, &recovery, 0) == FuriStatusOk) {
+        bt->stack_recovery_pending = true;
+        FURI_LOG_W(TAG, "Queued BLE stack recovery after incomplete GATTS teardown");
+    } else {
+        /* Retain the request. bt_srv retries after each consumed message, once
+         * queue capacity is available; never block this sole queue consumer. */
+        FURI_LOG_W(TAG, "BLE recovery queue full; will retry after draining a message");
+    }
+}
+
+static void bt_schedule_stack_recovery(Bt* bt) {
+    bt->stack_recovery_requested = true;
+    bt_queue_stack_recovery_if_needed(bt);
+}
+
 static void bt_change_profile(Bt* bt, BtMessage* message) {
     if(furi_hal_bt_is_gatt_gap_supported()) {
         bt_settings_load(&bt->bt_settings);
 
         bt_keys_storage_load(bt->keys_storage);
+
+        /* HID shutdown queues a default serial restore. Recovery can install
+         * that same profile before the queued restore is consumed; treating
+         * it as a no-op avoids unregistering/re-registering serial twice. */
+        if(message->data.profile.template == ble_profile_serial &&
+           message->data.profile.params == NULL &&
+           furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial)) {
+            if(message->profile_instance) *message->profile_instance = bt->current_profile;
+            if(message->result) *message->result = true;
+            return;
+        }
 
         bt->current_profile = furi_hal_bt_change_app(
             message->data.profile.template,
@@ -460,6 +577,13 @@ static void bt_change_profile(Bt* bt, BtMessage* message) {
             bt_keys_storage_get_root_keys(bt->keys_storage),
             bt_on_gap_event_callback,
             bt);
+        if(!bt->current_profile && furi_hal_bt_profile_recovery_required()) {
+            /* Do not restart the BLE host inline here: bt_profile_start() waits for
+             * this message, so a stuck controller-disable would also strand the
+             * BadUSB worker and make Back appear frozen. Let this request fail,
+             * then recover on a separate BT-service queue turn. */
+            bt_schedule_stack_recovery(bt);
+        }
         if(bt->current_profile) {
             FURI_LOG_I(TAG, "Bt App started");
             if(bt->bt_settings.enabled) {
@@ -558,37 +682,112 @@ static void bt_handle_reload_keys_settings(Bt* bt) {
     bt_load_settings(bt);
 }
 
-static void bt_handle_stop_stack(Bt* bt) {
+static bool bt_handle_stop_stack(Bt* bt) {
     FURI_LOG_I(TAG, "Stopping BLE stack...");
 
-    if(bt->status == BtStatusOff) {
+#if CONFIG_BT_NIMBLE_ENABLED
+    if((bt->status == BtStatusOff) && !bt->current_profile &&
+       !ble_core_stack_is_up() && !bt->beacon_active &&
+       !furi_hal_bt_extra_beacon_is_active() && !furi_hal_bt_profile_recovery_required()) {
         FURI_LOG_I(TAG, "BLE stack already off");
-        return;
+        return true;
     }
 
     bt_close_rpc_connection(bt);
-    furi_hal_bt_stop_advertising();
+    bool profile_stopped = furi_hal_bt_stop_current_profile();
+    bt->current_profile = NULL;
+    if(!profile_stopped) {
+        FURI_LOG_W(TAG, "Profile teardown incomplete; stopping NimBLE host to drain state");
+    }
 
-    if(bt->current_profile) {
-        bt->current_profile->config->stop(bt->current_profile);
-        bt->current_profile = NULL;
+    esp_err_t nimble_err = ble_core_stack_down();
+    if(nimble_err != ESP_OK) {
+        FURI_LOG_E(TAG, "NimBLE host/controller shutdown failed: %s", esp_err_to_name(nimble_err));
+        bt->status = BtStatusUnavailable;
+        return false;
+    }
+
+    ble_serial_reset_initialized();
+    furi_hal_bt_reinit();
+    bt->beacon_active = false;
+    bt_statusbar_update(bt);
+    bt->status = BtStatusOff;
+    FURI_LOG_I(TAG, "NimBLE stack stopped");
+    return true;
+#else
+    if((bt->status == BtStatusOff) && !bt->current_profile &&
+       (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED) &&
+       (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) &&
+       !furi_hal_bt_profile_recovery_required()) {
+        FURI_LOG_I(TAG, "BLE stack already off");
+        return true;
+    }
+
+    FURI_LOG_I(TAG, "Stack stop: closing RPC");
+    bt_close_rpc_connection(bt);
+    FURI_LOG_I(TAG, "Stack stop: stopping/detaching active profile");
+    bool profile_stopped = furi_hal_bt_stop_current_profile();
+    bt->current_profile = NULL;
+    if(!profile_stopped) {
+        FURI_LOG_W(TAG, "Stack stop: profile teardown incomplete; full stack deinit will drain it");
     }
 
     // Only deinit if stack was actually initialized
     if(esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
-        esp_bluedroid_disable();
-        furi_delay_ms(50);
-        esp_bluedroid_deinit();
-        furi_delay_ms(50);
+        if(esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED) {
+            FURI_LOG_I(TAG, "Stack stop: disabling Bluedroid");
+            esp_err_t err = esp_bluedroid_disable();
+            if((err != ESP_OK) && (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED)) {
+                FURI_LOG_E(TAG, "Stack stop: Bluedroid disable failed: %s", esp_err_to_name(err));
+                bt->status = BtStatusUnavailable;
+                return false;
+            }
+            furi_delay_ms(50);
+        }
+        if(esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+            FURI_LOG_I(TAG, "Stack stop: deinitializing Bluedroid");
+            esp_err_t err = esp_bluedroid_deinit();
+            if((err != ESP_OK) &&
+               (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED)) {
+                FURI_LOG_E(TAG, "Stack stop: Bluedroid deinit failed: %s", esp_err_to_name(err));
+                bt->status = BtStatusUnavailable;
+                return false;
+            }
+            furi_delay_ms(50);
+        }
     }
 
     if(esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE) {
-        esp_bt_controller_disable();
+        FURI_LOG_I(TAG, "Stack stop: disabling controller");
+        if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
+            esp_err_t err = esp_bt_controller_disable();
+            if((err != ESP_OK) &&
+               (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)) {
+                FURI_LOG_E(TAG, "Stack stop: controller disable failed: %s", esp_err_to_name(err));
+                bt->status = BtStatusUnavailable;
+                return false;
+            }
+            furi_delay_ms(50);
+        }
+    }
+    if(esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE) {
+        FURI_LOG_I(TAG, "Stack stop: deinitializing controller");
+        esp_err_t err = esp_bt_controller_deinit();
+        if((err != ESP_OK) &&
+           (esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE)) {
+            FURI_LOG_E(TAG, "Stack stop: controller deinit failed: %s", esp_err_to_name(err));
+            bt->status = BtStatusUnavailable;
+            return false;
+        }
         furi_delay_ms(50);
     }
-    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
-        esp_bt_controller_deinit();
-        furi_delay_ms(50);
+
+    if((esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) ||
+       (esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE)) {
+        FURI_LOG_E(TAG, "Stack stop incomplete: bluedroid=%d controller=%d",
+                   esp_bluedroid_get_status(), esp_bt_controller_get_status());
+        bt->status = BtStatusUnavailable;
+        return false;
     }
 
     ble_serial_reset_initialized();
@@ -596,6 +795,41 @@ static void bt_handle_stop_stack(Bt* bt) {
 
     bt->status = BtStatusOff;
     FURI_LOG_I(TAG, "BLE stack stopped");
+    return true;
+#endif
+}
+
+static void bt_handle_recover_stack(Bt* bt) {
+    FURI_LOG_W(TAG, "Recovering BLE stack after incomplete GATTS teardown");
+    if(bt->status == BtStatusOff) bt->status = BtStatusUnavailable;
+    if(!bt_handle_stop_stack(bt)) {
+        FURI_LOG_E(TAG, "BLE stack recovery could not complete controller shutdown");
+        bt->stack_recovery_pending = false;
+        bt->stack_recovery_requested = false;
+        return;
+    }
+
+    if(bt->status == BtStatusOff) {
+        bt->current_profile = furi_hal_bt_change_app(
+            ble_profile_serial,
+            NULL,
+            bt_keys_storage_get_root_keys(bt->keys_storage),
+            bt_on_gap_event_callback,
+            bt);
+        if(bt->current_profile) {
+            if(bt->bt_settings.enabled) furi_hal_bt_start_advertising();
+            furi_hal_bt_set_key_storage_change_callback(bt_on_key_storage_change_callback, bt);
+        } else {
+            FURI_LOG_E(TAG, "Profile start failed after BLE stack recovery");
+            bt->status = BtStatusUnavailable;
+        }
+    } else if(bt->status == BtStatusOff) {
+        FURI_LOG_I(TAG, "BLE stack recovery kept stack off (BT disabled or sleep suspended)");
+    }
+
+    bt->stack_recovery_pending = false;
+    bt->stack_recovery_requested = false;
+    FURI_LOG_I(TAG, "BLE stack recovery finished status=%u profile=%p", bt->status, (void*)bt->current_profile);
 }
 
 static void bt_handle_start_stack(Bt* bt) {
@@ -606,8 +840,12 @@ static void bt_handle_start_stack(Bt* bt) {
      * Nötig, weil im WiFi-„sticky"-Modell das Lock-Menü „Enable Bluetooth" diesen
      * Pfad IMMER aufruft, um einen zuvor durch WiFi abgebauten Stack real wieder
      * hochzufahren. */
+#if CONFIG_BT_NIMBLE_ENABLED
+    if(ble_core_stack_is_up()) {
+#else
     if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED &&
        esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED) {
+#endif
         FURI_LOG_I(TAG, "BLE stack already running");
         if(bt->bt_settings.enabled) furi_hal_bt_start_advertising();
         return;
@@ -638,7 +876,7 @@ static bool bt_handle_sleep_suspend(Bt* bt) {
         return false; /* an app profile (HID, ...) is in use */
     }
     FURI_LOG_I(TAG, "Light sleep: stopping idle BLE stack");
-    bt_handle_stop_stack(bt);
+    if(!bt_handle_stop_stack(bt)) return false;
     bt->sleep_suspended = true;
     return true;
 }
@@ -696,6 +934,21 @@ bool bt_profile_restore_default(Bt* bt) {
     /* Restore the serial profile (same as STM32) */
     bt->current_profile = bt_profile_start(bt, ble_profile_serial, NULL);
     return bt->current_profile != NULL;
+}
+
+void bt_profile_restore_default_async(Bt* bt) {
+    furi_check(bt);
+
+    /* The BT service performs profile startup itself. Do not attach a lock or
+     * stack-backed result pointer: restoring the serial profile waits for
+     * asynchronous GATT startup and must not block an app's shutdown/UI. */
+    BtMessage message = {
+        .type = BtMessageTypeSetProfile,
+        .data.profile.params = NULL,
+        .data.profile.template = ble_profile_serial,
+    };
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
 }
 
 void bt_disconnect(Bt* bt) {
@@ -855,7 +1108,7 @@ int32_t bt_srv(void* p) {
 
     if(!furi_hal_bt_is_available()) {
         /* Board without BLE radio (e.g. Waveshare C6-1.47): force-disable so the
-         * radio stack (BT controller + Bluedroid, ~100KB heap) is never started,
+         * radio stack (BT controller + BLE host and its heap) is never started,
          * leaving that RAM for WiFi. The service still runs so RECORD_BT exists
          * and BLE-dependent code degrades gracefully instead of crashing. */
         bt->bt_settings.enabled = false;
@@ -889,7 +1142,7 @@ int32_t bt_srv(void* p) {
 
         if(message.type == BtMessageTypeUpdateStatus) {
             bt_statusbar_update(bt);
-            bt_pin_code_hide(bt);
+            if(bt->status != BtStatusConnected) bt_pin_code_hide(bt);
             if(bt->status_changed_cb) {
                 bt->status_changed_cb(bt->status, bt->status_changed_ctx);
             }
@@ -898,7 +1151,13 @@ int32_t bt_srv(void* p) {
         } else if(message.type == BtMessageTypeUpdatePowerState) {
             furi_hal_bt_update_power_state(message.data.power_state_charging);
         } else if(message.type == BtMessageTypePinCodeShow) {
+            BT_LOG_I("Processing passkey display event on BT service thread");
             bt_pin_code_show(bt, message.data.pin_code);
+        } else if(message.type == BtMessageTypePairingStalled) {
+            BT_LOG_W("Showing pairing-stalled guidance on device display");
+            bt_pairing_stalled_show(bt);
+        } else if(message.type == BtMessageTypePairingDone) {
+            bt_pin_code_hide(bt);
         } else if(message.type == BtMessageTypeKeysStorageUpdated) {
             bt_keys_storage_update(
                 bt->keys_storage,
@@ -921,6 +1180,8 @@ int32_t bt_srv(void* p) {
         } else if(message.type == BtMessageTypeStartStack) {
             bt->sleep_suspended = false;
             bt_handle_start_stack(bt);
+        } else if(message.type == BtMessageTypeRecoverStack) {
+            bt_handle_recover_stack(bt);
         } else if(message.type == BtMessageTypeSleepSuspend) {
             const bool suspended = bt_handle_sleep_suspend(bt);
             if(message.result) *message.result = suspended;
@@ -929,6 +1190,7 @@ int32_t bt_srv(void* p) {
         }
 
         if(message.lock) api_lock_unlock(message.lock);
+        bt_queue_stack_recovery_if_needed(bt);
     }
 
     return 0;

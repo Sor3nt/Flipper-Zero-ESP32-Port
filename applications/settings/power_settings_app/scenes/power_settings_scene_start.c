@@ -1,11 +1,13 @@
 #include "../power_settings_app.h"
 #include <lib/toolbox/value_index.h>
+#include "boards/board.h"
 
 enum PowerSettingsSubmenuIndex {
     PowerSettingsSubmenuIndexBatteryInfo,
     PowerSettingsSubmenuIndexReboot,
     PowerSettingsSubmenuIndexOff,
     PowerSettingsSubmenuIndexAutoPowerOff,
+    PowerSettingsEventEnableLightSleepShip = 0x100,
 };
 
 #define AUTO_POWEROFF_DELAY_COUNT 8
@@ -25,6 +27,56 @@ const uint32_t charge_supress_percent_value[CHARGE_SUPRESS_PERCENT_COUNT] = {0, 
 const char* const off_mode_text[OFF_MODE_COUNT] = {"Deep Sleep", "Power Off"};
 
 const uint32_t off_mode_value[OFF_MODE_COUNT] = {PowerOffModeDeepSleep, PowerOffModePowerOff};
+
+#define SHIP_INTERVAL_COUNT 20
+static const char* const ship_interval_text[SHIP_INTERVAL_COUNT] = {
+    "1 min",  "2 min",  "3 min",  "4 min",  "5 min",
+    "6 min",  "7 min",  "8 min",  "9 min",  "10 min",
+    "11 min", "12 min", "13 min", "14 min", "15 min",
+    "16 min", "17 min", "18 min", "19 min", "20 min",
+};
+
+static const uint32_t ship_interval_value[SHIP_INTERVAL_COUNT] = {
+    1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+};
+
+static const char* const toggle_text[] = {"OFF", "ON"};
+
+static void power_settings_scene_start_deep_sleep_usb_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    app->settings.deep_sleep_usb_check_enabled = index != 0;
+    variable_item_set_current_value_text(item, toggle_text[index]);
+}
+
+static void power_settings_scene_start_deep_sleep_usb_interval_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    app->settings.deep_sleep_usb_check_interval_minutes = ship_interval_value[index];
+    variable_item_set_current_value_text(item, ship_interval_text[index]);
+}
+
+static void power_settings_scene_start_light_sleep_ship_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    if(index && !app->settings.light_sleep_enabled) {
+        variable_item_set_current_value_index(item, 0);
+        variable_item_set_current_value_text(item, toggle_text[0]);
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher, PowerSettingsEventEnableLightSleepShip);
+        return;
+    }
+    app->settings.light_sleep_ship_mode_enabled = index != 0;
+    variable_item_set_current_value_text(item, toggle_text[index]);
+}
+
+static void power_settings_scene_start_light_sleep_ship_interval_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    app->settings.light_sleep_ship_mode_interval_minutes = ship_interval_value[index];
+    variable_item_set_current_value_text(item, ship_interval_text[index]);
+}
 
 // change variable_item_list visible text and charge_supress_percent_settings when user change item in variable_item_list
 static void power_settings_scene_start_charge_supress_percent_changed(VariableItem* item) {
@@ -110,6 +162,54 @@ void power_settings_scene_start_on_enter(void* context) {
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, off_mode_text[value_index]);
 
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+    item = variable_item_list_add(
+        variable_item_list,
+        "Deep USB Check",
+        COUNT_OF(toggle_text),
+        power_settings_scene_start_deep_sleep_usb_changed,
+        app);
+    value_index = app->settings.deep_sleep_usb_check_enabled ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, toggle_text[value_index]);
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "USB Check Time",
+        SHIP_INTERVAL_COUNT,
+        power_settings_scene_start_deep_sleep_usb_interval_changed,
+        app);
+    value_index = value_index_uint32(
+        app->settings.deep_sleep_usb_check_interval_minutes,
+        ship_interval_value,
+        SHIP_INTERVAL_COUNT);
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, ship_interval_text[value_index]);
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "Light Sleep Ship",
+        COUNT_OF(toggle_text),
+        power_settings_scene_start_light_sleep_ship_changed,
+        app);
+    value_index = app->settings.light_sleep_ship_mode_enabled ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, toggle_text[value_index]);
+
+    item = variable_item_list_add(
+        variable_item_list,
+        "Ship Timer",
+        SHIP_INTERVAL_COUNT,
+        power_settings_scene_start_light_sleep_ship_interval_changed,
+        app);
+    value_index = value_index_uint32(
+        app->settings.light_sleep_ship_mode_interval_minutes,
+        ship_interval_value,
+        SHIP_INTERVAL_COUNT);
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, ship_interval_text[value_index]);
+#endif
+
     variable_item_list_set_selected_item(
         variable_item_list,
         scene_manager_get_scene_state(app->scene_manager, PowerSettingsAppSceneStart));
@@ -123,14 +223,18 @@ bool power_settings_scene_start_on_event(void* context, SceneManagerEvent event)
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == PowerSettingsSubmenuIndexBatteryInfo) {
+        if(event.event == PowerSettingsEventEnableLightSleepShip) {
+            scene_manager_next_scene(app->scene_manager, PowerSettingsAppSceneLightSleepShipConfirm);
+        } else if(event.event == PowerSettingsSubmenuIndexBatteryInfo) {
             scene_manager_next_scene(app->scene_manager, PowerSettingsAppSceneBatteryInfo);
         } else if(event.event == PowerSettingsSubmenuIndexReboot) {
             scene_manager_next_scene(app->scene_manager, PowerSettingsAppSceneReboot);
         } else if(event.event == PowerSettingsSubmenuIndexOff) {
             scene_manager_next_scene(app->scene_manager, PowerSettingsAppScenePowerOff);
         }
-        scene_manager_set_scene_state(app->scene_manager, PowerSettingsAppSceneStart, event.event);
+        if(event.event != PowerSettingsEventEnableLightSleepShip) {
+            scene_manager_set_scene_state(app->scene_manager, PowerSettingsAppSceneStart, event.event);
+        }
         consumed = true;
     }
     return consumed;

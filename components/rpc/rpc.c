@@ -16,6 +16,8 @@
 #include <flipper.pb.h>
 
 #include <furi.h>
+#include <furi_hal_rtc.h>
+#include <momentum_settings.h>
 #include <esp_log.h>
 
 #include <stdint.h>
@@ -352,6 +354,14 @@ static void
 
 RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner) {
     furi_check(rpc);
+
+    /* While the device is PIN-locked, USB/BLE RPC is refused unless the user
+     * allowed it (Settings > Interface > Lock Screen). UART (expansion) is not
+     * gated, matching Momentum. */
+    if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock)) {
+        if(owner == RpcOwnerUsb && !momentum_settings.allow_locked_rpc_usb) return NULL;
+        if(owner == RpcOwnerBle && !momentum_settings.allow_locked_rpc_ble) return NULL;
+    }
 
     RpcSession* session = malloc(sizeof(RpcSession));
     session->callbacks_mutex = furi_mutex_alloc(FuriMutexTypeNormal);

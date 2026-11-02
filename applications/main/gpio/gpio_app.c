@@ -1,7 +1,10 @@
 #include "gpio_app_i.h"
+#include "gpio_infrared_settings.h"
 
 #include <furi.h>
 #include <furi_hal.h>
+#include <furi_hal_infrared.h>
+#include <boards/board.h>
 
 static bool gpio_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -23,6 +26,11 @@ static void gpio_app_tick_event_callback(void* context) {
 
 GpioApp* gpio_app_alloc(void) {
     GpioApp* app = malloc(sizeof(GpioApp));
+    furi_check(app);
+    app->usb_uart_bridge = NULL;
+    app->usb_uart_cfg = NULL;
+    usb_uart_config_init(&app->usb_uart_state_config);
+    app->usb_uart_state = (UsbUartState){.status = UsbUartStatusStarting};
 
     app->expansion = furi_record_open(RECORD_EXPANSION);
     expansion_disable(app->expansion);
@@ -31,6 +39,27 @@ GpioApp* gpio_app_alloc(void) {
     app->gpio_items = gpio_items_alloc();
 
     app->power = furi_record_open(RECORD_POWER);
+    app->infrared_settings = (InfraredSettings){
+        .tx_pin = FuriHalInfraredTxPinInternal,
+        .otg_enabled = false,
+    };
+    if(!gpio_infrared_settings_load(&app->infrared_settings)) {
+        FURI_LOG_W("GpioApp", "Could not load infrared/VBUS settings; using defaults");
+        gpio_infrared_settings_save(&app->infrared_settings);
+    }
+    if(app->infrared_settings.tx_pin > FuriHalInfraredTxPinMax) {
+        FURI_LOG_W("GpioApp", "Invalid infrared TX pin in settings; using internal output");
+        app->infrared_settings.tx_pin = FuriHalInfraredTxPinInternal;
+        app->infrared_settings.otg_enabled = false;
+        gpio_infrared_settings_save(&app->infrared_settings);
+    }
+#if defined(BOARD_IR_TX_REQUIRES_VBUS) && BOARD_IR_TX_REQUIRES_VBUS
+    power_enable_otg(
+        app->power,
+        app->infrared_settings.otg_enabled && furi_hal_power_is_running_on_battery());
+#else
+    power_enable_otg(app->power, app->infrared_settings.otg_enabled);
+#endif
 
     app->view_dispatcher = view_dispatcher_alloc();
     app->scene_manager = scene_manager_alloc(&gpio_scene_handlers, app);
@@ -82,6 +111,11 @@ GpioApp* gpio_app_alloc(void) {
 void gpio_app_free(GpioApp* app) {
     furi_assert(app);
 
+    if(app->usb_uart_bridge) {
+        usb_uart_disable(app->usb_uart_bridge);
+        app->usb_uart_bridge = NULL;
+    }
+
     // Views
     view_dispatcher_remove_view(app->view_dispatcher, GpioAppViewVarItemList);
     view_dispatcher_remove_view(app->view_dispatcher, GpioAppViewGpioTest);
@@ -98,6 +132,8 @@ void gpio_app_free(GpioApp* app) {
     // View dispatcher
     view_dispatcher_free(app->view_dispatcher);
     scene_manager_free(app->scene_manager);
+    free(app->usb_uart_cfg);
+    app->usb_uart_cfg = NULL;
 
     // Close records
     furi_record_close(RECORD_GUI);

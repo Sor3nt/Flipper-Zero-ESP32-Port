@@ -432,6 +432,11 @@ void bubble_animation_set_paused(BubbleAnimationView* view, bool paused) {
     if(frame_rate) bubble_animation_timer_start(view, 1000 / frame_rate);
 }
 
+void bubble_animation_hold_frame(BubbleAnimationView* view) {
+    furi_assert(view);
+    furi_timer_stop(view->timer);
+}
+
 View* bubble_animation_get_view(BubbleAnimationView* view) {
     furi_assert(view);
 

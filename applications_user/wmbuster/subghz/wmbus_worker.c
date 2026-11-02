@@ -10,6 +10,7 @@
 #include <furi_hal_resources.h>
 #include <lib/subghz/devices/devices.h>
 #include <lib/subghz/devices/preset.h>
+#include <stdatomic.h>
 
 /* CC1101 register presets.
  *
@@ -63,32 +64,47 @@ static const uint8_t k_preset_s1[] = {
 
 /* RX-FIFO drain hook. Weak default for host tests; wmbus_hal_rx.c
  * overrides on-device. `external` picks the SPI handle. */
-__attribute__((weak)) size_t wmbus_hal_rx_drain(uint8_t* dst, size_t cap, bool external) {
+__attribute__((weak)) size_t
+    wmbus_hal_rx_drain(uint8_t* dst, size_t cap, bool external, bool* overflow) {
     (void)dst; (void)cap; (void)external;
+    if(overflow) *overflow = false;
     return 0;
 }
 
 struct WmbusWorker {
     WmbusApp*       app;
     FuriThread*     thread;
-    volatile bool   running;
+    atomic_bool     running;
     WmbusMode       mode;
-    bool            is_external;  /* set at thread start after radio probe */
+    atomic_bool     is_external;  /* set at thread start after radio probe */
 
     uint8_t         chip_buf[1024];   /* generous: max frame ~290 B + 3of6 expansion */
     uint8_t         data_buf[WMBUS_MAX_FRAME];
     uint8_t         payload_buf[WMBUS_MAX_FRAME];
 
-    WmbusWorkerStats stats;
+    struct {
+        atomic_uint_least32_t sync_locks;
+        atomic_uint_least32_t decoded_a;
+        atomic_uint_least32_t decoded_b;
+        atomic_uint_least32_t crc_fails;
+        atomic_uint_least32_t three_of_six_err;
+        atomic_uint_least32_t fifo_overflows;
+    } stats;
 };
 
 void wmbus_worker_get_stats(const WmbusWorker* w, WmbusWorkerStats* out) {
     if(!w || !out) return;
-    *out = w->stats;
+    out->sync_locks = atomic_load_explicit(&w->stats.sync_locks, memory_order_relaxed);
+    out->decoded_a = atomic_load_explicit(&w->stats.decoded_a, memory_order_relaxed);
+    out->decoded_b = atomic_load_explicit(&w->stats.decoded_b, memory_order_relaxed);
+    out->crc_fails = atomic_load_explicit(&w->stats.crc_fails, memory_order_relaxed);
+    out->three_of_six_err =
+        atomic_load_explicit(&w->stats.three_of_six_err, memory_order_relaxed);
+    out->fifo_overflows = atomic_load_explicit(&w->stats.fifo_overflows, memory_order_relaxed);
 }
 
 bool wmbus_worker_is_external(const WmbusWorker* w) {
-    return w ? w->is_external : false;
+    return w ? atomic_load_explicit(&w->is_external, memory_order_acquire) : false;
 }
 
 static int32_t worker_thread(void* ctx);
@@ -103,9 +119,22 @@ static uint32_t freq_for_mode(WmbusMode m) {
 
 WmbusWorker* wmbus_worker_alloc(WmbusApp* app) {
     WmbusWorker* w = malloc(sizeof(WmbusWorker));
+    if(!w) return NULL;
     memset(w, 0, sizeof(*w));
     w->app = app;
+    atomic_init(&w->running, false);
+    atomic_init(&w->is_external, false);
+    atomic_init(&w->stats.sync_locks, 0);
+    atomic_init(&w->stats.decoded_a, 0);
+    atomic_init(&w->stats.decoded_b, 0);
+    atomic_init(&w->stats.crc_fails, 0);
+    atomic_init(&w->stats.three_of_six_err, 0);
+    atomic_init(&w->stats.fifo_overflows, 0);
     w->thread = furi_thread_alloc_ex("WmbusWorker", 3072, worker_thread, w);
+    if(!w->thread) {
+        free(w);
+        return NULL;
+    }
     furi_thread_set_priority(w->thread, FuriThreadPriorityLow);
     return w;
 }
@@ -118,19 +147,21 @@ void wmbus_worker_free(WmbusWorker* w) {
 }
 
 void wmbus_worker_start(WmbusWorker* w, WmbusMode mode) {
-    if(w->running) return;
+    if(!w || atomic_load_explicit(&w->running, memory_order_acquire)) return;
     w->mode = mode;
-    w->running = true;
+    atomic_store_explicit(&w->running, true, memory_order_release);
     furi_thread_start(w->thread);
 }
 
 void wmbus_worker_stop(WmbusWorker* w) {
-    if(!w->running) return;
-    w->running = false;
+    if(!w || !atomic_load_explicit(&w->running, memory_order_acquire)) return;
+    atomic_store_explicit(&w->running, false, memory_order_release);
     furi_thread_join(w->thread);
 }
 
-bool wmbus_worker_is_running(const WmbusWorker* w) { return w->running; }
+bool wmbus_worker_is_running(const WmbusWorker* w) {
+    return w && atomic_load_explicit(&w->running, memory_order_acquire);
+}
 
 /* Frame slicer.
  *
@@ -153,19 +184,19 @@ typedef struct {
 static void emit_format_a(WmbusWorker* w, const uint8_t* decoded, size_t len, int8_t rssi) {
     size_t out_len;
     if(!wmbus_crc_verify_format_a(decoded, len, w->payload_buf, sizeof(w->payload_buf), &out_len)) {
-        w->stats.crc_fails++;
+        atomic_fetch_add_explicit(&w->stats.crc_fails, 1, memory_order_relaxed);
         return;
     }
-    w->stats.decoded_a++;
+    atomic_fetch_add_explicit(&w->stats.decoded_a, 1, memory_order_relaxed);
     wmbus_app_on_telegram(w->app, w->payload_buf, out_len, rssi);
 }
 
 static void emit_format_b(WmbusWorker* w, const uint8_t* frame, size_t len, int8_t rssi) {
     if(!wmbus_crc_verify_format_b(frame, len)) {
-        w->stats.crc_fails++;
+        atomic_fetch_add_explicit(&w->stats.crc_fails, 1, memory_order_relaxed);
         return;
     }
-    w->stats.decoded_b++;
+    atomic_fetch_add_explicit(&w->stats.decoded_b, 1, memory_order_relaxed);
     wmbus_app_on_telegram(w->app, frame, len - 2, rssi);
 }
 
@@ -216,7 +247,7 @@ static void slicer_run_3of6(WmbusWorker* w, Slicer* s) {
     bool err = false;
     size_t n = wmbus_3of6_decode(
         w->chip_buf, s->chip_bits, w->data_buf, sizeof(w->data_buf), &err);
-    if(err) w->stats.three_of_six_err++;
+    if(err) atomic_fetch_add_explicit(&w->stats.three_of_six_err, 1, memory_order_relaxed);
     if(n < 1) return;
     if(!s->have_L) {
         size_t L = (size_t)w->data_buf[0];
@@ -249,7 +280,8 @@ static void slicer_run(WmbusWorker* w, Slicer* s) {
 
     bool was_routed = s->routed;
     slicer_route(w, s);
-    if(!was_routed && s->routed) w->stats.sync_locks++;
+    if(!was_routed && s->routed)
+        atomic_fetch_add_explicit(&w->stats.sync_locks, 1, memory_order_relaxed);
     if(!s->routed) return;
     switch(s->route) {
         case 0: slicer_run_3of6(w, s);            break;
@@ -267,7 +299,7 @@ static int32_t worker_thread(void* ctx) {
      * (MOSI=9, SCLK=11), and the bitbang "external" handle drives those exact
      * LCD pins, freezing the display. We drive the on-board CC1101 via
      * furi_hal_subghz, exactly like the built-in SubGHz app. */
-    w->is_external = false;
+    atomic_store_explicit(&w->is_external, false, memory_order_release);
 
     uint32_t f = w->app->settings.freq_hz;
     if(f < 868000000 || f > 869500000) f = freq_for_mode(w->mode);
@@ -279,13 +311,16 @@ static int32_t worker_thread(void* ctx) {
     furi_hal_subghz_rx();
 
     uint32_t idle_ticks = 0;
-    while(w->running) {
+    while(atomic_load_explicit(&w->running, memory_order_acquire)) {
         furi_delay_tick(1);
 
         s.rssi = (int8_t)furi_hal_subghz_get_rssi();
 
         uint8_t buf[64];
-        size_t got = wmbus_hal_rx_drain(buf, sizeof(buf), false);
+        bool overflow = false;
+        size_t got = wmbus_hal_rx_drain(buf, sizeof(buf), false, &overflow);
+        if(overflow)
+            atomic_fetch_add_explicit(&w->stats.fifo_overflows, 1, memory_order_relaxed);
 
         if(got > 0) {
             idle_ticks = 0;

@@ -9,7 +9,6 @@ extern "C" {
 #endif
 
 #define BLE_HID_DEVICE_NAME_LEN 32
-#define BLE_HID_PASSKEY_DEFAULT 123456U
 
 typedef enum {
     BleHidPairingModeVerifyYesNo = 0,
@@ -23,6 +22,8 @@ typedef struct {
     char device_name[BLE_HID_DEVICE_NAME_LEN + 1];
     uint8_t mac[6];
     bool bonding;
+    /* Use BLE Just Works pairing (no passkey/MITM prompt). Opt-in per profile. */
+    bool just_works;
     BleHidPairingMode pairing;
 } BleHidConfig;
 
@@ -32,7 +33,7 @@ void ble_hid_get_default_mac(uint8_t mac[6]);
 
 BleHid* ble_hid_alloc(const BleHidConfig* config);
 
-void ble_hid_free(BleHid* ble_hid);
+bool ble_hid_free(BleHid* ble_hid);
 
 void ble_hid_set_state_callback(BleHid* ble_hid, BleHidStateCallback callback, void* context);
 
@@ -58,6 +59,9 @@ bool ble_hid_start_advertising(void);
 void ble_hid_stop_advertising(void);
 bool ble_hid_is_advertising(void);
 bool ble_hid_is_active(void);
+bool ble_hid_is_teardown_pending(void);
+/** Clear stale GATTS bookkeeping after the BT controller has been deinitialized. */
+void ble_hid_reset_gatts_state(void);
 
 bool ble_hid_remove_pairing(void);
 

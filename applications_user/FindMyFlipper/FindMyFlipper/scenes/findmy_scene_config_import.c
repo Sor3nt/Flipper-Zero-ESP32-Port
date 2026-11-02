@@ -11,6 +11,11 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
 
     Stream* stream = file_stream_alloc(app->storage);
     FuriString* line = furi_string_alloc();
+    if(!stream || !line) {
+        if(line) furi_string_free(line);
+        if(stream) stream_free(stream);
+        return "Not enough memory";
+    }
     do {
         // XX-XX-XX-XX-XX-XX_YYYY-MM-DD HH_MM_SS.txt
         error = "Filename must\nhave MAC\naddress";
@@ -21,8 +26,8 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
         for(size_t i = 0; i < sizeof(mac); i++) {
             char a = furi_string_get_char(line, i * 3);
             char b = furi_string_get_char(line, i * 3 + 1);
-            if((a < 'A' && a > 'F') || (a < '0' && a > '9') || (b < 'A' && b > 'F') ||
-               (b < '0' && b > '9') || !hex_char_to_uint8(a, b, &mac[i])) {
+            if(!hex_char_to_uint8(a, b, &mac[i]) ||
+               (i + 1 < sizeof(mac) && furi_string_get_char(line, i * 3 + 2) != '-')) {
                 error = "Filename must\nhave MAC\naddress";
                 break;
             }
@@ -64,8 +69,7 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
 
         memcpy(app->state.mac, mac, sizeof(app->state.mac));
         memcpy(app->state.data, data, sizeof(app->state.data));
-        findmy_state_sync_config(&app->state);
-        findmy_state_save(&app->state);
+        findmy_state_save_and_apply(app, &app->state);
 
         error = NULL;
 
@@ -82,6 +86,11 @@ static const char* parse_open_haystack(FindMy* app, const char* path) {
 
     Stream* stream = file_stream_alloc(app->storage);
     FuriString* line = furi_string_alloc();
+    if(!stream || !line) {
+        if(line) furi_string_free(line);
+        if(stream) stream_free(stream);
+        return "Not enough memory";
+    }
     do {
         error = "Can't open file";
         if(!file_stream_open(stream, path, FSAM_READ, FSOM_OPEN_EXISTING)) break;
@@ -100,10 +109,11 @@ static const char* parse_open_haystack(FindMy* app, const char* path) {
         furi_string_trim(line);
 
         error = "Base64 failed";
-        size_t decoded_len;
+        if(furi_string_size(line) > 128) break;
+        size_t decoded_len = 0;
         uint8_t* public_key = base64_decode(
             (uint8_t*)furi_string_get_cstr(line), furi_string_size(line), &decoded_len);
-        if(decoded_len != 28) {
+        if(!public_key || decoded_len != 28) {
             free(public_key);
             break;
         }
@@ -123,11 +133,11 @@ static const char* parse_open_haystack(FindMy* app, const char* path) {
             0x00, // first two bits of key[0]
             0x00, // hint
         };
+        app->state.tag_type = FindMyTypeApple;
         memcpy(app->state.data, advertisement_template, sizeof(app->state.data));
         memcpy(&app->state.data[7], &public_key[6], decoded_len - 6);
         app->state.data[29] = public_key[0] >> 6;
-        findmy_state_sync_config(&app->state);
-        findmy_state_save(&app->state);
+        findmy_state_save_and_apply(app, &app->state);
 
         free(public_key);
         error = NULL;

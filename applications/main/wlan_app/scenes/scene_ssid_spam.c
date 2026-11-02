@@ -16,7 +16,7 @@ static void ssid_spam_submenu_cb(void* context, uint32_t index) {
 void wlan_app_scene_ssid_spam_on_enter(void* context) {
     WlanApp* app = context;
     submenu_reset(app->submenu);
-    submenu_set_header_centered(app->submenu, "SSID Spam");
+    submenu_set_header(app->submenu, "SSID Spam");
     submenu_add_item(app->submenu, "Funny SSIDs", SsidSpamModeFunny,
         ssid_spam_submenu_cb, app);
     submenu_add_item(app->submenu, "Rick Roll", SsidSpamModeRickroll,

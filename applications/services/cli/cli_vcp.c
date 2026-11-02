@@ -26,9 +26,10 @@ typedef struct {
     enum {
         CliVcpMessageTypeEnable,
         CliVcpMessageTypeDisable,
+        CliVcpMessageTypeIsEnabled,
     } type;
     FuriApiLock api_lock;
-    union {};
+    bool* enabled_result;
 } CliVcpMessage;
 
 typedef enum {
@@ -155,6 +156,25 @@ static void cli_vcp_shell_ready(PipeSide* pipe, void* context) {
 }
 
 /**
+ * Ends the shell session: frees our pipe side and waits for the shell to exit.
+ */
+static void cli_vcp_disconnect(CliVcp* cli_vcp) {
+    if(!cli_vcp->is_connected) return;
+    FURI_LOG_D(TAG, "Disconnected");
+    cli_vcp->is_connected = false;
+
+    // disconnect our side of the pipe
+    pipe_detach_from_event_loop(cli_vcp->own_pipe);
+    pipe_free(cli_vcp->own_pipe);
+    cli_vcp->own_pipe = NULL;
+
+    // wait for shell to stop
+    cli_shell_join(cli_vcp->shell);
+    cli_shell_free(cli_vcp->shell);
+    pipe_free(cli_vcp->shell_pipe);
+}
+
+/**
  * Processes messages arriving from other threads
  */
 static void cli_vcp_message_received(FuriEventLoopObject* object, void* context) {
@@ -164,6 +184,7 @@ static void cli_vcp_message_received(FuriEventLoopObject* object, void* context)
 
     switch(message.type) {
     case CliVcpMessageTypeEnable:
+        furi_assert(!message.enabled_result);
         if(cli_vcp->is_enabled) break;
         FURI_LOG_D(TAG, "Enabling");
         cli_vcp->is_enabled = true;
@@ -175,6 +196,7 @@ static void cli_vcp_message_received(FuriEventLoopObject* object, void* context)
         break;
 
     case CliVcpMessageTypeDisable:
+        furi_assert(!message.enabled_result);
         if(!cli_vcp->is_enabled) break;
         FURI_LOG_D(TAG, "Disabling");
         cli_vcp->is_enabled = false;
@@ -182,6 +204,15 @@ static void cli_vcp_message_received(FuriEventLoopObject* object, void* context)
         // restore usb mode
         furi_hal_cdc_set_callbacks(VCP_IF_NUM, NULL, NULL);
         furi_hal_usb_set_config(cli_vcp->previous_interface, NULL);
+        // Without callbacks no disconnect event would ever arrive: a live shell
+        // would keep reading and writing a port that now belongs to someone else
+        // (USB-UART bridge) or stay usable behind a PIN lock.
+        cli_vcp_disconnect(cli_vcp);
+        break;
+
+    case CliVcpMessageTypeIsEnabled:
+        furi_assert(message.enabled_result);
+        *message.enabled_result = cli_vcp->is_enabled;
         break;
     }
 
@@ -210,24 +241,13 @@ static void cli_vcp_internal_event_happened(FuriEventLoopObject* object, void* c
     }
 
     case CliVcpInternalEventDisconnected: {
-        if(!cli_vcp->is_connected) return;
-        FURI_LOG_D(TAG, "Disconnected");
-        cli_vcp->is_connected = false;
-
-        // disconnect our side of the pipe
-        pipe_detach_from_event_loop(cli_vcp->own_pipe);
-        pipe_free(cli_vcp->own_pipe);
-        cli_vcp->own_pipe = NULL;
-
-        // wait for shell to stop
-        cli_shell_join(cli_vcp->shell);
-        cli_shell_free(cli_vcp->shell);
-        pipe_free(cli_vcp->shell_pipe);
+        cli_vcp_disconnect(cli_vcp);
         break;
     }
 
     case CliVcpInternalEventConnected: {
-        if(cli_vcp->is_connected) return;
+        // A DTR event queued before Disable must not reopen the shell.
+        if(cli_vcp->is_connected || !cli_vcp->is_enabled) return;
         FURI_LOG_D(TAG, "Connected");
         cli_vcp->is_connected = true;
 
@@ -321,4 +341,15 @@ void cli_vcp_disable(CliVcp* cli_vcp) {
         .type = CliVcpMessageTypeDisable,
     };
     cli_vcp_synchronous_request(cli_vcp, &message);
+}
+
+bool cli_vcp_is_enabled(CliVcp* cli_vcp) {
+    furi_check(cli_vcp);
+    bool enabled = false;
+    CliVcpMessage message = {
+        .type = CliVcpMessageTypeIsEnabled,
+        .enabled_result = &enabled,
+    };
+    cli_vcp_synchronous_request(cli_vcp, &message);
+    return enabled;
 }

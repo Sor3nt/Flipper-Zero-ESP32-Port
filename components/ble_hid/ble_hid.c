@@ -6,6 +6,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_bt.h>
 #include <esp_bt_defs.h>
@@ -18,20 +19,20 @@
 #include <esp_hidd_gatts.h>
 #include <esp_log.h>
 #include <esp_mac.h>
-#include <nvs_flash.h>
+#include <ble_core.h>
+#include "ble_hid_report_map.h"
 
 #define TAG "ble_hid"
 
-#define BLE_HID_REPORT_ID_KEYBOARD 1
-#define BLE_HID_REPORT_ID_MOUSE    2
-#define BLE_HID_REPORT_ID_CONSUMER 3
 #define BLE_HID_SERVICE_UUID       0x1812
+#define BLE_HID_APP_ID_BATTERY     0x180F
+#define BLE_HID_APP_ID_DEVICE_INFO 0x180A
+#define BLE_HID_APP_ID_HID         0x1812
+#define BLE_SERIAL_APP_ID          0x0055
 #define BLE_HID_ADV_TYPE_FLAGS     0x01
 #define BLE_HID_ADV_TYPE_UUID16    0x03
 #define BLE_HID_ADV_TYPE_NAME_SHORT 0x08
 #define BLE_HID_ADV_TYPE_NAME_FULL  0x09
-
-#define BLE_HID_KEYBOARD_KEYS_MAX 6
 
 typedef struct {
     uint8_t modifiers;
@@ -68,18 +69,25 @@ typedef struct {
     bool gap_registered;
     bool gatts_registered;
     bool hidd_started;
+    esp_gatt_if_t hid_if[3];
+    uint8_t registration_pending_mask;
+    uint8_t unregister_pending_mask;
+    bool shutting_down;
     bool adv_data_pending;
     bool rand_addr_pending;
     bool rand_addr_enabled;
     bool advertising_requested;
     bool advertising;
     SemaphoreHandle_t mutex;
+    SemaphoreHandle_t callbacks_drained;
+    uint32_t callback_refs;
     BleHid* active;
     esp_ble_adv_params_t adv_params;
 } BleHidGlobalState;
 
 static BleHidGlobalState ble_hid_state = {
     .mutex = NULL,
+    .hid_if = {ESP_GATT_IF_NONE, ESP_GATT_IF_NONE, ESP_GATT_IF_NONE},
     .adv_params =
         {
             .adv_int_min = 0x20,
@@ -91,78 +99,13 @@ static BleHidGlobalState ble_hid_state = {
         },
 };
 
-static const uint8_t ble_hid_report_map[] = {
-    0x05, 0x01,
-    0x09, 0x06,
-    0xA1, 0x01,
-    0x85, BLE_HID_REPORT_ID_KEYBOARD,
-    0x05, 0x07,
-    0x19, 0xE0,
-    0x29, 0xE7,
-    0x15, 0x00,
-    0x25, 0x01,
-    0x75, 0x01,
-    0x95, 0x08,
-    0x81, 0x02,
-    0x95, 0x01,
-    0x75, 0x08,
-    0x81, 0x01,
-    0x05, 0x08,
-    0x95, 0x08,
-    0x75, 0x01,
-    0x19, 0x01,
-    0x29, 0x08,
-    0x91, 0x02,
-    0x95, BLE_HID_KEYBOARD_KEYS_MAX,
-    0x75, 0x08,
-    0x15, 0x00,
-    0x26, 0xFF, 0x00,
-    0x05, 0x07,
-    0x19, 0x00,
-    0x2A, 0xFF, 0x00,
-    0x81, 0x00,
-    0xC0,
-    0x05, 0x01,
-    0x09, 0x02,
-    0xA1, 0x01,
-    0x09, 0x01,
-    0xA1, 0x00,
-    0x85, BLE_HID_REPORT_ID_MOUSE,
-    0x05, 0x09,
-    0x19, 0x01,
-    0x29, 0x03,
-    0x15, 0x00,
-    0x25, 0x01,
-    0x95, 0x03,
-    0x75, 0x01,
-    0x81, 0x02,
-    0x95, 0x01,
-    0x75, 0x05,
-    0x81, 0x03,
-    0x05, 0x01,
-    0x09, 0x30,
-    0x09, 0x31,
-    0x09, 0x38,
-    0x15, 0x81,
-    0x25, 0x7F,
-    0x75, 0x08,
-    0x95, 0x03,
-    0x81, 0x06,
-    0xC0,
-    0xC0,
-    0x05, 0x0C,
-    0x09, 0x01,
-    0xA1, 0x01,
-    0x85, BLE_HID_REPORT_ID_CONSUMER,
-    0x15, 0x00,
-    0x26, 0xFF, 0x03,
-    0x19, 0x00,
-    0x2A, 0xFF, 0x03,
-    0x95, 0x01,
-    0x75, 0x10,
-    0x81, 0x00,
-    0xC0,
-};
+/* Must be called with ble_hid_state.mutex held. */
+static void ble_hid_maybe_finish_teardown_locked(void) {
+    if(ble_hid_state.shutting_down && !ble_hid_state.active &&
+       !ble_hid_state.registration_pending_mask && !ble_hid_state.unregister_pending_mask) {
+        ble_hid_state.shutting_down = false;
+    }
+}
 
 static esp_hid_raw_report_map_t ble_report_maps[] = {
     {
@@ -194,6 +137,33 @@ static void ble_hid_unlock_global(void) {
     }
 }
 
+static BleHid* ble_hid_callback_acquire(void) {
+    ble_hid_lock_global();
+    BleHid* ble_hid = ble_hid_state.active;
+    if(ble_hid) {
+        ble_hid_state.callback_refs++;
+    }
+    ble_hid_unlock_global();
+    return ble_hid;
+}
+
+static void ble_hid_callback_release(BleHid* ble_hid) {
+    if(!ble_hid) return;
+
+    ble_hid_lock_global();
+    if(ble_hid_state.callback_refs == 0) {
+        ble_hid_unlock_global();
+        ESP_LOGE(TAG, "Callback reference underflow");
+        return;
+    }
+    ble_hid_state.callback_refs--;
+    bool callbacks_drained = ble_hid_state.callback_refs == 0;
+    if(callbacks_drained && ble_hid_state.callbacks_drained) {
+        xSemaphoreGive(ble_hid_state.callbacks_drained);
+    }
+    ble_hid_unlock_global();
+}
+
 static void ble_hid_lock(BleHid* ble_hid) {
     if(ble_hid && ble_hid->mutex) {
         xSemaphoreTake(ble_hid->mutex, portMAX_DELAY);
@@ -206,19 +176,10 @@ static void ble_hid_unlock(BleHid* ble_hid) {
     }
 }
 
-static esp_ble_auth_req_t ble_hid_auth_req(bool bonding) {
-    return bonding ? ESP_LE_AUTH_REQ_SC_MITM_BOND : ESP_LE_AUTH_REQ_SC_MITM;
-}
-
-static esp_ble_io_cap_t ble_hid_io_cap(BleHidPairingMode pairing) {
-    switch(pairing) {
-    case BleHidPairingModeDisplayOnly:
-    case BleHidPairingModeInputOnly:
-        return ESP_IO_CAP_OUT;
-    case BleHidPairingModeVerifyYesNo:
-    default:
-        return ESP_IO_CAP_IO;
-    }
+static BleCorePairing ble_hid_core_pairing(BleHidPairingMode pairing) {
+    /* No keyboard on the Flipper: InputOnly cannot type a passkey, show one instead. */
+    return pairing == BleHidPairingModeVerifyYesNo ? BleCorePairingVerifyYesNo :
+                                                     BleCorePairingDisplayOnly;
 }
 
 static void ble_hid_make_random_static_addr(uint8_t mac[6]) {
@@ -291,6 +252,11 @@ static void ble_hid_update_connection(BleHid* ble_hid, bool connected) {
 }
 
 static void ble_hid_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
+    /* SMP events (security request, numeric comparison, passkey, auth result) are
+     * handled once for all profiles in ble_core. Done before taking our lock so the
+     * UI callbacks never run under it. */
+    if(ble_core_handle_gap_event(event, param)) return;
+
     ble_hid_lock_global();
 
     switch(event) {
@@ -323,17 +289,6 @@ static void ble_hid_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_
         ESP_LOGI(TAG, "gap event: ADV_STOP_COMPLETE");
         ble_hid_state.advertising = false;
         break;
-    case ESP_GAP_BLE_SEC_REQ_EVT:
-        ESP_LOGI(TAG, "gap event: SEC_REQ");
-        esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
-        break;
-    case ESP_GAP_BLE_NC_REQ_EVT:
-        ESP_LOGI(TAG, "gap event: NC_REQ");
-        esp_ble_confirm_reply(param->ble_security.key_notif.bd_addr, true);
-        break;
-    case ESP_GAP_BLE_PASSKEY_NOTIF_EVT:
-        ESP_LOGI(TAG, "BLE passkey: %06" PRIu32, param->ble_security.key_notif.passkey);
-        break;
     case ESP_GAP_BLE_AUTH_CMPL_EVT:
         if(param->ble_security.auth_cmpl.success) {
             ESP_LOGI(TAG, "BLE authentication complete");
@@ -361,9 +316,7 @@ static void ble_hid_device_event_handler(
     esp_hidd_event_t event = (esp_hidd_event_t)id;
     esp_hidd_event_data_t* data = event_data;
 
-    ble_hid_lock_global();
-    BleHid* ble_hid = ble_hid_state.active;
-    ble_hid_unlock_global();
+    BleHid* ble_hid = ble_hid_callback_acquire();
 
     if(!ble_hid) {
         return;
@@ -401,6 +354,190 @@ static void ble_hid_device_event_handler(
     default:
         break;
     }
+
+    ble_hid_callback_release(ble_hid);
+}
+
+/* The serial profile replaces these global handlers on start. Route only events
+ * for HID app interfaces to esp_hidd; link events still update the shared BLE core. */
+static void ble_hid_gatts_event_handler(
+    esp_gatts_cb_event_t event,
+    esp_gatt_if_t gatts_if,
+    esp_ble_gatts_cb_param_t* param) {
+    int hid_app_index = -1;
+    bool is_hid = false;
+
+    if(param && (event == ESP_GATTS_REG_EVT)) {
+        switch(param->reg.app_id) {
+        case BLE_HID_APP_ID_BATTERY:
+            hid_app_index = 0;
+            break;
+        case BLE_HID_APP_ID_DEVICE_INFO:
+            hid_app_index = 1;
+            break;
+        case BLE_HID_APP_ID_HID:
+            hid_app_index = 2;
+            break;
+        default:
+            break;
+        }
+        is_hid = (hid_app_index >= 0);
+        if(is_hid) {
+            bool reject_late_registration;
+            ble_hid_lock_global();
+            ble_hid_state.registration_pending_mask &= (uint8_t)~(1U << hid_app_index);
+            reject_late_registration =
+                (param->reg.status == ESP_GATT_OK) && (gatts_if != ESP_GATT_IF_NONE) &&
+                (ble_hid_state.shutting_down || !ble_hid_state.active);
+            if(param->reg.status == ESP_GATT_OK && (gatts_if != ESP_GATT_IF_NONE)) {
+                ble_hid_state.hid_if[hid_app_index] = gatts_if;
+                if(reject_late_registration) {
+                    ble_hid_state.unregister_pending_mask |= (uint8_t)(1U << hid_app_index);
+                }
+            }
+            ble_hid_maybe_finish_teardown_locked();
+            ble_hid_unlock_global();
+            if(reject_late_registration) {
+                ESP_LOGW(
+                    TAG,
+                    "gatts REG arrived during teardown app_id=0x%04x if=%u; unregistering",
+                    (unsigned)param->reg.app_id,
+                    (unsigned)gatts_if);
+                esp_ble_gatts_app_unregister(gatts_if);
+                return;
+            }
+        } else if((param->reg.app_id == BLE_SERIAL_APP_ID) &&
+                  (param->reg.status == ESP_GATT_OK) &&
+                  (gatts_if != ESP_GATT_IF_NONE)) {
+            ESP_LOGW(
+                TAG,
+                "gatts REG serial app arrived at HID callback; requesting unregister if=%u",
+                (unsigned)gatts_if);
+            esp_ble_gatts_app_unregister(gatts_if);
+            return;
+        } else if(!is_hid && (gatts_if != ESP_GATT_IF_NONE)) {
+            ble_hid_lock_global();
+            for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]);
+                i++) {
+                if(ble_hid_state.hid_if[i] == gatts_if) {
+                    ble_hid_state.hid_if[i] = ESP_GATT_IF_NONE;
+                }
+            }
+            ble_hid_unlock_global();
+        }
+    } else if(gatts_if != ESP_GATT_IF_NONE) {
+        ble_hid_lock_global();
+        for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]); i++) {
+            if(ble_hid_state.hid_if[i] == gatts_if) {
+                is_hid = true;
+                break;
+            }
+        }
+        ble_hid_maybe_finish_teardown_locked();
+        ble_hid_unlock_global();
+    }
+
+    if(param) {
+        switch(event) {
+        case ESP_GATTS_REG_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts REG %s app_id=0x%04x if=%u status=%d",
+                is_hid ? "hid" : "other",
+                (unsigned)param->reg.app_id,
+                (unsigned)gatts_if,
+                param->reg.status);
+            break;
+        case ESP_GATTS_CREAT_ATTR_TAB_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts CREAT_ATTR_TAB %s if=%u status=%d svc_uuid_len=%u inst=%u handles=%u",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->add_attr_tab.status,
+                (unsigned)param->add_attr_tab.svc_uuid.len,
+                (unsigned)param->add_attr_tab.svc_inst_id,
+                (unsigned)param->add_attr_tab.num_handle);
+            break;
+        case ESP_GATTS_START_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts START %s if=%u status=%d handle=%u",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->start.status,
+                (unsigned)param->start.service_handle);
+            break;
+        case ESP_GATTS_CREATE_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts CREATE %s if=%u status=%d handle=%u uuid_len=%u",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->create.status,
+                (unsigned)param->create.service_handle,
+                (unsigned)param->create.service_id.id.uuid.len);
+            break;
+        case ESP_GATTS_ADD_CHAR_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts ADD_CHAR %s if=%u status=%d attr=%u service=%u uuid_len=%u",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->add_char.status,
+                (unsigned)param->add_char.attr_handle,
+                (unsigned)param->add_char.service_handle,
+                (unsigned)param->add_char.char_uuid.len);
+            break;
+        case ESP_GATTS_STOP_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts STOP %s if=%u status=%d",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->stop.status);
+            break;
+        case ESP_GATTS_DELETE_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts DELETE %s if=%u status=%d",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if,
+                param->del.status);
+            break;
+        case ESP_GATTS_UNREG_EVT:
+            ESP_LOGI(
+                TAG,
+                "gatts UNREG %s if=%u",
+                is_hid ? "hid" : "other",
+                (unsigned)gatts_if);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if(param && (event == ESP_GATTS_CONNECT_EVT)) {
+        ble_core_link_connected(param->connect.remote_bda, &param->connect.conn_params);
+    } else if(param && (event == ESP_GATTS_DISCONNECT_EVT)) {
+        ble_core_link_disconnected();
+    }
+
+    if(is_hid && param) {
+        esp_hidd_gatts_event_handler(event, gatts_if, param);
+    }
+
+    if(param && (event == ESP_GATTS_UNREG_EVT)) {
+        ble_hid_lock_global();
+        for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]); i++) {
+            if(ble_hid_state.hid_if[i] == gatts_if) {
+                ble_hid_state.hid_if[i] = ESP_GATT_IF_NONE;
+                ble_hid_state.unregister_pending_mask &= (uint8_t)~(1U << i);
+            }
+        }
+        ble_hid_maybe_finish_teardown_locked();
+        ble_hid_unlock_global();
+    }
 }
 
 static esp_err_t ble_hid_stack_init_once(void) {
@@ -412,71 +549,33 @@ static esp_err_t ble_hid_stack_init_once(void) {
             return ESP_ERR_NO_MEM;
         }
     }
-
-    ble_hid_lock_global();
-    if(ble_hid_state.initialized) {
-        ble_hid_unlock_global();
-        return ESP_OK;
+    if(!ble_hid_state.callbacks_drained) {
+        ble_hid_state.callbacks_drained = xSemaphoreCreateBinary();
+        if(!ble_hid_state.callbacks_drained) {
+            return ESP_ERR_NO_MEM;
+        }
     }
 
-    ble_hid_unlock_global();
-
-    err = nvs_flash_init();
-    if((err == ESP_ERR_NVS_NO_FREE_PAGES) || (err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
+    /* Status based (not a private flag): the stack may have been stopped for
+     * WiFi / light sleep since the last HID session. */
+    err = ble_core_stack_up();
     if(err != ESP_OK) {
         return err;
     }
 
-    err = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
-    if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
+    err = ble_core_register_gap_callback(ble_hid_gap_event_handler);
+    if(err != ESP_OK) {
         return err;
     }
 
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    err = esp_bt_controller_init(&bt_cfg);
-    if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
-        return err;
-    }
-
-    err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-    if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
-        return err;
-    }
-
-    esp_bluedroid_config_t bluedroid_cfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
-    err = esp_bluedroid_init_with_cfg(&bluedroid_cfg);
-    if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
-        return err;
-    }
-
-    err = esp_bluedroid_enable();
-    if((err != ESP_OK) && (err != ESP_ERR_INVALID_STATE)) {
+    err = esp_ble_gatts_register_callback(ble_hid_gatts_event_handler);
+    if(err != ESP_OK) {
         return err;
     }
 
     ble_hid_lock_global();
-
-    if(!ble_hid_state.gap_registered) {
-        err = esp_ble_gap_register_callback(ble_hid_gap_event_handler);
-        if(err != ESP_OK) {
-            ble_hid_unlock_global();
-            return err;
-        }
-        ble_hid_state.gap_registered = true;
-    }
-
-    if(!ble_hid_state.gatts_registered) {
-        err = esp_ble_gatts_register_callback(esp_hidd_gatts_event_handler);
-        if(err != ESP_OK) {
-            ble_hid_unlock_global();
-            return err;
-        }
-        ble_hid_state.gatts_registered = true;
-    }
-
+    ble_hid_state.gap_registered = true;
+    ble_hid_state.gatts_registered = true;
     ble_hid_state.initialized = true;
     ble_hid_unlock_global();
 
@@ -484,40 +583,32 @@ static esp_err_t ble_hid_stack_init_once(void) {
 }
 
 static esp_err_t ble_hid_apply_security_config(const BleHidConfig* config) {
-    esp_ble_auth_req_t auth_req = ble_hid_auth_req(config->bonding);
-    esp_ble_io_cap_t io_cap = ble_hid_io_cap(config->pairing);
-    uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-    uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-    uint8_t key_size = 16;
-    uint32_t passkey = BLE_HID_PASSKEY_DEFAULT;
+    /* Ordinary HID profiles keep their existing passkey/numeric-comparison
+     * behavior. BadUSB opts into the separate Just Works override below. */
+    const BleCoreConfig core_config = {
+        .pairing = ble_hid_core_pairing(config->pairing),
+        .bonding = config->bonding,
+        .require_authenticated = false,
+        .link_auth_timeout_ms = 0,
+        .fail_limit = 0,
+        .fast_link = true,
+    };
+    esp_err_t err = ble_core_apply_config(&core_config);
+    if(err != ESP_OK || !config->just_works) return err;
 
-    esp_err_t err = esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, 1);
-    if(err != ESP_OK) {
-        return err;
-    }
-
-    err = esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &io_cap, 1);
-    if(err != ESP_OK) {
-        return err;
-    }
-
-    err = esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, 1);
-    if(err != ESP_OK) {
-        return err;
-    }
-
-    err = esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, 1);
-    if(err != ESP_OK) {
-        return err;
-    }
-
-    err = esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, 1);
-    if(err != ESP_OK) {
-        return err;
-    }
-
+    /* BadUSB opts into Just Works explicitly. Keep this override local to the
+     * BadUSB HID profile; ordinary HID and the firmware serial profile retain
+     * their existing MITM/pairing configuration. Apply it before GATT startup
+     * and advertising so the central never sees the previous Numeric Comparison
+     * parameters for this profile. */
+    esp_ble_auth_req_t auth_req =
+        config->bonding ? ESP_LE_AUTH_REQ_SC_BOND : ESP_LE_AUTH_REQ_SC_ONLY;
+    esp_ble_io_cap_t io_cap = ESP_IO_CAP_NONE;
+    err = esp_ble_gap_set_security_param(
+        ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(auth_req));
+    if(err != ESP_OK) return err;
     return esp_ble_gap_set_security_param(
-        ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(passkey));
+        ESP_BLE_SM_IOCAP_MODE, &io_cap, sizeof(io_cap));
 }
 
 static bool ble_hid_append_adv_field(
@@ -658,7 +749,7 @@ BleHid* ble_hid_alloc(const BleHidConfig* config) {
     memcpy(&ble_hid->config, config, sizeof(ble_hid->config));
     ESP_LOGI(
         TAG,
-        "alloc name=%s mac=%02x:%02x:%02x:%02x:%02x:%02x bonding=%d pairing=%d",
+        "alloc name=%s mac=%02x:%02x:%02x:%02x:%02x:%02x bonding=%d pairing=%d just_works=%d",
         ble_hid->config.device_name,
         ble_hid->config.mac[0],
         ble_hid->config.mac[1],
@@ -667,18 +758,32 @@ BleHid* ble_hid_alloc(const BleHidConfig* config) {
         ble_hid->config.mac[4],
         ble_hid->config.mac[5],
         ble_hid->config.bonding,
-        ble_hid->config.pairing);
+        ble_hid->config.pairing,
+        ble_hid->config.just_works);
 
     ble_device_config.device_name = ble_hid->config.device_name;
 
     ble_hid_lock_global();
-    if(ble_hid_state.active) {
+    if(ble_hid_state.active || ble_hid_state.shutting_down ||
+       ble_hid_state.registration_pending_mask || ble_hid_state.unregister_pending_mask) {
+        ESP_LOGE(
+            TAG,
+            "alloc rejected: previous HID GATTS lifecycle is not clean (reg=0x%02x unreg=0x%02x shutdown=%d)",
+            ble_hid_state.registration_pending_mask,
+            ble_hid_state.unregister_pending_mask,
+            ble_hid_state.shutting_down);
         ble_hid_unlock_global();
         vSemaphoreDelete(ble_hid->mutex);
         free(ble_hid);
         return NULL;
     }
     ble_hid_state.active = ble_hid;
+    ble_hid_state.shutting_down = false;
+    ble_hid_state.registration_pending_mask = 0;
+    ble_hid_state.unregister_pending_mask = 0;
+    for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]); i++) {
+        ble_hid_state.hid_if[i] = ESP_GATT_IF_NONE;
+    }
     ble_hid_state.advertising = false;
     ble_hid_state.advertising_requested = false;
     ble_hid_state.adv_data_pending = false;
@@ -707,6 +812,9 @@ BleHid* ble_hid_alloc(const BleHidConfig* config) {
         goto error;
     }
 
+    ble_hid_lock_global();
+    ble_hid_state.registration_pending_mask = 0x07;
+    ble_hid_unlock_global();
     err = esp_hidd_dev_init(
         &ble_device_config, ESP_HID_TRANSPORT_BLE, ble_hid_device_event_handler, &ble_hid->dev);
     if(err != ESP_OK) {
@@ -721,6 +829,9 @@ error:
     if(ble_hid_state.active == ble_hid) {
         ble_hid_state.active = NULL;
     }
+    ble_hid_state.shutting_down = ble_hid_state.registration_pending_mask ||
+                                  ble_hid_state.unregister_pending_mask;
+    ble_hid_maybe_finish_teardown_locked();
     ble_hid_unlock_global();
 
     if(ble_hid->mutex) {
@@ -730,9 +841,9 @@ error:
     return NULL;
 }
 
-void ble_hid_free(BleHid* ble_hid) {
+bool ble_hid_free(BleHid* ble_hid) {
     if(!ble_hid) {
-        return;
+        return true;
     }
 
     ble_hid_lock_global();
@@ -742,20 +853,80 @@ void ble_hid_free(BleHid* ble_hid) {
     }
     ble_hid_state.advertising_requested = false;
     ble_hid_state.hidd_started = false;
+    ble_hid_state.shutting_down = true;
+    for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]); i++) {
+        if(ble_hid_state.hid_if[i] != ESP_GATT_IF_NONE) {
+            ble_hid_state.unregister_pending_mask |= (uint8_t)(1U << i);
+        }
+    }
     if(ble_hid_state.active == ble_hid) {
         ble_hid_state.active = NULL;
     }
+    uint32_t callback_refs = ble_hid_state.callback_refs;
     ble_hid_unlock_global();
 
-    if(ble_hid->dev) {
-        esp_hidd_dev_deinit(ble_hid->dev);
+    while(callback_refs > 0) {
+        if(xSemaphoreTake(ble_hid_state.callbacks_drained, portMAX_DELAY) != pdTRUE) {
+            ESP_LOGE(TAG, "Failed waiting for BLE HID callbacks to drain");
+            return false;
+        }
+        ble_hid_lock_global();
+        callback_refs = ble_hid_state.callback_refs;
+        ble_hid_unlock_global();
     }
+
+    bool teardown_clean = true;
+    if(ble_hid->dev) {
+        esp_err_t err = esp_hidd_dev_deinit(ble_hid->dev);
+        if(err != ESP_OK) {
+            ESP_LOGE(TAG, "HID deinit failed: %s", esp_err_to_name(err));
+            teardown_clean = false;
+        }
+
+        /* esp_hidd_dev_deinit() only queues GATTS stop/delete/unregister calls.
+         * Do not let the BT service install the next profile callback until all
+         * HID app interfaces have actually emitted UNREG. Late REG events are
+         * rejected and unregistered by ble_hid_gatts_event_handler(). */
+        const TickType_t unregister_timeout = pdMS_TO_TICKS(3000);
+        TickType_t unregister_started = xTaskGetTickCount();
+        while(true) {
+            ble_hid_lock_global();
+            uint8_t unregister_pending = ble_hid_state.unregister_pending_mask;
+            uint8_t registration_pending = ble_hid_state.registration_pending_mask;
+            ble_hid_unlock_global();
+            uint8_t pending = unregister_pending | registration_pending;
+            if(pending == 0) break;
+
+            TickType_t elapsed = xTaskGetTickCount() - unregister_started;
+            if(elapsed >= unregister_timeout) {
+                ESP_LOGE(
+                    TAG,
+                    "Timed out waiting for HID GATTS teardown reg=0x%02x unreg=0x%02x",
+                    registration_pending,
+                    unregister_pending);
+                teardown_clean = false;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
+    ble_hid_lock_global();
+    uint8_t registration_pending = ble_hid_state.registration_pending_mask;
+    uint8_t unregister_pending = ble_hid_state.unregister_pending_mask;
+    if(registration_pending || unregister_pending) teardown_clean = false;
+    /* Keep the tombstone and interface map when teardown is incomplete. A late
+     * REG/UNREG callback can still drain it, and a new HID allocation is refused
+     * until then. */
+    if(teardown_clean) ble_hid_state.shutting_down = false;
+    ble_hid_unlock_global();
 
     if(ble_hid->mutex) {
         vSemaphoreDelete(ble_hid->mutex);
     }
 
     free(ble_hid);
+    return teardown_clean;
 }
 
 void ble_hid_set_state_callback(BleHid* ble_hid, BleHidStateCallback callback, void* context) {
@@ -1028,36 +1199,41 @@ bool ble_hid_is_active(void) {
     return active;
 }
 
+bool ble_hid_is_teardown_pending(void) {
+    bool pending = false;
+    ble_hid_lock_global();
+    pending = ble_hid_state.shutting_down || ble_hid_state.registration_pending_mask ||
+              ble_hid_state.unregister_pending_mask;
+    ble_hid_unlock_global();
+    return pending;
+}
+
+void ble_hid_reset_gatts_state(void) {
+    if(!ble_hid_state.mutex) return;
+
+    ble_hid_lock_global();
+    /* This is called only after Bluedroid/controller deinit. No GATTS callbacks
+     * from the previous stack instance can still own these interface IDs. */
+    ble_hid_state.active = NULL;
+    ble_hid_state.registration_pending_mask = 0;
+    ble_hid_state.unregister_pending_mask = 0;
+    ble_hid_state.shutting_down = false;
+    ble_hid_state.advertising = false;
+    ble_hid_state.advertising_requested = false;
+    ble_hid_state.adv_data_pending = false;
+    ble_hid_state.hidd_started = false;
+    ble_hid_state.rand_addr_pending = false;
+    ble_hid_state.rand_addr_enabled = false;
+    ble_hid_state.callback_refs = 0;
+    for(size_t i = 0; i < sizeof(ble_hid_state.hid_if) / sizeof(ble_hid_state.hid_if[0]); i++) {
+        ble_hid_state.hid_if[i] = ESP_GATT_IF_NONE;
+    }
+    ble_hid_unlock_global();
+}
+
 bool ble_hid_remove_pairing(void) {
-    if(!ble_hid_state.initialized) {
-        return false;
-    }
-
-    int device_count = esp_ble_get_bond_device_num();
-    if(device_count <= 0) {
-        return true;
-    }
-
-    esp_ble_bond_dev_t* devices = calloc(device_count, sizeof(esp_ble_bond_dev_t));
-    if(!devices) {
-        return false;
-    }
-
-    int requested = device_count;
-    esp_err_t err = esp_ble_get_bond_device_list(&requested, devices);
-    if(err != ESP_OK) {
-        free(devices);
-        return false;
-    }
-
-    bool success = true;
-    for(int i = 0; i < requested; i++) {
-        err = esp_ble_remove_bond_device(devices[i].bd_addr);
-        if(err != ESP_OK) {
-            success = false;
-        }
-    }
-
-    free(devices);
-    return success;
+    /* Bonds are shared by every profile. The old guard on this module's own
+     * "initialized" flag made "forget devices" a silent no-op whenever only the
+     * serial profile had brought the stack up. */
+    return ble_core_remove_all_bonds();
 }

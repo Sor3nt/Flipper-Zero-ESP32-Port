@@ -103,7 +103,8 @@ static void subghz_protocol_faac_slh_check_remote_controller(
     const char** manufacture_name);
 
 void* subghz_protocol_encoder_faac_slh_alloc(SubGhzEnvironment* environment) {
-    SubGhzProtocolEncoderFaacSLH* instance = malloc(sizeof(SubGhzProtocolEncoderFaacSLH));
+    SubGhzProtocolEncoderFaacSLH* instance =
+        calloc(1, sizeof(SubGhzProtocolEncoderFaacSLH));
 
     instance->base.protocol = &subghz_protocol_faac_slh;
     instance->generic.protocol_name = instance->base.protocol->name;
@@ -282,6 +283,11 @@ static bool subghz_protocol_faac_slh_gen_data(SubGhzProtocolEncoderFaacSLH* inst
         decrypt = fixx[2] << 28 | fixx[3] << 24 | fixx[4] << 20 |
                   (instance->generic.cnt & 0xFFFFF);
     }
+    if(!instance->manufacture_name) {
+        FURI_LOG_E(TAG, "Missing FAAC SLH manufacturer");
+        return false;
+    }
+
     for
         M_EACH(manufacture_code, *subghz_keystore_get_data(instance->keystore), SubGhzKeyArray_t) {
             res = strcmp(furi_string_get_cstr(manufacture_code->name), instance->manufacture_name);
@@ -409,7 +415,11 @@ SubGhzProtocolStatus
         flipper_format_read_uint32(
             flipper_format, "Repeat", (uint32_t*)&instance->encoder.repeat, 1);
 
-        subghz_protocol_encoder_faac_slh_get_upload(instance);
+        if(!instance->manufacture_name ||
+           !subghz_protocol_encoder_faac_slh_get_upload(instance)) {
+            FURI_LOG_E(TAG, "Unable to generate FAAC SLH upload data");
+            break;
+        }
 
         if(!flipper_format_rewind(flipper_format)) {
             FURI_LOG_E(TAG, "Rewind error");

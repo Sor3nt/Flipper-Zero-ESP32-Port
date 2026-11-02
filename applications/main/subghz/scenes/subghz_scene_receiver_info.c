@@ -3,6 +3,7 @@
 #include <lib/subghz/blocks/custom_btn.h>
 
 #include "applications/main/subghz/helpers/subghz_txrx_i.h"
+#include "applications/main/subghz/helpers/subghz_click_echo.h"
 #include <lib/subghz/blocks/generic.h>
 
 #define TAG "SubGhzSceneReceiverInfo"
@@ -10,6 +11,13 @@
 void subghz_scene_receiver_info_callback(GuiButtonType result, InputType type, void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
+    static SubGhzClickEcho center_click_echo = {0};
+
+    // Center is hold-to-transmit (Press/Release): drop the synthetic second click
+    // some boards append, or each click would transmit twice.
+    if(result == GuiButtonTypeCenter && subghz_click_echo_filter_type(&center_click_echo, type)) {
+        return;
+    }
 
     if((result == GuiButtonTypeCenter) && (type == InputTypePress)) {
         view_dispatcher_send_custom_event(
@@ -252,9 +260,10 @@ bool subghz_scene_receiver_info_on_event(void* context, SceneManagerEvent event)
             if(!subghz_tx_start(
                    subghz,
                    subghz_history_get_raw_data(subghz->history, subghz->idx_menu_chosen))) {
-                subghz_txrx_rx_start(subghz->txrx);
+                const bool rx_started = subghz_txrx_rx_start(subghz->txrx);
                 subghz_txrx_hopper_unpause(subghz->txrx);
-                subghz->state_notifications = SubGhzNotificationStateRx;
+                subghz->state_notifications = rx_started ? SubGhzNotificationStateRx :
+                                                           SubGhzNotificationStateIDLE;
                 subghz_block_generic_global.endless_tx = false;
             }
             return true;
@@ -332,9 +341,10 @@ bool subghz_scene_receiver_info_on_event(void* context, SceneManagerEvent event)
                 subghz->state_notifications = SubGhzNotificationStateIDLE;
 
                 if(!scene_manager_has_previous_scene(subghz->scene_manager, SubGhzSceneDecodeRAW)) {
-                    subghz_txrx_rx_start(subghz->txrx);
+                    const bool rx_started = subghz_txrx_rx_start(subghz->txrx);
                     subghz_txrx_hopper_unpause(subghz->txrx);
-                    if(!subghz_history_get_text_space_left(subghz->history, NULL)) {
+                    // Receiver's on_enter retries (and shows "RX ERROR") if it failed.
+                    if(rx_started && !subghz_history_get_text_space_left(subghz->history, NULL)) {
                         subghz->state_notifications = SubGhzNotificationStateRx;
                     }
                 }

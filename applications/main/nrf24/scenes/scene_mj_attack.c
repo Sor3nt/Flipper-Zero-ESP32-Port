@@ -65,6 +65,9 @@ static int32_t mj_attack_worker(void* context) {
                     model->error_text, "Cannot open script", sizeof(model->error_text) - 1);
             },
             true);
+        nrf24_hw_acquire();
+        nrf24_hw_power_down();
+        nrf24_hw_release();
         nrf24_hw_deinit();
         return 0;
     }
@@ -88,13 +91,12 @@ static int32_t mj_attack_worker(void* context) {
         },
         true);
 
-    /* Acquire SPI for the whole attack — radio access alone, no LCD writes are
-     * needed inside this hot path (the view model updates go through the
-     * GUI thread). The acquire stays in the same thread, so re-acquire is
-     * safe across multiple bursts. */
-
-    /* Setup radio */
-    nrf24_hw_acquire();
+    /* Setup radio. mj_setup_tx_for_target/mj_logitech_wake/mj_inject_keystroke
+     * each claim nrf24_hw_acquire()/release() internally for just their SPI
+     * burst — do NOT wrap this block in an outer acquire/release. On a
+     * shared-SPI board that also takes the global LCD/SD bus lock, and the
+     * furi_delay_ms(2) between MS wake keystrokes below would then freeze
+     * the display for however long this loop runs. */
     mj_setup_tx_for_target(target);
     mj_logitech_wake(target);
     mj_reset_ms_sequence();
@@ -104,13 +106,13 @@ static int32_t mj_attack_worker(void* context) {
             furi_delay_ms(2);
         }
     }
-    nrf24_hw_release();
 
-    /* Stream script line-by-line. */
+    /* Stream script line-by-line. mj_script_step() claims the bus itself
+     * for each SPI burst — do NOT wrap the call: a line can be a DELAY of up
+     * to 60 s or a multi-second STRING, and holding the bus across that
+     * would freeze the shared-SPI display/input for the whole line. */
     while(!ctx->stop && !mj_script_done(ctx->script)) {
-        nrf24_hw_acquire();
         bool more = mj_script_step(ctx->script, target, &ctx->stop);
-        nrf24_hw_release();
 
         with_view_model(
             app->mj_attack_view,
@@ -153,6 +155,10 @@ void nrf24_app_scene_mj_attack_on_enter(void* context) {
     Nrf24App* app = context;
 
     Nrf24MjAttackCtx* ctx = malloc(sizeof(Nrf24MjAttackCtx));
+    if(!ctx) {
+        FURI_LOG_E(TAG, "No memory for attack context");
+        return;
+    }
     memset(ctx, 0, sizeof(*ctx));
     ctx->app = app;
     g_ctx = ctx;
@@ -180,10 +186,24 @@ void nrf24_app_scene_mj_attack_on_enter(void* context) {
 }
 
 bool nrf24_app_scene_mj_attack_on_event(void* context, SceneManagerEvent event) {
-    UNUSED(context);
+    Nrf24App* app = context;
     if(event.type != SceneManagerEventTypeCustom || !g_ctx) return false;
     if(event.event == Nrf24MjAttackEventStop) {
-        g_ctx->stop = true;
+        /* The center (OK) button is the only key the view sends. The footer
+         * shows "Stop" only while Running and "Back" otherwise, so OK must
+         * match: abort the active run, or leave the scene once it has finished
+         * (Done/Error/Idle). Without this, a finished run showed "Back" but OK
+         * only re-asserted the stop flag — a dead button that trapped the user
+         * until they pressed the physical Back key. */
+        MjAttackPhase phase;
+        with_view_model(
+            app->mj_attack_view, Nrf24MjAttackModel * model, { phase = model->phase; }, false);
+        if(phase == MjAttackPhaseScanning || phase == MjAttackPhaseRunning) {
+            g_ctx->stop = true;
+        } else {
+            /* on_exit joins the (already finished) worker and frees g_ctx. */
+            scene_manager_previous_scene(app->scene_manager);
+        }
         return true;
     }
     return false;

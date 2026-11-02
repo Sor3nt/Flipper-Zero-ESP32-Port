@@ -66,10 +66,9 @@ __attribute__((weak)) bool target_input_idle_wait(uint32_t timeout_ms) {
  *
  * The display state is sampled once before each driver poll, i.e. before any
  * subscriber (notification) can wake the panel in reaction to the press, so the
- * decision cannot race with the wake-up itself. A click ends at its Release,
- * but some drivers (paradoxt) emit a synthetic Press/Short/Release right after
- * the real Release within the same poll; those are covered by keeping the
- * swallow state until the poll that delivered the Release is over. */
+ * decision cannot race with the wake-up itself. Paradoxt emits its logical
+ * Short immediately after the physical Release in the same poll, so keep the
+ * swallow state until that poll is over. */
 typedef struct {
     FuriPubSub* output;
     bool poll_display_asleep;

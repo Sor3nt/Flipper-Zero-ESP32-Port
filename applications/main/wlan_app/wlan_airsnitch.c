@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <furi.h>
+#include <esp_attr.h>
 
 #define TAG "WlanAirSnitch"
 
@@ -55,16 +56,16 @@ static volatile bool s_running = false;
 static volatile bool s_stop = false;
 static volatile bool s_done = false;
 static volatile uint8_t s_progress = 0;
-static uint32_t s_results[AS_MAX_RESULTS]; // Network-Byte-Order
+static EXT_RAM_BSS_ATTR uint32_t s_results[AS_MAX_RESULTS]; // Network-Byte-Order
 static volatile uint8_t s_count = 0;
-static char s_status[24];
+static EXT_RAM_BSS_ATTR char s_status[24];
 static TaskHandle_t s_task = NULL;
 
 // Große Arbeitspuffer statisch (nur ein Worker gleichzeitig) → kleiner Stack.
-static bool s_found[256];        // index = host-lowbyte 1..254
-static AsJob s_jobs[254];
-static int s_hostmap[254];
-static bool s_res[254];
+static EXT_RAM_BSS_ATTR bool s_found[256];        // index = host-lowbyte 1..254
+static EXT_RAM_BSS_ATTR AsJob s_jobs[254];
+static EXT_RAM_BSS_ATTR int s_hostmap[254];
+static EXT_RAM_BSS_ATTR bool s_res[254];
 
 static void as_add_result(uint32_t ip_be) {
     if(s_count >= AS_MAX_RESULTS) return;

@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <furi_hal_nvs_blob.h>
+#include <furi_hal_nrf24.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <driver/rmt_tx.h>
 #include <driver/spi_master.h>
 #include <esp_attr.h>
@@ -121,6 +125,56 @@ static FuriHalSubGhzContext furi_hal_subghz = {
         },
 };
 
+/* ---- External CC1101 module with user-selectable CS / GDO0 ----
+ * The module shares MISO/MOSI/SCK with the board radio; only CS and GDO0 differ and
+ * come from the header GPIOs. While attached, the radio SPI handle is re-pointed at
+ * the module's CS and GDO0 follows the chosen pad, so every furi_hal_subghz_* call
+ * (and the Sub-GHz workers that use the shared handle) drives the module. While
+ * detached nothing about the chosen pads is held: no reservation, no SPI device,
+ * no pull - other features may use them freely. */
+#if defined(BOARD_SUBGHZ_EXT_MODULE)
+#define FURI_HAL_SUBGHZ_HAS_EXT 1
+#else
+#define FURI_HAL_SUBGHZ_HAS_EXT 0
+#endif
+
+#define FURI_HAL_SUBGHZ_EXT_NVS_NAMESPACE "subghz"
+#define FURI_HAL_SUBGHZ_EXT_NVS_KEY       "ext"
+#define FURI_HAL_SUBGHZ_EXT_BLOB_MAGIC    0xE1u
+#define FURI_HAL_SUBGHZ_EXT_BLOB_SIZE     4u
+
+typedef struct {
+    FuriHalSubGhzExtConfig config;
+    bool config_loaded;
+    volatile bool attached;
+    bool internal_connected; /* board radio's `connected`, restored on detach */
+    GpioPin cs;
+    GpioPin g0;
+    FuriMutex* mutex;
+} FuriHalSubGhzExt;
+
+static FuriHalSubGhzExt furi_hal_subghz_ext = {
+    .cs = {.port = NULL, .pin = UINT16_MAX},
+    .g0 = {.port = NULL, .pin = UINT16_MAX},
+};
+
+/* Compared by pointer (furi_hal_gpio_reserve), so it must stay a single object. */
+static const char furi_hal_subghz_ext_owner[] = "SubGHz ext";
+
+/* GDO0 of the radio that is currently routed (board radio or external module). */
+static inline const GpioPin* furi_hal_subghz_g0(void) {
+    return furi_hal_subghz_ext.attached ? &furi_hal_subghz_ext.g0 : &gpio_cc1101_g0;
+}
+
+static void furi_hal_subghz_g0_init(GpioMode mode, GpioPull pull) {
+    furi_hal_gpio_init_owned(
+        furi_hal_subghz_g0(),
+        mode,
+        pull,
+        GpioSpeedLow,
+        furi_hal_subghz_ext.attached ? furi_hal_subghz_ext_owner : NULL);
+}
+
 #define FURI_HAL_SUBGHZ_RMT_RESOLUTION_HZ     (1000000u)
 #define FURI_HAL_SUBGHZ_RMT_MEM_BLOCK_SYMBOLS (64u)
 #define FURI_HAL_SUBGHZ_RMT_TX_QUEUE_DEPTH    (1u)
@@ -128,6 +182,9 @@ static FuriHalSubGhzContext furi_hal_subghz = {
  * truncated (mod 32768): long gaps shrink, and an exact multiple of 32768
  * becomes 0, which the RMT treats as the end marker and stops the TX early. */
 #define FURI_HAL_SUBGHZ_RMT_MAX_DURATION_TICKS (0x7FFFu)
+/* Upper bound for letting the RMT finish its buffered symbols on stop: at most
+ * one RMT memory block (64 symbols), typically a few ms for real signals. */
+#define FURI_HAL_SUBGHZ_TX_STOP_DRAIN_MS (100)
 
 static volatile uint32_t furi_hal_subghz_rx_irq_count = 0;
 
@@ -135,11 +192,16 @@ static void furi_hal_subghz_capture_gpio_callback(void* context) {
     UNUSED(context);
     furi_hal_subghz_rx_irq_count++;
 
-    FuriHalSubGhzCaptureCallback callback = furi_hal_subghz.async_rx_callback;
+    /* stop_async_rx() may run on the other core. It clears the callback before the
+     * context, and this reads them in the opposite order, so a non-NULL callback
+     * always comes with a valid context (never callback(…, NULL)). */
+    void* callback_context = __atomic_load_n(&furi_hal_subghz.async_rx_context, __ATOMIC_ACQUIRE);
+    FuriHalSubGhzCaptureCallback callback =
+        __atomic_load_n(&furi_hal_subghz.async_rx_callback, __ATOMIC_ACQUIRE);
     if(!callback) return;
 
     const uint32_t now = (uint32_t)esp_timer_get_time();
-    const bool current_level = furi_hal_gpio_read(&gpio_cc1101_g0);
+    const bool current_level = furi_hal_gpio_read(furi_hal_subghz_g0());
     const bool previous_level = furi_hal_subghz.async_rx_last_level;
     uint32_t duration = 0;
 
@@ -151,7 +213,7 @@ static void furi_hal_subghz_capture_gpio_callback(void* context) {
     furi_hal_subghz.async_rx_last_level = current_level;
 
     if(duration > 0) {
-        callback(previous_level, duration, furi_hal_subghz.async_rx_context);
+        callback(previous_level, duration, callback_context);
     }
 }
 
@@ -230,6 +292,10 @@ static bool furi_hal_subghz_async_tx_next_chunk(
     uint16_t* duration) {
     furi_check(level);
     furi_check(duration);
+
+    // On stop, end right away instead of first emitting the rest of a long
+    // (chunked) duration, so the RMT drains quickly.
+    if(async_tx->stop_requested) async_tx->sequence_complete = true;
 
     while(async_tx->remaining_duration == 0 && !async_tx->sequence_complete) {
         if(async_tx->stop_requested) {
@@ -330,7 +396,7 @@ static esp_err_t furi_hal_subghz_async_tx_alloc_backend(FuriHalSubGhzAsyncTx* as
     }
 
     const rmt_tx_channel_config_t channel_config = {
-        .gpio_num = gpio_cc1101_g0.pin,
+        .gpio_num = furi_hal_subghz_g0()->pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = FURI_HAL_SUBGHZ_RMT_RESOLUTION_HZ,
         .mem_block_symbols = FURI_HAL_SUBGHZ_RMT_MEM_BLOCK_SYMBOLS,
@@ -527,10 +593,14 @@ bool furi_hal_subghz_get_ext_leds_and_amp(void) {
 }
 
 const GpioPin* furi_hal_subghz_get_data_gpio(void) {
-    return &gpio_cc1101_g0;
+    return furi_hal_subghz_g0();
 }
 
 void furi_hal_subghz_init(void) {
+    /* An attached external module owns the SPI handle; re-running the board radio's
+     * probe/park sequence would talk to the module instead. */
+    if(furi_hal_subghz_ext.attached) return;
+
     /* Note: BOARD_PIN_PWR_EN is set in furi_hal_init_early() */
 
 #if defined(BOARD_CC1101_SPI_HOST) && defined(BOARD_PIN_RADIO_SPI_MOSI) && \
@@ -617,6 +687,332 @@ void furi_hal_subghz_sleep(void) {
     furi_hal_subghz.state = FuriHalSubGhzStateIdle;
 }
 
+/* ---- External CC1101 module: configuration, attach, detach ---- */
+
+static FuriMutex* furi_hal_subghz_ext_lock(void) {
+    static portMUX_TYPE create_lock = portMUX_INITIALIZER_UNLOCKED;
+    FuriMutex* mutex = furi_hal_subghz_ext.mutex;
+    if(!mutex) {
+        FuriMutex* candidate = furi_mutex_alloc(FuriMutexTypeRecursive);
+        furi_check(candidate);
+        portENTER_CRITICAL(&create_lock);
+        if(!furi_hal_subghz_ext.mutex) furi_hal_subghz_ext.mutex = candidate;
+        mutex = furi_hal_subghz_ext.mutex;
+        portEXIT_CRITICAL(&create_lock);
+        if(mutex != candidate) furi_mutex_free(candidate);
+    }
+    furi_check(furi_mutex_acquire(mutex, FuriWaitForever) == FuriStatusOk);
+    return mutex;
+}
+
+static void furi_hal_subghz_ext_unlock(FuriMutex* mutex) {
+    furi_check(furi_mutex_release(mutex) == FuriStatusOk);
+}
+
+bool furi_hal_subghz_ext_supported(void) {
+    return FURI_HAL_SUBGHZ_HAS_EXT;
+}
+
+bool furi_hal_subghz_ext_pin_allowed(uint8_t pin) {
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    for(size_t i = 0; i < gpio_pins_count; i++) {
+        if(gpio_pins[i].pin && gpio_pins[i].pin->pin == pin) return true;
+    }
+#else
+    UNUSED(pin);
+#endif
+    return false;
+}
+
+static bool furi_hal_subghz_ext_config_valid(const FuriHalSubGhzExtConfig* config) {
+    return config->cs_pin != config->g0_pin && furi_hal_subghz_ext_pin_allowed(config->cs_pin) &&
+           furi_hal_subghz_ext_pin_allowed(config->g0_pin);
+}
+
+static void furi_hal_subghz_ext_config_defaults(FuriHalSubGhzExtConfig* config) {
+    config->use_external = false;
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    /* GPIO4 is left out: it is the default external IR transmitter pin. */
+    config->cs_pin = BOARD_PIN_EXT_GPIO_2;
+    config->g0_pin = BOARD_PIN_EXT_GPIO_3;
+#else
+    config->cs_pin = UINT8_MAX;
+    config->g0_pin = UINT8_MAX;
+#endif
+}
+
+static void furi_hal_subghz_ext_config_load_locked(void) {
+    if(furi_hal_subghz_ext.config_loaded) return;
+
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_config_defaults(&config);
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    uint8_t blob[FURI_HAL_SUBGHZ_EXT_BLOB_SIZE] = {0};
+    if(furi_hal_nvs_blob_read(
+           FURI_HAL_SUBGHZ_EXT_NVS_NAMESPACE, FURI_HAL_SUBGHZ_EXT_NVS_KEY, blob, sizeof(blob)) &&
+       blob[0] == FURI_HAL_SUBGHZ_EXT_BLOB_MAGIC) {
+        const FuriHalSubGhzExtConfig stored = {
+            .use_external = blob[1] == 1,
+            .cs_pin = blob[2],
+            .g0_pin = blob[3],
+        };
+        if(furi_hal_subghz_ext_config_valid(&stored)) {
+            config = stored;
+        } else {
+            ESP_LOGW(TAG, "Stored external-module pins are invalid; using defaults");
+        }
+    }
+#endif
+    furi_hal_subghz_ext.config = config;
+    furi_hal_subghz_ext.config_loaded = true;
+}
+
+static bool furi_hal_subghz_ext_config_save(const FuriHalSubGhzExtConfig* config) {
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    /* The helper runs the write in a task with an internal stack (nvs_commit() switches the
+     * flash cache off and Furi threads keep their stack in PSRAM). */
+    const uint8_t blob[FURI_HAL_SUBGHZ_EXT_BLOB_SIZE] = {
+        FURI_HAL_SUBGHZ_EXT_BLOB_MAGIC,
+        config->use_external ? 1 : 0,
+        config->cs_pin,
+        config->g0_pin,
+    };
+    return furi_hal_nvs_blob_write(
+        FURI_HAL_SUBGHZ_EXT_NVS_NAMESPACE, FURI_HAL_SUBGHZ_EXT_NVS_KEY, blob, sizeof(blob));
+#else
+    UNUSED(config);
+    return false;
+#endif
+}
+
+void furi_hal_subghz_ext_get_config(FuriHalSubGhzExtConfig* config) {
+    furi_check(config);
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    furi_hal_subghz_ext_config_load_locked();
+    *config = furi_hal_subghz_ext.config;
+    furi_hal_subghz_ext_unlock(mutex);
+}
+
+bool furi_hal_subghz_ext_uses_pin(uint8_t pin) {
+    if(!FURI_HAL_SUBGHZ_HAS_EXT) return false;
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    furi_hal_subghz_ext_config_load_locked();
+    const FuriHalSubGhzExtConfig* c = &furi_hal_subghz_ext.config;
+    const bool used = c->use_external && (c->cs_pin == pin || c->g0_pin == pin);
+    furi_hal_subghz_ext_unlock(mutex);
+    return used;
+}
+
+bool furi_hal_subghz_ext_set_config(const FuriHalSubGhzExtConfig* config) {
+    furi_check(config);
+    if(!FURI_HAL_SUBGHZ_HAS_EXT || !furi_hal_subghz_ext_config_valid(config)) return false;
+    /* Two modules cannot share a header pin: asked before taking our own lock so the
+     * two HAL modules never wait on each other. */
+    if(config->use_external &&
+       (furi_hal_nrf24_ext_uses_pin(config->cs_pin) ||
+        furi_hal_nrf24_ext_uses_pin(config->g0_pin))) {
+        return false;
+    }
+
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    furi_hal_subghz_ext_config_load_locked();
+    FuriHalSubGhzExtConfig* current = &furi_hal_subghz_ext.config;
+    const bool pins_changed =
+        current->cs_pin != config->cs_pin || current->g0_pin != config->g0_pin;
+    bool applied = true;
+    if(furi_hal_subghz_ext.attached && pins_changed) {
+        applied = false; /* the pads are in use: the caller has to detach first */
+    } else if(pins_changed || current->use_external != config->use_external) {
+        *current = *config;
+        (void)furi_hal_subghz_ext_config_save(current);
+    }
+    furi_hal_subghz_ext_unlock(mutex);
+    return applied;
+}
+
+bool furi_hal_subghz_ext_is_attached(void) {
+    return furi_hal_subghz_ext.attached;
+}
+
+const char* furi_hal_subghz_ext_result_text(FuriHalSubGhzExtResult result) {
+    switch(result) {
+    case FuriHalSubGhzExtOk:
+        return "OK";
+    case FuriHalSubGhzExtUnsupported:
+        return "Not supported on this board";
+    case FuriHalSubGhzExtBadConfig:
+        return "CS and GDO0 must be two different header pins";
+    case FuriHalSubGhzExtBusy:
+        return "Radio is busy";
+    case FuriHalSubGhzExtPinInUse:
+        return "A chosen pin is used by another feature";
+    case FuriHalSubGhzExtNotDetected:
+        return "No CC1101 detected on the chosen pins";
+    default:
+        return "Unknown error";
+    }
+}
+
+#if FURI_HAL_SUBGHZ_HAS_EXT
+/* Hand the pads back: ext module asleep, board radio's SPI device restored, both
+ * header pads idle (input, no pull) and unreserved. Mutex held by the caller. */
+static void furi_hal_subghz_ext_detach_locked(bool sleep_module) {
+    if(!furi_hal_subghz_ext.attached) return;
+
+    if(sleep_module) furi_hal_subghz_sleep(); /* also stops a running async RX/TX */
+
+    bool restored = false;
+    for(uint32_t i = 0; i < 100 && !restored; i++) {
+        restored = furi_hal_spi_bus_handle_set_cs(&furi_hal_spi_bus_handle_subghz, &gpio_ext_pa4);
+        if(!restored) furi_delay_ms(5);
+    }
+    if(!restored) {
+        /* The handle is stuck inside a transaction. Staying attached keeps the
+         * routing consistent; the next detach retries. */
+        ESP_LOGE(TAG, "External module: SPI handle busy, still attached");
+        return;
+    }
+
+    const GpioPin cs = furi_hal_subghz_ext.cs;
+    const GpioPin g0 = furi_hal_subghz_ext.g0;
+    furi_hal_subghz_ext.attached = false;
+    (void)furi_hal_power_light_sleep_hold_pin_high(cs.pin, false);
+    furi_hal_gpio_remove_int_callback(&g0);
+    furi_hal_gpio_init_owned(&cs, GpioModeInput, GpioPullNo, GpioSpeedLow, furi_hal_subghz_ext_owner);
+    furi_hal_gpio_init_owned(&g0, GpioModeInput, GpioPullNo, GpioSpeedLow, furi_hal_subghz_ext_owner);
+    furi_hal_gpio_unreserve(&cs, furi_hal_subghz_ext_owner);
+    furi_hal_gpio_unreserve(&g0, furi_hal_subghz_ext_owner);
+    furi_hal_subghz_ext.cs.pin = UINT16_MAX;
+    furi_hal_subghz_ext.g0.pin = UINT16_MAX;
+
+    furi_hal_subghz.connected = furi_hal_subghz_ext.internal_connected;
+    furi_hal_subghz.state = FuriHalSubGhzStateIdle;
+    ESP_LOGI(
+        TAG,
+        "External CC1101 detached (GPIO%u, GPIO%u released)",
+        (unsigned)cs.pin,
+        (unsigned)g0.pin);
+}
+
+static FuriHalSubGhzExtResult furi_hal_subghz_ext_attach_locked(void) {
+    if(furi_hal_subghz_ext.attached) return FuriHalSubGhzExtOk;
+
+    if(furi_hal_subghz.state == FuriHalSubGhzStateInit) furi_hal_subghz_init();
+    if(furi_hal_subghz.state != FuriHalSubGhzStateIdle) return FuriHalSubGhzExtBusy;
+
+    furi_hal_subghz_ext_config_load_locked();
+    const FuriHalSubGhzExtConfig config = furi_hal_subghz_ext.config;
+    if(!furi_hal_subghz_ext_config_valid(&config)) return FuriHalSubGhzExtBadConfig;
+
+    const GpioPin cs = {.port = NULL, .pin = config.cs_pin};
+    const GpioPin g0 = {.port = NULL, .pin = config.g0_pin};
+    if(!furi_hal_gpio_reserve(&cs, furi_hal_subghz_ext_owner)) {
+        ESP_LOGW(
+            TAG,
+            "External module: GPIO%u is in use by %s",
+            (unsigned)cs.pin,
+            furi_hal_gpio_get_reservation(&cs));
+        return FuriHalSubGhzExtPinInUse;
+    }
+    if(!furi_hal_gpio_reserve(&g0, furi_hal_subghz_ext_owner)) {
+        ESP_LOGW(
+            TAG,
+            "External module: GPIO%u is in use by %s",
+            (unsigned)g0.pin,
+            furi_hal_gpio_get_reservation(&g0));
+        furi_hal_gpio_unreserve(&cs, furi_hal_subghz_ext_owner);
+        return FuriHalSubGhzExtPinInUse;
+    }
+
+    /* The board radio goes to sleep first (route is still the board radio). */
+    furi_hal_subghz_sleep();
+
+    furi_hal_subghz_ext.cs.pin = config.cs_pin;
+    furi_hal_subghz_ext.g0.pin = config.g0_pin;
+    if(!furi_hal_spi_bus_handle_set_cs(&furi_hal_spi_bus_handle_subghz, &furi_hal_subghz_ext.cs)) {
+        furi_hal_gpio_unreserve(&cs, furi_hal_subghz_ext_owner);
+        furi_hal_gpio_unreserve(&g0, furi_hal_subghz_ext_owner);
+        furi_hal_subghz_ext.cs.pin = UINT16_MAX;
+        furi_hal_subghz_ext.g0.pin = UINT16_MAX;
+        return FuriHalSubGhzExtBusy;
+    }
+    /* The SPI driver let go of the board radio's CSn pad. Keep it high so the
+     * sleeping chip stays deselected (MISO is shared) for the whole session. */
+    furi_hal_gpio_init(&gpio_ext_pa4, GpioModeOutputPushPull, GpioPullNo, GpioSpeedLow);
+    furi_hal_gpio_write(&gpio_ext_pa4, true);
+    furi_hal_gpio_init_owned(
+        &furi_hal_subghz_ext.g0,
+        GpioModeInput,
+        GpioPullNo,
+        GpioSpeedLow,
+        furi_hal_subghz_ext_owner);
+
+    furi_hal_subghz_ext.internal_connected = furi_hal_subghz.connected;
+    furi_hal_subghz_ext.attached = true;
+    /* Light sleep would otherwise pull the (header) CS pad low and wake the module. */
+    (void)furi_hal_power_light_sleep_hold_pin_high(cs.pin, true);
+
+    FuriHalSubGhzProbe probe = {0};
+    const bool found = furi_hal_subghz_probe_read(&probe, true);
+    furi_hal_subghz_log_probe(&probe, found);
+    if(!found) {
+        furi_hal_subghz_ext_detach_locked(false);
+        return FuriHalSubGhzExtNotDetected;
+    }
+
+    furi_hal_subghz.connected = true;
+    furi_hal_subghz.state = FuriHalSubGhzStateIdle;
+    furi_hal_subghz_sleep(); /* park the module like the board radio at boot */
+    ESP_LOGI(
+        TAG,
+        "External CC1101 attached: CS=GPIO%u GDO0=GPIO%u",
+        (unsigned)cs.pin,
+        (unsigned)g0.pin);
+    return FuriHalSubGhzExtOk;
+}
+#endif
+
+FuriHalSubGhzExtResult furi_hal_subghz_ext_attach(void) {
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    const FuriHalSubGhzExtResult result = furi_hal_subghz_ext_attach_locked();
+    furi_hal_subghz_ext_unlock(mutex);
+    return result;
+#else
+    return FuriHalSubGhzExtUnsupported;
+#endif
+}
+
+void furi_hal_subghz_ext_detach(void) {
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    furi_hal_subghz_ext_detach_locked(true);
+    furi_hal_subghz_ext_unlock(mutex);
+#endif
+}
+
+FuriHalSubGhzExtResult furi_hal_subghz_ext_probe(void) {
+#if FURI_HAL_SUBGHZ_HAS_EXT
+    FuriMutex* mutex = furi_hal_subghz_ext_lock();
+    FuriHalSubGhzExtResult result = FuriHalSubGhzExtOk;
+    if(!furi_hal_subghz_ext.attached) {
+        result = furi_hal_subghz_ext_attach_locked();
+        if(result == FuriHalSubGhzExtOk) furi_hal_subghz_ext_detach_locked(true);
+    }
+    furi_hal_subghz_ext_unlock(mutex);
+    return result;
+#else
+    return FuriHalSubGhzExtUnsupported;
+#endif
+}
+
+bool furi_hal_subghz_ext_is_available(void) {
+    if(!FURI_HAL_SUBGHZ_HAS_EXT) return false;
+    FuriHalSubGhzExtConfig config;
+    furi_hal_subghz_ext_get_config(&config);
+    return config.use_external && furi_hal_subghz_ext_probe() == FuriHalSubGhzExtOk;
+}
+
 void furi_hal_subghz_dump_state(void) {
     furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
     printf(
@@ -666,6 +1062,12 @@ void furi_hal_subghz_load_patable(const uint8_t data[8]) {
 void furi_hal_subghz_write_packet(const uint8_t* data, uint8_t size) {
     furi_check(data);
     furi_check(size);
+    /* Variable-length packet: length byte + payload share the 64-byte TX FIFO.
+     * Clamp here so the length byte matches what cc1101_write_fifo() sends. */
+    if(size > 63) {
+        ESP_LOGW(TAG, "TX packet of %u bytes truncated to 63", (unsigned)size);
+        size = 63;
+    }
     furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
     cc1101_flush_tx(&furi_hal_spi_bus_handle_subghz);
     cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FIFO, size);
@@ -911,15 +1313,15 @@ void furi_hal_subghz_set_path(FuriHalSubGhzPath path) {
 #endif
 }
 
-void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context) {
+bool furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context) {
     furi_check(callback);
     if(furi_hal_subghz.state != FuriHalSubGhzStateIdle) {
         ESP_LOGW(TAG, "Cannot start async RX while Sub-GHz state is %d", furi_hal_subghz.state);
-        return;
+        return false;
     }
     if(!furi_hal_subghz.connected) {
         ESP_LOGE(TAG, "Cannot start async RX: CC1101 is not connected");
-        return;
+        return false;
     }
 
     /* Hold insomnia for the whole RX session. The CC1101 GDO0 capture is a plain
@@ -929,26 +1331,28 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
     furi_hal_power_insomnia_enter();
 
     ESP_LOGD(TAG, "start_async_rx: GDO0=GPIO%d freq=%lu connected=%d",
-        gpio_cc1101_g0.pin, (unsigned long)furi_hal_subghz.frequency, furi_hal_subghz.connected);
+        furi_hal_subghz_g0()->pin, (unsigned long)furi_hal_subghz.frequency, furi_hal_subghz.connected);
 
-    furi_hal_subghz.async_rx_callback = callback;
-    furi_hal_subghz.async_rx_context = context;
-    furi_hal_subghz.async_rx_last_level = furi_hal_gpio_read(&gpio_cc1101_g0);
+    // Context first, then callback (see furi_hal_subghz_capture_gpio_callback).
+    __atomic_store_n(&furi_hal_subghz.async_rx_context, context, __ATOMIC_RELEASE);
+    __atomic_store_n(&furi_hal_subghz.async_rx_callback, callback, __ATOMIC_RELEASE);
+    furi_hal_subghz.async_rx_last_level = furi_hal_gpio_read(furi_hal_subghz_g0());
     furi_hal_subghz.async_rx_last_timestamp = (uint32_t)esp_timer_get_time();
     furi_hal_subghz.state = FuriHalSubGhzStateAsyncRx;
 
-    furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeInterruptRiseFall, GpioPullNo, GpioSpeedLow);
+    furi_hal_subghz_g0_init(GpioModeInterruptRiseFall, GpioPullNo);
     furi_hal_gpio_add_int_callback(
-        &gpio_cc1101_g0, furi_hal_subghz_capture_gpio_callback, NULL);
+        furi_hal_subghz_g0(), furi_hal_subghz_capture_gpio_callback, NULL);
     if(!furi_hal_subghz_rx()) {
-        furi_hal_gpio_remove_int_callback(&gpio_cc1101_g0);
-        furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeInput, GpioPullNo, GpioSpeedLow);
-        furi_hal_subghz.async_rx_callback = NULL;
-        furi_hal_subghz.async_rx_context = NULL;
+        furi_hal_gpio_remove_int_callback(furi_hal_subghz_g0());
+        furi_hal_subghz_g0_init(GpioModeInput, GpioPullNo);
+        __atomic_store_n(&furi_hal_subghz.async_rx_callback, NULL, __ATOMIC_RELEASE);
+        __atomic_store_n(&furi_hal_subghz.async_rx_context, NULL, __ATOMIC_RELEASE);
         furi_hal_subghz.state = FuriHalSubGhzStateIdle;
+        furi_hal_subghz_idle(); // don't leave the radio half-way into RX
         furi_hal_power_insomnia_exit();
         ESP_LOGE(TAG, "Async RX start aborted: radio or RF front-end setup failed");
-        return;
+        return false;
     }
 
     /* Read CC1101 status to verify RX mode */
@@ -957,17 +1361,19 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
     ESP_LOGD(TAG, "start_async_rx: CC1101 status=0x%02X state=%d gdo0_level=%d irq_count=%lu",
         status.raw, cc1101_status_state(status),
-        furi_hal_gpio_read(&gpio_cc1101_g0),
+        furi_hal_gpio_read(furi_hal_subghz_g0()),
         (unsigned long)furi_hal_subghz_rx_irq_count);
+    return true;
 }
 
 void furi_hal_subghz_stop_async_rx(void) {
     if(furi_hal_subghz.state != FuriHalSubGhzStateAsyncRx) return;
 
-    furi_hal_gpio_remove_int_callback(&gpio_cc1101_g0);
-    furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeInput, GpioPullNo, GpioSpeedLow);
-    furi_hal_subghz.async_rx_callback = NULL;
-    furi_hal_subghz.async_rx_context = NULL;
+    furi_hal_gpio_remove_int_callback(furi_hal_subghz_g0());
+    furi_hal_subghz_g0_init(GpioModeInput, GpioPullNo);
+    // Callback first, then context (see furi_hal_subghz_capture_gpio_callback).
+    __atomic_store_n(&furi_hal_subghz.async_rx_callback, NULL, __ATOMIC_RELEASE);
+    __atomic_store_n(&furi_hal_subghz.async_rx_context, NULL, __ATOMIC_RELEASE);
     furi_hal_subghz.async_rx_last_timestamp = 0;
     furi_hal_subghz.async_rx_last_level = false;
     furi_hal_subghz.state = FuriHalSubGhzStateIdle;
@@ -991,7 +1397,7 @@ bool furi_hal_subghz_start_async_tx(FuriHalSubGhzAsyncTxCallback callback, void*
     furi_hal_subghz.async_tx_complete = false;
     furi_hal_subghz.state = FuriHalSubGhzStateAsyncTx;
 
-    furi_hal_gpio_remove_int_callback(&gpio_cc1101_g0);
+    furi_hal_gpio_remove_int_callback(furi_hal_subghz_g0());
 
     if(furi_hal_subghz.async_mirror_pin) {
         furi_hal_gpio_init(
@@ -1012,6 +1418,10 @@ bool furi_hal_subghz_start_async_tx(FuriHalSubGhzAsyncTxCallback callback, void*
     }
 
     if(!furi_hal_subghz_tx()) {
+        /* STX may still have been accepted (the status poll can lag or fail). In async
+         * TX the CC1101 keys its carrier from GDO0, which is left undriven once the RMT
+         * channel is freed below, so leave TX first, as the other failure paths do. */
+        furi_hal_subghz_idle();
         async_tx->callback = NULL;
         async_tx->callback_context = NULL;
         furi_hal_subghz.async_tx_complete = true;
@@ -1081,13 +1491,27 @@ void furi_hal_subghz_stop_async_tx(void) {
     cc1101_switch_to_idle(&furi_hal_spi_bus_handle_subghz);
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
 
+    /* The RMT refill ISR (encoder callback -> protocol yield) can be running on the
+     * other core right now; deleting the encoder/channel under it is a
+     * use-after-free, and the caller frees the transmitter right after this.
+     * stop_requested makes the encoder end at its next refill, so wait for the
+     * RMT to drain first. The radio is already IDLE, so nothing is radiated
+     * meanwhile. On timeout fall through to the old abort-by-disable path. */
+    if(async_tx->channel && async_tx->channel_enabled) {
+        const esp_err_t drain_error =
+            rmt_tx_wait_all_done(async_tx->channel, FURI_HAL_SUBGHZ_TX_STOP_DRAIN_MS);
+        if(drain_error != ESP_OK) {
+            ESP_LOGW(TAG, "RMT TX did not drain on stop: %s", esp_err_to_name(drain_error));
+        }
+    }
+
     /* free_backend() disables the channel, which also aborts a transmission
        still in flight — no separate abort call (it would fail with
        INVALID_STATE and make the RMT driver log an error). */
     furi_hal_subghz_async_tx_free_backend(async_tx);
 
     /* Pull down so the next TX entry starts with the carrier keyed off. */
-    furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeInput, GpioPullDown, GpioSpeedLow);
+    furi_hal_subghz_g0_init(GpioModeInput, GpioPullDown);
     if(furi_hal_subghz.async_mirror_pin) {
         furi_hal_gpio_write(furi_hal_subghz.async_mirror_pin, false);
     }

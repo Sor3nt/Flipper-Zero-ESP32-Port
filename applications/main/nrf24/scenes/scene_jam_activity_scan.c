@@ -53,6 +53,11 @@ static int32_t act_scan_worker(void* context) {
 
     nrf24_hw_acquire();
     bool ok = nrf24_hw_probe();
+    /* Put the radio in a defined wide-RX state before sampling the RPD. Without
+     * this the RF_SETUP left by a previous app (e.g. a 250 kbps jammer) narrows
+     * the RX bandwidth and the activity scan misses most of the band — the
+     * spectrum scanner already does this; the activity scanner was missing it. */
+    if(ok) ok = nrf24_hw_rpd_setup();
     nrf24_hw_release();
 
     with_view_model(app->scan_view, Nrf24ScanModel * model, { model->hardware_ok = ok; }, true);
@@ -64,17 +69,28 @@ static int32_t act_scan_worker(void* context) {
     }
 
     memset(ctx->hits, 0, sizeof(ctx->hits));
+
+    /* nrf24_hw_rpd_setup() already waited out Tpd2stby and leaves the radio in
+     * powered RX standby, so the first channel can be measured directly. */
+
     uint32_t scan_start = furi_get_tick();
     uint32_t scan_end = scan_start + pdMS_TO_TICKS(ACT_SCAN_MS);
     uint32_t sweeps = 0;
+    uint32_t sample_errors = 0;
 
     while(!ctx->stop && furi_get_tick() < scan_end) {
-        nrf24_hw_acquire();
         for(uint8_t ch = 0; ch < ACT_CH_COUNT && !ctx->stop; ch++) {
-            uint8_t rpd = nrf24_hw_listen_rpd((uint8_t)(NRF24_ACTIVITY_CH_MIN + ch));
-            if(rpd) ctx->hits[ch]++;
+            uint8_t rpd = 0;
+            nrf24_hw_acquire();
+            const bool sample_ok =
+                nrf24_hw_listen_rpd((uint8_t)(NRF24_ACTIVITY_CH_MIN + ch), &rpd);
+            nrf24_hw_release();
+            if(!sample_ok) {
+                sample_errors++;
+            } else if(rpd) {
+                ctx->hits[ch]++;
+            }
         }
-        nrf24_hw_release();
         sweeps++;
 
         uint32_t elapsed = furi_get_tick() - scan_start;
@@ -97,6 +113,10 @@ static int32_t act_scan_worker(void* context) {
     nrf24_hw_power_down();
     nrf24_hw_release();
     nrf24_hw_deinit();
+
+    if(sample_errors) {
+        FURI_LOG_W(TAG, "RPD samples skipped after SPI failures: %lu", (unsigned long)sample_errors);
+    }
 
     if(ctx->stop) return 0; /* aborted — leave cache untouched */
 

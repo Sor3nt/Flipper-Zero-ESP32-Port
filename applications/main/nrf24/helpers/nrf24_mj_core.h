@@ -11,8 +11,17 @@
  * Furi/ESP-IDF world. The radio interface goes through `nrf24_hw_*`. UI lives
  * in scenes.
  *
- * Caller responsibility: wrap any sequence of mj_* radio calls inside
- * `nrf24_hw_acquire()` / `nrf24_hw_release()`.
+ * Unlike the raw `nrf24_hw_*` layer, the `mj_setup_tx_for_target` /
+ * `mj_logitech_wake` / `mj_inject_keystroke` / `mj_inject_string` entry
+ * points below claim `nrf24_hw_acquire()`/`release()` themselves, scoped
+ * tightly to each actual SPI burst. Do NOT wrap a call to one of them (or to
+ * `mj_script_step()`, which calls into them) in your own
+ * `nrf24_hw_acquire()`/`release()` pair — these functions sleep internally
+ * (inter-key delay, DELAY directives up to 60 s, Logitech wake timing) and on
+ * a shared-SPI board holding the bus across that sleep freezes the display
+ * and input for its whole duration. `mj_fingerprint()` is the exception: it
+ * touches no SPI, so the caller's own acquire/release around the radio read
+ * that produced its buffer is what it piggybacks on.
  */
 
 #define MJ_MAX_TARGETS 16
@@ -96,7 +105,8 @@ bool mj_lookup_ducky_key(const char* name, uint8_t* modifier, uint8_t* keycode);
  * the inner ESB payload as Logitech / Microsoft / MS-encrypted. On match the
  * target is added to (or refreshed in) `targets` (capacity MJ_MAX_TARGETS).
  * Returns the index of the matched target (>=0) or -1.
- * Caller must hold nrf24_hw_acquire (this only crunches bytes — no SPI). */
+ * This only parses the supplied buffer and does not access SPI; no radio lock
+ * is required. */
 int mj_fingerprint(
     const uint8_t* raw_buf,
     uint8_t size,
@@ -111,22 +121,25 @@ void mj_reset_ms_sequence(void);
 /* ---- Transmit primitives ---- */
 
 /* Configure NRF24 for TX against the given target (address width, channel,
- * payload size). Caller must hold nrf24_hw_acquire. */
+ * payload size). Claims nrf24_hw_acquire/release itself — do not wrap. */
 void mj_setup_tx_for_target(const MjTarget* target);
 
 /* Send a Logitech wake/keepalive frame to nudge sleeping receivers, then a
  * neutral keystroke. No-op for non-Logitech vendors.
- * Caller must hold nrf24_hw_acquire. */
+ * Sleeps between frames; claims nrf24_hw_acquire/release itself for each SPI
+ * burst only — do not wrap the whole call. */
 void mj_logitech_wake(const MjTarget* target);
 
 /* Inject a single keystroke (modifier + keycode) plus implicit release.
  * Vendor-aware. Returns true if the radio accepted at least one frame.
- * Caller must hold nrf24_hw_acquire. */
+ * Sleeps internally (inter-key delay); claims nrf24_hw_acquire/release
+ * itself for each SPI burst only — do not wrap the whole call. */
 bool mj_inject_keystroke(const MjTarget* target, uint8_t modifier, uint8_t keycode);
 
 /* Type a printable ASCII string (use '\n' for ENTER, '\t' for TAB).
- * Stops on `*abort` becoming true if non-NULL.
- * Caller must hold nrf24_hw_acquire. */
+ * Stops on `*abort` becoming true if non-NULL. Sleeps between characters;
+ * claims nrf24_hw_acquire/release itself for each SPI burst only — do not
+ * wrap the whole call (see the file-level comment for why). */
 void mj_inject_string(const MjTarget* target, const char* text, volatile bool* abort);
 
 /* ---- Display helpers ---- */

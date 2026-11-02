@@ -19,6 +19,7 @@ typedef struct {
     char* args;
     FuriThread* thread;
     bool insomniac;
+    bool light_sleep_inhibited;
     FlipperApplication* fap;
 } LoaderAppData;
 

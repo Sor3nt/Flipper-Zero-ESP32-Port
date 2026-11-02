@@ -25,7 +25,7 @@ static const uint8_t RACE_UUID_SONY[16] = {
     0x59, 0x4A, 0x51, 0xA3, 0x70, 0x54, 0x40, 0xDC,
 };
 
-static bool uuid_is_race(const esp_bt_uuid_t* u) {
+static bool uuid_is_race(const BleUuid* u) {
     if(u->len != ESP_UUID_LEN_128) return false;
     if(memcmp(u->uuid.uuid128, RACE_UUID_DEFAULT, 16) == 0) return true;
     if(memcmp(u->uuid.uuid128, RACE_UUID_SONY, 16) == 0) return true;
@@ -45,7 +45,7 @@ static void refresh_device_list(BleSpamApp* app) {
 
         bool found = false;
         for(uint16_t j = 0; j < model->count; j++) {
-            if(memcmp(model->devices[j].addr, src->addr, sizeof(esp_bd_addr_t)) == 0) {
+            if(memcmp(model->devices[j].addr, src->addr, sizeof(BleAddress)) == 0) {
                 model->devices[j].rssi = src->rssi;
                 if(src->name[0]) {
                     strncpy(model->devices[j].name, src->name, sizeof(model->devices[j].name) - 1);
@@ -57,7 +57,7 @@ static void refresh_device_list(BleSpamApp* app) {
         }
         if(!found && model->count < RACE_DETECTOR_MAX_DEVICES) {
             RaceDevice* dst = &model->devices[model->count];
-            memcpy(dst->addr, src->addr, sizeof(esp_bd_addr_t));
+            memcpy(dst->addr, src->addr, sizeof(BleAddress));
             dst->addr_type = src->addr_type;
             dst->rssi = src->rssi;
             strncpy(dst->name, src->name, sizeof(dst->name) - 1);
@@ -75,7 +75,7 @@ static void refresh_device_list(BleSpamApp* app) {
 
 static RaceStatus probe_device(BleSpamApp* app, RaceDevice* target) {
     BleWalkDevice walk_dev = {0};
-    memcpy(walk_dev.addr, target->addr, sizeof(esp_bd_addr_t));
+    memcpy(walk_dev.addr, target->addr, sizeof(BleAddress));
     walk_dev.addr_type = target->addr_type;
 
     app->race_probe_abort = false;
@@ -179,7 +179,7 @@ bool ble_spam_scene_race_detector_on_event(void* context, SceneManagerEvent even
             RaceDetectorModel* m2 = view_get_model(app->view_race_detector);
             // The selected_idx may still point to the same device; verify by addr.
             for(uint16_t i = 0; i < m2->count; i++) {
-                if(memcmp(m2->devices[i].addr, target_copy.addr, sizeof(esp_bd_addr_t)) == 0) {
+            if(memcmp(m2->devices[i].addr, target_copy.addr, sizeof(BleAddress)) == 0) {
                     m2->devices[i].status = result;
                     break;
                 }

@@ -38,9 +38,19 @@ static void u2f_view_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_icon(canvas, 22, 15, &I_Connected_62x31);
         canvas_draw_str_aligned(
             canvas, 128 / 2, 3, AlignCenter, AlignTop, "Authentication successful!");
+    } else if(model->display_msg == U2fMsgRegisterSuccess) {
+        canvas_draw_icon(canvas, 22, 15, &I_Connected_62x31);
+        canvas_draw_str_aligned(
+            canvas, 128 / 2, 3, AlignCenter, AlignTop, "Registration successful!");
+    } else if(model->display_msg == U2fMsgUsbError) {
+        canvas_draw_icon(canvas, 22, 15, &I_Error_62x31);
+        canvas_draw_str_aligned(canvas, 128 / 2, 3, AlignCenter, AlignTop, "Close other USB mode");
     } else if(model->display_msg == U2fMsgError) {
         canvas_draw_icon(canvas, 22, 15, &I_Error_62x31);
-        canvas_draw_str_aligned(canvas, 128 / 2, 3, AlignCenter, AlignTop, "Certificate error");
+        canvas_draw_str_aligned(canvas, 128 / 2, 3, AlignCenter, AlignTop, "U2F setup required");
+        canvas_draw_str_aligned(
+            canvas, 128 / 2, 49, AlignCenter, AlignTop, "Install a custom cert/key");
+        canvas_draw_str_aligned(canvas, 128 / 2, 59, AlignCenter, AlignTop, "See U2F README");
     }
 }
 

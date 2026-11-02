@@ -5,6 +5,7 @@
 
 #include <esp_log.h>
 #include <furi.h>
+#include <esp_attr.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -20,7 +21,7 @@
 
 static FuriThread* s_thread = NULL;
 static volatile bool s_stop = false;
-static BleAutoWalkSeenSet s_seen;
+static EXT_RAM_BSS_ATTR BleAutoWalkSeenSet s_seen;
 static BleAutoWalkLog* s_log = NULL;
 
 // Worker → UI status (simple shared struct, written by worker, read by UI tick)

@@ -1,17 +1,29 @@
 #include "ble_tracker_hal.h"
 
-#include <esp_bt.h>
-#include <esp_bt_main.h>
-#include <esp_gap_ble_api.h>
+#include <sdkconfig.h>
+
 #include <esp_log.h>
 #include <furi.h>
 #include <string.h>
+
+#if CONFIG_BT_NIMBLE_ENABLED
+#include <ble_core.h>
+#include <host/ble_gap.h>
+#include <host/ble_hs.h>
+#include <host/ble_hs_id.h>
+#include <nimble/ble.h>
+#else
+#include <esp_bt.h>
+#include <esp_bt_main.h>
+#include <esp_gap_ble_api.h>
+#endif
 
 #define TAG "BleTracker"
 
 static TrackerDevice s_devices[TRACKER_MAX_DEVICES];
 static uint16_t s_device_count = 0;
 static volatile bool s_scanning = false;
+static bool s_host_owned = false;
 
 // ---------------------------------------------------------------------------
 // Apple Proximity Pairing model table — ported from Poseidon ble_db.cpp:154
@@ -140,6 +152,89 @@ static bool classify_advert(
 // GAP callback
 // ---------------------------------------------------------------------------
 
+#if CONFIG_BT_NIMBLE_ENABLED
+static void tracker_store_match(
+    const uint8_t address[6],
+    uint8_t address_type,
+    int8_t rssi,
+    TrackerKind kind,
+    const char* name) {
+    const uint32_t now = furi_get_tick();
+    int found = -1;
+    for(int i = 0; i < s_device_count; ++i) {
+        if(memcmp(s_devices[i].addr, address, 6) == 0) {
+            found = i;
+            break;
+        }
+    }
+
+    if(found >= 0) {
+        TrackerDevice* device = &s_devices[found];
+        device->rssi = rssi;
+        if(rssi > device->best_rssi) device->best_rssi = rssi;
+        device->last_seen_ms = now;
+        if(device->name[0] == '\0' && name[0] != '\0') {
+            strlcpy(device->name, name, sizeof(device->name));
+        }
+        device->kind = kind;
+        device->addr_type = address_type;
+        return;
+    }
+
+    if(s_device_count >= TRACKER_MAX_DEVICES) return;
+    TrackerDevice* device = &s_devices[s_device_count++];
+    memset(device, 0, sizeof(*device));
+    memcpy(device->addr, address, sizeof(device->addr));
+    device->addr_type = address_type;
+    device->kind = kind;
+    device->rssi = rssi;
+    device->best_rssi = rssi;
+    device->last_seen_ms = now;
+    if(name) strlcpy(device->name, name, sizeof(device->name));
+}
+
+static void tracker_process_report(
+    const ble_addr_t* addr,
+    int8_t rssi,
+    const uint8_t* data,
+    uint8_t data_len) {
+    if(!addr || !data || data_len == 0) return;
+    TrackerKind kind = TrackerKindUnknown;
+    char name[24] = "";
+    if(!classify_buffer(data, data_len, &kind, name, sizeof(name))) return;
+
+    uint8_t address[6];
+    for(size_t i = 0; i < sizeof(address); ++i) address[i] = addr->val[5U - i];
+    tracker_store_match(address, addr->type, rssi, kind, name);
+}
+
+static int tracker_gap_event_handler(struct ble_gap_event* event, void* context) {
+    (void)context;
+    if(!event) return 0;
+    switch(event->type) {
+    case BLE_GAP_EVENT_DISC: {
+        if(!s_scanning) break;
+        const struct ble_gap_disc_desc* disc = &event->disc;
+        tracker_process_report(&disc->addr, disc->rssi, disc->data, disc->length_data);
+        break;
+    }
+#if CONFIG_BT_NIMBLE_EXT_ADV
+    case BLE_GAP_EVENT_EXT_DISC: {
+        if(!s_scanning || event->ext_disc.data_status == BLE_GAP_EXT_ADV_DATA_STATUS_INCOMPLETE) break;
+        const struct ble_gap_ext_disc_desc* disc = &event->ext_disc;
+        tracker_process_report(&disc->addr, disc->rssi, disc->data, disc->length_data);
+        break;
+    }
+#endif
+    case BLE_GAP_EVENT_DISC_COMPLETE:
+        s_scanning = false;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+#else
 static void tracker_gap_event_handler(
     esp_gap_ble_cb_event_t event,
     esp_ble_gap_cb_param_t* param) {
@@ -211,6 +306,7 @@ static void tracker_gap_event_handler(
         break;
     }
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -220,6 +316,43 @@ bool ble_tracker_hal_start_scan(void) {
     s_device_count = 0;
     memset(s_devices, 0, sizeof(s_devices));
 
+#if CONFIG_BT_NIMBLE_ENABLED
+    s_host_owned = !ble_core_stack_is_up();
+    if(s_host_owned) {
+        esp_err_t start_err = ble_core_stack_up();
+        if(start_err != ESP_OK) {
+            ESP_LOGE(TAG, "NimBLE host start: %s", esp_err_to_name(start_err));
+            s_host_owned = false;
+            return false;
+        }
+    }
+
+    uint8_t own_addr_type;
+    int rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    if(rc != 0) {
+        ESP_LOGE(TAG, "cannot infer local address type: %d", rc);
+        if(s_host_owned) (void)ble_core_stack_down();
+        s_host_owned = false;
+        return false;
+    }
+
+    struct ble_gap_disc_params scan_params = {
+        .passive = 0,
+        .limited = 0,
+        .filter_duplicates = 0,
+        .itvl = 0x50,
+        .window = 0x50,
+    };
+    rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &scan_params, tracker_gap_event_handler, NULL);
+    if(rc != 0) {
+        ESP_LOGE(TAG, "NimBLE scan start: %d", rc);
+        if(s_host_owned) (void)ble_core_stack_down();
+        s_host_owned = false;
+        return false;
+    }
+    s_scanning = true;
+    return true;
+#else
     // Take over GAP callback from whoever had it (e.g. ble_walk_hal)
     esp_err_t err = esp_ble_gap_register_callback(tracker_gap_event_handler);
     if(err != ESP_OK) {
@@ -241,15 +374,30 @@ bool ble_tracker_hal_start_scan(void) {
         return false;
     }
     return true;
+#endif
 }
 
 void ble_tracker_hal_stop_scan(void) {
+#if CONFIG_BT_NIMBLE_ENABLED
+    if(s_scanning) {
+        int rc = ble_gap_disc_cancel();
+        if(rc != 0 && rc != BLE_HS_EALREADY) {
+            ESP_LOGW(TAG, "NimBLE scan cancel: %d", rc);
+        }
+        for(int i = 0; i < 40 && s_scanning; ++i) furi_delay_ms(5);
+    }
+    if(s_host_owned) {
+        (void)ble_core_stack_down();
+        s_host_owned = false;
+    }
+#else
     if(s_scanning) {
         esp_ble_gap_stop_scanning();
         for(int i = 0; i < 20 && s_scanning; i++) {
             furi_delay_ms(5);
         }
     }
+#endif
 }
 
 TrackerDevice* ble_tracker_hal_get_devices(uint16_t* count) {

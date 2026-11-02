@@ -42,11 +42,15 @@ int32_t infrared_test_app(void* arg) {
         .level = true,
     };
 
-    FURI_LOG_I(TAG, "Starting test signal on PA7");
+    FURI_LOG_I(TAG, "Starting test signal on the configured IR TX pin");
 
     furi_hal_infrared_set_tx_output(FuriHalInfraredTxPinExtPA7);
+    furi_check(furi_hal_infrared_claim_tx());
     furi_hal_infrared_async_tx_set_data_isr_callback(infrared_test_app_tx_data_callback, &app);
-    furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY);
+    if(!furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY)) {
+        furi_hal_infrared_release_claim();
+        furi_crash();
+    }
     furi_hal_infrared_async_tx_wait_termination();
     furi_hal_infrared_set_tx_output(FuriHalInfraredTxPinInternal);
 

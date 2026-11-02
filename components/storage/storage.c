@@ -344,9 +344,14 @@ bool storage_file_close(File* file) {
 
     if(file->handle) {
         storage_sd_bus_lock();
-        fclose(file->handle);
+        int result = fclose(file->handle);
         storage_sd_bus_unlock();
         file->handle = NULL;
+        if(result != 0) {
+            file->is_open = false;
+            file->error_id = FSE_INTERNAL;
+            return false;
+        }
     }
     file->is_open = false;
     file->error_id = FSE_OK;
@@ -497,12 +502,12 @@ bool storage_file_sync(File* file) {
     }
 
     storage_sd_bus_lock();
-    fflush(file->handle);
-    int fd = fileno(file->handle);
-    fsync(fd);
+    bool success = fflush(file->handle) == 0;
+    int fd = success ? fileno(file->handle) : -1;
+    if(success && (fd < 0 || fsync(fd) != 0)) success = false;
     storage_sd_bus_unlock();
-    file->error_id = FSE_OK;
-    return true;
+    file->error_id = success ? FSE_OK : FSE_INTERNAL;
+    return success;
 }
 
 bool storage_file_eof(File* file) {

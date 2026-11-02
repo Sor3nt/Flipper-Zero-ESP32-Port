@@ -65,8 +65,12 @@
 #define FURI_HAL_POWER_ADC_PRIMARY 0
 #endif
 
-/* VBUS is read from the charger at most this often while awake. */
-#define FURI_HAL_POWER_VBUS_CACHE_MS (1000U)
+/* VBUS is read from the charger at most this often while awake. The light
+ * sleep entry and exit refresh it explicitly, so this only bounds how fast an
+ * unplug is noticed by battery protection and the idle logic. */
+#define FURI_HAL_POWER_VBUS_CACHE_MS (5000U)
+/* Repeated diagnostics (e.g. charger VBAT without a cell) at most this often. */
+#define FURI_HAL_POWER_LOG_INTERVAL_MS (60000U)
 
 /* Battery protection (single Li-ion cell). Warning opens the power-off dialog,
  * critical disconnects the battery immediately. Both need consecutive samples
@@ -78,18 +82,27 @@
 #define FURI_HAL_POWER_PROTECTION_SAMPLES       (3U)
 #define FURI_HAL_POWER_PROTECTION_INTERVAL_MS   (900U)
 
-/* Deep sleep entered on USB power wakes up this often to check whether USB is
- * still connected; without USB the battery is disconnected (ship mode). */
+/* Default interval for the optional deep-sleep USB-removal check. */
 #ifndef FURI_HAL_POWER_USB_DSLP_CHECK_S
 #define FURI_HAL_POWER_USB_DSLP_CHECK_S (600U)
 #endif
+#define FURI_HAL_POWER_USB_DSLP_MIN_CHECK_S (60U)
+#define FURI_HAL_POWER_USB_DSLP_MAX_CHECK_S (1200U)
 #define FURI_HAL_POWER_USB_DSLP_MAGIC (0x55B5D5A1UL)
 RTC_DATA_ATTR static uint32_t furi_hal_power_usb_dslp_magic = 0;
+RTC_DATA_ATTR static uint32_t furi_hal_power_usb_dslp_interval_s = 0;
+static bool furi_hal_power_usb_dslp_check_enabled = false;
+static uint32_t furi_hal_power_usb_dslp_check_interval_s = FURI_HAL_POWER_USB_DSLP_CHECK_S;
 
 static volatile bool furi_hal_power_vbus_valid = false;
 static volatile bool furi_hal_power_vbus_present = true;
 static volatile uint32_t furi_hal_power_vbus_tick = 0;
 static volatile bool furi_hal_power_charger_adc_enabled = true;
+/* Tick of the last (successful) switch-off, so a stuck-off ADC can be told from the
+ * few milliseconds between switching it off and light sleep actually being granted. */
+static volatile uint32_t furi_hal_power_charger_adc_off_tick = 0;
+/* An ADC that is still off this long after being switched off, while awake, is stuck. */
+#define FURI_HAL_POWER_CHARGER_ADC_RETRY_MS (3000U)
 
 static FuriPubSub* furi_hal_power_idle_pubsub = NULL;
 static volatile bool furi_hal_power_idle = false;
@@ -415,6 +428,16 @@ bool furi_hal_power_refresh_vbus_cache(void) {
     return true;
 }
 
+void furi_hal_power_set_usb_deep_sleep_check(bool enabled, uint32_t interval_seconds) {
+    if(interval_seconds < FURI_HAL_POWER_USB_DSLP_MIN_CHECK_S) {
+        interval_seconds = FURI_HAL_POWER_USB_DSLP_MIN_CHECK_S;
+    } else if(interval_seconds > FURI_HAL_POWER_USB_DSLP_MAX_CHECK_S) {
+        interval_seconds = FURI_HAL_POWER_USB_DSLP_MAX_CHECK_S;
+    }
+    furi_hal_power_usb_dslp_check_enabled = enabled;
+    furi_hal_power_usb_dslp_check_interval_s = interval_seconds;
+}
+
 /* Cached VBUS state. Refreshed at most once per FURI_HAL_POWER_VBUS_CACHE_MS
  * while awake and never while the light-sleep gate is open: in light sleep the
  * value read right before sleeping is used, so the charger is not polled. */
@@ -444,6 +467,7 @@ static bool furi_hal_power_is_usb_present(void) {
 
 static void furi_hal_power_refresh_sample(void) {
 #if !defined(BOARD_BATTERY_ADC_PRIMARY) || !BOARD_BATTERY_ADC_PRIMARY
+    static uint32_t charger_vbat_invalid_log_tick = 0;
     static bool charger_vbat_invalid_logged = false;
 #endif
     static bool adc_sample_invalid_logged = false;
@@ -463,8 +487,21 @@ static void furi_hal_power_refresh_sample(void) {
 #if !BOARD_HAS_BATTERY_ADC
     /* The charger ADC is off during light sleep: its VBAT register is stale,
      * keep the previous sample instead of filtering an old value again. */
-    if(!furi_hal_power_charger_adc_enabled && furi_hal_power.last_sample_ok) {
-        return;
+    if(!furi_hal_power_charger_adc_enabled) {
+        /* It is off on purpose only while light sleep is granted. Awake with it still
+         * off well after it was switched off means the re-enable on wake-up failed (an
+         * I2C error): nothing would ever retry, so the battery readings would stay
+         * frozen. The grace period keeps the few milliseconds between "ADC off" and
+         * "light sleep granted" out of this; the path runs at most once per sample
+         * refresh and never during light sleep (no charger polling there). */
+        if(!furi_hal_power_idle && !furi_hal_power_light_sleep_gate_open() &&
+           (furi_get_tick() - furi_hal_power_charger_adc_off_tick) >=
+               furi_ms_to_ticks(FURI_HAL_POWER_CHARGER_ADC_RETRY_MS)) {
+            furi_hal_power_set_charger_adc_enabled(true);
+        }
+        if(!furi_hal_power_charger_adc_enabled && furi_hal_power.last_sample_ok) {
+            return;
+        }
     }
 #endif
 
@@ -529,14 +566,20 @@ static void furi_hal_power_refresh_sample(void) {
         const uint16_t charger_vbat_mv = furi_hal_bq25896_get_vbat_voltage_mv();
         if(charger_vbat_mv >= 2500U && charger_vbat_mv <= 4500U) {
             charger_battery_voltage = (float)charger_vbat_mv / 1000.0f;
-            charger_vbat_invalid_logged = false;
         } else {
-            if(!charger_vbat_invalid_logged) {
+            /* Without a cell this alternates between valid and invalid every
+             * conversion; rate limit instead of logging each transition. */
+            const uint32_t now_tick = furi_get_tick();
+            if(!charger_vbat_invalid_logged ||
+               (now_tick - charger_vbat_invalid_log_tick) >=
+                   furi_ms_to_ticks(FURI_HAL_POWER_LOG_INTERVAL_MS)) {
+                charger_vbat_invalid_logged = true;
+                charger_vbat_invalid_log_tick = now_tick;
                 ESP_LOGW(
                     TAG,
-                    "BQ25896 VBAT reading invalid: %umV; using divider",
-                    charger_vbat_mv);
-                charger_vbat_invalid_logged = true;
+                    "BQ25896 VBAT reading invalid: %umV (no battery?); %s",
+                    charger_vbat_mv,
+                    BOARD_HAS_BATTERY_ADC ? "using divider" : "no battery voltage source");
             }
         }
     }
@@ -639,9 +682,13 @@ static float furi_hal_power_get_estimated_battery_voltage(void) {
 #if FURI_HAL_POWER_HAS_GAUGE && !FURI_HAL_POWER_ADC_PRIMARY
     if(furi_hal_bq27220_is_present()) {
         FuriHalBq27220Snapshot gauge;
-        if(furi_hal_bq27220_get_snapshot(&gauge) && gauge.fresh) {
-            return (float)gauge.voltage_mv / 1000.0f;
-        }
+        const bool valid = furi_hal_bq27220_get_snapshot(&gauge);
+        /* No cell fitted (last answer said so): there is no battery voltage,
+         * and the charger VBAT is meaningless too. 0 = "no reading", so the
+         * protection holds instead of acting on noise. */
+        if(valid && !gauge.battery_present) return 0.0f;
+        if(valid && gauge.fresh) return (float)gauge.voltage_mv / 1000.0f;
+        /* Gauge stopped answering with a cell fitted: charger VBAT fallback. */
     }
 #endif
     furi_hal_power_refresh_sample();
@@ -677,6 +724,7 @@ void furi_hal_power_set_charger_adc_enabled(bool enabled) {
     if(furi_hal_bq25896_is_present() && !furi_hal_bq25896_set_adc_continuous(enabled)) {
         return;
     }
+    if(!enabled) furi_hal_power_charger_adc_off_tick = furi_get_tick();
     furi_hal_power_charger_adc_enabled = enabled;
 }
 
@@ -820,7 +868,13 @@ void furi_hal_power_init(void) {
 }
 
 bool furi_hal_power_gauge_is_ok(void) {
-    if(furi_hal_bq27220_is_present()) return true;
+    /* With a gauge: only when it reports a fitted cell recently. Without a
+     * battery the status bar then shows "no data" instead of stale values. */
+    if(furi_hal_bq27220_is_present()) return furi_hal_bq27220_is_data_valid();
+    /* Deliberately false without a gauge or a battery ADC, even though get_pct() can fall
+     * back to the charger VBAT: with no cell fitted that VBAT alternates between valid
+     * and invalid every conversion, which would make the status bar flicker a bogus
+     * percentage instead of showing a steady "no data". */
     if(!furi_hal_power.adc_handle) return false;
     furi_hal_power_refresh_sample();
     return furi_hal_power.last_sample_ok;
@@ -916,15 +970,17 @@ uint16_t furi_hal_power_insomnia_level(void) {
 }
 
 void furi_hal_power_insomnia_enter(void) {
+    /* Acquire the paired light-sleep reference before publishing an active
+     * insomnia session; otherwise a concurrent exit can consume another
+     * client's reference before this session has registered its own. */
+    furi_hal_power_light_sleep_inhibit_enter();
     FURI_CRITICAL_ENTER();
     furi_check(furi_hal_power.insomnia < UINT8_MAX);
     const bool first = (furi_hal_power.insomnia == 0);
     furi_hal_power.insomnia++;
     FURI_CRITICAL_EXIT();
-    furi_hal_power_light_sleep_inhibit_enter();
-    /* Acquire outside the critical section (a frequency switch busy-waits for
-     * PLL relock). Callers pair enter/exit within the same scope, so the 0->1
-     * transition owns exactly one lock reference. */
+    /* The frequency switch may busy-wait for PLL relock, so take its lock
+     * outside the critical section. Only the 0->1 transition needs a reference. */
 #if CONFIG_PM_ENABLE
     if(first && furi_hal_power_freq_lock) {
         esp_pm_lock_acquire(furi_hal_power_freq_lock);
@@ -968,6 +1024,36 @@ bool furi_hal_power_is_usb_connected(void) {
 
 static bool furi_hal_power_pin_number_valid(gpio_num_t pin) {
     return (int)pin >= 0 && (int)pin < (int)GPIO_NUM_MAX && GPIO_IS_VALID_GPIO(pin);
+}
+
+/* Pads that a driver wants kept HIGH (weak pull-up) during light sleep, overriding the
+ * table below. Few and short-lived: the chip-selects of an attached header module. */
+#define FURI_HAL_POWER_LS_HOLD_MAX 4
+static int16_t furi_hal_power_ls_hold_pins[FURI_HAL_POWER_LS_HOLD_MAX] = {-1, -1, -1, -1};
+
+bool furi_hal_power_light_sleep_hold_pin_high(uint16_t pin, bool hold) {
+    if(!furi_hal_power_pin_number_valid((gpio_num_t)pin)) return false;
+    bool ok = true;
+    FURI_CRITICAL_ENTER();
+    int free_slot = -1;
+    int found = -1;
+    for(int i = 0; i < FURI_HAL_POWER_LS_HOLD_MAX; i++) {
+        if(furi_hal_power_ls_hold_pins[i] == (int16_t)pin) found = i;
+        if(furi_hal_power_ls_hold_pins[i] < 0 && free_slot < 0) free_slot = i;
+    }
+    if(hold) {
+        if(found < 0) {
+            if(free_slot >= 0) {
+                furi_hal_power_ls_hold_pins[free_slot] = (int16_t)pin;
+            } else {
+                ok = false;
+            }
+        }
+    } else if(found >= 0) {
+        furi_hal_power_ls_hold_pins[found] = -1;
+    }
+    FURI_CRITICAL_EXIT();
+    return ok;
 }
 
 #if CONFIG_PM_ENABLE
@@ -1069,6 +1155,21 @@ static void furi_hal_power_apply_light_sleep_pins(void) {
         gpio_sleep_sel_en(pin);
         applied++;
     }
+    /* Pads an attached module needs deselected (see furi_hal_power_light_sleep_hold_pin_high);
+     * applied last so they win over the table default. A pad that was released since the
+     * previous sleep is back at its table state because the table is re-applied above. */
+    int16_t held[FURI_HAL_POWER_LS_HOLD_MAX];
+    FURI_CRITICAL_ENTER();
+    for(int i = 0; i < FURI_HAL_POWER_LS_HOLD_MAX; i++) held[i] = furi_hal_power_ls_hold_pins[i];
+    FURI_CRITICAL_EXIT();
+    for(int i = 0; i < FURI_HAL_POWER_LS_HOLD_MAX; i++) {
+        if(held[i] < 0) continue;
+        const gpio_num_t pin = (gpio_num_t)held[i];
+        gpio_sleep_set_direction(pin, GPIO_MODE_DISABLE);
+        gpio_sleep_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+        gpio_sleep_sel_en(pin);
+        applied++;
+    }
     if(!logged) {
         logged = true;
         ESP_LOGI(TAG, "Light-sleep pad states configured for %u pins", applied);
@@ -1084,7 +1185,10 @@ static bool device_can_enter_light_sleep(void) {
     const bool on_battery = furi_hal_power_vbus_valid && !furi_hal_power_vbus_present;
     FURI_CRITICAL_EXIT();
 
+    /* Boost (OTG) on: a module on the header is powered from it and the OTG
+     * fault supervision runs in the awake power tick only. Cached flag, no I2C. */
     return active_sessions == 0 && furi_hal_power_insomnia_level() == 0 &&
+           !furi_hal_power.otg_enabled &&
            furi_hal_display_is_asleep() && !furi_hal_speaker_is_playing() &&
            !furi_hal_bt_extra_beacon_is_active() && furi_hal_bq25896_is_present() && on_battery;
 }
@@ -1703,7 +1807,10 @@ static void furi_hal_power_start_deep_sleep(bool digital_hold) {
 
 /* Enter ESP32 deep sleep, waking on the BOOT/encoder button. The RTC domain
  * stays powered (~µA draw); this is not a true power cut. Does not return. */
-static void furi_hal_power_enter_deep_sleep(bool wake_on_boot_button, bool usb_watch) {
+static void furi_hal_power_enter_deep_sleep(
+    bool wake_on_boot_button,
+    bool usb_watch,
+    uint32_t usb_watch_interval_s) {
     esp_err_t disable_err = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     if(disable_err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to clear previous wake sources: %s", esp_err_to_name(disable_err));
@@ -1769,16 +1876,21 @@ static void furi_hal_power_enter_deep_sleep(bool wake_on_boot_button, bool usb_w
     /* 3) Pull/level RTC IO dan konfigurasi wake tetap hidup selama tidur. */
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
-    /* 4) Entered on USB power: wake up periodically and check whether USB is
-     *    still there. If it was unplugged the battery is disconnected (ship
-     *    mode) instead of feeding the always-on peripherals for days. */
-    if(usb_watch &&
-       esp_sleep_enable_timer_wakeup((uint64_t)FURI_HAL_POWER_USB_DSLP_CHECK_S * 1000000ULL) ==
-           ESP_OK) {
+    /* 4. On USB power, optionally wake periodically to check whether USB is
+     *    still connected. If enabled and USB was removed, disconnect the
+     *    battery instead of feeding always-on peripherals for days. */
+    const bool usb_watch_enabled = usb_watch_interval_s || furi_hal_power_usb_dslp_check_enabled;
+    const uint32_t check_interval_s =
+        usb_watch_interval_s ? usb_watch_interval_s : furi_hal_power_usb_dslp_check_interval_s;
+    if(usb_watch && usb_watch_enabled && check_interval_s >= FURI_HAL_POWER_USB_DSLP_MIN_CHECK_S &&
+       check_interval_s <= FURI_HAL_POWER_USB_DSLP_MAX_CHECK_S &&
+       esp_sleep_enable_timer_wakeup((uint64_t)check_interval_s * 1000000ULL) == ESP_OK) {
         furi_hal_power_usb_dslp_magic = FURI_HAL_POWER_USB_DSLP_MAGIC;
-        ESP_LOGI(TAG, "Deep-sleep USB check every %us", (unsigned)FURI_HAL_POWER_USB_DSLP_CHECK_S);
+        furi_hal_power_usb_dslp_interval_s = check_interval_s;
+        ESP_LOGI(TAG, "Deep-sleep USB check every %us", (unsigned)check_interval_s);
     } else {
         furi_hal_power_usb_dslp_magic = 0;
+        furi_hal_power_usb_dslp_interval_s = 0;
     }
 
     ESP_LOGI(TAG, "Entering ESP32 deep sleep");
@@ -1793,7 +1905,7 @@ void furi_hal_power_shutdown(void) {
         ESP_LOGE(TAG, "Deep-sleep shutdown aborted during hardware preparation; restarting");
         esp_restart();
     }
-    furi_hal_power_enter_deep_sleep(true, false);
+    furi_hal_power_enter_deep_sleep(true, false, 0);
 }
 
 /* Real power-off: put the BQ25896 charger into ship mode (BATFET off), which
@@ -1847,9 +1959,9 @@ bool furi_hal_power_off(void) {
         esp_restart();
     }
 #if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
-    furi_hal_power_enter_deep_sleep(true, true);
+    furi_hal_power_enter_deep_sleep(true, true, 0);
 #else
-    furi_hal_power_enter_deep_sleep(true, false);
+    furi_hal_power_enter_deep_sleep(true, false, 0);
 #endif
     return true;
 }
@@ -1860,6 +1972,11 @@ bool furi_hal_power_off(void) {
 static void furi_hal_power_usb_deep_sleep_check(void) {
     if(furi_hal_power_usb_dslp_magic != FURI_HAL_POWER_USB_DSLP_MAGIC) return;
     furi_hal_power_usb_dslp_magic = 0;
+    uint32_t check_interval_s = furi_hal_power_usb_dslp_interval_s;
+    if(check_interval_s < FURI_HAL_POWER_USB_DSLP_MIN_CHECK_S ||
+       check_interval_s > FURI_HAL_POWER_USB_DSLP_MAX_CHECK_S) {
+        check_interval_s = FURI_HAL_POWER_USB_DSLP_CHECK_S;
+    }
     if(esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) return; /* user wake */
     if(furi_hal_power_gpio_is_low((gpio_num_t)BOARD_PIN_BUTTON_BOOT)) return; /* OK pressed */
 
@@ -1877,7 +1994,7 @@ static void furi_hal_power_usb_deep_sleep_check(void) {
     } else {
         ESP_LOGI(TAG, "Deep-sleep USB check: %s", read_ok ? "USB present" : "VBUS unknown");
     }
-    furi_hal_power_enter_deep_sleep(true, true);
+    furi_hal_power_enter_deep_sleep(true, true, check_interval_s);
 }
 
 FURI_NORETURN void furi_hal_power_reset(void) {

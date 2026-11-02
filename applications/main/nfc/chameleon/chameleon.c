@@ -1,29 +1,65 @@
 /**
  * @file chameleon.c
- * @brief Bluedroid GATT-client transport + ChameleonUltra NUS protocol.
+ * @brief NimBLE GATT-client transport + ChameleonUltra NUS protocol.
  *
- * Structure mirrors applications/main/ble_spam/ble_walk_hal.c (proven
- * Bluedroid GATTC pattern: stop BT service → controller/bluedroid init in
- * BLE mode → GAP scan → GATTC open → service/char discovery), extended with
+ * NimBLE replaces the old Bluedroid central path: stop BT service → initialize
+ * the NimBLE host in BLE mode → GAP scan → connect → service/characteristic
+ * discovery, extended with
  * notification subscription (CCCD) and the ChameleonUltra frame protocol.
  */
 #include "chameleon.h"
 
+#include <sdkconfig.h>
+#if CONFIG_BT_NIMBLE_ENABLED
+#include <ble_core.h>
+#include <host/ble_att.h>
+#include <host/ble_gap.h>
+#include <host/ble_gatt.h>
+#include <host/ble_hs.h>
+#include <host/ble_hs_id.h>
+#include <host/ble_hs_mbuf.h>
+#include <host/ble_uuid.h>
+#include <nimble/ble.h>
+#include <os/os_mbuf.h>
+#else
 #include <esp_bt.h>
 #include <esp_bt_main.h>
 #include <esp_gap_ble_api.h>
 #include <esp_gattc_api.h>
 #include <esp_gatt_common_api.h>
+#endif
 #include <esp_log.h>
 #include <furi.h>
 #include <btshim.h>
+#include <esp_attr.h>
 #include <string.h>
 
 #define TAG               "Chameleon"
-#define CHAM_GATTC_APP_ID 0x43
 #define CHAM_DEV_NAME     "ChameleonUltra"
 
-/* Nordic UART Service UUIDs, stored little-endian (Bluedroid uuid128 order):
+#if CONFIG_BT_NIMBLE_ENABLED
+typedef uint8_t ChamAddress[6];
+typedef uint8_t ChamAddressType;
+typedef struct {
+    uint16_t len;
+    union {
+        uint16_t uuid16;
+        uint32_t uuid32;
+        uint8_t uuid128[16];
+    } uuid;
+} ChamUuid;
+#define CHAM_UUID_LEN_16 2
+#define CHAM_UUID_LEN_128 16
+#else
+typedef esp_bd_addr_t ChamAddress;
+typedef esp_ble_addr_type_t ChamAddressType;
+typedef esp_bt_uuid_t ChamUuid;
+#define CHAM_UUID_LEN_16 ESP_UUID_LEN_16
+#define CHAM_UUID_LEN_128 ESP_UUID_LEN_128
+#define CHAM_GATTC_APP_ID 0x43
+#endif
+
+/* Nordic UART Service UUIDs, stored in BLE's little-endian 128-bit wire order:
  * 6E400001-B5A3-F393-E0A9-E50E24DCCA9E (service), -0002 TX(write), -0003 RX(notify) */
 static const uint8_t NUS_SVC[16] =
     {0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
@@ -41,8 +77,17 @@ static const uint16_t CCCD_UUID = 0x2902;
  * ISO14443-3A exchange with auto-anticollision and CRC handling. */
 #define CHAMELEON_RAW_OPT_DEFAULT ((1 << 6) | (1 << 5) | (1 << 4) | (1 << 2)) /* 0x74 */
 
+#if CONFIG_BT_NIMBLE_ENABLED
+static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static volatile bool s_connect_complete;
+static volatile bool s_chars_done;
+static volatile bool s_descriptors_done;
+static bool s_cccd_found;
+static uint16_t s_cccd_handle;
+#else
 static esp_gatt_if_t s_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t s_conn_id = 0;
+#endif
 static volatile bool s_connected = false;
 static bool s_hal_started = false;
 /* True if BT was disabled in settings when we connected: we force-started the
@@ -52,16 +97,16 @@ static bool s_bt_was_disabled = false;
 
 static volatile bool s_scanning = false;
 static volatile bool s_dev_found = false;
-static esp_bd_addr_t s_dev_addr;
-static esp_ble_addr_type_t s_dev_addr_type;
+static ChamAddress s_dev_addr;
+static ChamAddressType s_dev_addr_type;
 
 #define CHAM_MAX_SVC 24
 typedef struct {
-    esp_bt_uuid_t uuid;
+    ChamUuid uuid;
     uint16_t start;
     uint16_t end;
 } ChamSvc;
-static ChamSvc s_svcs[CHAM_MAX_SVC];
+static EXT_RAM_BSS_ATTR ChamSvc s_svcs[CHAM_MAX_SVC];
 static volatile uint16_t s_svc_count = 0;
 
 static volatile bool s_search_done = false;
@@ -74,14 +119,16 @@ static volatile bool s_cccd_written = false;
 
 static int s_device_mode = -1; /* cache to skip redundant CHANGE_DEVICE_MODE */
 
+static void cham_hal_stop(void);
+
 /* RX frame reassembly + last parsed response (commands are serialized) */
-static uint8_t s_acc[CHAMELEON_RESP_DATA_MAX + 32];
+static EXT_RAM_BSS_ATTR uint8_t s_acc[CHAMELEON_RESP_DATA_MAX + 32];
 static size_t s_acc_len = 0;
 static ChameleonResp s_last_resp;
 static volatile bool s_resp_ready = false;
 
-static bool uuid_is(const esp_bt_uuid_t* u, const uint8_t ref[16]) {
-    if(u->len != ESP_UUID_LEN_128) return false;
+static bool uuid_is(const ChamUuid* u, const uint8_t ref[16]) {
+    if(u->len != CHAM_UUID_LEN_128) return false;
     if(memcmp(u->uuid.uuid128, ref, 16) == 0) return true;
     /* Be byte-order tolerant: also accept the reversed representation */
     for(int i = 0; i < 16; i++)
@@ -89,10 +136,10 @@ static bool uuid_is(const esp_bt_uuid_t* u, const uint8_t ref[16]) {
     return true;
 }
 
-static void uuid_log(const char* tag, const esp_bt_uuid_t* u) {
-    if(u->len == ESP_UUID_LEN_16) {
+static void uuid_log(const char* tag, const ChamUuid* u) {
+    if(u->len == CHAM_UUID_LEN_16) {
         ESP_LOGD(TAG, "%s uuid16=%04X", tag, u->uuid.uuid16);
-    } else if(u->len == ESP_UUID_LEN_128) {
+    } else if(u->len == CHAM_UUID_LEN_128) {
         const uint8_t* b = u->uuid.uuid128;
         ESP_LOGD(
             TAG,
@@ -141,6 +188,194 @@ static void cham_try_parse(void) {
 
 /* ---------------------------------------------------------------- GAP ---- */
 
+#if CONFIG_BT_NIMBLE_ENABLED
+static bool ad_name_matches(const uint8_t* data, uint8_t length) {
+    uint8_t offset = 0;
+    while(data && offset < length) {
+        const uint8_t field_len = data[offset];
+        if(field_len == 0 || (uint16_t)offset + field_len + 1U > length) break;
+        const uint8_t type = data[offset + 1U];
+        if((type == 0x08 || type == 0x09) && field_len > 1) {
+            const size_t name_len = field_len - 1U;
+            return name_len == strlen(CHAM_DEV_NAME) &&
+                   memcmp(&data[offset + 2U], CHAM_DEV_NAME, name_len) == 0;
+        }
+        offset = (uint8_t)(offset + field_len + 1U);
+    }
+    return false;
+}
+
+static void cham_process_scan_report(
+    const uint8_t* data,
+    uint8_t length,
+    const ble_addr_t* address) {
+    if(s_dev_found || !address || !ad_name_matches(data, length)) return;
+    for(size_t i = 0; i < sizeof(s_dev_addr); ++i) {
+        s_dev_addr[i] = address->val[5U - i];
+    }
+    s_dev_addr_type = address->type;
+    s_dev_found = true;
+    (void)ble_gap_disc_cancel();
+}
+
+static void cham_handle_notification(struct os_mbuf* om) {
+    if(!om) return;
+    const size_t packet_len = OS_MBUF_PKTLEN(om);
+    size_t space = sizeof(s_acc) - s_acc_len;
+    size_t copy_len = packet_len;
+    if(copy_len > space) {
+        s_acc_len = 0;
+        copy_len = packet_len > sizeof(s_acc) ? sizeof(s_acc) : packet_len;
+    }
+    uint16_t copied = 0;
+    if(ble_hs_mbuf_to_flat(om, s_acc + s_acc_len, (uint16_t)copy_len, &copied) == 0) {
+        s_acc_len += copied;
+        cham_try_parse();
+    }
+}
+
+static int cham_profile_gap_cb(struct ble_gap_event* event, void* context) {
+    (void)context;
+    if(event && event->type == BLE_GAP_EVENT_NOTIFY_RX &&
+       event->notify_rx.attr_handle == s_notify_handle) {
+        cham_handle_notification(event->notify_rx.om);
+    }
+    return 0;
+}
+
+static int cham_gap_cb(struct ble_gap_event* event, void* context) {
+    (void)context;
+    if(!event) return 0;
+    switch(event->type) {
+    case BLE_GAP_EVENT_DISC:
+        cham_process_scan_report(
+            event->disc.data, event->disc.length_data, &event->disc.addr);
+        break;
+#if CONFIG_BT_NIMBLE_EXT_ADV
+    case BLE_GAP_EVENT_EXT_DISC:
+        if(event->ext_disc.data_status != BLE_GAP_EXT_ADV_DATA_STATUS_INCOMPLETE) {
+            cham_process_scan_report(
+                event->ext_disc.data, event->ext_disc.length_data, &event->ext_disc.addr);
+        }
+        break;
+#endif
+    case BLE_GAP_EVENT_DISC_COMPLETE:
+        s_scanning = false;
+        break;
+    case BLE_GAP_EVENT_CONNECT:
+        s_connect_complete = true;
+        if(event->connect.status == 0) {
+            s_conn_handle = event->connect.conn_handle;
+            s_connected = true;
+            int rc = ble_gattc_exchange_mtu(s_conn_handle, NULL, NULL);
+            if(rc != 0 && rc != BLE_HS_EALREADY) ESP_LOGW(TAG, "MTU exchange request failed: %d", rc);
+        } else {
+            s_connected = false;
+            s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+        }
+        break;
+    case BLE_GAP_EVENT_DISCONNECT:
+        s_connected = false;
+        s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+        s_connect_complete = true;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
+static bool uuid128_is(const ble_uuid_t* uuid, const uint8_t ref[16]) {
+    return uuid && uuid->type == BLE_UUID_TYPE_128 &&
+           memcmp(((const ble_uuid128_t*)uuid)->value, ref, 16) == 0;
+}
+
+static void cham_uuid_from_nimble(ChamUuid* out, const ble_uuid_any_t* uuid) {
+    memset(out, 0, sizeof(*out));
+    switch(uuid->u.type) {
+    case BLE_UUID_TYPE_16:
+        out->len = CHAM_UUID_LEN_16;
+        out->uuid.uuid16 = uuid->u16.value;
+        break;
+    case BLE_UUID_TYPE_32:
+        out->len = 4;
+        out->uuid.uuid32 = uuid->u32.value;
+        break;
+    case BLE_UUID_TYPE_128:
+        out->len = CHAM_UUID_LEN_128;
+        memcpy(out->uuid.uuid128, uuid->u128.value, sizeof(out->uuid.uuid128));
+        break;
+    default:
+        break;
+    }
+}
+
+static int cham_service_cb(uint16_t conn_handle, const struct ble_gatt_error* error,
+                           const struct ble_gatt_svc* service, void* context) {
+    (void)conn_handle;
+    (void)context;
+    if(error && error->status == 0 && service && s_svc_count < CHAM_MAX_SVC) {
+        ChamSvc* out = &s_svcs[s_svc_count++];
+        cham_uuid_from_nimble(&out->uuid, &service->uuid);
+        out->start = service->start_handle;
+        out->end = service->end_handle;
+    } else if(error && error->status != 0) {
+        if(error->status != BLE_HS_EDONE) ESP_LOGW(TAG, "service discovery ended: %u", error->status);
+        s_search_done = true;
+    }
+    return 0;
+}
+
+static int cham_characteristic_cb(uint16_t conn_handle, const struct ble_gatt_error* error,
+                                  const struct ble_gatt_chr* chr, void* context) {
+    (void)conn_handle;
+    (void)context;
+    if(error && error->status == 0 && chr) {
+        if(uuid128_is(&chr->uuid.u, NUS_TX)) s_write_handle = chr->val_handle;
+        else if(uuid128_is(&chr->uuid.u, NUS_RX)) s_notify_handle = chr->val_handle;
+    } else if(error && error->status != 0) {
+        if(error->status != BLE_HS_EDONE) ESP_LOGW(TAG, "characteristic discovery ended: %u", error->status);
+        s_chars_done = true;
+    }
+    return 0;
+}
+
+static int cham_write_done_cb(uint16_t conn_handle, const struct ble_gatt_error* error,
+                              struct ble_gatt_attr* attr, void* context) {
+    (void)conn_handle;
+    (void)attr;
+    (void)context;
+    if(error && error->status != 0) ESP_LOGW(TAG, "NUS write failed: %u", error->status);
+    return 0;
+}
+
+static int cham_cccd_write_cb(uint16_t conn_handle, const struct ble_gatt_error* error,
+                              struct ble_gatt_attr* attr, void* context) {
+    (void)conn_handle;
+    (void)attr;
+    (void)context;
+    s_cccd_written = error && error->status == 0;
+    s_notify_registered = s_cccd_written;
+    return 0;
+}
+
+static int cham_descriptor_cb(uint16_t conn_handle, const struct ble_gatt_error* error,
+                              uint16_t chr_val_handle, const struct ble_gatt_dsc* dsc,
+                              void* context) {
+    (void)conn_handle;
+    (void)context;
+    if(error && error->status == 0 && dsc && chr_val_handle == s_notify_handle &&
+       dsc->uuid.u.type == BLE_UUID_TYPE_16 && dsc->uuid.u16.value == CCCD_UUID) {
+        s_cccd_found = true;
+        s_cccd_handle = dsc->handle;
+    } else if(error && error->status != 0) {
+        if(error->status != BLE_HS_EDONE) ESP_LOGW(TAG, "descriptor discovery ended: %u", error->status);
+        s_descriptors_done = true;
+    }
+    return 0;
+}
+
+#else
 static void cham_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
     switch(event) {
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
@@ -265,6 +500,7 @@ static void cham_gattc_cb(
         break;
     }
 }
+#endif /* CONFIG_BT_NIMBLE_ENABLED */
 
 /* --------------------------------------------------- HAL start / stop ---- */
 
@@ -274,7 +510,7 @@ static bool cham_hal_start(void) {
     Bt* bt = furi_record_open(RECORD_BT);
     /* If BT is disabled in settings the radio stack was never started, so the
      * ESP BT controller is uninitialized. Bring it up through the normal
-     * service path first (ble_serial does esp_bt_controller_init); otherwise
+     * service path first; otherwise
      * the controller takeover below dereferences an uninitialized controller
      * and crashes. */
     s_bt_was_disabled = !bt_is_enabled(bt);
@@ -287,6 +523,43 @@ static bool cham_hal_start(void) {
     furi_record_close(RECORD_BT);
     furi_delay_ms(100);
 
+#if CONFIG_BT_NIMBLE_ENABLED
+    if(ble_core_stack_is_up()) {
+        ESP_LOGE(TAG, "refusing Chameleon takeover while btshim still owns the NimBLE host");
+        Bt* restore = furi_record_open(RECORD_BT);
+        if(s_bt_was_disabled) {
+            bt_stop_stack(restore);
+            s_bt_was_disabled = false;
+        } else {
+            bt_start_stack(restore);
+        }
+        furi_record_close(RECORD_BT);
+        return false;
+    }
+    esp_err_t err = ble_core_stack_up();
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "NimBLE host start failed: %s", esp_err_to_name(err));
+        (void)ble_core_stack_down();
+        Bt* restore = furi_record_open(RECORD_BT);
+        bt_start_stack(restore);
+        if(s_bt_was_disabled) {
+            furi_delay_ms(200);
+            bt_stop_stack(restore);
+            s_bt_was_disabled = false;
+        }
+        furi_record_close(RECORD_BT);
+        return false;
+    }
+    s_hal_started = true;
+    err = ble_core_register_gap_callback(cham_profile_gap_cb, NULL);
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "NimBLE GAP listener registration failed: %s", esp_err_to_name(err));
+        cham_hal_stop();
+        return false;
+    }
+    (void)ble_att_set_preferred_mtu(247);
+    return true;
+#else
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     esp_err_t err = esp_bt_controller_init(&bt_cfg);
     if(err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
@@ -312,9 +585,43 @@ static bool cham_hal_start(void) {
     esp_ble_gatt_set_local_mtu(247);
     s_hal_started = true;
     return true;
+#endif
 }
 
 static void cham_hal_stop(void) {
+#if CONFIG_BT_NIMBLE_ENABLED
+    if(s_scanning) {
+        int rc = ble_gap_disc_cancel();
+        if(rc != 0 && rc != BLE_HS_EALREADY) ESP_LOGW(TAG, "NimBLE scan cancel: %d", rc);
+        for(int i = 0; i < 40 && s_scanning; ++i) furi_delay_ms(5);
+    }
+    if(s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        int rc = ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        if(rc != 0 && rc != BLE_HS_ENOTCONN) ESP_LOGW(TAG, "NimBLE disconnect: %d", rc);
+        for(int i = 0; i < 40 && s_connected; ++i) furi_delay_ms(50);
+    }
+    if(ble_core_stack_is_up()) {
+        esp_err_t err = ble_core_stack_down();
+        if(err != ESP_OK) {
+            ESP_LOGE(TAG, "NimBLE host teardown failed: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+    Bt* bt = furi_record_open(RECORD_BT);
+    bt_start_stack(bt);
+    if(s_bt_was_disabled) {
+        furi_delay_ms(200);
+        bt_stop_stack(bt);
+        s_bt_was_disabled = false;
+    }
+    furi_record_close(RECORD_BT);
+
+    s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+    s_connected = false;
+    s_scanning = false;
+    s_hal_started = false;
+    s_device_mode = -1;
+#else
     if(s_connected) {
         esp_ble_gattc_close(s_gattc_if, s_conn_id);
         furi_delay_ms(100);
@@ -356,12 +663,179 @@ static void cham_hal_stop(void) {
     s_gattc_if = ESP_GATT_IF_NONE;
     s_hal_started = false;
     s_device_mode = -1;
+#endif
 }
 
 /* ----------------------------------------------------- public API -------- */
 
+static bool chameleon_connect_nimble(volatile bool* abort_flag) {
+    if(!cham_hal_start()) {
+        ESP_LOGE(TAG, "NimBLE HAL start failed");
+        cham_hal_stop();
+        return false;
+    }
+
+    s_dev_found = false;
+    s_connected = false;
+    s_connect_complete = false;
+    s_search_done = false;
+    s_chars_done = false;
+    s_descriptors_done = false;
+    s_notify_registered = false;
+    s_cccd_written = false;
+    s_cccd_found = false;
+    s_svc_start = s_svc_end = s_write_handle = s_notify_handle = 0;
+    s_svc_count = 0;
+    s_acc_len = 0;
+    s_resp_ready = false;
+
+    uint8_t own_addr_type = BLE_OWN_ADDR_PUBLIC;
+    int rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    if(rc != 0) {
+        ESP_LOGE(TAG, "cannot infer NimBLE central address type: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    const struct ble_gap_disc_params scan_params = {
+        .itvl = 0x50,
+        .window = 0x30,
+        .filter_policy = BLE_HCI_SCAN_FILT_NO_WL,
+        .limited = 0,
+        .passive = 0,
+        .filter_duplicates = 0,
+    };
+    rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &scan_params, cham_gap_cb, NULL);
+    if(rc != 0) {
+        ESP_LOGE(TAG, "NimBLE scan start failed: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    s_scanning = true;
+    for(int i = 0; i < 300 && !s_dev_found; ++i) {
+        if(abort_flag && *abort_flag) {
+            (void)ble_gap_disc_cancel();
+            cham_hal_stop();
+            return false;
+        }
+        furi_delay_ms(50);
+    }
+    if(!s_dev_found) {
+        ESP_LOGW(TAG, "ChameleonUltra not found");
+        cham_hal_stop();
+        return false;
+    }
+    if(s_scanning) (void)ble_gap_disc_cancel();
+    for(int i = 0; i < 40 && s_scanning; ++i) furi_delay_ms(5);
+
+    ble_addr_t peer = {.type = s_dev_addr_type};
+    for(size_t i = 0; i < sizeof(peer.val); ++i) peer.val[i] = s_dev_addr[5U - i];
+    s_connect_complete = false;
+    rc = ble_gap_connect(own_addr_type, &peer, 5000, NULL, cham_gap_cb, NULL);
+    if(rc != 0) {
+        ESP_LOGW(TAG, "NimBLE connection request failed: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    for(int i = 0; i < 100 && !s_connect_complete; ++i) {
+        if(abort_flag && *abort_flag) {
+            (void)ble_gap_conn_cancel();
+            break;
+        }
+        furi_delay_ms(50);
+    }
+    if(!s_connect_complete) {
+        (void)ble_gap_conn_cancel();
+        for(int i = 0; i < 60 && !s_connect_complete; ++i) furi_delay_ms(50);
+    }
+    if(!s_connected) {
+        ESP_LOGW(TAG, "NimBLE connection timed out or failed");
+        cham_hal_stop();
+        return false;
+    }
+
+    s_search_done = false;
+    s_svc_count = 0;
+    rc = ble_gattc_disc_all_svcs(s_conn_handle, cham_service_cb, NULL);
+    if(rc != 0) {
+        ESP_LOGW(TAG, "NimBLE service discovery start failed: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    for(int i = 0; i < 150 && !s_search_done; ++i) furi_delay_ms(20);
+    if(!s_search_done) {
+        ESP_LOGW(TAG, "NimBLE service discovery timed out");
+        cham_hal_stop();
+        return false;
+    }
+    for(uint16_t i = 0; i < s_svc_count; ++i) {
+        if(uuid_is(&s_svcs[i].uuid, NUS_SVC)) {
+            s_svc_start = s_svcs[i].start;
+            s_svc_end = s_svcs[i].end;
+            break;
+        }
+    }
+    if(s_svc_start == 0) {
+        ESP_LOGW(TAG, "NUS service not found among %u services", s_svc_count);
+        cham_hal_stop();
+        return false;
+    }
+
+    s_chars_done = false;
+    rc = ble_gattc_disc_all_chrs(
+        s_conn_handle, s_svc_start, s_svc_end, cham_characteristic_cb, NULL);
+    if(rc != 0) {
+        ESP_LOGW(TAG, "NimBLE characteristic discovery start failed: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    for(int i = 0; i < 100 && !s_chars_done; ++i) furi_delay_ms(20);
+    if(!s_chars_done || !s_write_handle || !s_notify_handle) {
+        ESP_LOGW(TAG, "NUS characteristics missing (write=%u notify=%u)",
+                 s_write_handle, s_notify_handle);
+        cham_hal_stop();
+        return false;
+    }
+
+    s_descriptors_done = false;
+    s_cccd_found = false;
+    s_cccd_handle = 0;
+    s_cccd_written = false;
+    s_notify_registered = false;
+    rc = ble_gattc_disc_all_dscs(
+        s_conn_handle, s_notify_handle + 1U, s_svc_end, cham_descriptor_cb, NULL);
+    if(rc != 0) {
+        ESP_LOGW(TAG, "NimBLE CCCD discovery start failed: %d", rc);
+        cham_hal_stop();
+        return false;
+    }
+    for(int i = 0; i < 100 && !s_descriptors_done; ++i) furi_delay_ms(20);
+    if(s_cccd_found && s_cccd_handle) {
+        const uint8_t cccd_value[2] = {0x01, 0x00};
+        rc = ble_gattc_write_flat(s_conn_handle, s_cccd_handle, cccd_value,
+                                  sizeof(cccd_value), cham_cccd_write_cb, NULL);
+        if(rc != 0) {
+            ESP_LOGW(TAG, "NimBLE CCCD write request failed: %d", rc);
+            cham_hal_stop();
+            return false;
+        }
+        for(int i = 0; i < 100 && !s_cccd_written; ++i) furi_delay_ms(20);
+    }
+    if(!s_cccd_found || !s_cccd_written || !s_notify_registered) {
+        ESP_LOGW(TAG, "NUS notification subscription failed (found=%d written=%d)",
+                 s_cccd_found, s_cccd_written);
+        cham_hal_stop();
+        return false;
+    }
+
+    ESP_LOGD(TAG, "NimBLE connected and subscribed to NUS notifications");
+    return true;
+}
+
 bool chameleon_connect(volatile bool* abort_flag) {
     if(s_connected) return true;
+#if CONFIG_BT_NIMBLE_ENABLED
+    return chameleon_connect_nimble(abort_flag);
+#else
     if(!cham_hal_start()) {
         ESP_LOGE(TAG, "HAL start failed");
         cham_hal_stop();
@@ -423,8 +897,8 @@ bool chameleon_connect(volatile bool* abort_flag) {
         return false;
     }
 
-    /* Discover ALL services (NULL filter — the proven ble_walk pattern; a
-     * 128-bit UUID filter is unreliable across the Bluedroid cache), then
+    /* Discover ALL services (NULL filter — a 128-bit UUID filter can be
+     * unreliable with a peer's cached GATT database), then
      * match the NUS service from the collected list. */
     s_search_done = false;
     s_svc_count = 0;
@@ -499,6 +973,7 @@ bool chameleon_connect(volatile bool* abort_flag) {
 
     ESP_LOGD(TAG, "connected & subscribed");
     return true;
+#endif
 }
 
 void chameleon_disconnect(void) {
@@ -536,6 +1011,24 @@ bool chameleon_cmd(
     s_resp_ready = false;
     s_acc_len = 0;
 
+#if CONFIG_BT_NIMBLE_ENABLED
+    const uint16_t frame_len = 10U + len;
+    const uint16_t mtu = ble_att_mtu(s_conn_handle);
+    int write_rc;
+    if(mtu >= 3U && frame_len <= mtu - 3U) {
+        write_rc = ble_gattc_write_flat(
+            s_conn_handle, s_write_handle, frame, frame_len, cham_write_done_cb, NULL);
+    } else {
+        struct os_mbuf* om = ble_hs_mbuf_from_flat(frame, frame_len);
+        if(!om) return false;
+        write_rc = ble_gattc_write_long(
+            s_conn_handle, s_write_handle, 0, om, cham_write_done_cb, NULL);
+    }
+    if(write_rc != 0) {
+        ESP_LOGW(TAG, "NimBLE GATT write request failed: %d", write_rc);
+        return false;
+    }
+#else
     esp_err_t e = esp_ble_gattc_write_char(
         s_gattc_if, s_conn_id, s_write_handle, 10 + len, frame,
         ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
@@ -544,6 +1037,7 @@ bool chameleon_cmd(
         ESP_LOGW(TAG, "write_char: %s", esp_err_to_name(e));
         return false;
     }
+#endif
 
     uint32_t waited = 0;
     while(!s_resp_ready && waited < timeout_ms) {

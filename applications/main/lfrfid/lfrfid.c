@@ -1,5 +1,6 @@
 #include "lfrfid_i.h"
 #include <dolphin/dolphin.h>
+#include <expansion/expansion.h>
 
 //TODO: use .txt file in resources for passwords.
 const uint32_t default_passwords[] = {
@@ -59,6 +60,11 @@ static void rpc_command_callback(const RpcAppSystemEvent* event, void* context) 
 
 static LfRfid* lfrfid_alloc(void) {
     LfRfid* lfrfid = malloc(sizeof(LfRfid));
+    furi_check(lfrfid);
+
+    Expansion* expansion = furi_record_open(RECORD_EXPANSION);
+    expansion_disable(expansion);
+    furi_record_close(RECORD_EXPANSION);
 
     lfrfid->storage = furi_record_open(RECORD_STORAGE);
     lfrfid->dialogs = furi_record_open(RECORD_DIALOGS);
@@ -136,6 +142,10 @@ static void lfrfid_free(LfRfid* lfrfid) {
     protocol_dict_free(lfrfid->dict);
 
     lfrfid_worker_free(lfrfid->lfworker);
+
+    Expansion* expansion = furi_record_open(RECORD_EXPANSION);
+    expansion_enable(expansion);
+    furi_record_close(RECORD_EXPANSION);
 
     if(lfrfid->rpc_ctx) {
         rpc_system_app_set_callback(lfrfid->rpc_ctx, NULL, NULL);

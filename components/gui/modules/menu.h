@@ -73,8 +73,14 @@ void menu_set_selected_item(Menu* menu, uint32_t index);
  */
 typedef enum {
     MenuStyleList, // default vertical list
-    MenuStyleDsi, // Nintendo DSi home menu
     MenuStyleWii, // Nintendo Wii Channel grid
+    MenuStyleDsi, // Nintendo DSi home menu
+    MenuStylePs4, // PS4-style horizontal bar
+    MenuStyleVertical, // rotated vertical list
+    MenuStyleC64, // Commodore 64 BASIC listing
+    MenuStyleCompact, // dense two-column list
+    MenuStyleMNTM, // Momentum home-screen dashboard
+    MenuStyleCoverFlow, // album-coverflow carousel
     MenuStyleCount,
 } MenuStyle;
 

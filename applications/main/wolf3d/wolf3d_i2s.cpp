@@ -15,6 +15,16 @@
 
 #define TAG "WolfI2S"
 
+#if !(defined(BOARD_HAS_SPEAKER) && BOARD_HAS_SPEAKER)
+/* Buzzer-only boards (paradoxt): no I2S amp. The T-Embed pins used below
+ * (BCLK/WS/DOUT) are LCD-CS / D-pad etc. elsewhere, so never touch them. */
+extern "C" bool wolf3d_i2s_init(void) {
+    FURI_LOG_W(TAG, "no I2S speaker on this board - SFX disabled");
+    return false;
+}
+extern "C" void wolf3d_i2s_deinit(void) {}
+#else
+
 #define CHUNK_FRAMES   240
 #define DMA_DESC_NUM   6
 #define DMA_FRAME_NUM  CHUNK_FRAMES
@@ -121,3 +131,5 @@ extern "C" void wolf3d_i2s_deinit(void) {
     }
     if(tx_buf) { heap_caps_free(tx_buf); tx_buf = nullptr; }
 }
+
+#endif /* BOARD_HAS_SPEAKER */

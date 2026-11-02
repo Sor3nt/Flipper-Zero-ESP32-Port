@@ -49,9 +49,13 @@ void wmbus_view_keys_exit(void*);
 extern void wmbus_view_meters_refresh(WmbusApp* app);
 static void on_tick_event(void* ctx) {
     WmbusApp* app = ctx;
-    if(!app->on_meters_view) return;
-    if(app->telegram_seq == app->last_shown_seq) return;
+    if(furi_mutex_acquire(app->lock, FuriWaitForever) != FuriStatusOk) return;
+    if(!app->on_meters_view || app->telegram_seq == app->last_shown_seq) {
+        furi_mutex_release(app->lock);
+        return;
+    }
     app->last_shown_seq = app->telegram_seq;
+    furi_mutex_release(app->lock);
     wmbus_view_meters_refresh(app);
 }
 
@@ -235,21 +239,35 @@ void wmbus_app_free(WmbusApp* app) {
  * must not touch it; the on-screen UI is the scanning cue. */
 
 void wmbus_scanning_start(WmbusApp* app) {
-    if(app->worker && !wmbus_worker_is_running(app->worker)) {
-        wmbus_worker_start(app->worker, app->settings.mode);
-    }
+    furi_mutex_acquire(app->lock, FuriWaitForever);
     app->scan_active = true;
+    WmbusMode mode = app->settings.mode;
+    furi_mutex_release(app->lock);
+    if(app->worker && !wmbus_worker_is_running(app->worker)) {
+        wmbus_worker_start(app->worker, mode);
+    }
 }
 
 void wmbus_scanning_stop(WmbusApp* app) {
+    furi_mutex_acquire(app->lock, FuriWaitForever);
     app->scan_active = false;
+    furi_mutex_release(app->lock);
     if(app->worker && wmbus_worker_is_running(app->worker)) {
         wmbus_worker_stop(app->worker);
     }
 }
 
-void wmbus_scanning_indicator_off(WmbusApp* app) { app->scan_active = false; }
-void wmbus_scanning_indicator_on (WmbusApp* app) { app->scan_active = true; }
+void wmbus_scanning_indicator_off(WmbusApp* app) {
+    furi_mutex_acquire(app->lock, FuriWaitForever);
+    app->scan_active = false;
+    furi_mutex_release(app->lock);
+}
+
+void wmbus_scanning_indicator_on(WmbusApp* app) {
+    furi_mutex_acquire(app->lock, FuriWaitForever);
+    app->scan_active = true;
+    furi_mutex_release(app->lock);
+}
 
 /* ------------- Telegram callback (worker thread) ------------- */
 
@@ -491,6 +509,9 @@ void wmbus_app_on_telegram(WmbusApp* app, const uint8_t* fr, size_t len, int8_t 
         s_log_rssi = rssi;
     }
 
+    app->telegram_seq++;
+    const bool scan_active = app->scan_active;
+
     furi_mutex_release(app->lock);
 
     if(log_request && log_len) {
@@ -498,11 +519,8 @@ void wmbus_app_on_telegram(WmbusApp* app, const uint8_t* fr, size_t len, int8_t 
                            &s_log_link, s_log_text);
     }
 
-    /* Bump the GUI sequence counter so the tick handler redraws. */
-    app->telegram_seq++;
-
     /* Beep+haptic per telegram, throttled to 800 ms, only on scan views. */
-    if(app->scan_active) {
+    if(scan_active) {
         static uint32_t last_alert_tick = 0;
         uint32_t now = furi_get_tick();
         if((uint32_t)(now - last_alert_tick) >= 800) {

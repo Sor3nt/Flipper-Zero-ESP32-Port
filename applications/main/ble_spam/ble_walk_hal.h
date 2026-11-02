@@ -2,8 +2,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <esp_gap_ble_api.h>
-#include <esp_gattc_api.h>
+
+#include "ble_types.h"
 
 #define BLE_WALK_MAX_DEVICES    32
 #define BLE_WALK_MAX_SERVICES   16
@@ -11,8 +11,8 @@
 #define BLE_WALK_MAX_VALUE_LEN  128
 
 typedef struct {
-    esp_bd_addr_t addr;
-    esp_ble_addr_type_t addr_type;
+    BleAddress addr;
+    BleAddressType addr_type;
     int8_t rssi;
     char name[32];
     uint8_t adv_data[31];
@@ -22,13 +22,13 @@ typedef struct {
 } BleWalkDevice;
 
 typedef struct {
-    esp_bt_uuid_t uuid;
+    BleUuid uuid;
     uint16_t start_handle;
     uint16_t end_handle;
 } BleWalkService;
 
 typedef struct {
-    esp_bt_uuid_t uuid;
+    BleUuid uuid;
     uint16_t handle;
     uint8_t properties;
 } BleWalkChar;

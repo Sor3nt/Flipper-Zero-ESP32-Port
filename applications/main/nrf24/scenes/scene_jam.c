@@ -1,12 +1,12 @@
 #include "../nrf24_app.h"
 #include "../nrf24_hw.h"
-#include "../helpers/nrf24_channel_source.h"
 #include "../helpers/nrf24_jam_config.h"
 
 #include <furi.h>
 #include <esp_rom_sys.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -87,6 +87,33 @@ static void jam_view_static(
             uint8_t n = (chcount > sizeof(model->channels)) ? sizeof(model->channels) : chcount;
             memcpy(model->channels, chbuf, n);
             model->band_count = n;
+        },
+        true);
+}
+
+/* Shared runtime-stats push used by the main throttle below AND by the AFH
+ * hold loop (which otherwise would not update the screen at all for the
+ * whole per-channel hold -- see the call site in jam_worker). Takes a
+ * snapshot of the few fields that change while jamming so callers don't need
+ * to duplicate the with_view_model block. */
+static void jam_view_runtime(
+    Nrf24App* app,
+    uint8_t channel,
+    uint32_t hop_count,
+    uint32_t sweeps,
+    uint32_t elapsed_ms,
+    uint32_t ch_per_sec,
+    bool running) {
+    with_view_model(
+        app->jam_view,
+        Nrf24JamModel * model,
+        {
+            model->channel = channel;
+            model->hop_count = hop_count;
+            model->sweeps = sweeps;
+            model->elapsed_ms = elapsed_ms;
+            model->ch_per_sec = ch_per_sec;
+            model->running = running;
         },
         true);
 }
@@ -194,6 +221,13 @@ static int32_t jam_worker(void* context) {
                     hop_index = 0;
                     sweeps++;
                 }
+                /* Each hop is only a single RF_CH write (~microseconds), so unlike
+                 * the dwell-bounded branch below we must NOT yield every hop -- that
+                 * would be thousands of context-switch checks per second. Yield once
+                 * every 32 hops instead: often enough (~every few hundred us) that an
+                 * equal-priority GUI/input thread never starves, cheap enough not to
+                 * dent the FAP's tight retune cadence. */
+                if((hops & 0x1F) == 0) taskYIELD();
             }
         } else if(ctx->active && cfg->strategy == Nrf24StrategyAfh) {
             /* AFH exhaustion: park a strong CW carrier on one channel long
@@ -202,7 +236,18 @@ static int32_t jam_worker(void* context) {
              * to systematically push channels onto the bad-channel map. The
              * carrier keeps transmitting via REUSE_TX_PL, so the SPI bus is
              * dropped during the dwell (LCD/SD stay responsive) and only
-             * re-acquired briefly to retune. */
+             * re-acquired briefly to retune.
+             *
+             * dwell_us can be configured up to NRF24_JAM_DWELL_MAX_US (5000),
+             * which here means up to a 5-SECOND hold on one channel. The
+             * runtime view (channel / hop count / elapsed time / c/s) used to
+             * only be refreshed by the shared block after this whole hold_ms
+             * wait finished -- so during a multi-second hold the screen simply
+             * stopped updating, which looked identical to a freeze even though
+             * the app was fully responsive to Stop/Back the entire time (the
+             * flag checks below still ran every 25ms). Refreshing periodically
+             * INSIDE the hold loop fixes that: the elapsed timer keeps visibly
+             * ticking so the screen never looks stuck. */
             cur_ch = chbuf[hop_index % chcount];
             nrf24_hw_acquire();
             nrf24_hw_jammer_set_channel(cur_ch);
@@ -218,31 +263,60 @@ static int32_t jam_worker(void* context) {
             while(waited < hold_ms && !ctx->stop && ctx->desired_running && !ctx->dirty) {
                 furi_delay_ms(25);
                 waited += 25;
+
+                uint32_t now2 = furi_get_tick();
+                if(now2 - last_view_tick >= pdMS_TO_TICKS(150)) {
+                    last_view_tick = now2;
+                    uint32_t et = now2 - start_tick;
+                    uint32_t elapsed_ms2 =
+                        (tick_hz == 1000) ? et : (uint32_t)((uint64_t)et * 1000 / tick_hz);
+                    /* Channel hasn't changed during the hold, so c/s is left
+                     * at its last computed value rather than recomputed here. */
+                    jam_view_runtime(app, cur_ch, hops, sweeps, elapsed_ms2, last_cps, true);
+                }
             }
         } else if(ctx->active) {
-            uint16_t dwell = cfg->dwell_us;
+            uint16_t dwell = cfg->dwell_us; /* NRF24_JAM_DWELL_MIN/MAX_US: 20..5000 */
             uint8_t burst = cfg->burst_count;
             uint8_t strategy = cfg->strategy;
 
-            nrf24_hw_acquire();
+            /* Per-hop acquire/release (not held for the whole 30ms batch) plus
+             * taskYIELD() every hop. Flood/Turbo keeps an NRF24 operation mutex
+             * while yielding the shared SPI host during FIFO airtime waits, so
+             * the LCD/SD/CC1101 can still use their separate CS devices. */
             uint32_t batch_end = furi_get_tick() + pdMS_TO_TICKS(30);
             while(!ctx->stop && ctx->desired_running && !ctx->dirty &&
                   furi_get_tick() < batch_end) {
+
+                nrf24_hw_acquire();
                 cur_ch = chbuf[hop_index % chcount];
                 if(strategy == Nrf24StrategyCw) {
                     nrf24_hw_jammer_set_channel(cur_ch);
-                    esp_rom_delay_us(dwell);
+                    /* The CONT_WAVE carrier keeps radiating autonomously once
+                     * RF_CH is written, and the nRF24 ignores bus traffic while
+                     * its own CS is deasserted. So drop the shared SPI bus BEFORE
+                     * the dwell busy-wait (same pattern as the AFH branch above):
+                     * the LCD/SD can use the bus during the hold instead of being
+                     * locked out for up to dwell µs on every single hop. RF_CH was
+                     * the only thing needing the bus, and it is already set. */
+                    nrf24_hw_release();
+                    if(dwell > 0) esp_rom_delay_us(dwell);
                 } else {
                     /* Flood / Turbo: keep bursting on this channel until the
                      * dwell window (µs) elapses — at least one burst. Use the
-                     * microsecond timer so sub-millisecond dwells are honored. */
+                     * microsecond timer so sub-millisecond dwells are honored.
+                     * nrf24_hw_flood_burst() bounds a stuck FIFO and yields the
+                     * shared host between polls, so a radio burst cannot reserve
+                     * SPI2 for its full on-air duration. */
                     bool turbo = (strategy == Nrf24StrategyTurbo);
                     int64_t hop_end = esp_timer_get_time() + (int64_t)dwell;
                     do {
                         nrf24_hw_flood_burst(cur_ch, burst, turbo);
                     } while(esp_timer_get_time() < hop_end && !ctx->stop &&
                             ctx->desired_running && !ctx->dirty);
+                    nrf24_hw_release();
                 }
+
                 hop_index++;
                 hops++;
                 if(hop_index >= chcount) {
@@ -250,8 +324,13 @@ static int32_t jam_worker(void* context) {
                     sweeps++;
                     if(cfg->random_hop && chcount > 1) jam_shuffle(chbuf, chcount);
                 }
+
+                /* Give the scheduler a chance every hop -- cheap no-op if
+                 * nothing else is runnable, but lets the GUI/display thread
+                 * (and anything else at equal priority) get its slice instead
+                 * of waiting out the whole batch window. */
+                taskYIELD();
             }
-            nrf24_hw_release();
         }
 
         uint32_t now = furi_get_tick();
@@ -275,23 +354,8 @@ static int32_t jam_worker(void* context) {
                 last_cps = cps;
                 last_cps_hops = hops;
             }
-            uint8_t ch = cur_ch;
-            uint32_t s = sweeps;
-            bool run = ctx->active;
-            with_view_model(
-                app->jam_view,
-                Nrf24JamModel * model,
-                {
-                    model->channel = ch;
-                    model->hop_count = hops;
-                    model->sweeps = s;
-                    model->elapsed_ms = elapsed_ms;
-                    model->ch_per_sec = cps;
-                    model->running = run;
-                },
-                true);
+            jam_view_runtime(app, cur_ch, hops, sweeps, elapsed_ms, cps, ctx->active);
         }
-
 
         furi_delay_ms(ctx->active ? 1 : 10);
     }

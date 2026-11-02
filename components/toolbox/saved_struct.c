@@ -200,36 +200,69 @@ static bool saved_struct_file_get_metadata(
 
 /* ---- NVS backend (legacy read / no-SD fallback) ---- */
 
-static bool saved_struct_nvs_read_blob(const char* path, uint8_t** blob_out, size_t* blob_size) {
+/* Argument for the NVS-read helper task — same rationale as
+ * SavedStructNvsWriteCtx below: nvs_get_blob() can hit the same
+ * cache-disabled-flash-access window as nvs_commit(), so it must not run
+ * on a caller thread whose stack lives in PSRAM. */
+typedef struct {
+    const char* path;
+    uint8_t** blob_out;
+    size_t* blob_size;
+    volatile bool result;
+    volatile bool done;
+} SavedStructNvsReadCtx;
+
+static void saved_struct_nvs_read_task(void* p) {
+    SavedStructNvsReadCtx* ctx = p;
     char key[16];
-    path_to_nvs_key(path, key, sizeof(key));
+    path_to_nvs_key(ctx->path, key, sizeof(key));
 
+    bool ok = false;
     nvs_handle_t nvs;
-    if(nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return false;
-
-    size_t size = 0;
-    if(nvs_get_blob(nvs, key, NULL, &size) != ESP_OK || size < sizeof(SavedStructHeader)) {
+    if(nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t size = 0;
+        if(nvs_get_blob(nvs, key, NULL, &size) == ESP_OK && size >= sizeof(SavedStructHeader)) {
+            /* MUST be internal DRAM — read back while cache may be disabled */
+            uint8_t* blob = heap_caps_malloc(size, MALLOC_CAP_INTERNAL);
+            if(blob) {
+                if(nvs_get_blob(nvs, key, blob, &size) == ESP_OK) {
+                    *ctx->blob_out = blob;
+                    *ctx->blob_size = size;
+                    ok = true;
+                } else {
+                    heap_caps_free(blob);
+                }
+            }
+        }
         nvs_close(nvs);
+    }
+
+    ctx->result = ok;
+    ctx->done = true;
+    vTaskDelete(NULL);
+}
+
+static bool saved_struct_nvs_read_blob(const char* path, uint8_t** blob_out, size_t* blob_size) {
+    SavedStructNvsReadCtx ctx = {
+        .path = path,
+        .blob_out = blob_out,
+        .blob_size = blob_size,
+        .result = false,
+        .done = false,
+    };
+
+    /* Plain xTaskCreate here gets an internal-DRAM stack by default, unlike
+     * the PSRAM-stacked Furi service tasks that may call this function. */
+    if(xTaskCreate(saved_struct_nvs_read_task, "nvs_rd", 3072, &ctx, 5, NULL) != pdPASS) {
+        FURI_LOG_E(TAG, "Failed to spawn NVS read task");
         return false;
     }
 
-    uint8_t* blob = malloc(size);
-    if(!blob) {
-        nvs_close(nvs);
-        return false;
+    while(!ctx.done) {
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 
-    esp_err_t err = nvs_get_blob(nvs, key, blob, &size);
-    nvs_close(nvs);
-
-    if(err != ESP_OK) {
-        free(blob);
-        return false;
-    }
-
-    *blob_out = blob;
-    *blob_size = size;
-    return true;
+    return ctx.result;
 }
 
 static bool saved_struct_nvs_load(

@@ -13,6 +13,8 @@ extern "C" {
 #include <furi_hal_crypto.h>
 #include <furi_hal_info.h>
 #include <furi_hal_gpio.h>
+#include <furi_hal_serial.h>
+#include <furi_hal_serial_control.h>
 #include <furi_hal_resources.h>
 #include <furi_hal_usb.h>
 #include <furi_hal_random.h>

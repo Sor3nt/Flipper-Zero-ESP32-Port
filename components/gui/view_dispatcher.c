@@ -1,5 +1,7 @@
 #include "view_dispatcher_i.h"
 
+#include <boards/board.h>
+
 #define TAG "ViewDispatcher"
 
 #define VIEW_DISPATCHER_QUEUE_LEN (16U)
@@ -278,6 +280,8 @@ void view_dispatcher_handle_input(ViewDispatcher* view_dispatcher, InputEvent* e
     // button views). Touch panels use INPUT_SEQUENCE_SOURCE_TOUCH and are a
     // genuine 2-axis source — they already deliver Left/Right natively, so they
     // must be excluded here or horizontal swipes never reach LeftRight views.
+    // A real D-pad (BOARD_INPUT_DPAD) is 2-axis as well: no remap.
+#if !(defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD)
     if(view_dispatcher->current_view &&
        event->sequence_source == INPUT_SEQUENCE_SOURCE_HARDWARE) {
         ViewInputMode mode = view_get_input_mode(view_dispatcher->current_view);
@@ -286,8 +290,9 @@ void view_dispatcher_handle_input(ViewDispatcher* view_dispatcher, InputEvent* e
             else if(event->key == InputKeyDown) event->key = InputKeyRight;
             else if(event->key == InputKeyLeft) event->key = InputKeyDown;
             else if(event->key == InputKeyRight) event->key = InputKeyUp;
-        } 
+        }
     }
+#endif
 
     // Deliver event
     if(view_dispatcher->current_view &&

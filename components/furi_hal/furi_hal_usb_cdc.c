@@ -1,12 +1,14 @@
 #include "furi_hal_usb_cdc.h"
 
 #include <string.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+#include <furi.h>
 
 #include <core/common_defines.h>
 #include "sdkconfig.h"
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
-#include <furi.h>
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #define FURI_HAL_CDC_HAVE_TINYUSB 1
@@ -21,6 +23,7 @@ typedef struct {
     void* context;
     struct usb_cdc_line_coding line_coding;
     uint8_t ctrl_line_state;
+    uint16_t callbacks_in_flight;
 } FuriHalUsbCdcInterfaceState;
 
 static FuriHalUsbCdcInterfaceState furi_hal_usb_cdc[FURI_HAL_USB_CDC_IF_MAX] = {
@@ -36,8 +39,10 @@ static FuriHalUsbCdcInterfaceState furi_hal_usb_cdc[FURI_HAL_USB_CDC_IF_MAX] = {
                     .bDataBits = 8,
                 },
             .ctrl_line_state = 0,
+            .callbacks_in_flight = 0,
         },
 };
+static portMUX_TYPE furi_hal_usb_cdc_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static FuriHalUsbCdcInterfaceState* furi_hal_usb_cdc_get(uint8_t if_num) {
     if(if_num >= FURI_HAL_USB_CDC_IF_MAX) {
@@ -47,45 +52,140 @@ static FuriHalUsbCdcInterfaceState* furi_hal_usb_cdc_get(uint8_t if_num) {
     return &furi_hal_usb_cdc[if_num];
 }
 
+static CdcCallbacks* furi_hal_cdc_callback_acquire(
+    FuriHalUsbCdcInterfaceState* interface,
+    void** context) {
+    CdcCallbacks* callbacks;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+    callbacks = interface->callbacks;
+    if(callbacks) {
+        furi_check(interface->callbacks_in_flight < UINT16_MAX);
+        interface->callbacks_in_flight++;
+        *context = interface->context;
+    }
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+    return callbacks;
+}
+
+static void furi_hal_cdc_callback_release(FuriHalUsbCdcInterfaceState* interface) {
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+    furi_check(interface->callbacks_in_flight > 0);
+    interface->callbacks_in_flight--;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+}
+
 void furi_hal_cdc_set_callbacks(uint8_t if_num, CdcCallbacks* cb, void* context) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
     if(!interface) {
         return;
     }
 
+    struct usb_cdc_line_coding line_coding;
+    uint8_t ctrl_line_state;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
     interface->callbacks = cb;
     interface->context = context;
+    line_coding = interface->line_coding;
+    ctrl_line_state = interface->ctrl_line_state;
+    if(cb) {
+        furi_check(interface->callbacks_in_flight < UINT16_MAX);
+        interface->callbacks_in_flight++;
+    }
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
 
-    if(interface->callbacks && interface->callbacks->state_callback) {
-        interface->callbacks->state_callback(
-            interface->context,
-            (interface->ctrl_line_state & CdcCtrlLineDTR) ? CdcStateConnected :
-                                                            CdcStateDisconnected);
+    if(cb && cb->state_callback) {
+        cb->state_callback(
+            context,
+            (ctrl_line_state & CdcCtrlLineDTR) ? CdcStateConnected : CdcStateDisconnected);
     }
-    if(interface->callbacks && interface->callbacks->ctrl_line_callback) {
-        interface->callbacks->ctrl_line_callback(interface->context, interface->ctrl_line_state);
+    if(cb && cb->ctrl_line_callback) {
+        cb->ctrl_line_callback(context, (CdcCtrlLine)ctrl_line_state);
     }
-    if(interface->callbacks && interface->callbacks->config_callback) {
-        interface->callbacks->config_callback(interface->context, &interface->line_coding);
+    if(cb && cb->config_callback) {
+        cb->config_callback(context, &line_coding);
+    }
+    if(cb) {
+        furi_hal_cdc_callback_release(interface);
+    } else {
+        while(true) {
+            portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+            const bool callbacks_active = interface->callbacks_in_flight != 0;
+            portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+            if(!callbacks_active) break;
+            furi_delay_ms(1);
+        }
     }
 }
 
-struct usb_cdc_line_coding* furi_hal_cdc_get_port_settings(uint8_t if_num) {
+bool furi_hal_cdc_is_owned(uint8_t if_num) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
-    return interface ? &interface->line_coding : NULL;
+    if(!interface) return false;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+    const bool owned = interface->callbacks != NULL;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+    return owned;
+}
+
+bool furi_hal_cdc_get_port_settings(uint8_t if_num, struct usb_cdc_line_coding* settings) {
+    FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
+    if(!interface || !settings) return false;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+    *settings = interface->line_coding;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+    return true;
 }
 
 uint8_t furi_hal_cdc_get_ctrl_line_state(uint8_t if_num) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
-    return interface ? interface->ctrl_line_state : 0;
+    if(!interface) return 0;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+    uint8_t ctrl_line_state = interface->ctrl_line_state;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+    return ctrl_line_state;
+}
+
+/* Called by the composite installer when the CDC ports appear or disappear.
+ * TinyUSB does not report a line-state change on teardown, so without this a
+ * new session starts with the previous host's DTR/RTS and line coding.
+ *
+ * With notify (teardown), an attached owner whose host had the port open gets
+ * the same DTR drop a closing terminal would send, so e.g. a CLI shell ends
+ * instead of writing into a port that no longer exists. */
+void furi_hal_cdc_internal_reset_line_state(bool notify) {
+    for(size_t i = 0; i < FURI_HAL_USB_CDC_IF_MAX; i++) {
+        FuriHalUsbCdcInterfaceState* interface = &furi_hal_usb_cdc[i];
+        portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
+        const bool was_open = (interface->ctrl_line_state & CdcCtrlLineDTR) != 0;
+        interface->ctrl_line_state = 0;
+        interface->line_coding = (struct usb_cdc_line_coding){
+            .dwDTERate = 115200,
+            .bCharFormat = 0,
+            .bParityType = 0,
+            .bDataBits = 8,
+        };
+        CdcCallbacks* callbacks = interface->callbacks;
+        void* context = interface->context;
+        if(notify && was_open && callbacks) {
+            furi_check(interface->callbacks_in_flight < UINT16_MAX);
+            interface->callbacks_in_flight++;
+        }
+        portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
+
+        if(!notify || !was_open || !callbacks) continue;
+        if(callbacks->ctrl_line_callback) {
+            callbacks->ctrl_line_callback(context, (CdcCtrlLine)0);
+        } else if(callbacks->state_callback) {
+            callbacks->state_callback(context, CdcStateDisconnected);
+        }
+        furi_hal_cdc_callback_release(interface);
+    }
 }
 
 #if FURI_HAL_CDC_HAVE_TINYUSB
 
 #define TAG "FuriHalCdc"
 
-/* The composite descriptor exposes a single CDC interface, wired to esp_tinyusb
- * logical port TINYUSB_CDC_ACM_0. furi if_num 0 maps to it 1:1. */
+/* The logical CDC indices map directly to TinyUSB CDC-ACM ports. */
 
 void furi_hal_cdc_send(uint8_t if_num, uint8_t* buf, uint16_t len) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
@@ -96,10 +196,17 @@ void furi_hal_cdc_send(uint8_t if_num, uint8_t* buf, uint16_t len) {
     /* write_queue copies into the 512-byte TX ring; flush kicks the USB
      * transfer and frees ring space. For payloads larger than the ring (RPC
      * screen frames, file reads) we loop, flushing between chunks. A bounded
-     * retry guards against a host that stops reading mid-transfer. */
-    size_t sent = 0;
+     * retry guards against a host that stops reading mid-transfer. With no
+     * host at all (cable out, composite torn down) the data is dropped at
+     * once instead of stalling the caller for two seconds. */
+    size_t sent = tud_mounted() ? 0 : len;
     int stalls = 0;
     while(sent < len) {
+        if(!tud_mounted()) {
+            FURI_LOG_W(TAG, "cdc tx interrupted by USB unmount, dropping %u bytes",
+                       (unsigned)(len - sent));
+            break;
+        }
         size_t queued =
             tinyusb_cdcacm_write_queue(if_num, buf + sent, (size_t)(len - sent));
         sent += queued;
@@ -116,9 +223,12 @@ void furi_hal_cdc_send(uint8_t if_num, uint8_t* buf, uint16_t len) {
         }
     }
 
-    if(interface->callbacks && interface->callbacks->tx_ep_callback) {
-        interface->callbacks->tx_ep_callback(interface->context);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_cdc_callback_acquire(interface, &context);
+    if(callbacks && callbacks->tx_ep_callback) {
+        callbacks->tx_ep_callback(context);
     }
+    if(callbacks) furi_hal_cdc_callback_release(interface);
 }
 
 int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
@@ -135,6 +245,19 @@ int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
     return (int32_t)rx_size;
 }
 
+int32_t furi_hal_cdc_send_nonblocking(uint8_t if_num, const uint8_t* buf, uint16_t len) {
+    if(!buf || !len || if_num >= TINYUSB_CDC_ACM_MAX ||
+       !furi_hal_usb_cdc_get(if_num)) {
+        return 0;
+    }
+
+    size_t queued = tinyusb_cdcacm_write_queue(if_num, (uint8_t*)buf, len);
+    if(queued > 0) {
+        tinyusb_cdcacm_write_flush(if_num, 0);
+    }
+    return (int32_t)queued;
+}
+
 /* ─────────────────────────────────────────────────────────────────────
  * TinyUSB CDC-ACM event fan-out → user CdcCallbacks.
  * These run on the TinyUSB task.
@@ -143,9 +266,13 @@ int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
 static void furi_hal_cdc_tusb_rx(int itf, cdcacm_event_t* event) {
     UNUSED(event);
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get((uint8_t)itf);
-    if(interface && interface->callbacks && interface->callbacks->rx_ep_callback) {
-        interface->callbacks->rx_ep_callback(interface->context);
+    if(!interface) return;
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_cdc_callback_acquire(interface, &context);
+    if(callbacks && callbacks->rx_ep_callback) {
+        callbacks->rx_ep_callback(context);
     }
+    if(callbacks) furi_hal_cdc_callback_release(interface);
 }
 
 static void furi_hal_cdc_tusb_line_state(int itf, cdcacm_event_t* event) {
@@ -157,11 +284,16 @@ static void furi_hal_cdc_tusb_line_state(int itf, cdcacm_event_t* event) {
     uint8_t ctrl = 0;
     if(event->line_state_changed_data.dtr) ctrl |= CdcCtrlLineDTR;
     if(event->line_state_changed_data.rts) ctrl |= CdcCtrlLineRTS;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
     interface->ctrl_line_state = ctrl;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
 
-    if(interface->callbacks && interface->callbacks->ctrl_line_callback) {
-        interface->callbacks->ctrl_line_callback(interface->context, ctrl);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_cdc_callback_acquire(interface, &context);
+    if(callbacks && callbacks->ctrl_line_callback) {
+        callbacks->ctrl_line_callback(context, (CdcCtrlLine)ctrl);
     }
+    if(callbacks) furi_hal_cdc_callback_release(interface);
 }
 
 static void furi_hal_cdc_tusb_line_coding(int itf, cdcacm_event_t* event) {
@@ -170,17 +302,24 @@ static void furi_hal_cdc_tusb_line_coding(int itf, cdcacm_event_t* event) {
         return;
     }
 
+    struct usb_cdc_line_coding line_coding;
     const cdc_line_coding_t* lc = event->line_coding_changed_data.p_line_coding;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_mux);
     if(lc) {
         interface->line_coding.dwDTERate = lc->bit_rate;
         interface->line_coding.bCharFormat = lc->stop_bits;
         interface->line_coding.bParityType = lc->parity;
         interface->line_coding.bDataBits = lc->data_bits;
     }
+    line_coding = interface->line_coding;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_mux);
 
-    if(interface->callbacks && interface->callbacks->config_callback) {
-        interface->callbacks->config_callback(interface->context, &interface->line_coding);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_cdc_callback_acquire(interface, &context);
+    if(callbacks && callbacks->config_callback) {
+        callbacks->config_callback(context, &line_coding);
     }
+    if(callbacks) furi_hal_cdc_callback_release(interface);
 }
 
 /* Wire the tinyusb CDC events into the fan-out above. Called once by the
@@ -192,6 +331,13 @@ void furi_hal_cdc_internal_register_tinyusb_callbacks(void) {
         TINYUSB_CDC_ACM_0, CDC_EVENT_LINE_STATE_CHANGED, furi_hal_cdc_tusb_line_state);
     tinyusb_cdcacm_register_callback(
         TINYUSB_CDC_ACM_0, CDC_EVENT_LINE_CODING_CHANGED, furi_hal_cdc_tusb_line_coding);
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    tinyusb_cdcacm_register_callback(TINYUSB_CDC_ACM_1, CDC_EVENT_RX, furi_hal_cdc_tusb_rx);
+    tinyusb_cdcacm_register_callback(
+        TINYUSB_CDC_ACM_1, CDC_EVENT_LINE_STATE_CHANGED, furi_hal_cdc_tusb_line_state);
+    tinyusb_cdcacm_register_callback(
+        TINYUSB_CDC_ACM_1, CDC_EVENT_LINE_CODING_CHANGED, furi_hal_cdc_tusb_line_coding);
+#endif
 }
 
 #else /* !FURI_HAL_CDC_HAVE_TINYUSB — boards without USB-OTG */
@@ -207,6 +353,13 @@ int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
     if(buf && max_len) {
         memset(buf, 0, max_len);
     }
+    return 0;
+}
+
+int32_t furi_hal_cdc_send_nonblocking(uint8_t if_num, const uint8_t* buf, uint16_t len) {
+    UNUSED(if_num);
+    UNUSED(buf);
+    UNUSED(len);
     return 0;
 }
 

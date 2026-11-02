@@ -18,9 +18,13 @@ void subghz_spectrum_free(SubGhzSpectrum* instance);
 
 View* subghz_spectrum_get_view(SubGhzSpectrum* instance);
 
+/** Center frequency (Hz) the next start() opens at, e.g. the app's current
+ * frequency. Ignored if outside the CC1101 bands (then 433.92 MHz is used). */
+void subghz_spectrum_set_start_frequency(SubGhzSpectrum* instance, uint32_t frequency);
+
 /** Take over the color display and start the sweep + render threads. Called
  * from the scene's on_enter. */
-void subghz_spectrum_start(SubGhzSpectrum* instance);
+bool subghz_spectrum_start(SubGhzSpectrum* instance);
 
 /** Stop the render + sweep threads and release the display. Called from the
  * scene's on_exit. Safe to call even if start() was never called. */

@@ -2,6 +2,7 @@
 #include "../elements.h"
 #include <assets_icons.h>
 #include <furi.h>
+#include <boards/board.h>
 
 struct TextInput {
     View* view;
@@ -497,6 +498,23 @@ static bool text_input_view_input_callback(InputEvent* event, void* context) {
     TextInput* text_input = context;
     furi_assert(text_input);
 
+#if defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD
+    /* The handlers are laid out for the T-Embed encoder: Up/Down step along
+     * the keys (wrapping rows), Left/Right change row. On a D-pad Up/Down
+     * change row and Left/Right step along it. */
+    static const InputKey dpad_keys[InputKeyMAX] = {
+        [InputKeyUp] = InputKeyLeft,
+        [InputKeyDown] = InputKeyRight,
+        [InputKeyRight] = InputKeyDown,
+        [InputKeyLeft] = InputKeyUp,
+        [InputKeyOk] = InputKeyOk,
+        [InputKeyBack] = InputKeyBack,
+    };
+    InputEvent dpad_event = *event;
+    if(dpad_event.key < InputKeyMAX) dpad_event.key = dpad_keys[dpad_event.key];
+    event = &dpad_event;
+#endif
+
     bool consumed = false;
 
     // Acquire model
@@ -750,4 +768,11 @@ void* text_input_get_validator_callback_context(TextInput* text_input) {
 void text_input_set_header_text(TextInput* text_input, const char* text) {
     furi_check(text_input);
     with_view_model(text_input->view, TextInputModel * model, { model->header = text; }, true);
+}
+
+void text_input_show_illegal_symbols(TextInput* text_input, bool show) {
+    furi_check(text_input);
+    /* This port's keyboard has no illegal-symbol hint layer; accepted for API
+     * compatibility with apps ported from upstream Flipper (e.g. WiFi Marauder). */
+    UNUSED(show);
 }

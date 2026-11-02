@@ -3,6 +3,7 @@
 #include "nfc.h"
 
 #include <furi_hal_nfc.h>
+#include <furi_hal_power.h>
 #include <furi/furi.h>
 
 #define TAG "Nfc"
@@ -116,6 +117,7 @@ static int32_t nfc_worker_listener(void* context) {
 
     instance->state = NfcStateRunning;
 
+    furi_hal_power_light_sleep_inhibit_enter();
     furi_hal_nfc_event_start();
 
     NfcEventData event_data = {};
@@ -166,6 +168,7 @@ static int32_t nfc_worker_listener(void* context) {
 
     bit_buffer_free(event_data.buffer);
     furi_hal_nfc_low_power_mode_start();
+    furi_hal_power_light_sleep_inhibit_exit();
     return 0;
 }
 
@@ -231,6 +234,7 @@ static int32_t nfc_worker_poller(void* context) {
     instance->state = NfcStateRunning;
     instance->poller_state = NfcPollerStateStart;
 
+    furi_hal_power_light_sleep_inhibit_enter();
     furi_hal_nfc_event_start();
 
     bool exit = false;
@@ -238,6 +242,7 @@ static int32_t nfc_worker_poller(void* context) {
         exit = nfc_worker_poller_state_handlers[instance->poller_state](instance);
     }
 
+    furi_hal_power_light_sleep_inhibit_exit();
     return 0;
 }
 

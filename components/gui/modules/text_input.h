@@ -88,6 +88,9 @@ void* text_input_get_validator_callback_context(TextInput* text_input);
  */
 void text_input_set_header_text(TextInput* text_input, const char* text);
 
+/** Toggle the illegal-symbol hint (no-op on this port; API compatibility). */
+void text_input_show_illegal_symbols(TextInput* text_input, bool show);
+
 #ifdef __cplusplus
 }
 #endif

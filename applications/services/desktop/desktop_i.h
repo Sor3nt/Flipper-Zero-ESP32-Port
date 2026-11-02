@@ -118,6 +118,7 @@ struct Desktop {
 
     AnimationManager* animation_manager;
     FuriSemaphore* animation_semaphore;
+    bool animation_reload_pending; /* DesktopGlobalReloadAnimation queued */
 
     DesktopClock clock;
     DesktopSettings settings;

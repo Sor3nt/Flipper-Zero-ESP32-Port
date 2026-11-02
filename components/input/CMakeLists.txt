@@ -1,7 +1,5 @@
 # Target-specific input driver selection
-if(NOT DEFINED FLIPPER_BOARD)
-    set(FLIPPER_BOARD "waveshare_c6_1.9" CACHE STRING "Target board")
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/flipper_board.cmake")
 
 set(TARGET_INPUT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../targets/${FLIPPER_BOARD}")
 
@@ -15,5 +13,5 @@ idf_component_register(
         "${TARGET_INPUT_DIR}/target_input.c"
     INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../targets"
     REQUIRES furi
-    PRIV_REQUIRES furi_hal
+    PRIV_REQUIRES furi_hal esp_rom loader
 )

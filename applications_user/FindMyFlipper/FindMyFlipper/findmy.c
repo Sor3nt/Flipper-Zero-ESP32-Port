@@ -14,7 +14,8 @@ static bool findmy_back_event_callback(void* context) {
 }
 
 static FindMy* findmy_app_alloc() {
-    FindMy* app = malloc(sizeof(FindMy));
+    FindMy* app = calloc(1, sizeof(FindMy));
+    if(!app) return NULL;
 
     app->gui = furi_record_open(RECORD_GUI);
     app->storage = furi_record_open(RECORD_STORAGE);
@@ -89,6 +90,7 @@ static void findmy_app_free(FindMy* app) {
 int32_t findmy_main(void* p) {
     UNUSED(p);
     FindMy* app = findmy_app_alloc();
+    if(!app) return 255;
 
     scene_manager_next_scene(app->scene_manager, FindMySceneMain);
 
@@ -128,6 +130,7 @@ void findmy_toggle_beacon(FindMy* app) {
 }
 
 void findmy_set_tag_type(FindMy* app, FindMyType type) {
+    if(!app || findmy_state_data_size(type) == 0) return;
     app->state.tag_type = type;
     findmy_state_save_and_apply(app, &app->state);
     findmy_main_update_type(app->findmy_main, type);

@@ -3,14 +3,24 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define NRF24_RPD_MIN_VALID_DWELL_US 170U
+#define NRF24_RPD_SCAN_DWELL_US 200U
+
 /* Low-level NRF24L01(+) helper.
- * Bus + CS are shared with the CC1101 / LCD / SD-Card on T-Embed -- callers must
+ * Bus + CS are shared with the CC1101 / LCD / SD-Card on Paradoxt -- callers must
  * surround SPI access with nrf24_hw_acquire() / nrf24_hw_release(). The CE pin
  * is handled exclusively by this module.
  */
 
+/* nrf24_hw_init() opens an NRF24 session (furi_hal_nrf24): the SPI handle and CE are routed
+ * to the module chosen in NRF24 > Radio Settings (the board's, or an external one on two
+ * header pins) and nrf24_hw_deinit() hands every pin back. Boards other than paradoxt
+ * always use their own module. If routing fails, nrf24_hw_probe() returns false and
+ * nrf24_hw_route_error() says why. */
 void nrf24_hw_init(void);
 void nrf24_hw_deinit(void);
+/* Text of the last nrf24_hw_init() routing failure, NULL when it succeeded. */
+const char* nrf24_hw_route_error(void);
 
 void nrf24_hw_acquire(void);
 void nrf24_hw_release(void);
@@ -37,9 +47,30 @@ void nrf24_hw_power_down(void);
 /* Set RF channel (0..125). Must be wrapped in acquire/release. */
 void nrf24_hw_set_channel(uint8_t channel);
 
-/* Spectrum helper: tune to channel, listen briefly in RX, return RPD bit.
- * Must be wrapped in acquire/release. */
-uint8_t nrf24_hw_listen_rpd(uint8_t channel);
+/* Spectrum helper: tune to channel and listen in RX. The dwell is clamped to
+ * the RPD-valid minimum. Returns false when an SPI transaction fails. */
+bool nrf24_hw_listen_rpd(uint8_t channel, uint8_t* rpd);
+
+/* Split RPD listen for shared-bus boards: _begin tunes the channel and raises
+ * CE (SPI → bus required), then keeps the NRF24 operation lock and sleep
+ * inhibition until the paired _end. The caller may release the shared SPI host
+ * during the dwell so LCD/SD/CC1101 can run. _end drops CE, reads the latched
+ * result, and releases the operation/sleep hold. Both must run in the same
+ * task; _begin failure releases its hold and leaves CE low. */
+bool nrf24_hw_listen_rpd_begin(uint8_t channel);
+/* Read RPD while CE remains high. Returns false if the SPI transaction fails. */
+bool nrf24_hw_listen_rpd_sample(uint8_t* rpd);
+bool nrf24_hw_listen_rpd_end(uint8_t* rpd);
+
+/* Listen on `channel` for `dwell_us` (receiver settling + sample window), then
+ * read RPD. Dwell is clamped to NRF24_RPD_SCAN_DWELL_US. Must be wrapped in
+ * acquire/release. */
+bool nrf24_hw_listen_rpd_dwell(uint8_t channel, uint32_t dwell_us, uint8_t* rpd);
+
+/* Put the radio in a defined 2 Mbps, no-ack, no-CRC state for RPD/carrier
+ * scanning. Must be wrapped in acquire/release. Leaves the chip powered in
+ * RX standby with CE low. */
+bool nrf24_hw_rpd_setup(void);
 
 /* Constant-carrier jammer: enable continuous wave on the given channel
  * at maximum PA power, 2 Mbps data rate, PLL locked.
@@ -113,7 +144,9 @@ void nrf24_hw_rx_start_promiscuous(uint8_t channel);
 bool nrf24_hw_rx_data_ready(void);
 
 /* Read up to maxlen bytes from the RX FIFO. Returns the number of bytes read
- * (always equal to the configured payload size, typically 32).
+ * (the configured payload size, typically 32), or 0 if the SPI read failed — in
+ * which case buf is zeroed and no real packet was received, so the caller must
+ * not treat it as data.
  * Must be wrapped in acquire/release. */
 uint8_t nrf24_hw_rx_read_payload(uint8_t* buf, uint8_t maxlen);
 
@@ -141,7 +174,8 @@ void nrf24_hw_tx_setup(
  * Must be wrapped in acquire/release. */
 bool nrf24_hw_tx_send(const uint8_t* data, uint8_t len);
 
-/* Power down, drop CE.
+/* Stop TX: drop CE and flush the TX FIFO. The chip stays PWR_UP — the caller
+ * decides when to power down (nrf24_hw_power_down()), mirroring nrf24_hw_rx_stop().
  * Must be wrapped in acquire/release. */
 void nrf24_hw_tx_stop(void);
 

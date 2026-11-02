@@ -9,6 +9,73 @@
 const InputPin input_pins[] = {};
 const size_t input_pins_count = 0;
 
+#define FURI_HAL_STRINGIFY_INNER(value) #value
+#define FURI_HAL_STRINGIFY(value) FURI_HAL_STRINGIFY_INNER(value)
+#if defined(BOARD_PIN_EXT_GPIO_1) && defined(BOARD_PIN_EXT_GPIO_2) && \
+    defined(BOARD_PIN_EXT_GPIO_3) && defined(BOARD_PIN_EXT_GPIO_4) && \
+    defined(BOARD_PIN_EXT_GPIO_5)
+static const GpioPin gpio_manual_ext_gpio_1 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_1};
+static const GpioPin gpio_manual_ext_gpio_2 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_2};
+static const GpioPin gpio_manual_ext_gpio_3 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_3};
+static const GpioPin gpio_manual_ext_gpio_4 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_4};
+static const GpioPin gpio_manual_ext_gpio_5 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_5};
+const GpioPinRecord gpio_pins[] = {
+    {
+        .pin = &gpio_manual_ext_gpio_1,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_1),
+        .debug = false,
+    },
+    {
+        .pin = &gpio_manual_ext_gpio_2,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_2),
+        .debug = false,
+    },
+    {
+        .pin = &gpio_manual_ext_gpio_3,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_3),
+        .debug = false,
+    },
+    {
+        .pin = &gpio_manual_ext_gpio_4,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_4),
+        .debug = false,
+    },
+    {
+        .pin = &gpio_manual_ext_gpio_5,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_5),
+        .debug = false,
+    },
+};
+const size_t gpio_pins_count = sizeof(gpio_pins) / sizeof(gpio_pins[0]);
+#elif defined(BOARD_UART0_SINK_TX) && defined(BOARD_UART0_SINK_RX)
+static const GpioPin gpio_manual_uart0_sink_tx = {
+    .port = NULL,
+    .pin = BOARD_UART0_SINK_TX,
+};
+static const GpioPin gpio_manual_uart0_sink_rx = {
+    .port = NULL,
+    .pin = BOARD_UART0_SINK_RX,
+};
+const GpioPinRecord gpio_pins[] = {
+    {
+        .pin = &gpio_manual_uart0_sink_tx,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_UART0_SINK_TX),
+        .debug = false,
+    },
+    {
+        .pin = &gpio_manual_uart0_sink_rx,
+        .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_UART0_SINK_RX),
+        .debug = false,
+    },
+};
+const size_t gpio_pins_count = sizeof(gpio_pins) / sizeof(gpio_pins[0]);
+#else
+const GpioPinRecord gpio_pins[] = {{0}};
+const size_t gpio_pins_count = 0;
+#endif
+#undef FURI_HAL_STRINGIFY
+#undef FURI_HAL_STRINGIFY_INNER
+
 /* Hardware Button Pins */
 const GpioPin gpio_button_boot  = {.port = NULL, .pin = BOARD_PIN_BUTTON_BOOT};
 const GpioPin gpio_battery_sense = {.port = NULL, .pin = BOARD_PIN_BATTERY_ADC};
@@ -22,6 +89,8 @@ const GpioPin gpio_lcd_rst = {.port = NULL, .pin = BOARD_PIN_LCD_RST};
 const GpioPin gpio_lcd_bl  = {.port = NULL, .pin = BOARD_PIN_LCD_BL};
 
 /* SD Card Pins */
+const GpioPin gpio_sdcard_mosi = {.port = NULL, .pin = BOARD_PIN_LCD_MOSI};
+const GpioPin gpio_sdcard_sck  = {.port = NULL, .pin = BOARD_PIN_LCD_SCLK};
 const GpioPin gpio_sdcard_cs   = {.port = NULL, .pin = BOARD_PIN_SD_CS};
 const GpioPin gpio_sdcard_miso = {.port = NULL, .pin = BOARD_PIN_SD_MISO};
 
@@ -47,5 +116,9 @@ const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = BOARD_PIN_NRF24_CSN};
 #else
 const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = UINT16_MAX};
 #endif
-const GpioPin gpio_ibutton  = {.port = NULL, .pin = UINT16_MAX};
-const GpioPin gpio_speaker  = {.port = NULL, .pin = UINT16_MAX};
+const GpioPin gpio_ibutton = {.port = NULL, .pin = UINT16_MAX};
+#ifdef BOARD_PIN_BUZZER
+const GpioPin gpio_speaker = {.port = NULL, .pin = BOARD_PIN_BUZZER};
+#else
+const GpioPin gpio_speaker = {.port = NULL, .pin = UINT16_MAX};
+#endif

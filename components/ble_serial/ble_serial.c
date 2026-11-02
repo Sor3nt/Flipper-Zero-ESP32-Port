@@ -17,6 +17,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_bt.h>
 #include <esp_bt_defs.h>
@@ -114,6 +115,8 @@ static esp_ble_adv_params_t serial_adv_params = {
 
 struct BleSerial {
     SemaphoreHandle_t mutex;
+    SemaphoreHandle_t callbacks_drained;
+    uint32_t callback_refs;
     BleSerialConfig config;
     bool connected;
     uint16_t conn_id;
@@ -143,6 +146,10 @@ static struct {
     bool rand_addr_pending;
     bool rand_addr_enabled;
     bool app_registered;
+    bool registration_pending;
+    bool unregister_complete;
+    bool unregister_pending;
+    esp_gatt_if_t unregister_gatts_if;
     bool service_started;
     BleSerial* active;
 } serial_state = {0};
@@ -160,6 +167,59 @@ static void serial_lock_global(void) {
 }
 static void serial_unlock_global(void) {
     xSemaphoreGive(serial_state.mutex);
+}
+
+static BleSerial* serial_callback_acquire(void) {
+    serial_lock_global();
+    BleSerial* serial = serial_state.active;
+    if(serial) {
+        serial->callback_refs++;
+    }
+    serial_unlock_global();
+    return serial;
+}
+
+static void serial_callback_release(BleSerial* serial) {
+    if(!serial) return;
+
+    serial_lock_global();
+    if(serial->callback_refs == 0) {
+        serial_unlock_global();
+        ESP_LOGE(TAG, "Callback reference underflow");
+        return;
+    }
+    serial->callback_refs--;
+    bool callbacks_drained = serial->callback_refs == 0;
+    SemaphoreHandle_t callbacks_drained_sem = serial->callbacks_drained;
+    if(callbacks_drained && callbacks_drained_sem) {
+        xSemaphoreGive(callbacks_drained_sem);
+    }
+    serial_unlock_global();
+}
+
+static bool serial_detach_and_wait(BleSerial* serial) {
+    serial_lock_global();
+    if(serial_state.active == serial) {
+        serial_state.active = NULL;
+    }
+    serial_state.advertising_requested = false;
+    if(serial_state.advertising) {
+        esp_ble_gap_stop_advertising();
+        serial_state.advertising = false;
+    }
+    uint32_t callback_refs = serial->callback_refs;
+    serial_unlock_global();
+
+    while(callback_refs > 0) {
+        if(xSemaphoreTake(serial->callbacks_drained, portMAX_DELAY) != pdTRUE) {
+            ESP_LOGE(TAG, "Failed waiting for serial callbacks to drain");
+            return false;
+        }
+        serial_lock_global();
+        callback_refs = serial->callback_refs;
+        serial_unlock_global();
+    }
+    return true;
 }
 
 static void serial_update_connection(BleSerial* s, bool connected) {
@@ -459,6 +519,13 @@ static bool bas_service_started = false;
 /* ---- GAP event handler ---- */
 
 static void serial_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
+    BleSerial* serial = serial_callback_acquire();
+    if(!param) {
+        ESP_LOGE(TAG, "gap: event=%d has NULL parameters", event);
+        serial_callback_release(serial);
+        return;
+    }
+
     switch(event) {
     case ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT:
         ESP_LOGI(TAG, "gap: adv data set complete");
@@ -530,7 +597,7 @@ static void serial_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_c
          * The initial notifications sent at connection time are typically lost because
          * the client hasn't subscribed to CCCDs yet. */
         if(param->ble_security.auth_cmpl.success) {
-            BleSerial* s = serial_state.active;
+            BleSerial* s = serial;
             if(s && s->connected) {
                 /* Re-send Flow Control if callback was set */
                 if(s->handle_table[IDX_FLOW_VAL] && s->event_callback) {
@@ -569,6 +636,8 @@ static void serial_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_c
     default:
         break;
     }
+
+    serial_callback_release(serial);
 }
 
 /* ---- GATTS event handler ---- */
@@ -578,15 +647,78 @@ static void serial_gatts_event_handler(
     esp_gatt_if_t gatts_if,
     esp_ble_gatts_cb_param_t* param) {
 
-    BleSerial* serial = serial_state.active;
+    BleSerial* serial = serial_callback_acquire();
+
+    /* App unregister is asynchronous. Record it even after the instance has
+     * been detached, so profile switching can wait before replacing this
+     * global GATTS callback with another profile's handler. */
+    if(event == ESP_GATTS_UNREG_EVT) {
+        serial_lock_global();
+        if(serial_state.unregister_pending && serial_state.unregister_gatts_if == gatts_if) {
+            serial_state.unregister_complete = true;
+            serial_state.unregister_pending = false;
+            serial_state.unregister_gatts_if = ESP_GATT_IF_NONE;
+        }
+        serial_unlock_global();
+    }
+
+    if(!param) {
+        ESP_LOGE(TAG, "gatts: event=%d has NULL parameters", event);
+        goto callback_done;
+    }
+
+    if(event == ESP_GATTS_REG_EVT) {
+        if(param->reg.app_id != BLE_SERIAL_APP_ID) {
+            ESP_LOGI(
+                TAG,
+                "gatts: ignoring foreign REG app_id=0x%04x if=%u",
+                (unsigned)param->reg.app_id,
+                (unsigned)gatts_if);
+            goto callback_done;
+        }
+        serial_lock_global();
+        serial_state.registration_pending = false;
+        serial_unlock_global();
+    } else if(!serial || (gatts_if != serial->gatts_if)) {
+        if((event == ESP_GATTS_STOP_EVT) || (event == ESP_GATTS_DELETE_EVT) ||
+           (event == ESP_GATTS_UNREG_EVT) || (event == ESP_GATTS_CREAT_ATTR_TAB_EVT) ||
+           (event == ESP_GATTS_START_EVT) || (event == ESP_GATTS_CREATE_EVT) ||
+           (event == ESP_GATTS_ADD_CHAR_EVT)) {
+            ESP_LOGI(
+                TAG,
+                "gatts: ignoring foreign/stale event=%d if=%u serial_if=%u",
+                event,
+                (unsigned)gatts_if,
+                serial ? (unsigned)serial->gatts_if : (unsigned)ESP_GATT_IF_NONE);
+        }
+        goto callback_done;
+    }
 
     switch(event) {
     case ESP_GATTS_REG_EVT:
         if(param->reg.status == ESP_GATT_OK) {
-            ESP_LOGI(TAG, "gatts: app registered, gatts_if=%d", gatts_if);
-            if(serial) {
-                serial->gatts_if = gatts_if;
+            if(!serial) {
+                ESP_LOGW(
+                    TAG,
+                    "gatts: late serial REG if=%u after teardown; requesting unregister",
+                    (unsigned)gatts_if);
+                serial_lock_global();
+                serial_state.unregister_gatts_if = gatts_if;
+                serial_state.unregister_pending = true;
+                serial_state.unregister_complete = false;
+                serial_unlock_global();
+                esp_err_t err = esp_ble_gatts_app_unregister(gatts_if);
+                if(err != ESP_OK) {
+                    serial_lock_global();
+                    serial_state.unregister_pending = false;
+                    serial_state.unregister_gatts_if = ESP_GATT_IF_NONE;
+                    serial_unlock_global();
+                    ESP_LOGE(TAG, "late serial unregister failed: %s", esp_err_to_name(err));
+                }
+                break;
             }
+            ESP_LOGI(TAG, "gatts: app registered, gatts_if=%d", gatts_if);
+            serial->gatts_if = gatts_if;
             serial_lock_global();
             serial_state.app_registered = true;
             serial_unlock_global();
@@ -846,6 +978,9 @@ static void serial_gatts_event_handler(
         ESP_LOGD(TAG, "gatts: unhandled event %d", event);
         break;
     }
+
+callback_done:
+    serial_callback_release(serial);
 }
 
 /* ---- BLE stack init (shared with ble_hid, idempotent) ---- */
@@ -1015,14 +1150,23 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
         free(serial);
         return NULL;
     }
+    serial->callbacks_drained = xSemaphoreCreateBinary();
+    if(!serial->callbacks_drained) {
+        vSemaphoreDelete(serial->mutex);
+        free(serial);
+        return NULL;
+    }
+    serial->gatts_if = ESP_GATT_IF_NONE;
 
     memcpy(&serial->config, config, sizeof(serial->config));
     ESP_LOGI(TAG, "alloc name=%s bonding=%d pairing=%d",
         serial->config.device_name, serial->config.bonding, serial->config.pairing);
 
     serial_lock_global();
-    if(serial_state.active) {
+    if(serial_state.active || serial_state.registration_pending || serial_state.unregister_pending) {
+        ESP_LOGE(TAG, "alloc rejected: previous GATTS lifecycle still pending");
         serial_unlock_global();
+        vSemaphoreDelete(serial->callbacks_drained);
         vSemaphoreDelete(serial->mutex);
         free(serial);
         return NULL;
@@ -1032,6 +1176,7 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     serial_state.advertising_requested = false;
     serial_state.adv_data_pending = false;
     serial_state.app_registered = false;
+    serial_state.unregister_complete = false;
     serial_state.service_started = false;
     dis_service_started = false;
     bas_service_started = false;
@@ -1086,17 +1231,25 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
 
     /* Create semaphore to wait for GATT service to be fully started */
     serial_state.ready_sem = xSemaphoreCreateBinary();
+    if(!serial_state.ready_sem) {
+        ESP_LOGE(TAG, "Failed to allocate GATT startup semaphore");
+        goto error;
+    }
 
     ESP_LOGI(TAG, "alloc: registering GATTS app (async)");
     /* Register GATTS app — triggers async chain:
      *   ESP_GATTS_REG_EVT → create attr table
      *   ESP_GATTS_CREAT_ATTR_TAB_EVT → start service
      *   ESP_GATTS_START_EVT → ready_sem signaled */
+    serial_lock_global();
+    serial_state.registration_pending = true;
+    serial_unlock_global();
     err = esp_ble_gatts_app_register(BLE_SERIAL_APP_ID);
     if(err != ESP_OK) {
+        serial_lock_global();
+        serial_state.registration_pending = false;
+        serial_unlock_global();
         ESP_LOGE(TAG, "GATTS app register failed: %s", esp_err_to_name(err));
-        vSemaphoreDelete(serial_state.ready_sem);
-        serial_state.ready_sem = NULL;
         goto error;
     }
 
@@ -1108,8 +1261,6 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     if(xSemaphoreTake(serial_state.ready_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
         ESP_LOGE(TAG, "Timeout waiting for GATT service start! app_reg=%d svc_started=%d",
             serial_state.app_registered, serial_state.service_started);
-        vSemaphoreDelete(serial_state.ready_sem);
-        serial_state.ready_sem = NULL;
         goto error;
     }
 
@@ -1121,39 +1272,139 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     return serial;
 
 error:
-    serial_lock_global();
-    if(serial_state.active == serial) serial_state.active = NULL;
-    serial_unlock_global();
+    if(!serial_detach_and_wait(serial)) {
+        return NULL;
+    }
+    if(serial_state.app_registered && (serial->gatts_if != ESP_GATT_IF_NONE)) {
+        ESP_LOGW(
+            TAG,
+            "alloc failed after app registration; requesting unregister if=%u",
+            (unsigned)serial->gatts_if);
+        serial_lock_global();
+        serial_state.unregister_gatts_if = serial->gatts_if;
+        serial_state.unregister_pending = true;
+        serial_state.unregister_complete = false;
+        serial_unlock_global();
+        esp_err_t unregister_err = esp_ble_gatts_app_unregister(serial->gatts_if);
+        if(unregister_err == ESP_OK) {
+            serial_state.app_registered = false;
+            TickType_t wait_started = xTaskGetTickCount();
+            while((xTaskGetTickCount() - wait_started) < pdMS_TO_TICKS(3000)) {
+                serial_lock_global();
+                bool unregister_complete = serial_state.unregister_complete;
+                serial_unlock_global();
+                if(unregister_complete) break;
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            serial_lock_global();
+            bool unregister_complete = serial_state.unregister_complete;
+            serial_unlock_global();
+            if(!unregister_complete) {
+                ESP_LOGE(
+                    TAG,
+                    "Timed out waiting for GATTS unregister after failed startup if=%u",
+                    (unsigned)serial->gatts_if);
+            }
+        } else {
+            serial_lock_global();
+            serial_state.unregister_pending = false;
+            serial_state.unregister_gatts_if = ESP_GATT_IF_NONE;
+            serial_unlock_global();
+            ESP_LOGE(
+                TAG,
+                "GATTS unregister after alloc failure failed: %s",
+                esp_err_to_name(unregister_err));
+        }
+    }
+    if(serial_state.ready_sem) {
+        vSemaphoreDelete(serial_state.ready_sem);
+        serial_state.ready_sem = NULL;
+    }
+    vSemaphoreDelete(serial->callbacks_drained);
     if(serial->mutex) vSemaphoreDelete(serial->mutex);
     free(serial);
     return NULL;
 }
 
-void ble_serial_free(BleSerial* serial) {
-    if(!serial) return;
+bool ble_serial_free(BleSerial* serial) {
+    if(!serial) return true;
 
-    serial_lock_global();
-    if(serial_state.advertising) {
-        esp_ble_gap_stop_advertising();
-        serial_state.advertising = false;
+    if(!serial_detach_and_wait(serial)) {
+        return false;
     }
-    serial_state.advertising_requested = false;
-    if(serial_state.active == serial) serial_state.active = NULL;
-    serial_unlock_global();
 
+    bool teardown_clean = true;
     if(serial_state.app_registered) {
-        esp_ble_gatts_app_unregister(serial->gatts_if);
-        serial_state.app_registered = false;
+        ESP_LOGI(
+            TAG,
+            "free: requesting GATTS app unregister if=%u",
+            (unsigned)serial->gatts_if);
+        serial_lock_global();
+        serial_state.unregister_gatts_if = serial->gatts_if;
+        serial_state.unregister_pending = true;
+        serial_state.unregister_complete = false;
+        serial_unlock_global();
+        esp_err_t err = esp_ble_gatts_app_unregister(serial->gatts_if);
+        if(err == ESP_OK) {
+            serial_state.app_registered = false;
+            TickType_t wait_started = xTaskGetTickCount();
+            while((xTaskGetTickCount() - wait_started) < pdMS_TO_TICKS(3000)) {
+                serial_lock_global();
+                bool unregister_complete = serial_state.unregister_complete;
+                serial_unlock_global();
+                if(unregister_complete) break;
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            serial_lock_global();
+            bool unregister_complete = serial_state.unregister_complete;
+            serial_unlock_global();
+            if(!unregister_complete) {
+                ESP_LOGE(TAG, "Timed out waiting for GATTS app unregister if=%u", (unsigned)serial->gatts_if);
+                teardown_clean = false;
+            }
+        } else {
+            serial_lock_global();
+            serial_state.unregister_pending = false;
+            serial_state.unregister_gatts_if = ESP_GATT_IF_NONE;
+            serial_unlock_global();
+            ESP_LOGE(TAG, "free: GATTS app unregister failed: %s", esp_err_to_name(err));
+            teardown_clean = false;
+        }
     }
 
+    vSemaphoreDelete(serial->callbacks_drained);
     if(serial->mutex) vSemaphoreDelete(serial->mutex);
     free(serial);
+    return teardown_clean;
+}
+
+bool ble_serial_is_teardown_pending(void) {
+    bool pending = false;
+    if(!serial_state.mutex) return false;
+    serial_lock_global();
+    pending = serial_state.registration_pending || serial_state.unregister_pending;
+    serial_unlock_global();
+    return pending;
 }
 
 void ble_serial_reset_initialized(void) {
     if(!serial_state.mutex) return; // BLE-Stack nicht initialisiert (BT aus)
     serial_lock_global();
     serial_state.initialized = false;
+    /* Called after full Bluedroid/controller deinit, which invalidates old
+     * registrations even when their asynchronous UNREG callback never arrived. */
+    serial_state.active = NULL;
+    serial_state.app_registered = false;
+    serial_state.registration_pending = false;
+    serial_state.unregister_pending = false;
+    serial_state.unregister_complete = false;
+    serial_state.unregister_gatts_if = ESP_GATT_IF_NONE;
+    serial_state.service_started = false;
+    serial_state.advertising = false;
+    serial_state.advertising_requested = false;
+    serial_state.adv_data_pending = false;
+    serial_state.rand_addr_pending = false;
+    serial_state.rand_addr_enabled = false;
     serial_unlock_global();
 }
 

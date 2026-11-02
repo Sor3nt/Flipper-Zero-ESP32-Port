@@ -3,6 +3,7 @@
 #include <furi_hal.h>
 #include <gui/elements.h>
 #include <assets_icons.h>
+#include <boards/board.h>
 
 struct GpioUsbUart {
     View* view;
@@ -14,76 +15,85 @@ typedef struct {
     uint32_t baudrate;
     uint32_t tx_cnt;
     uint32_t rx_cnt;
-    uint8_t vcp_port;
-    uint8_t tx_pin;
-    uint8_t rx_pin;
+    int tx_pin;
+    int rx_pin;
+    uint8_t usb_channel;
     bool tx_active;
     bool rx_active;
+    UsbUartStatus status;
+    bool usb_connected;
 } GpioUsbUartModel;
 
 static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
     GpioUsbUartModel* model = _model;
     char temp_str[18];
-    elements_button_left(canvas, "Config");
-    canvas_draw_line(canvas, 2, 10, 125, 10);
-    canvas_draw_line(canvas, 44, 52, 123, 52);
 
     canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str(canvas, 2, 9, "USB Serial");
-    canvas_draw_str(canvas, 3, 25, "TX:");
-    canvas_draw_str(canvas, 3, 42, "RX:");
+    canvas_draw_str(canvas, 2, 9, "USB-UART");
+    canvas_draw_line(canvas, 2, 12, 125, 12);
 
     canvas_set_font(canvas, FontSecondary);
-    snprintf(temp_str, 18, "COM PORT:%u", model->vcp_port);
-    canvas_draw_str_aligned(canvas, 126, 8, AlignRight, AlignBottom, temp_str);
-    snprintf(temp_str, 18, "Pin %u", model->tx_pin);
-    canvas_draw_str(canvas, 22, 25, temp_str);
-    snprintf(temp_str, 18, "Pin %u", model->rx_pin);
-    canvas_draw_str(canvas, 22, 42, temp_str);
+    if(model->status != UsbUartStatusActive) {
+        canvas_draw_str(canvas, 2, 27, "Unavailable:");
+        canvas_draw_str(canvas, 2, 40, usb_uart_get_status_text(model->status));
+        canvas_draw_str(canvas, 2, 60, "Back to exit");
+        return;
+    }
 
-    if(model->baudrate == 0)
-        snprintf(temp_str, 18, "Baud: ????");
-    else
-        snprintf(temp_str, 18, "Baud: %lu", model->baudrate);
-    canvas_draw_str(canvas, 45, 62, temp_str);
+    snprintf(
+        temp_str,
+        sizeof(temp_str),
+        "CDC%u %s",
+        (unsigned)model->usb_channel,
+        model->usb_connected ? "OPEN" : "WAIT");
+    canvas_draw_str_aligned(canvas, 126, 9, AlignRight, AlignBottom, temp_str);
+#if defined(BOARD_HAS_USB_UART_BRIDGE) && BOARD_HAS_USB_UART_BRIDGE
+    snprintf(temp_str, sizeof(temp_str), "TX GPIO %d", model->tx_pin);
+    canvas_draw_str(canvas, 3, 27, temp_str);
+    snprintf(temp_str, sizeof(temp_str), "RX GPIO %d", model->rx_pin);
+    canvas_draw_str(canvas, 3, 41, temp_str);
+#else
+    canvas_draw_str(canvas, 3, 27, "TX --");
+    canvas_draw_str(canvas, 3, 41, "RX --");
+#endif
 
     if(model->tx_cnt < 100000000) {
-        canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 24, AlignRight, AlignBottom, "B.");
-        canvas_set_font(canvas, FontKeyboard);
-        snprintf(temp_str, 18, "%lu", model->tx_cnt);
-        canvas_draw_str_aligned(canvas, 116, 24, AlignRight, AlignBottom, temp_str);
+        if(model->tx_cnt < 1000) {
+            snprintf(temp_str, sizeof(temp_str), "%lu B", (unsigned long)model->tx_cnt);
+        } else {
+            snprintf(temp_str, sizeof(temp_str), "%lu KB", (unsigned long)(model->tx_cnt / 1000));
+        }
     } else {
-        canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 24, AlignRight, AlignBottom, "KiB.");
-        canvas_set_font(canvas, FontKeyboard);
-        snprintf(temp_str, 18, "%lu", model->tx_cnt / 1024);
-        canvas_draw_str_aligned(canvas, 111, 24, AlignRight, AlignBottom, temp_str);
+        snprintf(temp_str, sizeof(temp_str), "%lu MB", (unsigned long)(model->tx_cnt / 1000000));
     }
-
+    canvas_draw_str_aligned(canvas, 126, 27, AlignRight, AlignBottom, temp_str);
     if(model->rx_cnt < 100000000) {
-        canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 41, AlignRight, AlignBottom, "B.");
-        canvas_set_font(canvas, FontKeyboard);
-        snprintf(temp_str, 18, "%lu", model->rx_cnt);
-        canvas_draw_str_aligned(canvas, 116, 41, AlignRight, AlignBottom, temp_str);
+        if(model->rx_cnt < 1000) {
+            snprintf(temp_str, sizeof(temp_str), "%lu B", (unsigned long)model->rx_cnt);
+        } else {
+            snprintf(temp_str, sizeof(temp_str), "%lu KB", (unsigned long)(model->rx_cnt / 1000));
+        }
     } else {
-        canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 41, AlignRight, AlignBottom, "KiB.");
-        canvas_set_font(canvas, FontKeyboard);
-        snprintf(temp_str, 18, "%lu", model->rx_cnt / 1024);
-        canvas_draw_str_aligned(canvas, 111, 41, AlignRight, AlignBottom, temp_str);
+        snprintf(temp_str, sizeof(temp_str), "%lu MB", (unsigned long)(model->rx_cnt / 1000000));
     }
-
+    canvas_draw_str_aligned(canvas, 126, 41, AlignRight, AlignBottom, temp_str);
     if(model->tx_active)
-        canvas_draw_icon(canvas, 48, 14, &I_ArrowUpFilled_14x15);
+        canvas_draw_icon(canvas, 56, 14, &I_ArrowUpFilled_14x15);
     else
-        canvas_draw_icon(canvas, 48, 14, &I_ArrowUpEmpty_14x15);
+        canvas_draw_icon(canvas, 56, 14, &I_ArrowUpEmpty_14x15);
 
     if(model->rx_active)
-        canvas_draw_icon_ex(canvas, 48, 34, &I_ArrowUpFilled_14x15, IconRotation180);
+        canvas_draw_icon_ex(canvas, 56, 28, &I_ArrowUpFilled_14x15, IconRotation180);
     else
-        canvas_draw_icon_ex(canvas, 48, 34, &I_ArrowUpEmpty_14x15, IconRotation180);
+        canvas_draw_icon_ex(canvas, 56, 28, &I_ArrowUpEmpty_14x15, IconRotation180);
+
+    canvas_draw_line(canvas, 2, 47, 125, 47);
+    elements_button_left(canvas, "Config");
+    if(model->baudrate == 0)
+        snprintf(temp_str, sizeof(temp_str), "Baud: Host");
+    else
+        snprintf(temp_str, sizeof(temp_str), "Baud: %lu", (unsigned long)model->baudrate);
+    canvas_draw_str_aligned(canvas, 126, 62, AlignRight, AlignBottom, temp_str);
 }
 
 static bool gpio_usb_uart_input_callback(InputEvent* event, void* context) {
@@ -103,9 +113,11 @@ static bool gpio_usb_uart_input_callback(InputEvent* event, void* context) {
 }
 
 GpioUsbUart* gpio_usb_uart_alloc(void) {
-    GpioUsbUart* usb_uart = malloc(sizeof(GpioUsbUart));
+    GpioUsbUart* usb_uart = calloc(1, sizeof(GpioUsbUart));
+    furi_check(usb_uart);
 
     usb_uart->view = view_alloc();
+    furi_check(usb_uart->view);
     view_allocate_model(usb_uart->view, ViewModelTypeLocking, sizeof(GpioUsbUartModel));
     view_set_context(usb_uart->view, usb_uart);
     view_set_draw_callback(usb_uart->view, gpio_usb_uart_draw_callback);
@@ -151,9 +163,17 @@ void gpio_usb_uart_update_state(GpioUsbUart* instance, UsbUartConfig* cfg, UsbUa
         GpioUsbUartModel * model,
         {
             model->baudrate = st->baudrate_cur;
-            model->vcp_port = cfg->vcp_ch;
-            model->tx_pin = (cfg->uart_ch == 0) ? (13) : (15);
-            model->rx_pin = (cfg->uart_ch == 0) ? (14) : (16);
+            model->status = st->status;
+            model->usb_connected = st->usb_connected;
+#if defined(BOARD_HAS_USB_UART_BRIDGE) && BOARD_HAS_USB_UART_BRIDGE
+            model->usb_channel = cfg->usb_channel;
+            model->tx_pin = usb_uart_get_uart_tx_pin(cfg->uart_pin_pair);
+            model->rx_pin = usb_uart_get_uart_rx_pin(cfg->uart_pin_pair);
+#else
+            model->usb_channel = cfg->usb_channel;
+            model->tx_pin = 0;
+            model->rx_pin = 0;
+#endif
             model->tx_active = (model->tx_cnt != st->tx_cnt);
             model->rx_active = (model->rx_cnt != st->rx_cnt);
             model->tx_cnt = st->tx_cnt;

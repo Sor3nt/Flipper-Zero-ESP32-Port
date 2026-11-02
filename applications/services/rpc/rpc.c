@@ -1,3 +1,29 @@
+#if defined(ESP_PLATFORM)
+
+#include "rpc_i.h"
+
+#include <toolbox/cli/cli_command.h>
+#include <cli/cli_main_commands.h>
+
+void rpc_on_system_start(void* p) {
+    UNUSED(p);
+
+    rpc_init();
+
+    Rpc* rpc = furi_record_open(RECORD_RPC);
+    CliRegistry* registry = furi_record_open(RECORD_CLI);
+    cli_registry_add_command(
+        registry,
+        "start_rpc_session",
+        CliCommandFlagParallelSafe,
+        rpc_cli_command_start_session,
+        rpc);
+    furi_record_close(RECORD_CLI);
+    furi_record_close(RECORD_RPC);
+}
+
+#else
+
 #include "rpc_i.h"
 
 #include <pb.h>
@@ -504,3 +530,5 @@ void rpc_send_and_release_empty(RpcSession* session, uint32_t command_id, PB_Com
     rpc_send_and_release(session, &message);
     pb_release(&PB_Main_msg, &message);
 }
+
+#endif

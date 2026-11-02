@@ -22,8 +22,8 @@ static bool subghz_device_cc1101_ext_interconnect_start_async_tx(void* callback,
         (SubGhzDeviceCC1101ExtCallback)callback, context);
 }
 
-static void subghz_device_cc1101_ext_interconnect_start_async_rx(void* callback, void* context) {
-    subghz_device_cc1101_ext_start_async_rx(
+static bool subghz_device_cc1101_ext_interconnect_start_async_rx(void* callback, void* context) {
+    return subghz_device_cc1101_ext_start_async_rx(
         (SubGhzDeviceCC1101ExtCaptureCallback)callback, context);
 }
 

@@ -12,6 +12,8 @@
 
 static void subghz_txrx_radio_device_power_on(SubGhzTxRx* instance) {
     UNUSED(instance);
+    /* A header-powered external module needs no 5 V (OTG) rail. */
+    if(furi_hal_subghz_ext_supported()) return;
     uint8_t attempts = 0;
     while(!furi_hal_power_is_otg_enabled() && attempts++ < 5) {
         furi_hal_power_enable_otg();
@@ -22,6 +24,8 @@ static void subghz_txrx_radio_device_power_on(SubGhzTxRx* instance) {
 
 static void subghz_txrx_radio_device_power_off(SubGhzTxRx* instance) {
     UNUSED(instance);
+    /* Never touch the OTG rail here: something else (GPIO 5 V, IR) may own it. */
+    if(furi_hal_subghz_ext_supported()) return;
     if(furi_hal_power_is_otg_enabled()) furi_hal_power_disable_otg();
 }
 
@@ -190,9 +194,9 @@ static uint32_t subghz_txrx_rx(SubGhzTxRx* instance, uint32_t frequency) {
     subghz_devices_flush_rx(instance->radio_device);
     subghz_txrx_speaker_on(instance);
 
+    subghz_worker_start(instance->worker);
     subghz_devices_start_async_rx(
         instance->radio_device, subghz_worker_rx_callback, instance->worker);
-    subghz_worker_start(instance->worker);
     instance->txrx_state = SubGhzTxRxStateRx;
     return value;
 }
@@ -209,9 +213,9 @@ static void subghz_txrx_rx_end(SubGhzTxRx* instance) {
     furi_assert(instance);
     furi_assert(instance->txrx_state == SubGhzTxRxStateRx);
 
+    subghz_devices_stop_async_rx(instance->radio_device);
     if(subghz_worker_is_running(instance->worker)) {
         subghz_worker_stop(instance->worker);
-        subghz_devices_stop_async_rx(instance->radio_device);
     }
     subghz_devices_idle(instance->radio_device);
     subghz_txrx_speaker_off(instance);
@@ -652,17 +656,22 @@ SubGhzRadioDeviceType
     if(radio_device_type == SubGhzRadioDeviceTypeExternalCC1101 &&
        subghz_txrx_radio_device_is_external_connected(instance, SUBGHZ_DEVICE_CC1101_EXT_NAME)) {
         subghz_txrx_radio_device_power_on(instance);
-        instance->radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_EXT_NAME);
-        subghz_devices_begin(instance->radio_device);
-        instance->radio_device_type = SubGhzRadioDeviceTypeExternalCC1101;
-    } else {
-        subghz_txrx_radio_device_power_off(instance);
-        if(instance->radio_device_type != SubGhzRadioDeviceTypeInternal) {
-            subghz_devices_end(instance->radio_device);
+        const SubGhzDevice* external = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_EXT_NAME);
+        /* begin() can still fail after the probe (a pad got taken in between). */
+        if(external && subghz_devices_begin(external)) {
+            instance->radio_device = external;
+            instance->radio_device_type = SubGhzRadioDeviceTypeExternalCC1101;
+            return instance->radio_device_type;
         }
-        instance->radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
-        instance->radio_device_type = SubGhzRadioDeviceTypeInternal;
+        FURI_LOG_W(TAG, "External radio module did not start, using the internal one");
     }
+
+    subghz_txrx_radio_device_power_off(instance);
+    if(instance->radio_device_type != SubGhzRadioDeviceTypeInternal) {
+        subghz_devices_end(instance->radio_device);
+    }
+    instance->radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
+    instance->radio_device_type = SubGhzRadioDeviceTypeInternal;
 
     return instance->radio_device_type;
 }

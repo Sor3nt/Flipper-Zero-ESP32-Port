@@ -25,6 +25,8 @@ void bad_usb_view_set_state(BadUsb* bad_usb, BadUsbState* st);
 
 void bad_usb_view_set_interface(BadUsb* bad_usb, BadUsbHidInterface interface);
 
+void bad_usb_view_set_stopping(BadUsb* bad_usb, bool stopping);
+
 void bad_usb_view_set_usb_supported(BadUsb* bad_usb, bool supported);
 
 bool bad_usb_view_is_idle_state(BadUsb* bad_usb);

@@ -91,3 +91,7 @@ void bubble_animation_unfreeze(BubbleAnimationView* view);
 /** Stop (paused=true) or resume the frame timer, e.g. while the device is idle
  * with the screen off. Does not change the animation state. */
 void bubble_animation_set_paused(BubbleAnimationView* view, bool paused);
+
+/** Hold the current frame until the next bubble_animation_view_set_animation(),
+ * which restarts the frame timer. Use while the next animation loads from SD. */
+void bubble_animation_hold_frame(BubbleAnimationView* view);

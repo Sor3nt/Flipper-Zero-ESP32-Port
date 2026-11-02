@@ -7,7 +7,6 @@
 #include "../desktop_i.h"
 #include "../views/desktop_view_lock_menu.h"
 #include "../helpers/qflipper_bridge.h"
-#include "furi_hal_usb_tinyusb_composite.h"
 #include "desktop_scene.h"
 
 #include "sdkconfig.h"
@@ -30,15 +29,6 @@ static bool desktop_lock_menu_bt_enabled(void) {
     bt_get_settings(bt, &settings);
     furi_record_close(RECORD_BT);
     return settings.enabled;
-}
-
-static void desktop_lock_menu_set_bt_enabled(bool enabled) {
-    Bt* bt = furi_record_open(RECORD_BT);
-    BtSettings settings;
-    bt_get_settings(bt, &settings);
-    settings.enabled = enabled;
-    bt_set_settings(bt, &settings);
-    furi_record_close(RECORD_BT);
 }
 
 static bool desktop_lock_menu_wifi_enabled(void) {
@@ -75,21 +65,17 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
         case DesktopLockMenuEventQflipperToggle:
-            if(qflipper_bridge_is_active()) {
-                qflipper_bridge_stop();
-                /* Bridge detached — now fully tear the shared composite down so
-                 * the internal USB PHY routes back to USB-Serial-JTAG. esptool
-                 * can flash again immediately, no reboot / BOOT+RESET needed. */
-                furi_hal_usb_composite_uninstall();
-            } else {
-                qflipper_bridge_start();
+            if(!desktop_system_task_is_pending(desktop)) {
+                desktop_system_task_start_qflipper(desktop, !qflipper_bridge_is_active());
             }
-            /* Stay in the menu; refresh so the label flips. */
-            desktop_scene_lock_menu_refresh(desktop);
             consumed = true;
             break;
 
         case DesktopLockMenuEventUsbStorage:
+            if(desktop_system_task_is_pending(desktop)) {
+                consumed = true;
+                break;
+            }
             /* The USB-Storage scene stops the qFlipper bridge itself (shared
              * composite / mutual exclusion). */
             scene_manager_next_scene(desktop->scene_manager, DesktopSceneUsbStorage);
@@ -97,37 +83,28 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case DesktopLockMenuEventBluetoothToggle: {
-            bool want_on = !desktop_lock_menu_bt_enabled();
-            if(want_on) {
-                /* Gegenseitiger Ausschluss (geteiltes Radio/RAM): erst WiFi global
-                 * aus (gibt Radio + RAM frei), dann den BLE-Stack real hochfahren.
-                 * bt_start_stack ist idempotent — bei bereits laufendem Stack ein
-                 * No-op; nach vorheriger WiFi-Nutzung war er abgebaut. */
-                Wifi* wifi = furi_record_open(RECORD_WIFI);
-                if(wifi_is_enabled(wifi)) wifi_disable(wifi);
-                furi_record_close(RECORD_WIFI);
-                Bt* bt = furi_record_open(RECORD_BT);
-                bt_start_stack(bt);
-                furi_record_close(RECORD_BT);
+            if(desktop_system_task_is_pending(desktop)) {
+                consumed = true;
+                break;
             }
-            desktop_lock_menu_set_bt_enabled(want_on);
-            desktop_scene_lock_menu_refresh(desktop);
+            bool want_on = !desktop_lock_menu_bt_enabled();
+            desktop_system_task_toggle_bluetooth(desktop, want_on);
             consumed = true;
             break;
         }
 
         case DesktopLockMenuEventWifiToggle: {
+            if(desktop_system_task_is_pending(desktop)) {
+                consumed = true;
+                break;
+            }
             /* WiFi global toggeln. Enable schaltet BLE aus + persistiert, zieht das
              * Radio hoch und reconnectet zum zuletzt genutzten Netz (siehe
              * wifi_enable). Disable baut das Radio ab; BLE bleibt bewusst aus. */
             Wifi* wifi = furi_record_open(RECORD_WIFI);
-            if(wifi_is_enabled(wifi)) {
-                wifi_disable(wifi);
-            } else {
-                wifi_enable(wifi);
-            }
+            bool want_on = !wifi_is_enabled(wifi);
             furi_record_close(RECORD_WIFI);
-            desktop_scene_lock_menu_refresh(desktop);
+            desktop_system_task_toggle_wifi(desktop, want_on);
             consumed = true;
             break;
         }

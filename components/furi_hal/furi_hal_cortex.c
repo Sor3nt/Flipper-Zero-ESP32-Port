@@ -1,4 +1,5 @@
 #include "furi_hal_cortex.h"
+#include <esp_rom_sys.h>
 #include <esp_timer.h>
 #include <rom/ets_sys.h>
 
@@ -11,7 +12,9 @@ void furi_hal_cortex_delay_us(uint32_t microseconds) {
 }
 
 uint32_t furi_hal_cortex_instructions_per_microsecond(void) {
-    return 240; // ESP32 runs at 240MHz by default
+    /* Not a constant: this port scales the CPU between 80 and 160 MHz (DFS), and the
+     * old fixed 240 overstated it by 50-200%. The ROM keeps the live value (ticks per us). */
+    return esp_rom_get_cpu_ticks_per_us();
 }
 
 FuriHalCortexTimer furi_hal_cortex_timer_get(uint32_t timeout_us) {

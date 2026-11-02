@@ -70,6 +70,15 @@ typedef enum {
     SubGhzCustomEventTpmsEditTemperature,
     SubGhzCustomEventTpmsEditId,
     SubGhzCustomEventTpmsToggleBattery,
+
+    /* Radio Settings: the external-module probe/attach and its error dialog are
+     * deferred out of the VariableItemList change callbacks (which run inside the
+     * list's input dispatch) and handled from the scene's on_event instead. Doing
+     * the blocking SPI probe and opening a modal dialog from the change callback
+     * starved the GUI and wedged the view stack. */
+    SubGhzCustomEventSceneSettingExtModule,
+    SubGhzCustomEventSceneSettingExtCs,
+    SubGhzCustomEventSceneSettingExtG0,
 } SubGhzCustomEvent;
 
 typedef enum {

@@ -1,6 +1,8 @@
 #include "gpio_items.h"
 
+#include <furi.h>
 #include <furi_hal_resources.h>
+#include <stdlib.h>
 
 struct GPIOItems {
     GpioPinRecord* pins;
@@ -9,6 +11,7 @@ struct GPIOItems {
 
 GPIOItems* gpio_items_alloc(void) {
     GPIOItems* items = malloc(sizeof(GPIOItems));
+    furi_check(items);
 
     items->count = 0;
     for(size_t i = 0; i < gpio_pins_count; i++) {
@@ -18,6 +21,7 @@ GPIOItems* gpio_items_alloc(void) {
     }
 
     items->pins = malloc(sizeof(GpioPinRecord) * items->count);
+    furi_check(items->pins || items->count == 0);
     size_t index = 0;
     for(size_t i = 0; i < gpio_pins_count; i++) {
         if(!gpio_pins[i].debug) {
@@ -38,8 +42,15 @@ uint8_t gpio_items_get_count(GPIOItems* items) {
     return items->count;
 }
 
+/* A pin another subsystem has reserved (e.g. an attached external CC1101's CS)
+ * must not be driven from here: init is refused by the HAL, but a raw write is not. */
+static bool gpio_items_pin_is_reserved(GPIOItems* items, uint8_t index) {
+    return furi_hal_gpio_get_reservation(items->pins[index].pin) != NULL;
+}
+
 void gpio_items_configure_pin(GPIOItems* items, uint8_t index, GpioMode mode) {
     furi_assert(index < items->count);
+    if(gpio_items_pin_is_reserved(items, index)) return;
     furi_hal_gpio_write(items->pins[index].pin, false);
     furi_hal_gpio_init(items->pins[index].pin, mode, GpioPullNo, GpioSpeedVeryHigh);
 }
@@ -52,6 +63,7 @@ void gpio_items_configure_all_pins(GPIOItems* items, GpioMode mode) {
 
 void gpio_items_set_pin(GPIOItems* items, uint8_t index, bool level) {
     furi_assert(index < items->count);
+    if(gpio_items_pin_is_reserved(items, index)) return;
     furi_hal_gpio_write(items->pins[index].pin, level);
 }
 

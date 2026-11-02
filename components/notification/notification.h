@@ -89,6 +89,14 @@ typedef const NotificationMessage* NotificationSequence[];
 
 void notification_message(NotificationApp* app, const NotificationSequence* sequence);
 void notification_message_block(NotificationApp* app, const NotificationSequence* sequence);
+/** Queue a continuously playing tone; use frequency <= 0 or volume <= 0 to stop it. */
+void notification_message_tone(NotificationApp* app, float frequency, float volume);
+
+/** Stop WS2812 effects and darken the ring while automatic light sleep is pending. */
+void notification_set_led_sleeping(NotificationApp* app, bool sleeping);
+
+/** Reconcile USB LED auto-off with the current display and USB state. */
+void notification_update_usb_led_auto_off(NotificationApp* app);
 
 /**
  * @brief Send internal (apply to permanent layer) notification message. Think twice before use.

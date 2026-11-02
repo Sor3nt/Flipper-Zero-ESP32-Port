@@ -136,6 +136,9 @@ size_t rpc_session_feed(RpcSession* session, const uint8_t* buffer, size_t size,
  */
 size_t rpc_session_get_available_size(RpcSession* session);
 
+/** Initialize the RPC core and create RECORD_RPC. */
+void rpc_init(void);
+
 #ifdef __cplusplus
 }
 #endif

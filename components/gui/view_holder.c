@@ -1,6 +1,8 @@
 #include "view_holder.h"
 #include "view_i.h"
 
+#include <boards/board.h>
+
 #define TAG "ViewHolder"
 
 struct ViewHolder {
@@ -167,6 +169,8 @@ static void view_holder_input_callback(InputEvent* event, void* context) {
     // otherwise be unreachable. Only remap the 1-axis HARDWARE source; touch
     // (INPUT_SEQUENCE_SOURCE_TOUCH) is genuinely 2-axis. Bookkeeping above uses
     // the original key, consistent across Press/Short/Release.
+    // A real D-pad (BOARD_INPUT_DPAD) is 2-axis: no remap.
+#if !(defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD)
     if(view_holder->view && event->sequence_source == INPUT_SEQUENCE_SOURCE_HARDWARE) {
         ViewInputMode mode = view_get_input_mode(view_holder->view);
         if(mode == ViewInputModeLeftRight) {
@@ -179,6 +183,7 @@ static void view_holder_input_callback(InputEvent* event, void* context) {
             else if(event->key == InputKeyRight) event->key = InputKeyUp;
         }
     }
+#endif
 
     bool is_consumed = false;
 

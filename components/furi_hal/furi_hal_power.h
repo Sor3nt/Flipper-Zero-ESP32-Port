@@ -40,6 +40,8 @@ void furi_hal_power_shutdown(void);
 /** Request hardware power-off. Returns false if battery ship-mode was not
  * confirmed; in that case the caller must not enter deep sleep. */
 bool furi_hal_power_off(void);
+/** Configure the periodic USB-removal check used by deep sleep on BQ25896 boards. */
+void furi_hal_power_set_usb_deep_sleep_check(bool enabled, uint32_t interval_seconds);
 FURI_NORETURN void furi_hal_power_reset(void);
 
 bool furi_hal_power_enable_otg(void);
@@ -119,6 +121,13 @@ bool furi_hal_power_get_light_sleep_policy(uint32_t* delay_ms);
 /** Protect a time-critical session from automatic light sleep. Calls must be paired. */
 void furi_hal_power_light_sleep_inhibit_enter(void);
 void furi_hal_power_light_sleep_inhibit_exit(void);
+
+/** While `hold` is true the pad keeps a weak PULL-UP during automatic light sleep instead of
+ *  its table default (header pads: pull-down). For a chip-select that belongs to a module the
+ *  driver has attached: left at the default the pull-down would select the module and wake a
+ *  CC1101 out of power-down. Release it (hold = false) when the pad is handed back. Returns
+ *  false if too many pads are held. Only the sleep state is touched. */
+bool furi_hal_power_light_sleep_hold_pin_high(uint16_t pin, bool hold);
 
 /** Lepas semua hold GPIO sisa deep sleep sebelumnya dan serahkan tiap pin ke
  * HAL tanpa glitch (level/pull di-preload sebelum hold dilepas). Sudah

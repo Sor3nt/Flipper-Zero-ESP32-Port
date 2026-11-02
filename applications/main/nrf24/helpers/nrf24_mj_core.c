@@ -353,13 +353,40 @@ void mj_setup_tx_for_target(const MjTarget* target) {
     uint8_t payload_len = (target->vendor == MjVendorMicrosoft || target->vendor == MjVendorMsCrypt)
                               ? 19
                               : 10;
+    /* Self-contained: claims the (shared) SPI bus only for this short burst of
+     * register writes, not across whatever the caller does next. See the
+     * mj_transmit_reliable comment below for why that matters. */
+    nrf24_hw_acquire();
     nrf24_hw_tx_setup(target->address, target->addr_len, target->channel, payload_len);
+    nrf24_hw_release();
 }
 
-/* ---- Transmit primitives ---- */
+/* ---- Transmit primitives ----
+ *
+ * These claim nrf24_hw_acquire()/release() themselves, for the duration of
+ * the actual SPI burst only (a handful of back-to-back register writes,
+ * microseconds to low-single-digit milliseconds). They used to leave that to
+ * the caller, which on a shared-SPI board (BOARD_CC1101_SPI_SHARED) also
+ * takes the GLOBAL SPI bus lock that the LCD and SD card need. The ducky
+ * script runner (nrf24_mj_ducky.c) wraps a whole mj_script_step() — including
+ * DELAY (up to 60 s) and per-character STRING typing (10 ms/char, unbounded
+ * text length up to the 64 KB script cap, so minutes for a realistic BadUSB
+ * payload) — in exactly that acquire/release pair. Holding the bus for the
+ * full duration of those waits froze the display and input for the same
+ * duration, which looked like (and for a long/looping script effectively
+ * was) a hang requiring a reboot. Keeping the lock scoped to just the radio
+ * burst here lets the GUI/input and SD keep working during every delay. */
 static void mj_transmit_reliable(const uint8_t* frame, uint8_t len) {
     for(int r = 0; r < MJ_ATTACK_RETRANSMITS; r++) {
-        nrf24_hw_tx_send(frame, len);
+        nrf24_hw_acquire();
+        bool sent = nrf24_hw_tx_send(frame, len);
+        nrf24_hw_release();
+
+        /* With AutoAck disabled, TX_DS reports completion of the local RF
+         * transmission. If it did not assert before the bounded timeout,
+         * repeating the same frame immediately only repeats the long busy
+         * poll. Stop this burst and let the caller/UI continue. */
+        if(!sent) break;
     }
 }
 

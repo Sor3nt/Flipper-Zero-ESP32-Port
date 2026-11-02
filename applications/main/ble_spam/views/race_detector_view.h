@@ -1,7 +1,8 @@
 #pragma once
 
 #include <gui/view.h>
-#include <esp_gap_ble_api.h>
+
+#include "../ble_types.h"
 
 #define RACE_DETECTOR_MAX_DEVICES    24
 #define RACE_DETECTOR_ITEMS_ON_SCREEN 4
@@ -15,8 +16,8 @@ typedef enum {
 } RaceStatus;
 
 typedef struct {
-    esp_bd_addr_t addr;
-    esp_ble_addr_type_t addr_type;
+    BleAddress addr;
+    BleAddressType addr_type;
     int8_t rssi;
     char name[24];
     RaceStatus status;

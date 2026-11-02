@@ -71,7 +71,8 @@ FAP_FILENAME="${APP_ID}.fap"
 # ── Target definitions ──────────────────────────────────────────────
 #           BOARD_NAME              IDF_TARGET  TOOLCHAIN_PREFIX        BUILD_DIR
 TARGETS=(
-    "lilygo_t_embed_cc1101      esp32s3     xtensa-esp32s3-elf      build_t_embed"
+    "paradoxt                   esp32s3     xtensa-esp32s3-elf      build"
+#    "lilygo_t_embed_cc1101      esp32s3     xtensa-esp32s3-elf      build_t_embed"
 #    "waveshare_c6_1.9           esp32c6     riscv32-esp-elf         build_waveshare_c6"
 )
 
@@ -298,7 +299,7 @@ build_for_target() {
             -I"$IDF/esp_rom/esp32s3/include/esp32s3"
             -I"$IDF/esp_rom/esp32s3"
         )
-        TARGET_CFLAGS+=(-DBOARD_INCLUDE=\"board_lilygo_t_embed_cc1101.h\")
+        TARGET_CFLAGS+=(-DBOARD_INCLUDE=\"board_${BOARD}.h\")
     elif [ "$IDF_TARGET" = "esp32c6" ]; then
         TARGET_CFLAGS+=(-march=rv32imac_zicsr_zifencei)
         TARGET_INCLUDES+=(

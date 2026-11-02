@@ -27,6 +27,12 @@ struct BadUsbScript {
     bool load_id_cfg;
     const BadUsbHidApi* hid;
     void* hid_inst;
+    bool hid_initialized;
+    BadUsbHidInterface active_interface;
+    BadUsbScriptStoppedCallback stopped_callback;
+    void* stopped_callback_context;
+    bool worker_stopped;
+    FuriMutex* lifecycle_mutex;
     FuriThread* thread;
     BadUsbState st;
 

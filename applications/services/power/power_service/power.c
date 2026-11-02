@@ -18,6 +18,13 @@
 
 #define POWER_OFF_TIMEOUT_S  (90U)
 #define POWER_POLL_PERIOD_MS (1000UL)
+/* Screen off but awake (e.g. on USB, where light sleep never engages, or
+ * during the light-sleep delay): only charging state, VBUS (cached), fuel
+ * gauge and protection are refreshed, every 5 s instead of every second. */
+#define POWER_IDLE_POLL_PERIOD_MS (5000UL)
+/* Charger voltages/currents/temperatures, VREG and OTG are only shown in the
+ * battery info screen: refresh them every 5 s, not on every 1 s tick. */
+#define POWER_FULL_INFO_PERIOD_MS (5000UL)
 /* While light-sleeping only battery protection runs, from the fuel gauge alone
  * (no charger/VBUS access). The battery drains slowly in light sleep and the
  * protection still needs its consecutive samples, so once a minute is plenty. */
@@ -270,7 +277,26 @@ static ViewPort* power_battery_view_port_alloc(Power* power) {
     return battery_view_port;
 }
 
-static bool power_update_info(Power* power) {
+/* full=false (screen off): skip the charger readings that are only shown on
+ * screen (voltages, currents, temperatures, VREG, OTG) and keep their last
+ * values; PowerInfo stays complete for API callers. */
+static bool power_update_info(Power* power, bool full) {
+    if(!full) {
+        PowerInfo info = power->info;
+        info.is_charging = furi_hal_power_is_charging();
+        info.gauge_is_ok = furi_hal_power_gauge_is_ok();
+        info.is_shutdown_requested = furi_hal_power_is_shutdown_requested();
+        info.charge = furi_hal_power_get_pct();
+        if(!furi_hal_power_is_usb_connected()) info.voltage_vbus = 0.0f;
+        /* The OTG retry below must see the real state, not a stale one. */
+        if(power->is_otg_requested) info.is_otg_enabled = furi_hal_power_is_otg_enabled();
+        const bool need_refresh = (power->info.charge != info.charge) ||
+                                  (power->info.is_charging != info.is_charging) ||
+                                  (power->info.gauge_is_ok != info.gauge_is_ok);
+        power->info = info;
+        return need_refresh;
+    }
+
     const PowerInfo info = {
         .is_charging = furi_hal_power_is_charging(),
         .gauge_is_ok = furi_hal_power_gauge_is_ok(),
@@ -291,15 +317,26 @@ static bool power_update_info(Power* power) {
     };
 
     const bool need_refresh = (power->info.charge != info.charge) ||
-                              (power->info.is_charging != info.is_charging);
+                              (power->info.is_charging != info.is_charging) ||
+                              (power->info.gauge_is_ok != info.gauge_is_ok);
     power->info = info;
     return need_refresh;
+}
+
+static void power_tick_callback(void* context);
+
+/* Only re-arm the event-loop tick on an actual change. */
+static void power_set_tick_period(Power* power, uint32_t period_ms) {
+    if(power->tick_period == period_ms) return;
+    power->tick_period = period_ms;
+    furi_event_loop_tick_set(power->event_loop, period_ms, power_tick_callback, power);
 }
 
 static void power_check_charging_state(Power* power) {
     NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
 
-    if(furi_hal_power_is_charging()) {
+    /* is_charging was read by power_update_info() in this same tick. */
+    if(power->info.is_charging) {
         if((power->info.charge == 100) || (furi_hal_power_is_charging_done())) {
             if(power->state != PowerStateCharged) {
                 notification_internal_message(notification, &sequence_charged);
@@ -342,7 +379,6 @@ static bool power_check_manual_poweroff(Power* power) {
     return true;
 }
 
-static void power_tick_callback(void* context);
 static void power_light_sleep_exit(Power* power);
 
 /* Critical level: disconnect the battery now. No cancellable dialog: below this
@@ -664,6 +700,28 @@ static void power_loader_callback(const void* message, void* context) {
 
 // apply power settings
 static void power_settings_apply(Power* power) {
+    if(power->settings.deep_sleep_usb_check_interval_minutes <
+           POWER_SETTINGS_INTERVAL_MIN_MINUTES ||
+       power->settings.deep_sleep_usb_check_interval_minutes >
+           POWER_SETTINGS_INTERVAL_MAX_MINUTES) {
+        power->settings.deep_sleep_usb_check_interval_minutes =
+            POWER_SETTINGS_DEFAULT_DEEP_SLEEP_USB_INTERVAL_MINUTES;
+    }
+    if(power->settings.light_sleep_ship_mode_interval_minutes <
+           POWER_SETTINGS_INTERVAL_MIN_MINUTES ||
+       power->settings.light_sleep_ship_mode_interval_minutes >
+           POWER_SETTINGS_INTERVAL_MAX_MINUTES) {
+        power->settings.light_sleep_ship_mode_interval_minutes =
+            POWER_SETTINGS_DEFAULT_LIGHT_SLEEP_SHIP_INTERVAL_MINUTES;
+    }
+    if(!power->settings.light_sleep_enabled) {
+        power->settings.light_sleep_ship_mode_enabled = false;
+    }
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+    furi_hal_power_set_usb_deep_sleep_check(
+        power->settings.deep_sleep_usb_check_enabled,
+        (uint32_t)power->settings.deep_sleep_usb_check_interval_minutes * 60U);
+#endif
     //apply auto_poweroff settings
     if(power->settings.auto_poweroff_delay_ms && !power->app_running) {
         power_auto_poweroff_arm(power);
@@ -676,7 +734,9 @@ static void power_settings_apply(Power* power) {
 
 /* Queue the wake message (any thread, never blocks, at most one pending). */
 static void power_light_sleep_request_wake(Power* power) {
-    if(!power->light_sleep_entered || power->light_sleep_wake_pending) return;
+    /* Also used to get back to the 1 s tick as soon as the user is back. */
+    const bool slow = power->light_sleep_entered || power->tick_period != POWER_POLL_PERIOD_MS;
+    if(!slow || power->light_sleep_wake_pending) return;
     power->light_sleep_wake_pending = true;
     PowerMessage msg = {.type = PowerMessageTypeLightSleepWake};
     if(furi_message_queue_put(power->message_queue, &msg, 0) != FuriStatusOk) {
@@ -689,9 +749,21 @@ static void power_light_sleep_revoke_callback(void* context) {
     power_light_sleep_request_wake(context);
 }
 
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+static void power_light_sleep_ship_timeout_callback(void* context) {
+    furi_assert(context);
+    Power* power = context;
+    power->light_sleep_ship_timeout_pending = true;
+    PowerMessage msg = {.type = PowerMessageTypeLightSleepShipTimeout};
+    furi_message_queue_put(power->message_queue, &msg, 0);
+}
+#endif
+
 static void power_light_sleep_input_callback(const void* value, void* context) {
     UNUSED(value);
-    power_light_sleep_request_wake(context);
+    Power* power = context;
+    power->light_sleep_last_activity_tick = furi_get_tick();
+    power_light_sleep_request_wake(power);
 }
 
 static void power_light_sleep_enter(Power* power) {
@@ -721,19 +793,37 @@ static void power_light_sleep_enter(Power* power) {
     /* 5. Grant light sleep; the HAL opens the gate once no inhibitor is held. */
     power->light_sleep_entered = true;
     power->light_sleep_wake_pending = false;
+    power->light_sleep_ship_timeout_pending = false;
+    power->light_sleep_ship_started_tick = furi_get_tick();
+    power->light_sleep_last_activity_tick = power->light_sleep_ship_started_tick;
     furi_hal_power_allow_light_sleep(true);
 
     /* 6. Stop waking up every second. */
-    furi_event_loop_tick_set(
-        power->event_loop, POWER_LIGHT_SLEEP_POLL_PERIOD_MS, power_tick_callback, power);
+    power_set_tick_period(power, POWER_LIGHT_SLEEP_POLL_PERIOD_MS);
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+    if(power->settings.light_sleep_ship_mode_enabled) {
+        const uint32_t timeout_ms =
+            (uint32_t)power->settings.light_sleep_ship_mode_interval_minutes * 60000U;
+        if(furi_timer_start(power->light_sleep_ship_timer, furi_ms_to_ticks(timeout_ms)) !=
+           FuriStatusOk) {
+            FURI_LOG_E(TAG, "Failed to arm light-sleep ship-mode timeout");
+        }
+    }
+#endif
 }
 
 static void power_light_sleep_exit(Power* power) {
     if(!power->light_sleep_entered) return;
     power->light_sleep_entered = false;
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+    furi_timer_stop(power->light_sleep_ship_timer);
+    power->light_sleep_ship_timeout_pending = false;
+    power->light_sleep_ship_started_tick = 0;
+    power->light_sleep_last_activity_tick = 0;
+#endif
 
     furi_hal_power_allow_light_sleep(false);
-    furi_event_loop_tick_set(power->event_loop, POWER_POLL_PERIOD_MS, power_tick_callback, power);
+    power_set_tick_period(power, POWER_POLL_PERIOD_MS);
     furi_hal_power_set_charger_adc_enabled(true);
     furi_hal_power_refresh_vbus_cache();
     furi_hal_power_publish_idle_state(false);
@@ -749,6 +839,53 @@ static void power_light_sleep_exit(Power* power) {
     power->light_sleep_wake_pending = false;
     FURI_LOG_I(TAG, "Light sleep: woke up");
 }
+
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+static bool power_light_sleep_handle_ship_timeout(Power* power) {
+    if(!power->settings.light_sleep_ship_mode_enabled || !power->settings.light_sleep_enabled) {
+        power->light_sleep_ship_timeout_pending = false;
+        return false;
+    }
+    const uint32_t timeout_ms =
+        (uint32_t)power->settings.light_sleep_ship_mode_interval_minutes * 60000U;
+    if(!power->light_sleep_ship_timeout_pending) {
+        const uint32_t elapsed_ticks = furi_get_tick() - power->light_sleep_ship_started_tick;
+        if(!power->light_sleep_entered ||
+           elapsed_ticks < furi_ms_to_ticks(timeout_ms)) {
+            return false;
+        }
+    }
+    power->light_sleep_ship_timeout_pending = false;
+
+    if(!power->light_sleep_entered || power->light_sleep_wake_pending || power->app_running ||
+       !power->settings.light_sleep_enabled || !furi_hal_display_is_asleep() ||
+       !furi_hal_power_is_light_sleep_requested()) {
+        return true;
+    }
+    if((furi_get_tick() - power->light_sleep_last_activity_tick) <
+       furi_ms_to_ticks(timeout_ms)) {
+        FURI_LOG_I(TAG, "Auto ship mode cancelled: input activity was detected");
+        power_light_sleep_exit(power);
+        return true;
+    }
+
+    FURI_LOG_W(
+        TAG,
+        "Light sleep idle for %u minutes; checking USB before BQ25896 ship mode",
+        (unsigned)power->settings.light_sleep_ship_mode_interval_minutes);
+    power_light_sleep_exit(power);
+    if(!furi_hal_power_refresh_vbus_cache()) {
+        FURI_LOG_E(TAG, "Auto ship mode cancelled: USB state could not be verified");
+        return true;
+    }
+    if(furi_hal_power_is_usb_connected()) {
+        FURI_LOG_I(TAG, "Auto ship mode cancelled: USB connected during light sleep");
+        return true;
+    }
+    power_handle_shutdown(power);
+    return true;
+}
+#endif
 
 /* Close a pending grant without spinning the mutex every second. */
 static void power_light_sleep_hold_awake(Power* power, bool reset_delay) {
@@ -784,7 +921,7 @@ static void power_light_sleep_tick(Power* power) {
     Loader* loader = furi_record_open(RECORD_LOADER);
     const bool app_running = loader_is_locked(loader);
     furi_record_close(RECORD_LOADER);
-    if(app_running) {
+    if(app_running || power->is_otg_requested) {
         power_light_sleep_hold_awake(power, true);
         return;
     }
@@ -903,7 +1040,17 @@ static void power_message_callback(FuriEventLoopObject* object, void* context) {
         break;
     case PowerMessageTypeLightSleepWake:
         power->light_sleep_wake_pending = false;
-        power_light_sleep_exit(power);
+        if(power->light_sleep_entered) {
+            power_light_sleep_exit(power);
+        } else {
+            power_set_tick_period(power, POWER_POLL_PERIOD_MS);
+        }
+        power->info_full_tick = 0; /* screen back on: full refresh right away */
+        break;
+        case PowerMessageTypeLightSleepShipTimeout:
+    #if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+        power_light_sleep_handle_ship_timeout(power);
+    #endif
         break;
     default:
         furi_crash();
@@ -942,6 +1089,9 @@ static void power_tick_callback(void* context) {
     power_light_sleep_tick(power);
 
     if(power->light_sleep_entered) {
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+        if(power_light_sleep_handle_ship_timeout(power)) return;
+#endif
         /* Light sleep: fuel gauge only, the charger is not touched. */
         if(power_check_critical_battery(power)) return;
         if(furi_hal_power_get_battery_current(FuriHalPowerICFuelGauge) >
@@ -961,7 +1111,17 @@ static void power_tick_callback(void* context) {
     if(power_check_critical_battery(power)) return;
 
     // Update data from gauge and charger
-    const bool need_refresh = power_update_info(power);
+    /* Screen off and nothing on screen to count down: slow, reduced polling.
+     * The low-battery dialog counts seconds, so it keeps the 1 s tick. */
+    const bool idle = furi_hal_display_is_asleep() && !power->battery_low &&
+                      !power->poweroff_prompt_active;
+    power_set_tick_period(power, idle ? POWER_IDLE_POLL_PERIOD_MS : POWER_POLL_PERIOD_MS);
+    const uint32_t now = furi_get_tick();
+    const bool full = !idle && (power->info_full_tick == 0 ||
+                                (now - power->info_full_tick) >=
+                                    furi_ms_to_ticks(POWER_FULL_INFO_PERIOD_MS));
+    if(full) power->info_full_tick = now ? now : 1;
+    const bool need_refresh = power_update_info(power, full);
     // Check low battery level
     power_check_low_battery(power);
     // Check and notify about charging state
@@ -1037,6 +1197,10 @@ static Power* power_alloc(void) {
     //define autopoweroff timer and they callback
     power->auto_poweroff_timer =
         furi_timer_alloc(power_auto_poweroff_timer_callback, FuriTimerTypeOnce, power);
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+    power->light_sleep_ship_timer =
+        furi_timer_alloc(power_light_sleep_ship_timeout_callback, FuriTimerTypeOnce, power);
+#endif
 
     // Gui
     Gui* gui = furi_record_open(RECORD_GUI);
@@ -1069,7 +1233,8 @@ static Power* power_alloc(void) {
         FuriEventLoopEventIn,
         power_message_callback,
         power);
-    furi_event_loop_tick_set(power->event_loop, 1000, power_tick_callback, power);
+    power->tick_period = POWER_POLL_PERIOD_MS;
+    furi_event_loop_tick_set(power->event_loop, POWER_POLL_PERIOD_MS, power_tick_callback, power);
 
     return power;
 }
@@ -1089,7 +1254,7 @@ int32_t power_srv(void* p) {
     // power service settings initialization
     power_init_settings(power);
 
-    power_update_info(power);
+    power_update_info(power, true);
 
     furi_record_create(RECORD_POWER, power);
 

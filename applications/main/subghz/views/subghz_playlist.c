@@ -172,6 +172,16 @@ static int playlist_count_items(Storage* storage, const char* file_path) {
     return count;
 }
 
+/** Custom preset layout: {reg, value}... {0, 0}, then the 8-byte PA table.
+ * furi_hal_subghz_load_custom_preset() walks to the 0 marker and copies 8 bytes
+ * after it, so both must lie inside the buffer. */
+static bool playlist_custom_preset_is_valid(const uint8_t* data, size_t size) {
+    for(size_t i = 0; i + 1 < size; i += 2) {
+        if(data[i] == 0) return i + 2 + 8 <= size;
+    }
+    return false;
+}
+
 static FuriHalSubGhzPreset playlist_str_to_preset(FuriString* preset) {
     if(furi_string_cmp_str(preset, "FuriHalSubGhzPresetOok270Async") == 0) {
         return FuriHalSubGhzPresetOok270Async;
@@ -182,12 +192,19 @@ static FuriHalSubGhzPreset playlist_str_to_preset(FuriString* preset) {
     if(furi_string_cmp_str(preset, "FuriHalSubGhzPreset2FSKDev238Async") == 0) {
         return FuriHalSubGhzPreset2FSKDev238Async;
     }
+    if(furi_string_cmp_str(preset, "FuriHalSubGhzPreset2FSKDev12KAsync") == 0) {
+        return FuriHalSubGhzPreset2FSKDev12KAsync;
+    }
     if(furi_string_cmp_str(preset, "FuriHalSubGhzPreset2FSKDev476Async") == 0) {
         return FuriHalSubGhzPreset2FSKDev476Async;
     }
     if(furi_string_cmp_str(preset, "FuriHalSubGhzPresetMSK99_97KbAsync") == 0) {
         return FuriHalSubGhzPresetMSK99_97KbAsync;
     }
+    if(furi_string_cmp_str(preset, "FuriHalSubGhzPresetGFSK9_99KbAsync") == 0) {
+        return FuriHalSubGhzPresetGFSK9_99KbAsync;
+    }
+    // Custom (or unknown): the register data must come from Custom_preset_data.
     return FuriHalSubGhzPresetCustom;
 }
 
@@ -216,48 +233,89 @@ static int playlist_worker_process(
         frequency = 433920000;
     }
     if(!furi_hal_subghz_is_tx_allowed(frequency)) {
+        flipper_format_file_close(fff_file);
         return -2;
     }
 
     if(!flipper_format_read_string(fff_file, "Preset", preset)) {
         FURI_LOG_E(TAG, "Missing Preset");
+        flipper_format_file_close(fff_file);
         return -3;
+    }
+
+    // A custom preset carries its CC1101 registers in the file. Loading it with
+    // NULL data used to hit furi_check() in furi_hal_subghz_load_custom_preset().
+    const FuriHalSubGhzPreset preset_id = playlist_str_to_preset(preset);
+    uint8_t* custom_preset_data = NULL;
+    if(preset_id == FuriHalSubGhzPresetCustom) {
+        uint32_t custom_size = 0;
+        if(!flipper_format_get_value_count(fff_file, "Custom_preset_data", &custom_size) ||
+           custom_size < 2 || custom_size > 2048 ||
+           !(custom_preset_data = malloc(custom_size)) ||
+           !flipper_format_read_hex(
+               fff_file, "Custom_preset_data", custom_preset_data, custom_size) ||
+           !playlist_custom_preset_is_valid(custom_preset_data, custom_size)) {
+            FURI_LOG_E(TAG, "Unsupported preset without valid Custom_preset_data");
+            free(custom_preset_data);
+            flipper_format_file_close(fff_file);
+            return -3;
+        }
     }
 
     if(!flipper_format_read_string(fff_file, "Protocol", protocol)) {
         FURI_LOG_E(TAG, "Missing Protocol");
+        free(custom_preset_data);
+        flipper_format_file_close(fff_file);
         return -4;
     }
 
+    stream_clean(flipper_format_get_raw_stream(fff_data));
     if(!furi_string_cmp_str(protocol, "RAW")) {
         subghz_protocol_raw_gen_fff_data(fff_data, path, "cc1101_int");
     } else {
         stream_copy_full(
             flipper_format_get_raw_stream(fff_file), flipper_format_get_raw_stream(fff_data));
     }
-    flipper_format_free(fff_file);
+    flipper_format_file_close(fff_file);
 
     SubGhzEnvironment* environment = subghz_environment_alloc();
     subghz_environment_set_protocol_registry(environment, (void*)&subghz_protocol_registry);
     SubGhzTransmitter* transmitter =
         subghz_transmitter_alloc_init(environment, furi_string_get_cstr(protocol));
 
-    subghz_transmitter_deserialize(transmitter, fff_data);
+    if(!transmitter ||
+       subghz_transmitter_deserialize(transmitter, fff_data) != SubGhzProtocolStatusOk) {
+        FURI_LOG_E(
+            TAG,
+            "Invalid or unsupported playlist protocol: %s",
+            furi_string_get_cstr(protocol));
+        if(transmitter) subghz_transmitter_free(transmitter);
+        subghz_environment_free(environment);
+        free(custom_preset_data);
+        return -1;
+    }
 
     const SubGhzDevice* device = instance->device;
     if(!device) {
         subghz_transmitter_free(transmitter);
+        subghz_environment_free(environment);
+        free(custom_preset_data);
         return -1;
     }
 
     subghz_devices_reset(device);
     subghz_devices_idle(device);
-    subghz_devices_load_preset(device, playlist_str_to_preset(preset), NULL);
+    subghz_devices_load_preset(device, preset_id, custom_preset_data);
     subghz_devices_set_frequency(device, frequency);
 
     int status = 0;
-    subghz_devices_start_async_tx(device, subghz_transmitter_yield, transmitter);
-    while(!subghz_devices_is_async_complete_tx(device)) {
+    if(!subghz_devices_start_async_tx(device, subghz_transmitter_yield, transmitter)) {
+        // Previously ignored: the loop below saw "complete" at once and the entry
+        // was reported as sent although nothing went on air.
+        FURI_LOG_E(TAG, "Failed to start TX for %s", path);
+        status = -2;
+    }
+    while(status == 0 && !subghz_devices_is_async_complete_tx(device)) {
         if(instance->ctl_request_exit) {
             status = 2;
             break;
@@ -272,6 +330,8 @@ static int playlist_worker_process(
     subghz_devices_stop_async_tx(device);
     subghz_devices_sleep(device);
     subghz_transmitter_free(transmitter);
+    subghz_environment_free(environment);
+    free(custom_preset_data);
 
     return status;
 }
@@ -333,10 +393,7 @@ static bool playlist_worker_play_once(
             FlipperFormat* fff_file = flipper_format_file_alloc(storage);
             int status =
                 playlist_worker_process(instance, fff_file, fff_data, str, preset, protocol);
-
-            if(status < 0) {
-                flipper_format_free(fff_file);
-            }
+            flipper_format_free(fff_file);
             if(status == 1) {
                 i -= 1;
             } else if(status < 0) {

@@ -46,7 +46,8 @@ static bool read_rxbytes_stable(const FuriHalSpiBusHandle* h, uint8_t* out, bool
     return true;
 }
 
-size_t wmbus_hal_rx_drain(uint8_t* dst, size_t cap, bool external) {
+size_t wmbus_hal_rx_drain(uint8_t* dst, size_t cap, bool external, bool* overflow_out) {
+    if(overflow_out) *overflow_out = false;
     if(!dst || cap == 0) return 0;
     const FuriHalSpiBusHandle* h = external
                                        ? &furi_hal_spi_bus_handle_external
@@ -61,9 +62,9 @@ size_t wmbus_hal_rx_drain(uint8_t* dst, size_t cap, bool external) {
     }
 
     if(overflow) {
-        /* Recover: idle, flush, restart RX. The chip-level worker treats
-         * a chip-buffer reset on long idle as "lost frame", so we don't
-         * need to signal the caller explicitly. */
+        /* Recover: idle, flush, restart RX, and expose the loss to the worker's
+         * receiver statistics. */
+        if(overflow_out) *overflow_out = true;
         uint8_t sidle = (uint8_t)CC1101_STROBE_SIDLE;
         furi_hal_spi_bus_tx(h, &sidle, 1, 100);
         uint8_t sfrx  = (uint8_t)CC1101_STROBE_SFRX;

@@ -67,13 +67,14 @@ typedef enum {
 } FuriHalBtSerialRpcStatus;
 
 BleSerial* ble_serial_alloc(const BleSerialConfig* config);
-void ble_serial_free(BleSerial* serial);
+bool ble_serial_free(BleSerial* serial);
 
 /** Reset initialized flag so stack can be re-initialized after deinit */
 void ble_serial_reset_initialized(void);
 
 void ble_serial_set_state_callback(BleSerial* serial, BleSerialStateCallback callback, void* context);
 bool ble_serial_is_connected(BleSerial* serial);
+bool ble_serial_is_teardown_pending(void);
 
 void ble_serial_set_event_callback(
     BleSerial* serial,

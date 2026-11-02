@@ -10,6 +10,7 @@
 #include <furi_hal_light.h>
 #include <notification/notification_app.h>
 #include <notification/notification_messages.h>
+#include <power/power_service/power.h>
 #include <gui/modules/variable_item_list.h>
 #include <gui/view_dispatcher.h>
 #include <lib/toolbox/value_index.h>
@@ -25,6 +26,8 @@
 
 typedef struct {
     NotificationApp* notification;
+    Power* power;
+    PowerSettings power_settings;
     ViewDispatcher* view_dispatcher;
     VariableItemList* variable_item_list;
     NotificationColorPicker* color_picker;
@@ -83,6 +86,20 @@ const char* const delay_text[DELAY_COUNT] = {
 const uint32_t delay_value[DELAY_COUNT] =
     {0, 2000, 5000, 10000, 15000, 30000, 60000, 90000, 120000, 300000, 600000, 1800000};
 
+#define LIGHT_SLEEP_ENABLE_COUNT 2
+static const char* const light_sleep_enable_text[LIGHT_SLEEP_ENABLE_COUNT] = {"OFF", "ON"};
+static const uint8_t light_sleep_enable_value[LIGHT_SLEEP_ENABLE_COUNT] = {0, 1};
+
+#define LIGHT_SLEEP_DELAY_COUNT 8
+static const char* const light_sleep_delay_text[LIGHT_SLEEP_DELAY_COUNT] = {
+    "5s", "10s", "15s", "30s", "60s", "2min", "5min", "10min",
+};
+static const uint32_t light_sleep_delay_value[LIGHT_SLEEP_DELAY_COUNT] = {
+    5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000,
+};
+
+#define LED_USB_AUTO_OFF_COUNT 2
+static const char* const led_usb_auto_off_text[LED_USB_AUTO_OFF_COUNT] = {"OFF", "ON"};
 
 // --- NIGHT SHIFT ---
 #define NIGHT_SHIFT_COUNT 7
@@ -134,6 +151,22 @@ static void screen_changed(VariableItem* item) {
         furi_timer_stop(app->notification->display_timer);
     }
     notification_message(app->notification, &sequence_display_backlight_on);
+}
+
+static void light_sleep_enable_changed(VariableItem* item) {
+    NotificationAppSettings* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, light_sleep_enable_text[index]);
+    app->power_settings.light_sleep_enabled = light_sleep_enable_value[index] != 0;
+    power_api_set_settings(app->power, &app->power_settings);
+}
+
+static void light_sleep_delay_changed(VariableItem* item) {
+    NotificationAppSettings* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, light_sleep_delay_text[index]);
+    app->power_settings.light_sleep_delay_ms = light_sleep_delay_value[index];
+    power_api_set_settings(app->power, &app->power_settings);
 }
 
 static void volume_changed(VariableItem* item) {
@@ -278,6 +311,15 @@ static void led_timeout_changed(VariableItem* item) {
     app->notification->settings.led_off_delay_ms = delay_value[index];
     notification_apply_led_color(app->notification);     /* re-arms timer with new value */
     notification_message_save_settings(app->notification); /* persist */
+}
+
+static void led_usb_auto_off_changed(VariableItem* item) {
+    NotificationAppSettings* app = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, led_usb_auto_off_text[index]);
+    app->notification->settings.led_usb_auto_off = index != 0;
+    notification_update_usb_led_auto_off(app->notification);
+    notification_message_save_settings(app->notification);
 }
 
 #define LED_EFFECT_COUNT 9
@@ -448,6 +490,8 @@ static NotificationAppSettings* alloc_settings(void) {
     app->color_picker = NULL;
     app->ui_bg_item = NULL;
     app->notification = furi_record_open(RECORD_NOTIFICATION);
+    app->power = furi_record_open(RECORD_POWER);
+    power_api_get_settings(app->power, &app->power_settings);
 
     app->variable_item_list = variable_item_list_alloc();
     View* view = variable_item_list_get_view(app->variable_item_list);
@@ -520,6 +564,16 @@ static NotificationAppSettings* alloc_settings(void) {
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, delay_text[value_index]);
 
+    item = variable_item_list_add(
+        app->variable_item_list,
+        "USB LED Auto-Off",
+        LED_USB_AUTO_OFF_COUNT,
+        led_usb_auto_off_changed,
+        app);
+    value_index = app->notification->settings.led_usb_auto_off ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, led_usb_auto_off_text[value_index]);
+
     /* LED animation effect */
     item = variable_item_list_add(
         app->variable_item_list, "LED Effect", LED_EFFECT_COUNT, led_effect_changed, app);
@@ -544,6 +598,29 @@ static NotificationAppSettings* alloc_settings(void) {
         app->notification->settings.display_off_delay_ms, delay_value, DELAY_COUNT);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, delay_text[value_index]);
+
+    item = variable_item_list_add(
+        app->variable_item_list,
+        "Auto Light Sleep",
+        LIGHT_SLEEP_ENABLE_COUNT,
+        light_sleep_enable_changed,
+        app);
+    value_index = app->power_settings.light_sleep_enabled ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, light_sleep_enable_text[value_index]);
+
+    item = variable_item_list_add(
+        app->variable_item_list,
+        "Sleep Delay",
+        LIGHT_SLEEP_DELAY_COUNT,
+        light_sleep_delay_changed,
+        app);
+    value_index = value_index_uint32(
+        app->power_settings.light_sleep_delay_ms,
+        light_sleep_delay_value,
+        LIGHT_SLEEP_DELAY_COUNT);
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, light_sleep_delay_text[value_index]);
 
     /* --- NIGHT SHIFT --- */
     item = variable_item_list_add(
@@ -620,6 +697,7 @@ static void free_settings(NotificationAppSettings* app) {
     view_dispatcher_free(app->view_dispatcher);
 
     furi_record_close(RECORD_GUI);
+    furi_record_close(RECORD_POWER);
     furi_record_close(RECORD_NOTIFICATION);
     free(app);
 }

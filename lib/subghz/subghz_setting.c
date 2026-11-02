@@ -293,7 +293,11 @@ void subghz_setting_load(SubGhzSetting* instance, const char* file_path) {
                 break;
             }
             if(flipper_format_read_uint32(fff_data_file, "Default_frequency", &temp_data32, 1)) {
-                subghz_setting_set_default_frequency(instance, temp_data32);
+                if(furi_hal_subghz_is_frequency_valid(temp_data32)) {
+                    subghz_setting_set_default_frequency(instance, temp_data32);
+                } else {
+                    FURI_LOG_E(TAG, "Default frequency not supported %lu", temp_data32);
+                }
             }
 
             // custom preset (optional)
@@ -381,6 +385,8 @@ bool subghz_setting_load_custom_preset(
     SubGhzSettingCustomPresetItem* item =
         SubGhzSettingCustomPresetItemArray_push_raw(instance->preset->data);
     item->custom_preset_name = furi_string_alloc();
+    item->custom_preset_data = NULL;
+    item->custom_preset_data_size = 0;
     furi_string_set(item->custom_preset_name, preset_name);
     do {
         if(!flipper_format_get_value_count(fff_data_file, "Custom_preset_data", &temp_data32))
@@ -389,8 +395,16 @@ bool subghz_setting_load_custom_preset(
             FURI_LOG_E(TAG, "Integrity error Custom_preset_data");
             break;
         }
+        if(temp_data32 > 2048) {
+            FURI_LOG_E(TAG, "Custom_preset_data is too large");
+            break;
+        }
         item->custom_preset_data_size = sizeof(uint8_t) * temp_data32;
         item->custom_preset_data = malloc(item->custom_preset_data_size);
+        if(!item->custom_preset_data) {
+            FURI_LOG_E(TAG, "Unable to allocate Custom_preset_data");
+            break;
+        }
         if(!flipper_format_read_hex(
                fff_data_file,
                "Custom_preset_data",
@@ -399,8 +413,29 @@ bool subghz_setting_load_custom_preset(
             FURI_LOG_E(TAG, "Missing Custom_preset_data");
             break;
         }
+        // Layout: {reg, value}... {0, 0} + 8-byte PA table. The loader walks to the
+        // 0 marker and copies 8 bytes after it; reject data where either falls
+        // outside the buffer instead of reading past it at TX/RX time.
+        bool layout_ok = false;
+        for(size_t i = 0; i + 1 < item->custom_preset_data_size; i += 2) {
+            if(item->custom_preset_data[i] == 0) {
+                layout_ok = i + 2 + 8 <= item->custom_preset_data_size;
+                break;
+            }
+        }
+        if(!layout_ok) {
+            FURI_LOG_E(TAG, "Malformed Custom_preset_data");
+            break;
+        }
         return true;
     } while(true);
+    furi_string_free(item->custom_preset_name);
+    free(item->custom_preset_data);
+    SubGhzSettingCustomPresetItemArray_it_t cleanup_it;
+    SubGhzSettingCustomPresetItemArray_it_last(cleanup_it, instance->preset->data);
+    if(!SubGhzSettingCustomPresetItemArray_end_p(cleanup_it)) {
+        SubGhzSettingCustomPresetItemArray_remove(instance->preset->data, cleanup_it);
+    }
     return false;
 }
 

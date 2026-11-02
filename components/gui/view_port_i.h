@@ -16,6 +16,7 @@ struct ViewPort {
 
     uint8_t width;
     uint8_t height;
+    ViewPortStatusBarIcon statusbar_icon;
 
     ViewPortDrawCallback draw_callback;
     void* draw_callback_context;

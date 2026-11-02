@@ -1,0 +1,13 @@
+# Keep the ESP-IDF console on the USB Serial/JTAG controller. UART0 pins 43/44
+# are shared with the RFID reader and USB-UART bridge; moving the console to
+# GPIO4/5 would interfere with Paradoxt's external GPIO header.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# The USB-UART bridge polls CDC every two FreeRTOS ticks.
+CONFIG_FREERTOS_HZ=1000
+
+# Run the forced-reboot chord timer on CPU1 so it is independent of UI/input tasks.
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_ESP_TIMER_SHOW_EXPERIMENTAL=y
+CONFIG_ESP_TIMER_ISR_AFFINITY_CPU1=y
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y

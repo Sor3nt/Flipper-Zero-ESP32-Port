@@ -7,6 +7,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         furi
+        furi_hal
         toolbox
         storage
         btshim
@@ -15,4 +16,5 @@ idf_component_register(
         esp_netif
         esp_event
         lwip
+        notification
 )

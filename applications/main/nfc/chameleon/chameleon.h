@@ -5,7 +5,7 @@
  * Phase 1: connect/disconnect + low-level command exchange + a couple of
  * device-info commands (app version, battery) to prove the BLE link.
  *
- * The transport is a Bluedroid GATT *client*. Since the firmware normally runs
+ * The transport is a NimBLE GATT *client*. Since the firmware normally runs
  * a BLE *peripheral* (Flipper RPC), chameleon_connect() stops the BT service
  * stack first (mirrors applications/main/ble_spam/ble_walk_hal.c) and
  * chameleon_disconnect() restarts it.

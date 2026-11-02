@@ -38,6 +38,14 @@ typedef enum {
 } BleSpamWalkEvent;
 
 typedef enum {
+    BleSpamWardrivingOk = 300,
+    BleSpamWardrivingUp,
+    BleSpamWardrivingDown,
+    BleSpamWardrivingLeft,
+    BleSpamWardrivingRight,
+} BleSpamWardrivingEvent;
+
+typedef enum {
     BleSpamViewSubmenu,
     BleSpamViewRunning,
     BleSpamViewTextInput,
@@ -47,6 +55,7 @@ typedef enum {
     BleSpamViewTrackerScan,
     BleSpamViewTrackerGeiger,
     BleSpamViewRaceDetector,
+    BleSpamViewWardriving,
 } BleSpamViewId;
 
 typedef struct {
@@ -60,7 +69,8 @@ typedef struct {
 
     // Attack state
     BleSpamAttackType attack_type;
-    volatile bool running;
+    bool running; // Accessed across the UI and worker tasks under status_mutex.
+    FuriMutex* status_mutex;
     uint32_t packet_count;
     uint32_t delay_ms;
     uint16_t current_index;
@@ -89,4 +99,7 @@ typedef struct {
     // Airoha RACE Detector state (CVE-2025-20700)
     View* view_race_detector;
     volatile bool race_probe_abort;
+
+    // BLE Wardriving state (dipindah dari menu WiFi)
+    View* view_wardriving;
 } BleSpamApp;

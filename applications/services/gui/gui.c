@@ -1,5 +1,6 @@
 #include "gui_i.h"
 #include <assets_icons.h>
+#include <furi_hal_display.h>
 
 #define TAG "GuiSrv"
 
@@ -47,6 +48,24 @@ void gui_input_events_callback(const void* value, void* ctx) {
     furi_assert(ctx);
 
     Gui* gui = ctx;
+    const InputEvent* event = value;
+
+    if(event->sequence_source == INPUT_SEQUENCE_SOURCE_HARDWARE &&
+       event->key < InputKeyMAX) {
+        const uint8_t key_bit = 1U << event->key;
+
+        if(gui->suppressed_input & key_bit) {
+            if(event->type == InputTypeRelease) {
+                gui->suppressed_input &= ~key_bit;
+            }
+            return;
+        }
+
+        if(event->type == InputTypePress && furi_hal_display_is_asleep()) {
+            gui->suppressed_input |= key_bit;
+            return;
+        }
+    }
 
     furi_message_queue_put(gui->input_queue, value, FuriWaitForever);
     furi_thread_flags_set(gui->thread_id, GUI_THREAD_FLAG_INPUT);
@@ -80,18 +99,20 @@ static void gui_redraw_status_bar(Gui* gui, bool need_attention) {
     canvas_frame_set(
         gui->canvas, GUI_STATUS_BAR_X, GUI_STATUS_BAR_Y, GUI_DISPLAY_WIDTH, GUI_STATUS_BAR_HEIGHT);
 
-    /* for support black theme - paint white area and
-     * draw icon with transparent white color
-     */
-    canvas_set_color(gui->canvas, ColorWhite);
-    canvas_draw_box(gui->canvas, 1, 1, 9, 7);
-    canvas_draw_box(gui->canvas, 7, 3, 58, 6);
-    canvas_draw_box(gui->canvas, 61, 1, 32, 7);
-    canvas_draw_box(gui->canvas, 89, 3, 38, 6);
-    canvas_set_color(gui->canvas, ColorBlack);
-    canvas_set_bitmap_mode(gui->canvas, 1);
-    canvas_draw_icon(gui->canvas, 0, 0, &I_Background_128x11);
-    canvas_set_bitmap_mode(gui->canvas, 0);
+    if(gui->status_bar_background) {
+        /* Paint white behind the transparent background graphic for black theme support. */
+        canvas_set_color(gui->canvas, ColorWhite);
+        canvas_draw_box(gui->canvas, 1, 1, 9, 7);
+        canvas_draw_box(gui->canvas, 7, 3, 58, 6);
+        canvas_draw_box(gui->canvas, 61, 1, 32, 7);
+        canvas_draw_box(gui->canvas, 89, 3, 38, 6);
+        canvas_set_color(gui->canvas, ColorBlack);
+        canvas_set_bitmap_mode(gui->canvas, 1);
+        canvas_draw_icon(gui->canvas, 0, 0, &I_Background_128x11);
+        canvas_set_bitmap_mode(gui->canvas, 0);
+    } else {
+        canvas_set_color(gui->canvas, ColorBlack);
+    }
 
     // Right side
     uint8_t x = GUI_DISPLAY_WIDTH - 1;
@@ -484,6 +505,17 @@ size_t gui_get_framebuffer_size(const Gui* gui) {
     return canvas_get_buffer_size(gui->canvas);
 }
 
+void gui_set_status_bar_background(Gui* gui, bool enabled) {
+    furi_check(gui);
+
+    gui_lock(gui);
+    const bool changed = gui->status_bar_background != enabled;
+    gui->status_bar_background = enabled;
+    gui_unlock(gui);
+
+    if(changed) gui_update(gui);
+}
+
 void gui_set_lockdown(Gui* gui, bool lockdown) {
     furi_check(gui);
 
@@ -542,6 +574,8 @@ void gui_direct_draw_release(Gui* gui) {
 
 Gui* gui_alloc(void) {
     Gui* gui = malloc(sizeof(Gui));
+    gui->status_bar_background = true;
+    gui->suppressed_input = 0;
     // Thread ID
     gui->thread_id = furi_thread_get_current_id();
     // Allocate mutex

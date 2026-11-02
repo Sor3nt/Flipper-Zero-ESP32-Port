@@ -34,6 +34,7 @@ APPS = [
     "archive",
     "about",
     "bt_settings",
+    "gpio",
     "example_apps_data",
     "example_apps_assets",
     "example_number_input",
@@ -82,6 +83,13 @@ APPS = [
 
 # Boards without NFC / IR hardware – exclude the corresponding apps
 _board = os.environ.get("FLIPPER_BOARD", "")
+_boards_with_u2f = {
+    "esp32s3_generic",
+    "lilygo_t_embed_cc1101",
+    "smoochie",
+    "paradoxt",
+    "thormini",
+}
 _boards_without_nfc = {"waveshare_c6", "waveshare_c6_1.9", "waveshare_c6_1.47"}
 _boards_without_ir = {"waveshare_c6", "waveshare_c6_1.9", "waveshare_c6_1.47"}
 
@@ -92,6 +100,19 @@ _boards_without_wolf3d = {"waveshare_c6", "waveshare_c6_1.9", "waveshare_c6_1.47
 
 if _board in _boards_without_nfc:
     APPS = [a for a in APPS if a != "nfc"]
+
+if _board in _boards_with_u2f:
+    APPS.append("u2f")
+
+# ESP Flasher needs the external UART pads (USB-UART bridge / RFID UART on GPIO43/44).
+_boards_with_esp_flasher = {
+    "esp32s3_generic",
+    "lilygo_t_embed_cc1101",
+    "smoochie",
+    "paradoxt",
+}
+if _board in _boards_with_esp_flasher:
+    APPS.append("esp_flasher")
 
 # waveshare_c6_1.9: external CC1101 module wired up (pins in board_waveshare_c6_1.9.h,
 # BOARD_HAS_SUBGHZ=1) → SubGHz built in. 1.47 has no module → stays excluded.

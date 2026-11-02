@@ -66,6 +66,9 @@ void furi_hal_speaker_set_volume(float volume);
  */
 void furi_hal_speaker_stop(void);
 
+/** Check whether the speaker or buzzer is currently producing a tone. */
+bool furi_hal_speaker_is_playing(void);
+
 /** Mirror a GPIO pin (e.g. CC1101 GDO0) onto the speaker as 1-bit audio.
  *
  * Replaces the STM32 hardware TIM-bridge that wired the demodulator output

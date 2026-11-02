@@ -1,12 +1,15 @@
 #include "subghz_spectrum.h"
 #include "../helpers/subghz_spectrum_worker.h"
+#include "../helpers/subghz_click_echo.h"
 
 #include <furi.h>
 #include <furi_hal.h>
 #include <furi_hal_display.h>
+#include <furi_hal_power.h>
 #include <furi_hal_spi_bus.h>
 #include <gui/gui.h>
 #include <input/input.h>
+#include <notification/notification.h>
 #include <string.h>
 
 #include <esp_lcd_panel_ops.h>
@@ -23,8 +26,10 @@
  * ST7789 SPI byte order. */
 
 #define WF_ROWS_MAX 96
-#define STRIPE_H    17
-
+/* Internal RAM that must be free to start: 2 FuriThread TCBs (~0.5 KB each),
+ * mutexes and small queue objects, with slack. Deliberately small so Spectrum
+ * is only refused when the firmware could not have created its threads anyway. */
+#define SPECTRUM_INTERNAL_HEADROOM 2048
 #define BINS SUBGHZ_SPECTRUM_BINS
 
 /* RSSI window mapped to the display's dynamic range (dBm). */
@@ -33,6 +38,32 @@
 
 #define CENTER_MIN 300000000UL
 #define CENTER_MAX 928000000UL
+#define CENTER_DEFAULT 433920000UL
+
+/* Up/Down jump straight between the common ISM / remote frequencies. With only
+ * span/16 steps on Left/Right, getting from 433.92 to 315 MHz took ~160 clicks,
+ * so a remote on another band never showed up on screen. */
+static const uint32_t subghz_spectrum_bands[] = {
+    315000000UL,
+    390000000UL,
+    418000000UL,
+    433920000UL,
+    868350000UL,
+    915000000UL,
+};
+
+/* The max-hold peak is reported once it is this far above the display floor. */
+#define PEAK_REPORT_MARGIN_DB 6.0f
+
+#define NBANDS COUNT_OF(subghz_spectrum_bands)
+/* Auto-scan: a band whose strongest bin clears this margin over the display
+ * floor counts as "active". The scan parks on an active band so the user can
+ * see it, then resumes hopping after this many consecutive quiet sweeps. */
+#define AUTO_DETECT_MARGIN_DB 10.0f
+#define AUTO_QUIET_SWEEPS     8
+/* How long (ms) a band stays flagged "recently active" in the band bar after
+ * its last detection, so a brief burst stays visible instead of flickering. */
+#define BAND_ACTIVE_HOLD_MS 2500
 
 static const uint32_t subghz_spectrum_spans[] = {
     1000000UL,
@@ -47,8 +78,13 @@ typedef enum {
     SubGhzSpectrumAdjustCursor,
     SubGhzSpectrumAdjustCenter,
     SubGhzSpectrumAdjustSpan,
+    SubGhzSpectrumAdjustAuto, // hands the frequency to the auto band scanner
     SubGhzSpectrumAdjustMAX,
 } SubGhzSpectrumAdjust;
+
+typedef struct {
+    bool startup_failed;
+} SubGhzSpectrumViewModel;
 
 struct SubGhzSpectrum {
     View* view; // blank placeholder view for the ViewDispatcher
@@ -56,6 +92,7 @@ struct SubGhzSpectrum {
     void* context;
 
     SubGhzSpectrumWorker* worker;
+    NotificationApp* notification;
     Gui* gui;
     FuriPubSub* input;
     FuriPubSubSubscription* input_sub;
@@ -66,11 +103,15 @@ struct SubGhzSpectrum {
     uint16_t w;
     uint16_t h;
     uint16_t* fb; // PSRAM, w*h RGB565 (byte-swapped)
-    uint16_t* stripe; // DRAM DMA, w*STRIPE_H
     uint8_t* wf; // PSRAM, WF_ROWS_MAX*BINS normalized power (0..255)
+    uint16_t magma_lut[256]; // magma() colormap precomputed per 0..255 input (byte-swapped RGB565)
 
     volatile bool running;
     volatile bool dirty;
+    bool light_sleep_inhibited;
+    bool audio_tone_active;
+    uint32_t start_center; // set by the scene before start()
+    SubGhzClickEcho click_echo; // input pubsub thread only
 
     // model (mutex-protected)
     float rssi[BINS];
@@ -80,7 +121,39 @@ struct SubGhzSpectrum {
     uint16_t cursor;
     SubGhzSpectrumAdjust adjust;
     bool has_data;
+    bool radio_fail; // the last sweep could not measure a single bin (not "no signal")
+
+    /* Auto band scanner (adjust == SubGhzSpectrumAdjustAuto). Worker-thread
+     * writes via the sweep callback; render + input read under the mutex. */
+    int cur_band; // index into subghz_spectrum_bands of the window being swept
+    bool auto_parked; // sitting on an active band instead of hopping
+    uint32_t auto_quiet; // consecutive quiet sweeps while parked
+    float band_peak[NBANDS]; // last strongest RSSI seen per band (dBm)
+    uint32_t band_seen_ms[NBANDS]; // tick of last detection per band (0 = never)
 };
+
+/* Nearest band index for a center frequency (exact match in auto mode). */
+static int subghz_spectrum_band_index(uint32_t center) {
+    int best = 0;
+    uint32_t best_d = UINT32_MAX;
+    for(size_t i = 0; i < NBANDS; i++) {
+        uint32_t d = center > subghz_spectrum_bands[i] ? center - subghz_spectrum_bands[i] :
+                                                         subghz_spectrum_bands[i] - center;
+        if(d < best_d) {
+            best_d = d;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+static void subghz_spectrum_set_startup_failed(SubGhzSpectrum* instance, bool failed) {
+    with_view_model(
+        instance->view,
+        SubGhzSpectrumViewModel * model,
+        { model->startup_failed = failed; },
+        true);
+}
 
 /* ---- 5x7 font (column-major, bit0 = top row) ---------------------------- */
 typedef struct {
@@ -104,6 +177,8 @@ static const SubGhzGlyph subghz_font[] = {
     {'R', {0x7F, 0x09, 0x19, 0x29, 0x46}}, {'E', {0x7F, 0x49, 0x49, 0x49, 0x41}},
     {'N', {0x7F, 0x04, 0x08, 0x10, 0x7F}}, {'S', {0x46, 0x49, 0x49, 0x49, 0x31}},
     {'k', {0x7F, 0x10, 0x28, 0x44, 0x00}}, {'G', {0x3E, 0x41, 0x49, 0x49, 0x7A}},
+    {'O', {0x3E, 0x41, 0x41, 0x41, 0x3E}}, {'X', {0x63, 0x14, 0x08, 0x14, 0x63}},
+    {'K', {0x7F, 0x08, 0x14, 0x22, 0x41}},
 };
 
 static const uint8_t* subghz_glyph(char c) {
@@ -124,6 +199,7 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 #define COL_TRACE  rgb565(255, 48, 40)
 #define COL_HOLD   rgb565(0, 210, 210)
 #define COL_CURSOR rgb565(255, 220, 0)
+#define COL_ERROR  rgb565(255, 40, 40)
 #define COL_TEXT   rgb565(220, 220, 220)
 #define COL_TEXT_DIM rgb565(150, 150, 150)
 
@@ -245,12 +321,49 @@ static void fmt_mhz(uint32_t hz, char* buf, size_t n, int dec) {
     }
 }
 
+/* Band overview strip (auto mode): the configured bands laid out left to right
+ * as equal segments, each labelled with its MHz. The band currently being swept
+ * is outlined; a band seen active within BAND_ACTIVE_HOLD_MS is filled cyan so
+ * the user can tell at a glance which frequency is transmitting. Occupies the
+ * horizontal band from y0 to y1. */
+static void subghz_spectrum_draw_band_bar(SubGhzSpectrum* s, int y0, int y1) {
+    const int w = s->w;
+    const uint32_t now = furi_get_tick();
+    const uint32_t hold_ticks = furi_ms_to_ticks(BAND_ACTIVE_HOLD_MS);
+    for(size_t i = 0; i < NBANDS; i++) {
+        const int xa = (int)(i * (size_t)w / NBANDS);
+        const int xb = (int)((i + 1) * (size_t)w / NBANDS);
+        fb_vline(s, xb - 1, y0, y1, COL_GRID);
+
+        const bool recent = s->band_seen_ms[i] != 0 && (now - s->band_seen_ms[i]) < hold_ticks;
+        const uint16_t label_col = recent ? COL_HOLD : COL_TEXT_DIM;
+
+        char lbl[8];
+        fmt_mhz(subghz_spectrum_bands[i], lbl, sizeof(lbl), 0); // integer MHz
+        const int lw = text_width(lbl, 1);
+        fb_text(s, xa + (xb - xa - lw) / 2, y0 + 1, lbl, label_col, 1);
+
+        // Activity underline for a recently active band.
+        if(recent) fb_fillrect(s, xa + 2, y1 - 3, (xb - xa) - 4, 2, COL_HOLD);
+
+        // Outline the band currently being swept.
+        if((int)i == s->cur_band) {
+            fb_hline(s, xa, xb - 1, y0, COL_CURSOR);
+            fb_hline(s, xa, xb - 1, y1 - 1, COL_CURSOR);
+            fb_vline(s, xa, y0, y1 - 1, COL_CURSOR);
+            fb_vline(s, xb - 1, y0, y1 - 1, COL_CURSOR);
+        }
+    }
+}
+
 /* ---- frame composition (holds the data mutex) --------------------------- */
 static void subghz_spectrum_compose(SubGhzSpectrum* s) {
     const int w = s->w;
     const int h = s->h;
     const int spec_h = (h * 56) / 100; // spectrum region height (~95)
-    const int plot_top = 16; // reserve top strip for the readout
+    const bool auto_mode = (s->adjust == SubGhzSpectrumAdjustAuto);
+    // Auto mode reserves an extra strip under the readout for the band bar.
+    const int plot_top = auto_mode ? 30 : 16; // reserve top strip for the readout
     const int plot_bottom = spec_h - 10; // reserve bottom strip for freq ticks
     const int plot_h = plot_bottom - plot_top;
     const int wf_h = h - spec_h;
@@ -289,9 +402,9 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
         }
     }
 
-    // --- cursor ---
+    // --- cursor (hidden in auto mode: Left/Right don't move it there) ---
     int cx = s->cursor * (w - 1) / (BINS - 1);
-    fb_vline(s, cx, plot_top, plot_bottom, COL_CURSOR);
+    if(!auto_mode) fb_vline(s, cx, plot_top, plot_bottom, COL_CURSOR);
 
     // --- waterfall ---
     for(int r = 0; r < wf_h && r < WF_ROWS_MAX; r++) {
@@ -300,25 +413,56 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
         for(int x = 0; x < w; x++) {
             int bin = x * BINS / w;
             if(bin >= BINS) bin = BINS - 1;
-            fb_px(s, x, y, magma(row[bin] / 255.0f));
+            fb_px(s, x, y, s->magma_lut[row[bin]]);
         }
     }
     // cursor column marker in the waterfall
-    fb_vline(s, cx, spec_h, h - 1, COL_CURSOR);
+    if(!auto_mode) fb_vline(s, cx, spec_h, h - 1, COL_CURSOR);
 
     // --- text: readout ---
     char buf[40];
     const char* tag = (s->adjust == SubGhzSpectrumAdjustCursor) ? "CUR" :
                       (s->adjust == SubGhzSpectrumAdjustCenter) ? "CEN" :
-                                                                  "SPN";
+                      (s->adjust == SubGhzSpectrumAdjustSpan)   ? "SPN" :
+                                                                  "AUTO";
     fb_text(s, 2, 2, tag, COL_CURSOR, 2);
+    if(auto_mode) {
+        // Band overview between the readout line and the plot.
+        subghz_spectrum_draw_band_bar(s, 17, plot_top - 1);
+    }
+    /* Secondary readout starts past the widest tag ("AUTO" = 4 chars * 12 px),
+     * so it never overlaps the mode tag. */
+    const int readout_x = 2 + 4 * 12 + 4;
+    if(s->radio_fail) {
+        // Distinguish a dead radio from an empty band; both look flat otherwise.
+        fb_text(s, readout_x, 2, "NO RX", COL_ERROR, 2);
+    } else if(s->has_data) {
+        // Strongest max-hold bin, so a signal is found without walking the cursor.
+        int pk = 0;
+        for(int i = 1; i < BINS; i++) {
+            if(s->peak[i] > s->peak[pk]) pk = i;
+        }
+        if(s->peak[pk] > RSSI_FLOOR + PEAK_REPORT_MARGIN_DB) {
+            char pbuf[16];
+            char line[32];
+            fmt_mhz(f_start + (uint32_t)pk * stepf + stepf / 2, pbuf, sizeof(pbuf), 2);
+            snprintf(line, sizeof(line), "PK %s %ddB", pbuf, (int)s->peak[pk]);
+            fb_text(s, readout_x, 4, line, COL_HOLD, 1);
+        }
+    }
 
     char fbuf[16];
-    fmt_mhz(cursor_freq, fbuf, sizeof(fbuf), 2);
-    if(s->has_data) {
-        snprintf(buf, sizeof(buf), "f=%s P=%ddB", fbuf, (int)s->rssi[s->cursor]);
-    } else {
+    if(auto_mode) {
+        // No cursor in auto mode; show the band currently being swept.
+        fmt_mhz(s->center, fbuf, sizeof(fbuf), 2);
         snprintf(buf, sizeof(buf), "f=%s", fbuf);
+    } else {
+        fmt_mhz(cursor_freq, fbuf, sizeof(fbuf), 2);
+        if(s->has_data) {
+            snprintf(buf, sizeof(buf), "f=%s P=%ddB", fbuf, (int)s->rssi[s->cursor]);
+        } else {
+            snprintf(buf, sizeof(buf), "f=%s", fbuf);
+        }
     }
     fb_text(s, w - text_width(buf, 1) - 2, 4, buf, COL_TEXT, 1);
 
@@ -333,15 +477,14 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
 
 /* ---- push composed frame to the panel in DMA stripes -------------------- */
 static void subghz_spectrum_blit(SubGhzSpectrum* s) {
-    const int w = s->w;
-    const int h = s->h;
-    furi_hal_spi_bus_lock();
-    for(int y0 = 0; y0 < h; y0 += STRIPE_H) {
-        int rows = (y0 + STRIPE_H > h) ? (h - y0) : STRIPE_H;
-        memcpy(s->stripe, &s->fb[(size_t)y0 * w], (size_t)rows * w * sizeof(uint16_t));
-        esp_lcd_panel_draw_bitmap(s->panel, 0, y0, w, y0 + rows, s->stripe);
+    // The HAL bounces the PSRAM frame through its own boot-time DMA stripe, so
+    // the Spectrum needs no internal DMA RAM of its own (that allocation was the
+    // one that failed with "Not enough memory" once qFlipper/USB had taken it).
+    // It waits for each stripe's DMA and locks the shared bus per stripe, so
+    // SD/radio traffic can interleave.
+    if(!furi_hal_display_blit_buffered(0, 0, s->w, s->h, s->fb)) {
+        FURI_LOG_E(TAG, "Display blit failed (%ux%u)", s->w, s->h);
     }
-    furi_hal_spi_bus_unlock();
 }
 
 static int32_t subghz_spectrum_render_thread(void* context) {
@@ -350,16 +493,33 @@ static int32_t subghz_spectrum_render_thread(void* context) {
     s->gui = furi_record_open(RECORD_GUI);
     gui_direct_draw_acquire(s->gui);
     s->panel = furi_hal_display_get_panel_handle();
+    if(!s->panel) FURI_LOG_E(TAG, "No LCD panel handle: nothing can be drawn");
+    uint32_t frames = 0;
 
     while(s->running) {
-        if(s->dirty && s->panel && s->fb && s->stripe && s->wf) {
+        /* Screen off (backlight timeout, panel in SLPIN): nothing is visible, so
+         * do not compose ~150 KB and DMA it over the bus the CC1101 sweeps on.
+         * That traffic took the shared SPI lock per stripe and slowed the sweep
+         * while the user could not even see it. Keep the frame marked dirty so
+         * the first frame after the panel wakes is a full, current one. */
+        if(furi_hal_display_is_asleep()) {
+            s->dirty = true;
+            furi_delay_ms(50);
+            continue;
+        }
+        if(s->dirty && s->panel && s->fb && s->wf) {
             furi_mutex_acquire(s->mutex, FuriWaitForever);
             s->dirty = false;
             subghz_spectrum_compose(s);
             furi_mutex_release(s->mutex);
             subghz_spectrum_blit(s);
+            if(frames++ == 0) FURI_LOG_I(TAG, "First frame drawn (%ux%u)", s->w, s->h);
         }
-        furi_delay_ms(25);
+        /* Poll faster than the ~9 Hz sweep rate so a finished sweep and any input
+         * (cursor, band change) reach the panel within one short tick instead of
+         * up to 25 ms later. A redraw still only happens when something changed
+         * (the dirty flag), so this costs a bool check, not extra blits. */
+        furi_delay_ms(12);
     }
 
     gui_direct_draw_release(s->gui);
@@ -376,6 +536,7 @@ static void subghz_spectrum_reset_data(SubGhzSpectrum* s) {
     }
     memset(s->wf, 0, (size_t)WF_ROWS_MAX * BINS);
     s->has_data = false;
+    s->radio_fail = false;
 }
 
 static size_t subghz_span_index(uint32_t span) {
@@ -390,32 +551,84 @@ static void subghz_spectrum_input_callback(const void* value, void* context) {
     const InputEvent* event = value;
     if(!s->running) return;
 
-    // Back (side key short, or encoder long) -> exit
-    if(event->key == InputKeyBack && event->type == InputTypePress) {
-        s->running = false;
-        if(s->callback) s->callback(SubGhzCustomEventViewSpectrumBack, s->context);
-        return;
-    }
+    // Back is handled by subghz_spectrum_view_input() instead: the GUI keeps
+    // forwarding keys to the placeholder view, and leaving from here raced
+    // that delivery - the rest of the Back sequence then reached the previous
+    // scene and navigated back a second time.
+    if(event->key == InputKeyBack) return;
 
-    // OK short -> cycle the active control
+    // OK short -> cycle the active control (CUR -> CEN -> SPN -> AUTO)
     if(event->key == InputKeyOk && event->type == InputTypeShort) {
+        bool enter_auto = false;
+        uint32_t auto_center = 0, auto_span = 0;
         furi_mutex_acquire(s->mutex, FuriWaitForever);
         s->adjust = (s->adjust + 1) % SubGhzSpectrumAdjustMAX;
+        if(s->adjust == SubGhzSpectrumAdjustAuto) {
+            // Start the hop from the nearest band to where the user was looking.
+            s->cur_band = subghz_spectrum_band_index(s->center);
+            s->center = subghz_spectrum_bands[s->cur_band];
+            s->auto_parked = false;
+            s->auto_quiet = 0;
+            subghz_spectrum_reset_data(s);
+            enter_auto = true;
+            auto_center = s->center;
+            auto_span = s->span;
+        }
         s->dirty = true;
         furi_mutex_release(s->mutex);
+        if(enter_auto) subghz_spectrum_worker_set_window(s->worker, auto_center, auto_span);
         return;
     }
 
-    bool move = (event->type == InputTypePress) || (event->type == InputTypeRepeat);
     bool is_dir = (event->key == InputKeyUp) || (event->key == InputKeyDown) ||
                   (event->key == InputKeyLeft) || (event->key == InputKeyRight);
-    if(!move || !is_dir) return;
+    if(!is_dir) return;
+    // Keep the legacy-board click filter here; Paradoxt now emits one physical
+    // Press/Release pair and does not need its synthetic-echo path.
+    if(subghz_click_echo_filter(&s->click_echo, event)) return;
+    bool move = (event->type == InputTypePress) || (event->type == InputTypeRepeat);
+    if(!move) return;
 
     int dir = (event->key == InputKeyDown || event->key == InputKeyRight) ? 1 : -1;
     bool changed_window = false;
     uint32_t new_center = 0, new_span = 0;
 
     furi_mutex_acquire(s->mutex, FuriWaitForever);
+    if(event->key == InputKeyUp || event->key == InputKeyDown) {
+        // Up/Down: next/previous band, whatever control is active.
+        const bool up = event->key == InputKeyUp;
+        uint32_t target = s->center;
+        if(up) {
+            for(size_t i = 0; i < COUNT_OF(subghz_spectrum_bands); i++) {
+                if(subghz_spectrum_bands[i] > s->center) {
+                    target = subghz_spectrum_bands[i];
+                    break;
+                }
+            }
+        } else {
+            for(size_t i = COUNT_OF(subghz_spectrum_bands); i-- > 0;) {
+                if(subghz_spectrum_bands[i] < s->center) {
+                    target = subghz_spectrum_bands[i];
+                    break;
+                }
+            }
+        }
+        if(target != s->center) {
+            s->center = target;
+            subghz_spectrum_reset_data(s);
+            changed_window = true;
+        }
+        // In auto mode a manual band pick re-seeds the hop from here.
+        s->cur_band = subghz_spectrum_band_index(s->center);
+        s->auto_parked = false;
+        s->auto_quiet = 0;
+        new_center = s->center;
+        new_span = s->span;
+        s->dirty = true;
+        furi_mutex_release(s->mutex);
+        if(changed_window) subghz_spectrum_worker_set_window(s->worker, new_center, new_span);
+        return;
+    }
     switch(s->adjust) {
     case SubGhzSpectrumAdjustCursor: {
         int c = (int)s->cursor + dir;
@@ -464,8 +677,30 @@ static void subghz_spectrum_sweep_callback(
     uint32_t center,
     uint32_t span) {
     SubGhzSpectrum* s = context;
+    size_t strongest_bin = 0;
+    float strongest_rssi = RSSI_FLOOR;
+    bool any_measured = false;
+    for(size_t i = 0; i < BINS; i++) {
+        // The worker marks bins it could not measure (SPI error, radio not in RX,
+        // outside the CC1101 bands) with exactly -127 dBm.
+        if(rssi[i] != -127.0f) any_measured = true;
+        if(rssi[i] > strongest_rssi) {
+            strongest_rssi = rssi[i];
+            strongest_bin = i;
+        }
+    }
+
     furi_mutex_acquire(s->mutex, FuriWaitForever);
-    if(s->wf && s->center == center && s->span == span) {
+    if(s->wf && s->center == center && s->span == span && !any_measured) {
+        // Do not scroll an all-floor row into the waterfall: it would look like a
+        // quiet band while the radio is actually dead. A window centered outside
+        // the CC1101 bands is empty by design and is not flagged.
+        if(furi_hal_subghz_is_frequency_valid(center) && !s->radio_fail) {
+            s->radio_fail = true;
+            s->dirty = true;
+        }
+    } else if(s->wf && s->center == center && s->span == span) {
+        s->radio_fail = false;
         // scroll waterfall down (row 0 = newest)
         memmove(&s->wf[BINS], &s->wf[0], (size_t)(WF_ROWS_MAX - 1) * BINS);
         for(int i = 0; i < BINS; i++) {
@@ -477,7 +712,52 @@ static void subghz_spectrum_sweep_callback(
         s->has_data = true;
         s->dirty = true;
     }
+
+    /* Auto band scanner: record this band's activity, park on an active band so
+     * the user can read it, and otherwise hop to the next band. Decided under
+     * the mutex; the worker window change is requested after releasing it. */
+    bool auto_hop = false;
+    uint32_t auto_center = 0, auto_span = span;
+    if(s->adjust == SubGhzSpectrumAdjustAuto && s->center == center && s->span == span) {
+        const int b = subghz_spectrum_band_index(center);
+        const bool active =
+            any_measured && strongest_rssi > (RSSI_FLOOR + AUTO_DETECT_MARGIN_DB);
+        s->cur_band = b;
+        s->band_peak[b] = any_measured ? strongest_rssi : RSSI_FLOOR;
+        if(active) {
+            s->band_seen_ms[b] = furi_get_tick();
+            s->auto_parked = true;
+            s->auto_quiet = 0;
+        } else if(s->auto_parked) {
+            if(++s->auto_quiet >= AUTO_QUIET_SWEEPS) {
+                s->auto_parked = false;
+                s->auto_quiet = 0;
+            }
+        }
+        if(!s->auto_parked) {
+            const int nb = (b + 1) % (int)NBANDS;
+            s->cur_band = nb;
+            s->center = subghz_spectrum_bands[nb];
+            subghz_spectrum_reset_data(s);
+            auto_center = s->center;
+            auto_hop = true;
+        }
+        s->dirty = true;
+    }
     furi_mutex_release(s->mutex);
+
+    if(auto_hop) subghz_spectrum_worker_set_window(s->worker, auto_center, auto_span);
+
+    if(strongest_rssi > RSSI_FLOOR + 8.0f) {
+        const float strength = subghz_norm(strongest_rssi);
+        const float tone_hz = 300.0f + (1700.0f * (float)strongest_bin / (float)(BINS - 1));
+        const float volume = 0.15f + 0.55f * strength;
+        notification_message_tone(s->notification, tone_hz, volume);
+        s->audio_tone_active = true;
+    } else if(s->audio_tone_active) {
+        notification_message_tone(s->notification, 0.0f, 0.0f);
+        s->audio_tone_active = false;
+    }
 }
 
 /* ---- lifecycle ---------------------------------------------------------- */
@@ -490,8 +770,9 @@ void subghz_spectrum_set_callback(
     instance->context = context;
 }
 
-void subghz_spectrum_start(SubGhzSpectrum* instance) {
+bool subghz_spectrum_start(SubGhzSpectrum* instance) {
     furi_assert(instance);
+    subghz_spectrum_set_startup_failed(instance, false);
 
     instance->w = furi_hal_display_get_h_res();
     instance->h = furi_hal_display_get_v_res();
@@ -499,11 +780,62 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
     instance->fb =
         heap_caps_malloc((size_t)instance->w * instance->h * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
     instance->wf = heap_caps_malloc((size_t)WF_ROWS_MAX * BINS, MALLOC_CAP_SPIRAM);
-    instance->stripe =
-        heap_caps_malloc((size_t)instance->w * STRIPE_H * sizeof(uint16_t), MALLOC_CAP_DMA);
 
-    instance->center = 433920000UL;
+    /* No DMA-capable buffer of our own: furi_hal_display_blit_buffered() bounces
+     * the PSRAM frame through the display HAL's stripe, allocated once at boot.
+     * A private stripe from MALLOC_CAP_DMA is what made Spectrum fail with "Not
+     * enough memory" whenever internal RAM was used up (qFlipper/USB composite,
+     * Wi-Fi, BT), however far the stripe was shrunk. */
+    if(!instance->fb || !instance->wf) {
+        FURI_LOG_E(
+            TAG,
+            "Spectrum buffers unavailable: PSRAM free=%u largest=%u",
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+        heap_caps_free(instance->fb);
+        heap_caps_free(instance->wf);
+        instance->fb = NULL;
+        instance->wf = NULL;
+        subghz_spectrum_set_startup_failed(instance, true);
+        return false;
+    }
+
+    /* Two thread control blocks and a few mutexes must live in internal RAM, and
+     * their allocators abort the firmware when that fails (furi_thread_alloc has
+     * no NULL path). Before the private stripe was dropped, the stripe allocation
+     * above refused to start in this situation; keep refusing gracefully instead
+     * of crashing: probe for the headroom first. */
+    void* internal_probe =
+        heap_caps_malloc(SPECTRUM_INTERNAL_HEADROOM, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if(!internal_probe) {
+        FURI_LOG_E(
+            TAG,
+            "Not enough internal RAM for the sweep/render threads: free=%u largest=%u",
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        heap_caps_free(instance->fb);
+        heap_caps_free(instance->wf);
+        instance->fb = NULL;
+        instance->wf = NULL;
+        subghz_spectrum_set_startup_failed(instance, true);
+        return false;
+    }
+    heap_caps_free(internal_probe);
+
+    // Precompute the magma colormap once: the waterfall samples it per pixel
+    // from an 8-bit power value, so a 256-entry LUT replaces ~24k float ops per
+    // frame with a table lookup (bit-identical output).
+    for(int i = 0; i < 256; i++) {
+        instance->magma_lut[i] = magma((float)i / 255.0f);
+    }
+
+    instance->center = (furi_hal_subghz_is_frequency_valid(instance->start_center) &&
+                        instance->start_center >= CENTER_MIN &&
+                        instance->start_center <= CENTER_MAX) ?
+                           instance->start_center :
+                           CENTER_DEFAULT;
     instance->span = 6000000UL;
+    memset(&instance->click_echo, 0, sizeof(instance->click_echo));
     instance->cursor = BINS / 2;
     instance->adjust = SubGhzSpectrumAdjustCursor;
     subghz_spectrum_reset_data(instance);
@@ -511,9 +843,19 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
 
     // Worker
     instance->worker = subghz_spectrum_worker_alloc();
+    if(!instance->worker) {
+        FURI_LOG_E(TAG, "Unable to allocate spectrum worker");
+        heap_caps_free(instance->fb);
+        heap_caps_free(instance->wf);
+        instance->fb = NULL;
+        instance->wf = NULL;
+        subghz_spectrum_set_startup_failed(instance, true);
+        return false;
+    }
     subghz_spectrum_worker_set_window(instance->worker, instance->center, instance->span);
     subghz_spectrum_worker_set_callback(
         instance->worker, subghz_spectrum_sweep_callback, instance);
+    instance->notification = furi_record_open(RECORD_NOTIFICATION);
 
     // Input
     instance->input = furi_record_open(RECORD_INPUT_EVENTS);
@@ -524,9 +866,43 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
     instance->running = true;
     instance->render_thread = furi_thread_alloc_ex(
         "SubGhzSpectrumRender", 4096, subghz_spectrum_render_thread, instance);
+    if(!instance->render_thread) {
+        FURI_LOG_E(TAG, "Unable to allocate spectrum render thread");
+        instance->running = false;
+        furi_pubsub_unsubscribe(instance->input, instance->input_sub);
+        instance->input_sub = NULL;
+        furi_record_close(RECORD_INPUT_EVENTS);
+        instance->input = NULL;
+        furi_record_close(RECORD_NOTIFICATION);
+        instance->notification = NULL;
+        subghz_spectrum_worker_free(instance->worker);
+        instance->worker = NULL;
+        heap_caps_free(instance->fb);
+        heap_caps_free(instance->wf);
+        instance->fb = NULL;
+        instance->wf = NULL;
+        subghz_spectrum_set_startup_failed(instance, true);
+        return false;
+    }
     furi_thread_start(instance->render_thread);
 
+    furi_hal_power_light_sleep_inhibit_enter();
+    instance->light_sleep_inhibited = true;
     subghz_spectrum_worker_start(instance->worker);
+    FURI_LOG_I(
+        TAG,
+        "Started: center=%lu Hz span=%lu Hz panel=%s internal free=%u largest=%u",
+        (unsigned long)instance->center,
+        (unsigned long)instance->span,
+        furi_hal_display_get_panel_handle() ? "ok" : "MISSING",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    return true;
+}
+
+void subghz_spectrum_set_start_frequency(SubGhzSpectrum* instance, uint32_t frequency) {
+    furi_assert(instance);
+    instance->start_center = frequency;
 }
 
 void subghz_spectrum_stop(SubGhzSpectrum* instance) {
@@ -536,6 +912,14 @@ void subghz_spectrum_stop(SubGhzSpectrum* instance) {
     // Stop sweeps first (frees the SPI bus for the final render teardown).
     if(instance->worker && subghz_spectrum_worker_is_running(instance->worker)) {
         subghz_spectrum_worker_stop(instance->worker);
+    }
+    if(instance->audio_tone_active && instance->notification) {
+        notification_message_tone(instance->notification, 0.0f, 0.0f);
+        instance->audio_tone_active = false;
+    }
+    if(instance->light_sleep_inhibited) {
+        furi_hal_power_light_sleep_inhibit_exit();
+        instance->light_sleep_inhibited = false;
     }
 
     // Stop the render loop; the thread releases direct-draw before it returns.
@@ -557,37 +941,74 @@ void subghz_spectrum_stop(SubGhzSpectrum* instance) {
         subghz_spectrum_worker_free(instance->worker);
         instance->worker = NULL;
     }
+    if(instance->notification) {
+        furi_record_close(RECORD_NOTIFICATION);
+        instance->notification = NULL;
+    }
 
     if(instance->fb) {
-        free(instance->fb);
+        heap_caps_free(instance->fb);
         instance->fb = NULL;
     }
     if(instance->wf) {
-        free(instance->wf);
+        heap_caps_free(instance->wf);
         instance->wf = NULL;
-    }
-    if(instance->stripe) {
-        free(instance->stripe);
-        instance->stripe = NULL;
     }
 }
 
 /* Blank placeholder view — the color frame is drawn via direct display
  * takeover, so this view only exists to keep the ViewDispatcher happy. */
 static void subghz_spectrum_view_draw(Canvas* canvas, void* model) {
-    UNUSED(model);
+    const SubGhzSpectrumViewModel* view_model = model;
+    if(!canvas || !view_model || !view_model->startup_failed) return;
+
     canvas_clear(canvas);
     canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str_aligned(canvas, 64, 32, AlignCenter, AlignCenter, "RF Spectrum");
+    canvas_draw_str_aligned(
+        canvas,
+        64,
+        26,
+        AlignCenter,
+        AlignCenter,
+        "Spectrum unavailable");
+    canvas_set_font(canvas, FontSecondary);
+    canvas_draw_str_aligned(canvas, 64, 42, AlignCenter, AlignCenter, "Not enough memory");
+}
+
+/* Runs on the ViewDispatcher thread, so the exit event is queued strictly
+ * after this key event: the remaining events of the Back sequence still find
+ * this view as their target and cannot trigger a second navigation. */
+static bool subghz_spectrum_view_input(InputEvent* event, void* context) {
+    SubGhzSpectrum* instance = context;
+    if(!instance->running) {
+        // Startup failed (or already leaving): let the dispatcher navigate.
+        return false;
+    }
+    if(event->key == InputKeyBack &&
+       (event->type == InputTypeShort || event->type == InputTypeLong)) {
+        instance->running = false;
+        if(instance->callback) {
+            instance->callback(SubGhzCustomEventViewSpectrumBack, instance->context);
+        }
+    }
+    // Every other key is handled by the input pubsub subscription.
+    return true;
 }
 
 SubGhzSpectrum* subghz_spectrum_alloc(void) {
     SubGhzSpectrum* instance = malloc(sizeof(SubGhzSpectrum));
+    furi_check(instance);
     memset(instance, 0, sizeof(SubGhzSpectrum));
     instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    furi_check(instance->mutex);
     instance->view = view_alloc();
+    furi_check(instance->view);
+    view_allocate_model(
+        instance->view, ViewModelTypeLocking, sizeof(SubGhzSpectrumViewModel));
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, subghz_spectrum_view_draw);
+    view_set_input_callback(instance->view, subghz_spectrum_view_input);
+    subghz_spectrum_set_startup_failed(instance, false);
     return instance;
 }
 

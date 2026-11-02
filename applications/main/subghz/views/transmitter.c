@@ -5,11 +5,13 @@
 #include <gui/elements.h>
 
 #include <lib/subghz/blocks/custom_btn.h>
+#include "../helpers/subghz_click_echo.h"
 
 struct SubGhzViewTransmitter {
     View* view;
     SubGhzViewTransmitterCallback callback;
     void* context;
+    SubGhzClickEcho click_echo;
 };
 
 typedef struct {
@@ -121,7 +123,8 @@ bool subghz_view_transmitter_input(InputEvent* event, void* context) {
     SubGhzViewTransmitter* subghz_transmitter = context;
     bool can_be_sent = false;
 
-    if(event->key == InputKeyBack && event->type == InputTypeLong) {
+    if(event->key == InputKeyBack &&
+       (event->type == InputTypeShort || event->type == InputTypeLong)) {
         // Reset view model
         with_view_model(
             subghz_transmitter->view,
@@ -135,8 +138,17 @@ bool subghz_view_transmitter_input(InputEvent* event, void* context) {
                 model->draw_temp_button = false;
             },
             false);
+        if(subghz_transmitter->callback) {
+            subghz_transmitter->callback(
+                SubGhzCustomEventViewTransmitterBack, subghz_transmitter->context);
+            return true;
+        }
         return false;
     } // Finish "Back" key processing
+
+    // TX starts on Press and stops on Release: drop the synthetic second click
+    // some boards append, or each click would transmit twice.
+    if(subghz_click_echo_filter(&subghz_transmitter->click_echo, event)) return true;
 
     with_view_model(
         subghz_transmitter->view,
@@ -146,7 +158,7 @@ bool subghz_view_transmitter_input(InputEvent* event, void* context) {
                 can_be_sent = true;
             }
         },
-        true);
+        false);
 
     if(can_be_sent) {
         if(event->key == InputKeyOk && event->type == InputTypePress) {
@@ -168,6 +180,8 @@ bool subghz_view_transmitter_input(InputEvent* event, void* context) {
             return true;
         } // Finish "OK" key processing
 
+#if defined(BOARD_SUBGHZ_DPAD_CUSTOM_BUTTONS) && BOARD_SUBGHZ_DPAD_CUSTOM_BUTTONS
+        // Boards with a real D-pad: the arrows send the remote's custom buttons.
         if(subghz_custom_btn_is_allowed()) {
             uint8_t temp_btn_id;
             if(event->key == InputKeyUp) {
@@ -209,6 +223,10 @@ bool subghz_view_transmitter_input(InputEvent* event, void* context) {
                 return true;
             }
         }
+#else
+        // Encoder/touch boards (Up/Down come from scrolling) and Smoochie (arrows
+        // are navigation): only the center/OK button transmits.
+#endif
     }
 
     return true;

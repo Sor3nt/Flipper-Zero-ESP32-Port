@@ -169,7 +169,7 @@ typedef void (*SubGhzDeviceCC1101ExtCaptureCallback)(bool level, uint32_t durati
  * @param      callback  SubGhzDeviceCC1101ExtCaptureCallback
  * @param      context   callback context
  */
-void subghz_device_cc1101_ext_start_async_rx(
+bool subghz_device_cc1101_ext_start_async_rx(
     SubGhzDeviceCC1101ExtCaptureCallback callback,
     void* context);
 

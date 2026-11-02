@@ -35,6 +35,7 @@ typedef enum {
     BtMessageTypeGetSettings,
     BtMessageTypeSetSettings,
     BtMessageTypeReloadKeysSettings,
+    BtMessageTypeGapEvent,
 } BtMessageType;
 
 typedef struct {
@@ -52,6 +53,7 @@ typedef union {
     } profile;
     FuriHalBleProfileParams profile_params;
     BtKeyStorageUpdateData key_storage_data;
+    GapEvent gap_event;
     BtSettings* settings;
     const BtSettings* csettings;
 } BtMessageData;
@@ -88,7 +90,6 @@ struct Bt {
     FuriEventFlag* api_event;
     BtStatusChangedCallback status_changed_cb;
     void* status_changed_ctx;
-    uint32_t pin;
     bool suppress_pin_screen;
 };
 

@@ -68,19 +68,19 @@ def _match(app_dir, pattern):
     out = []
     if os.path.isdir(full):
         for m in _walk_sources(full):
-            out.append(os.path.relpath(m, app_dir))
+            out.append(os.path.relpath(m, app_dir).replace(os.sep, "/"))
     elif "/" not in pattern:
         # bare filename (maybe wildcard): match by basename anywhere in the tree
         for m in _walk_sources(app_dir):
             if fnmatch.fnmatch(os.path.basename(m), pattern):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace(os.sep, "/"))
     else:
         for m in glob.glob(full, recursive=True):
             if os.path.isdir(m):
                 for f in _walk_sources(m):
-                    out.append(os.path.relpath(f, app_dir))
+                    out.append(os.path.relpath(f, app_dir).replace(os.sep, "/"))
             elif os.path.isfile(m) and m.endswith(_SRC_EXTS):
-                out.append(os.path.relpath(m, app_dir))
+                out.append(os.path.relpath(m, app_dir).replace(os.sep, "/"))
     return out
 
 
@@ -182,7 +182,9 @@ def main():
             out.append(f"PLUGINDEF\t{appid}\t{str(d).replace(chr(92) + chr(34), chr(34))}")
 
     if out:
-        sys.stdout.write("\n".join(out) + "\n")
+        # Bytes, not text: Windows text-mode stdout would emit CRLF and bash `read` would
+        # keep the trailing \r in every path.
+        sys.stdout.buffer.write(("\n".join(out) + "\n").encode())
     return 0
 
 

@@ -34,6 +34,7 @@ typedef struct {
 } BadUsbState;
 
 typedef struct BadUsbScript BadUsbScript;
+typedef void (*BadUsbScriptStoppedCallback)(void* context);
 
 BadUsbScript* bad_usb_script_open(
     FuriString* file_path,
@@ -42,6 +43,13 @@ BadUsbScript* bad_usb_script_open(
     bool load_id_cfg);
 
 void bad_usb_script_close(BadUsbScript* bad_usb);
+
+void bad_usb_script_stop_async(
+    BadUsbScript* bad_usb,
+    BadUsbScriptStoppedCallback callback,
+    void* context);
+
+void bad_usb_script_switch_interface(BadUsbScript* bad_usb, BadUsbHidInterface interface);
 
 void bad_usb_script_set_keyboard_layout(BadUsbScript* bad_usb, FuriString* layout_path);
 

@@ -417,6 +417,9 @@ void furi_thread_yield(void);
  */
 uint32_t furi_thread_flags_set(FuriThreadId thread_id, uint32_t flags);
 
+/** Set thread flags from ISR context without event-loop notification. */
+bool furi_thread_flags_set_from_isr(FuriThreadId thread_id, uint32_t flags);
+
 /**
  * @brief Clear the thread flags of the current FuriThread.
  *

@@ -298,6 +298,13 @@ void infrared_show_error_message(const InfraredApp* infrared, const char* fmt, .
     _ATTRIBUTE((__format__(__printf__, 2, 3)));
 
 /**
+ * @brief Explain why a transmission could not start (busy external pin or HAL failure).
+ *
+ * @param[in] infrared pointer to the application instance.
+ */
+void infrared_show_tx_error(const InfraredApp* infrared);
+
+/**
  * @brief Set which pin will be used to transmit infrared signals.
  *
  * Setting tx_pin to InfraredTxPinInternal will enable transmission via
@@ -332,6 +339,9 @@ void infrared_save_settings(InfraredApp* infrared);
  * @param[in] received_signal pointer to the received signal.
  */
 void infrared_signal_received_callback(void* context, InfraredWorkerSignal* received_signal);
+
+/** Worker thread -> app: the receiver died mid-session (posts InfraredCustomEventTypeRxError). */
+void infrared_rx_error_callback(void* context);
 
 /**
  * @brief Common text input callback.

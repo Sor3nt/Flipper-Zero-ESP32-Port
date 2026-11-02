@@ -1,8 +1,14 @@
 #include "expansion_settings_app.h"
 
+#ifdef ESP_PLATFORM
+#include <boards/board.h>
+#endif
+
 static const char* const expansion_uart_text[] = {
     "USART",
+#if !defined(BOARD_HAS_EXPANSION_UART) || !BOARD_HAS_EXPANSION_UART
     "LPUART",
+#endif
     "None",
 };
 
@@ -10,11 +16,17 @@ static void expansion_settings_app_uart_changed(VariableItem* item) {
     ExpansionSettingsApp* app = variable_item_get_context(item);
     const uint8_t index = variable_item_get_current_value_index(item);
     variable_item_set_current_value_text(item, expansion_uart_text[index]);
-    app->settings.uart_index = index;
 
-    if(index < FuriHalSerialIdMax) {
-        expansion_set_listen_serial(app->expansion, index);
+    if(index == 0) {
+        app->settings.uart_index = FuriHalSerialIdUsart;
+        expansion_set_listen_serial(app->expansion, FuriHalSerialIdUsart);
+#if !defined(BOARD_HAS_EXPANSION_UART) || !BOARD_HAS_EXPANSION_UART
+    } else if(index == 1) {
+        app->settings.uart_index = FuriHalSerialIdLpuart;
+        expansion_set_listen_serial(app->expansion, FuriHalSerialIdLpuart);
+#endif
     } else {
+        app->settings.uart_index = FuriHalSerialIdMax;
         expansion_disable(app->expansion);
     }
 }
@@ -26,8 +38,19 @@ static uint32_t expansion_settings_app_exit(void* context) {
 
 static ExpansionSettingsApp* expansion_settings_app_alloc(void) {
     ExpansionSettingsApp* app = malloc(sizeof(ExpansionSettingsApp));
+    furi_check(app);
 
     expansion_settings_load(&app->settings);
+#if defined(BOARD_HAS_EXPANSION_UART) && BOARD_HAS_EXPANSION_UART
+    if(app->settings.uart_index != FuriHalSerialIdUsart &&
+       app->settings.uart_index != FuriHalSerialIdMax) {
+#else
+    if(app->settings.uart_index > FuriHalSerialIdMax) {
+#endif
+        FURI_LOG_W("ExpansionSettingsApp", "Unsupported UART setting; using None");
+        app->settings.uart_index = FuriHalSerialIdMax;
+        expansion_settings_save(&app->settings);
+    }
 
     app->gui = furi_record_open(RECORD_GUI);
     app->expansion = furi_record_open(RECORD_EXPANSION);
@@ -41,14 +64,17 @@ static ExpansionSettingsApp* expansion_settings_app_alloc(void) {
 
     VariableItem* item;
     uint8_t value_index;
-
     item = variable_item_list_add(
         app->var_item_list,
         "Listen UART",
         COUNT_OF(expansion_uart_text),
         expansion_settings_app_uart_changed,
         app);
+#if defined(BOARD_HAS_EXPANSION_UART) && BOARD_HAS_EXPANSION_UART
+    value_index = app->settings.uart_index == FuriHalSerialIdUsart ? 0 : 1;
+#else
     value_index = app->settings.uart_index;
+#endif
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, expansion_uart_text[value_index]);
 

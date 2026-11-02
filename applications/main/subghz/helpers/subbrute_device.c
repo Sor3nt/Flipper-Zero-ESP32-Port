@@ -29,16 +29,14 @@ SubBruteDevice* subbrute_device_alloc(const SubGhzDevice* radio_device) {
 void subbrute_device_free(SubBruteDevice* instance) {
     furi_assert(instance);
 
-    // I don't know how to free this
-    // instance->decoder_result = NULL;
-    if(instance->decoder_result != NULL) {
-        free(instance->decoder_result);
-        instance->decoder_result = NULL;
-    }
+    // decoder_result is owned by the temporary SubGhzReceiver used during
+    // protocol validation; never free it independently.
+    instance->decoder_result = NULL;
 
     if(instance->receiver != NULL) {
         subghz_receiver_free(instance->receiver);
         instance->receiver = NULL;
+        instance->decoder_result = NULL;
     }
 
     subghz_environment_free(instance->environment);
@@ -203,6 +201,7 @@ SubBruteFileResult subbrute_device_attack_set(
 
     subghz_receiver_free(instance->receiver);
     instance->receiver = NULL;
+    instance->decoder_result = NULL;
 
     if(protocol_check_result != SubBruteFileResultOk) {
         return SubBruteFileResultProtocolNotFound;

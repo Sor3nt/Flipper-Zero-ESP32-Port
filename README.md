@@ -327,6 +327,17 @@ reconnecting USB reports the sleep accumulated during the battery window. The
 input service blocks while light-sleeping, so lines appear again after waking. Leave
 the option off for normal builds; it adds a small always-on callback.
 
+## Contributing
+
+Before changing HAL, power/sleep, the shared-SPI radio stack, BLE/pairing, or
+adding a new FAP — and before reporting or fixing a bug on any board — read
+**[docs/](docs/README.md)**, starting with
+**[docs/00-hardware-testing-scope.md](docs/00-hardware-testing-scope.md)**.
+It documents what has actually been run on real hardware (paradoxt only),
+hardware constraints (internal RAM pressure above all), power-management
+invariants, paradoxt's input quirks, and bugs that were already found and
+fixed so they don't come back.
+
 ## Porting Approach
 
 This port preserves the original Flipper Zero architecture as closely as possible:

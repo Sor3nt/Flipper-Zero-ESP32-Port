@@ -177,6 +177,16 @@ static void usb_rpc_session_close(UsbRpcSrv* srv) {
     FURI_LOG_I(TAG, "RPC session closed");
 }
 
+/* Feeds in short slices so stop() can always interrupt: a dead RPC worker would
+ * otherwise leave a FuriWaitForever feed blocked and join() would never return. */
+static size_t usb_rpc_feed(UsbRpcSrv* srv, const uint8_t* data, size_t len) {
+    size_t fed = 0;
+    while(fed < len && !srv->exiting) {
+        fed += rpc_session_feed(srv->session, data + fed, len - fed, furi_ms_to_ticks(50));
+    }
+    return fed;
+}
+
 static void usb_rpc_drain_rx(UsbRpcSrv* srv) {
     if(!srv->session_open) {
         uint8_t scratch[64];
@@ -204,9 +214,10 @@ static void usb_rpc_drain_rx(UsbRpcSrv* srv) {
             break;
         }
 
-        size_t fed = rpc_session_feed(srv->session, srv->rx_buf, (size_t)got, FuriWaitForever);
+        size_t fed = usb_rpc_feed(srv, srv->rx_buf, (size_t)got);
         if(fed != (size_t)got) {
-            FURI_LOG_E(TAG, "rpc_session_feed underran: %zu/%ld", fed, got);
+            /* A short feed while stopping is expected, not an error. */
+            if(!srv->exiting) FURI_LOG_E(TAG, "rpc_session_feed underran: %zu/%ld", fed, got);
             break;
         }
     }
@@ -246,8 +257,7 @@ static void qflipper_cli_rx(UsbRpcSrv* srv) {
                     usb_rpc_session_open(srv);
 
                     if(srv->session_open && (i + 1) < got) {
-                        rpc_session_feed(
-                            srv->session, &buf[i + 1], (size_t)(got - i - 1), FuriWaitForever);
+                        usb_rpc_feed(srv, &buf[i + 1], (size_t)(got - i - 1));
                     }
                     return;
                 }
@@ -382,9 +392,10 @@ bool qflipper_bridge_start(void) {
 
 void qflipper_bridge_stop(void) {
 #if QFLIPPER_HAVE_COMPOSITE
-    UsbRpcSrv* srv = s_bridge;
+    /* Desktop (lock menu / auto-off) and the USB-UART bridge may both stop it;
+     * only the caller that takes the pointer tears the session down. */
+    UsbRpcSrv* srv = __atomic_exchange_n(&s_bridge, NULL, __ATOMIC_ACQ_REL);
     if(!srv) return;
-    s_bridge = NULL;
 
     /* Wake the loop out of any blocking RX drain, then ask it to exit. */
     srv->exiting = true;
@@ -409,7 +420,7 @@ void qflipper_bridge_stop(void) {
 }
 
 bool qflipper_bridge_is_active(void) {
-    return s_bridge != NULL;
+    return __atomic_load_n(&s_bridge, __ATOMIC_ACQUIRE) != NULL;
 }
 
 void qflipper_bridge_set_auto_off_callback(QflipperBridgeAutoOffCallback callback, void* context) {

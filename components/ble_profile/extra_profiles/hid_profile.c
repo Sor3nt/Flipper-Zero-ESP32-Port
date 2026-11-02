@@ -54,9 +54,10 @@ static void ble_profile_hid_fill_default_gap_config(
         furi_hal_version_get_name_ptr());
 }
 
-FuriHalBleProfileBase* ble_profile_hid_start_with_config(
+static FuriHalBleProfileBase* ble_profile_hid_start_with_config_internal(
     const FuriHalBleProfileTemplate* profile_template,
-    const GapConfig* config) {
+    const GapConfig* config,
+    bool just_works) {
     BleProfileHid* profile = NULL;
     BleHidConfig ble_config = {0};
 
@@ -74,6 +75,7 @@ FuriHalBleProfileBase* ble_profile_hid_start_with_config(
     ble_profile_hid_reverse_mac(ble_config.mac, config->mac_address);
     ble_config.bonding = config->bonding_mode;
     ble_config.pairing = (BleHidPairingMode)config->pairing_method;
+    ble_config.just_works = just_works;
 
     profile->ble_hid = ble_hid_alloc(&ble_config);
     if(!profile->ble_hid) {
@@ -84,6 +86,18 @@ FuriHalBleProfileBase* ble_profile_hid_start_with_config(
     return &profile->base;
 }
 
+FuriHalBleProfileBase* ble_profile_hid_start_with_config(
+    const FuriHalBleProfileTemplate* profile_template,
+    const GapConfig* config) {
+    return ble_profile_hid_start_with_config_internal(profile_template, config, false);
+}
+
+FuriHalBleProfileBase* ble_profile_hid_start_with_config_just_works(
+    const FuriHalBleProfileTemplate* profile_template,
+    const GapConfig* config) {
+    return ble_profile_hid_start_with_config_internal(profile_template, config, true);
+}
+
 static FuriHalBleProfileBase* ble_profile_hid_start(FuriHalBleProfileParams profile_params) {
     GapConfig config = {0};
 
@@ -91,18 +105,20 @@ static FuriHalBleProfileBase* ble_profile_hid_start(FuriHalBleProfileParams prof
     return ble_profile_hid_start_with_config(ble_profile_hid, &config);
 }
 
-static void ble_profile_hid_stop(FuriHalBleProfileBase* profile) {
+static bool ble_profile_hid_stop(FuriHalBleProfileBase* profile) {
     BleProfileHid* hid_profile = (BleProfileHid*)profile;
 
     if(!hid_profile) {
-        return;
+        return true;
     }
 
+    bool stopped = true;
     if(hid_profile->ble_hid) {
-        ble_hid_free(hid_profile->ble_hid);
+        stopped = ble_hid_free(hid_profile->ble_hid);
     }
 
     free(hid_profile);
+    return stopped;
 }
 
 static void ble_profile_hid_get_config(GapConfig* config, FuriHalBleProfileParams profile_params) {

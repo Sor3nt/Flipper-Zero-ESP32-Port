@@ -40,8 +40,9 @@ extern "C" {
 
 typedef struct {
     bool valid; /**< At least one complete snapshot has been read */
-    bool fresh; /**< Last refresh succeeded (data is not older than a failed refresh) */
-    uint32_t tick; /**< furi tick of the last successful refresh */
+    bool fresh; /**< Most recent refresh attempt succeeded; use tick for data age */
+    bool battery_present; /**< BAT voltage high enough for a cell to be fitted */
+    uint32_t tick; /**< FreeRTOS tick of the last successful refresh */
     uint16_t temperature_dk; /**< 0.1 K */
     uint16_t voltage_mv;
     uint16_t battery_status; /**< FURI_HAL_BQ27220_STATUS_* */
@@ -61,12 +62,19 @@ typedef struct {
  *  @return true if the device was found and responded */
 bool furi_hal_bq27220_init(void);
 
-/** Check if the BQ27220 is present and responding */
+/** Check if the BQ27220 has been detected since boot. This remains true through
+ * temporary read failures; use furi_hal_bq27220_is_data_valid() for recent data.
+ * If it was not found at boot, the bus is re-probed at most every 10 s. */
 bool furi_hal_bq27220_is_present(void);
+
+/** True when the snapshot holds battery data: a cell is fitted and a complete
+ * snapshot succeeded within the last 10 s. */
+bool furi_hal_bq27220_is_data_valid(void);
 
 /** Copy the cached snapshot, refreshing it first if it is older than
  * FURI_HAL_BQ27220_SNAPSHOT_MAX_AGE_MS. On I2C errors the previous values are
- * kept (fresh=false), so a transient bus error never shows up as 0%.
+ * kept (fresh=false), so a transient bus error never shows up as 0%. Check
+ * tick/is_data_valid() before treating preserved values as current.
  * @return true if out->valid */
 bool furi_hal_bq27220_get_snapshot(FuriHalBq27220Snapshot* out);
 

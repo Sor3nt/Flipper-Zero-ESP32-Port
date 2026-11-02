@@ -4,6 +4,18 @@
 
 #define SAMPLES_TO_READ_PER_TICK 400
 
+static void subghz_scene_decode_raw_worker_free(SubGhz* subghz) {
+    furi_assert(subghz);
+    if(subghz->decode_raw_file_worker_encoder) {
+        if(subghz_file_encoder_worker_is_running(
+               subghz->decode_raw_file_worker_encoder)) {
+            subghz_file_encoder_worker_stop(subghz->decode_raw_file_worker_encoder);
+        }
+        subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+        subghz->decode_raw_file_worker_encoder = NULL;
+    }
+}
+
 static void subghz_scene_receiver_update_statusbar(void* context) {
     SubGhz* subghz = context;
     FuriString* history_stat_str = furi_string_alloc();
@@ -96,10 +108,13 @@ bool subghz_scene_decode_raw_start(SubGhz* subghz) {
         //FURI_LOG_I(TAG, "Listening at \033[0;33m%s\033[0m.", furi_string_get_cstr(file_name));
 
         subghz->decode_raw_file_worker_encoder = subghz_file_encoder_worker_alloc();
-        if(subghz_file_encoder_worker_start(
-               subghz->decode_raw_file_worker_encoder,
-               furi_string_get_cstr(file_name),
-               subghz_txrx_radio_device_get_name(subghz->txrx))) {
+        if(!subghz->decode_raw_file_worker_encoder) {
+            FURI_LOG_E(TAG, "Unable to allocate file encoder worker");
+            success = false;
+        } else if(subghz_file_encoder_worker_start(
+                      subghz->decode_raw_file_worker_encoder,
+                      furi_string_get_cstr(file_name),
+                      subghz_txrx_radio_device_get_name(subghz->txrx))) {
             //the worker needs a file in order to open and read part of the file
             furi_delay_ms(100);
         } else {
@@ -107,7 +122,7 @@ bool subghz_scene_decode_raw_start(SubGhz* subghz) {
         }
 
         if(!success) {
-            subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+            subghz_scene_decode_raw_worker_free(subghz);
         }
     }
 
@@ -216,10 +231,7 @@ bool subghz_scene_decode_raw_on_event(void* context, SceneManagerEvent event) {
 
             subghz_txrx_set_rx_callback(subghz->txrx, NULL, subghz);
 
-            if(subghz_file_encoder_worker_is_running(subghz->decode_raw_file_worker_encoder)) {
-                subghz_file_encoder_worker_stop(subghz->decode_raw_file_worker_encoder);
-            }
-            subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+            subghz_scene_decode_raw_worker_free(subghz);
 
             subghz->state_notifications = SubGhzNotificationStateIDLE;
             scene_manager_set_scene_state(
@@ -270,5 +282,5 @@ bool subghz_scene_decode_raw_on_event(void* context, SceneManagerEvent event) {
 }
 
 void subghz_scene_decode_raw_on_exit(void* context) {
-    UNUSED(context);
+    subghz_scene_decode_raw_worker_free(context);
 }

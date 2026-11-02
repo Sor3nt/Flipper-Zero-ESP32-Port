@@ -11,15 +11,21 @@ typedef enum {
     NetScanStateDone,
 } NetScanState;
 
-#define NET_SCAN_ARP_DURATION_TICKS 80   // 80 * 250 ms ≈ 20 s (254 IPs / 4 per tick = 64 ticks + Reserve)
-#define NET_SCAN_HOSTNAME_TIMEOUT_TICKS 60 // ~15 s
+#define NET_SCAN_ARP_DURATION_TICKS 80    // ~20 s @ 250ms tick
+#define NET_SCAN_HOSTNAME_TIMEOUT_TICKS 60 // ~15 s @ 250ms tick
 
+// ============================================================================
+// STATE GLOBAL (file-scope, hanya diakses dari GUI thread)
+// ============================================================================
 static uint16_t s_tick_counter;
 static bool s_popup_shown;
 static bool s_dialog_shown;
 
 static void net_scan_set_state(WlanApp* app, NetScanState state);
 
+// ============================================================================
+// OVERLAY MANAGEMENT
+// ============================================================================
 static void net_scan_close_overlays(WlanApp* app) {
     if(s_popup_shown) {
         popup_reset(app->popup);
@@ -33,7 +39,12 @@ static void net_scan_close_overlays(WlanApp* app) {
 
 static void net_scan_show_popup(WlanApp* app, const char* text) {
     net_scan_close_overlays(app);
+
+    // FIX: popup_reset selalu dipanggil (kalau s_popup_shown false,
+    // net_scan_close_overlays tidak mereset). Ini memastikan state popup
+    // selalu bersih sebelum di-set ulang.
     popup_reset(app->popup);
+
     popup_set_header(app->popup, "Network Scan", 64, 10, AlignCenter, AlignTop);
     popup_set_text(app->popup, text, 64, 32, AlignCenter, AlignCenter);
     popup_set_context(app->popup, app);
@@ -42,6 +53,9 @@ static void net_scan_show_popup(WlanApp* app, const char* text) {
     s_popup_shown = true;
 }
 
+// ============================================================================
+// RETRY DIALOG
+// ============================================================================
 static void net_scan_retry_yes_cb(GuiButtonType result, InputType type, void* context) {
     WlanApp* app = context;
     if(type == InputTypeShort && result == GuiButtonTypeRight) {
@@ -73,6 +87,9 @@ static void net_scan_show_retry_dialog(WlanApp* app) {
     s_dialog_shown = true;
 }
 
+// ============================================================================
+// STATE MACHINE
+// ============================================================================
 static void net_scan_set_state(WlanApp* app, NetScanState state) {
     scene_manager_set_scene_state(app->scene_manager, WlanAppSceneNetworkScanning, state);
     s_tick_counter = 0;
@@ -93,23 +110,37 @@ static void net_scan_set_state(WlanApp* app, NetScanState state) {
     }
 }
 
+// ============================================================================
+// PUBLISH DEVICES FROM NETSCAN BUFFER TO APP
+// FIX: gunakan counter terpisah (app->device_count) sebagai index tujuan,
+// supaya kalau ada host yang di-skip (misal get_host gagal), tidak ada
+// "slot kosong" di app->devices yang berisi data lama.
+// ============================================================================
 static void net_scan_publish_devices(WlanApp* app) {
     uint8_t count = wlan_netscan_get_host_count();
     if(count > WLAN_APP_MAX_DEVICES) count = WLAN_APP_MAX_DEVICES;
-    app->device_count = count;
+
+    app->device_count = 0;
+
     for(uint8_t i = 0; i < count; ++i) {
         WlanNetscanHost h;
         if(!wlan_netscan_get_host(i, &h)) continue;
-        WlanDeviceRecord* d = &app->devices[i];
+
+        // Index tujuan berdasarkan jumlah device valid yang sudah disalin
+        WlanDeviceRecord* d = &app->devices[app->device_count++];
         memset(d, 0, sizeof(*d));
         d->ip = h.ip;
         memcpy(d->mac, h.mac, 6);
         if(h.hostname[0]) {
             strncpy(d->hostname, h.hostname, sizeof(d->hostname) - 1);
+            d->hostname[sizeof(d->hostname) - 1] = '\0';
         }
     }
 }
 
+// ============================================================================
+// SCENE: on_enter
+// ============================================================================
 void wlan_app_scene_network_scanning_on_enter(void* context) {
     WlanApp* app = context;
     s_tick_counter = 0;
@@ -117,27 +148,36 @@ void wlan_app_scene_network_scanning_on_enter(void* context) {
     s_dialog_shown = false;
     app->device_count = 0;
 
-    // Re-Scan erzwingt echten ARP-Scan; der Cache wird am Ende von
-    // NetScanStateHostnames ohnehin per FSOM_CREATE_ALWAYS überschrieben.
+    // Force rescan: user minta scan ulang dari menu LAN
     if(app->lan_force_rescan) {
         app->lan_force_rescan = false;
         net_scan_set_state(app, NetScanStateArp);
         return;
     }
 
+    // Coba load dari cache dulu
     uint16_t cached = 0;
     if(wlan_lan_cache_load(
            app->connected_ap.ssid, app->devices, WLAN_APP_MAX_DEVICES, &cached) &&
        cached > 0) {
         app->device_count = cached;
+
+        // FIX: switch ke Loading dulu supaya tidak flash view scene sebelumnya
+        // selama custom event di-queue.
+        view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewLoading);
+
         view_dispatcher_send_custom_event(
             app->view_dispatcher, WlanAppCustomEventNetworkScanComplete);
         return;
     }
 
+    // Cache miss: mulai scan ARP
     net_scan_set_state(app, NetScanStateArp);
 }
 
+// ============================================================================
+// SCENE: on_event
+// ============================================================================
 bool wlan_app_scene_network_scanning_on_event(void* context, SceneManagerEvent event) {
     WlanApp* app = context;
     bool consumed = false;
@@ -164,7 +204,10 @@ bool wlan_app_scene_network_scanning_on_event(void* context, SceneManagerEvent e
             s_tick_counter++;
             if(arp_done || s_tick_counter >= NET_SCAN_ARP_DURATION_TICKS) {
                 net_scan_publish_devices(app);
-                if(wlan_netscan_get_host_count() == 0) {
+
+                // FIX: cek app->device_count (bukan host_count) supaya konsisten
+                // dengan data yang benar-benar tersalin.
+                if(app->device_count == 0) {
                     net_scan_set_state(app, NetScanStateRetryDialog);
                 } else {
                     net_scan_set_state(app, NetScanStateHostnames);
@@ -187,10 +230,14 @@ bool wlan_app_scene_network_scanning_on_event(void* context, SceneManagerEvent e
     return consumed;
 }
 
+// ============================================================================
+// SCENE: on_exit
+// ============================================================================
 void wlan_app_scene_network_scanning_on_exit(void* context) {
     WlanApp* app = context;
     wlan_netscan_stop_hostname_resolve();
     net_scan_close_overlays(app);
     s_tick_counter = 0;
-    scene_manager_set_scene_state(app->scene_manager, WlanAppSceneNetworkScanning, NetScanStateArp);
+    scene_manager_set_scene_state(
+        app->scene_manager, WlanAppSceneNetworkScanning, NetScanStateArp);
 }

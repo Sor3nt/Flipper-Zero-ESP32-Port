@@ -1,4 +1,3 @@
-/* Auto-generated from sor3nt_stuff.png (320x170). ST7789 byte-swapped RGB565. */
 #include <stdint.h>
 
 const uint16_t doom_splash_rgb565[54400] = {

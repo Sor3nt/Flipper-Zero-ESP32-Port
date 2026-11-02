@@ -10,21 +10,72 @@
 #include "animation_storage.h"
 #include <assets_dolphin_internal.h>
 #include <assets_dolphin_blocking.h>
+#include <momentum_settings.h>
 
-#define ANIMATION_META_FILE     "meta.txt"
-#define ANIMATION_DIR           EXT_PATH("dolphin")
-#define ANIMATION_MANIFEST_FILE ANIMATION_DIR "/manifest.txt"
-#define TAG                     "AnimationStorage"
+#define ANIMATION_META_FILE "meta.txt"
+#define BASE_ANIMATION_DIR  EXT_PATH("dolphin")
+#define TAG                 "AnimationStorage"
+
+/* The active animation directory and manifest depend on the selected asset
+ * pack (Settings > Interface > Graphics). Default = /ext/dolphin; a pack lives
+ * in /ext/asset_packs/<pack>/Anims. Resolved per scan into these buffers. */
+static char ANIMATION_DIR[23 /* /ext/asset_packs//Anims */ + ASSET_PACKS_NAME_LEN + 1];
+static char ANIMATION_MANIFEST_FILE[sizeof(ANIMATION_DIR) + 13 /* "/manifest.txt" */];
 
 static void animation_storage_free_bubbles(BubbleAnimation* animation);
 static void animation_storage_free_frames(BubbleAnimation* animation);
 static void animation_storage_free_animation(BubbleAnimation** storage_animation);
 static BubbleAnimation* animation_storage_load_animation(const char* name);
 
+/* Does <dir>/manifest.txt exist? */
+static bool animation_storage_manifest_at(Storage* storage, const char* dir) {
+    FuriString* p = furi_string_alloc_printf("%s/manifest.txt", dir);
+    FileInfo info;
+    bool ok = storage_common_stat(storage, furi_string_get_cstr(p), &info) == FSE_OK;
+    furi_string_free(p);
+    return ok;
+}
+
+static void animation_storage_select_manifest(void) {
+    FuriString* anim_dir = furi_string_alloc();
+    char pack[ASSET_PACKS_NAME_LEN];
+    momentum_settings_get_asset_pack(pack, sizeof(pack));
+    bool use_asset_pack = pack[0] != '\0';
+
+    if(use_asset_pack) {
+        Storage* storage = furi_record_open(RECORD_STORAGE);
+        /* Two supported pack layouts (this port's dolphin set keeps the
+         * manifest at the folder root, Momentum keeps it under Anims/):
+         *   /ext/asset_packs/<pack>/Anims/manifest.txt  (Momentum)
+         *   /ext/asset_packs/<pack>/manifest.txt         (plain dolphin set) */
+        furi_string_printf(anim_dir, "%s/%s/Anims", ASSET_PACKS_PATH, pack);
+        if(!animation_storage_manifest_at(storage, furi_string_get_cstr(anim_dir))) {
+            furi_string_printf(anim_dir, "%s/%s", ASSET_PACKS_PATH, pack);
+            if(!animation_storage_manifest_at(storage, furi_string_get_cstr(anim_dir))) {
+                FURI_LOG_W(TAG, "Asset pack '%s' has no manifest, using base", pack);
+                use_asset_pack = false;
+            }
+        }
+        furi_record_close(RECORD_STORAGE);
+    }
+    if(!use_asset_pack) {
+        furi_string_set(anim_dir, BASE_ANIMATION_DIR);
+    }
+
+    strlcpy(ANIMATION_DIR, furi_string_get_cstr(anim_dir), sizeof(ANIMATION_DIR));
+    snprintf(
+        ANIMATION_MANIFEST_FILE,
+        sizeof(ANIMATION_MANIFEST_FILE),
+        "%s/manifest.txt",
+        ANIMATION_DIR);
+    furi_string_free(anim_dir);
+}
+
 static bool animation_storage_load_single_manifest_info(
     StorageAnimationManifestInfo* manifest_info,
     const char* name) {
     furi_assert(manifest_info);
+    animation_storage_select_manifest();
 
     bool result = false;
     Storage* storage = furi_record_open(RECORD_STORAGE);
@@ -80,6 +131,7 @@ static bool animation_storage_load_single_manifest_info(
 void animation_storage_fill_animation_list(StorageAnimationList_t* animation_list) {
     furi_assert(sizeof(StorageAnimationList_t) == sizeof(void*));
     furi_assert(!StorageAnimationList_size(*animation_list));
+    animation_storage_select_manifest();
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
     FlipperFormat* file = flipper_format_file_alloc(storage);
@@ -293,7 +345,7 @@ static bool animation_storage_load_frames(
 
     for(int i = 0; i < icon->frame_count; ++i) {
         frames_ok = false;
-        furi_string_printf(filename, ANIMATION_DIR "/%s/frame_%d.bm", name, i);
+        furi_string_printf(filename, "%s/%s/frame_%d.bm", ANIMATION_DIR, name, i);
 
         if(storage_common_stat(storage, furi_string_get_cstr(filename), &file_info) != FSE_OK)
             break;
@@ -444,7 +496,7 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
 
         if(FSE_OK != storage_sd_status(storage)) break;
 
-        furi_string_printf(str, ANIMATION_DIR "/%s/" ANIMATION_META_FILE, name);
+        furi_string_printf(str, "%s/%s/" ANIMATION_META_FILE, ANIMATION_DIR, name);
         if(!flipper_format_file_open_existing(ff, furi_string_get_cstr(str))) break;
         if(!flipper_format_read_header(ff, str, &u32value)) break;
         if(furi_string_cmp_str(str, "Flipper Animation")) break;
@@ -478,7 +530,9 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
         if(!flipper_format_read_uint32(ff, "Active cycles", &u32value, 1)) break; //-V779
         animation->active_cycles = u32value;
         if(!flipper_format_read_uint32(ff, "Frame rate", &u32value, 1)) break;
-        FURI_CONST_ASSIGN(animation->icon_animation.frame_rate, u32value);
+        /* Anim Speed (Settings > Interface > Graphics): scale the frame rate. */
+        u32value = (u32value * momentum_settings.anim_speed) / 100;
+        FURI_CONST_ASSIGN(animation->icon_animation.frame_rate, u32value < 1 ? 1 : u32value);
         if(!flipper_format_read_uint32(ff, "Duration", &u32value, 1)) break;
         animation->duration = u32value;
         if(!flipper_format_read_uint32(ff, "Active cooldown", &u32value, 1)) break;

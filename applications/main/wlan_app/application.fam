@@ -5,7 +5,7 @@ App(
     entry_point="wlan_app",
     requires=["wifi"],
     stack_size=8 * 1024,
-    icon="A_Sub1ghz_14",
+    icon="A_WiFi_14",
     order=67,
     fap_libs=["assets"],
 )

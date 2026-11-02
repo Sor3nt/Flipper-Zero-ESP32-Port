@@ -1,6 +1,6 @@
 #include "stream_cache.h"
 
-#define STREAM_CACHE_MAX_SIZE 1024U
+#define STREAM_CACHE_MAX_SIZE 4096U
 
 struct StreamCache {
     uint8_t data[STREAM_CACHE_MAX_SIZE];

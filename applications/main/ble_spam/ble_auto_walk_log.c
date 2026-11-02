@@ -27,7 +27,7 @@ void ble_auto_walk_seen_reset(BleAutoWalkSeenSet* set) {
     memset(set, 0, sizeof(*set));
 }
 
-bool ble_auto_walk_seen_contains(const BleAutoWalkSeenSet* set, const esp_bd_addr_t addr) {
+bool ble_auto_walk_seen_contains(const BleAutoWalkSeenSet* set, const BleAddress addr) {
     if(!set) return false;
     for(uint16_t i = 0; i < set->count; i++) {
         if(memcmp(set->addrs[i], addr, 6) == 0) return true;
@@ -35,7 +35,7 @@ bool ble_auto_walk_seen_contains(const BleAutoWalkSeenSet* set, const esp_bd_add
     return false;
 }
 
-bool ble_auto_walk_seen_add(BleAutoWalkSeenSet* set, const esp_bd_addr_t addr) {
+bool ble_auto_walk_seen_add(BleAutoWalkSeenSet* set, const BleAddress addr) {
     if(!set) return false;
     if(ble_auto_walk_seen_contains(set, addr)) return true;
     if(set->count >= BLE_AUTO_WALK_SEEN_MAX) return false;
@@ -56,7 +56,7 @@ static int hex_nibble(char c) {
 }
 
 // Parses an "AA:BB:CC:DD:EE:FF" prefix from `s` into `out`. Returns true on success.
-static bool parse_addr_prefix(const char* s, esp_bd_addr_t out) {
+static bool parse_addr_prefix(const char* s, BleAddress out) {
     if(!s) return false;
     for(int i = 0; i < 6; i++) {
         int hi = hex_nibble(s[0]);
@@ -113,7 +113,7 @@ static void write_csv_field_quoted(BleAutoWalkLog* log, const char* s) {
     storage_file_write(log->file, "\"", 1);
 }
 
-static void format_uuid(const esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
+static void format_uuid(const BleUuid* uuid, char* buf, size_t buf_len) {
     if(uuid->len == ESP_UUID_LEN_16) {
         snprintf(buf, buf_len, "%04X", uuid->uuid.uuid16);
     } else if(uuid->len == ESP_UUID_LEN_32) {
@@ -130,7 +130,7 @@ static void format_uuid(const esp_bt_uuid_t* uuid, char* buf, size_t buf_len) {
     }
 }
 
-static void write_addr(BleAutoWalkLog* log, const esp_bd_addr_t addr) {
+static void write_addr(BleAutoWalkLog* log, const BleAddress addr) {
     log_writef(log, "%02X:%02X:%02X:%02X:%02X:%02X",
                addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 }
@@ -178,7 +178,7 @@ static void load_existing_seen(Storage* storage, BleAutoWalkSeenSet* out_seen) {
                         // line layout: "<ts>,<AA:BB:..>,..."
                         const char* comma = strchr(line, ',');
                         if(comma) {
-                            esp_bd_addr_t addr;
+                            BleAddress addr;
                             if(parse_addr_prefix(comma + 1, addr)) {
                                 ble_auto_walk_seen_add(out_seen, addr);
                             }
@@ -195,7 +195,7 @@ static void load_existing_seen(Storage* storage, BleAutoWalkSeenSet* out_seen) {
         line[line_len] = '\0';
         const char* comma = strchr(line, ',');
         if(comma) {
-            esp_bd_addr_t addr;
+            BleAddress addr;
             if(parse_addr_prefix(comma + 1, addr)) {
                 ble_auto_walk_seen_add(out_seen, addr);
             }

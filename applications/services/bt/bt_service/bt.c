@@ -154,14 +154,14 @@ static void bt_battery_level_changed_callback(const void* _event, void* context)
 }
 
 Bt* bt_alloc(void) {
-    Bt* bt = malloc(sizeof(Bt));
+    Bt* bt = calloc(1, sizeof(Bt));
     // Init default maximum packet size
     bt->max_packet_size = BLE_PROFILE_SERIAL_PACKET_SIZE_MAX;
     bt->current_profile = NULL;
     // Keys storage
     bt->keys_storage = bt_keys_storage_alloc(BT_KEYS_STORAGE_PATH);
     // Alloc queue
-    bt->message_queue = furi_message_queue_alloc(8, sizeof(BtMessage));
+    bt->message_queue = furi_message_queue_alloc(16, sizeof(BtMessage));
 
     // Setup statusbar view port
     bt->statusbar_view_port = bt_statusbar_view_port_alloc(bt);
@@ -185,8 +185,6 @@ Bt* bt_alloc(void) {
 
     // API evnent
     bt->api_event = furi_event_flag_alloc();
-
-    bt->pin = 0;
 
     return bt;
 }
@@ -263,74 +261,19 @@ static void bt_serial_buffer_is_empty_callback(void* context) {
 static bool bt_on_gap_event_callback(GapEvent event, void* context) {
     furi_assert(context);
     Bt* bt = context;
-    bool ret = false;
-    bt->pin = 0;
-    bool do_update_status = false;
-    bool current_profile_is_serial =
-        furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial);
-
-    if(event.type == GapEventTypeConnected) {
-        // Update status bar
-        bt->status = BtStatusConnected;
-        do_update_status = true;
-        bt_open_rpc_connection(bt);
-        // Update battery level
-        PowerInfo info;
-        power_get_info(bt->power, &info);
-        BtMessage message = {.type = BtMessageTypeUpdateStatus};
-        message.type = BtMessageTypeUpdateBatteryLevel;
-        message.data.battery_level = info.charge;
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
-        ret = true;
-    } else if(event.type == GapEventTypeDisconnected) {
-        if(current_profile_is_serial && bt->rpc_session) {
-            FURI_LOG_I(TAG, "Close RPC connection");
-            ble_profile_serial_set_rpc_active(
-                bt->current_profile, FuriHalBtSerialRpcStatusNotActive);
-            furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_DISCONNECTED);
-            rpc_session_close(bt->rpc_session);
-            ble_profile_serial_set_event_callback(bt->current_profile, 0, NULL, NULL);
-            bt->rpc_session = NULL;
+    BtMessage message = {
+        .type = BtMessageTypeGapEvent,
+        .data.gap_event = event,
+    };
+    if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+        FURI_LOG_E(
+            TAG, "BLE GAP event queue is full; event %u was dropped", (unsigned)event.type);
+        if(event.type == GapEventTypePinCodeVerify) {
+            furi_hal_bt_pairing_confirm(false);
         }
-        ret = true;
-    } else if(event.type == GapEventTypeStartAdvertising) {
-        bt->status = BtStatusAdvertising;
-        do_update_status = true;
-        ret = true;
-    } else if(event.type == GapEventTypeStopAdvertising) {
-        bt->status = BtStatusOff;
-        do_update_status = true;
-        ret = true;
-    } else if(event.type == GapEventTypePinCodeShow) {
-        bt->pin = event.data.pin_code;
-        BtMessage message = {
-            .type = BtMessageTypePinCodeShow, .data.pin_code = event.data.pin_code};
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
-        ret = true;
-    } else if(event.type == GapEventTypePinCodeVerify) {
-        bt->pin = event.data.pin_code;
-        ret = bt_pin_code_verify_event_handler(bt, event.data.pin_code);
-    } else if(event.type == GapEventTypeUpdateMTU) {
-        bt->max_packet_size = event.data.max_packet_size;
-        ret = true;
-    } else if(event.type == GapEventTypeBeaconStart) {
-        bt->beacon_active = true;
-        do_update_status = true;
-        ret = true;
-    } else if(event.type == GapEventTypeBeaconStop) {
-        bt->beacon_active = false;
-        do_update_status = true;
-        ret = true;
+        return false;
     }
-
-    if(do_update_status) {
-        BtMessage message = {.type = BtMessageTypeUpdateStatus};
-        furi_check(
-            furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
-    }
-    return ret;
+    return true;
 }
 
 static void bt_on_key_storage_change_callback(uint8_t* addr, uint16_t size, void* context) {
@@ -360,6 +303,78 @@ static void bt_statusbar_update(Bt* bt) {
         view_port_enabled_set(bt->statusbar_view_port, true);
     } else {
         view_port_enabled_set(bt->statusbar_view_port, false);
+    }
+}
+
+static void bt_status_update(Bt* bt) {
+    bt_statusbar_update(bt);
+    if(bt->status_changed_cb) {
+        bt->status_changed_cb(bt->status, bt->status_changed_ctx);
+    }
+}
+
+static void bt_gap_event_process(Bt* bt, GapEvent event) {
+    switch(event.type) {
+    case GapEventTypeConnected: {
+        if(furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial) &&
+           !ble_profile_serial_is_connected(bt->current_profile)) {
+            break;
+        }
+        bt->status = BtStatusConnected;
+        bt_open_rpc_connection(bt);
+        PowerInfo info;
+        power_get_info(bt->power, &info);
+        furi_hal_bt_update_battery_level(info.charge);
+        bt_status_update(bt);
+        break;
+    }
+    case GapEventTypeDisconnected:
+        if(furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial) &&
+           bt->rpc_session) {
+            FURI_LOG_I(TAG, "Close RPC connection");
+            ble_profile_serial_set_rpc_active(
+                bt->current_profile, FuriHalBtSerialRpcStatusNotActive);
+            furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_DISCONNECTED);
+            rpc_session_close(bt->rpc_session);
+            ble_profile_serial_set_event_callback(bt->current_profile, 0, NULL, NULL);
+            bt->rpc_session = NULL;
+        }
+        bt_pin_code_hide(bt);
+        break;
+    case GapEventTypeStartAdvertising:
+        bt->status = BtStatusAdvertising;
+        bt_status_update(bt);
+        break;
+    case GapEventTypeStopAdvertising:
+        bt->status = BtStatusOff;
+        bt_status_update(bt);
+        break;
+    case GapEventTypePinCodeShow:
+        bt_pin_code_show(bt, event.data.pin_code);
+        break;
+    case GapEventTypeUpdateMTU:
+        bt->max_packet_size = event.data.max_packet_size;
+        break;
+    case GapEventTypeBeaconStart:
+        bt->beacon_active = true;
+        bt_status_update(bt);
+        break;
+    case GapEventTypeBeaconStop:
+        bt->beacon_active = false;
+        bt_status_update(bt);
+        break;
+    case GapEventTypePairingDone:
+        bt_pin_code_hide(bt);
+        break;
+    case GapEventTypePairingStalled:
+        FURI_LOG_W(TAG, "BLE pairing did not start; the phone may have a stale bond");
+        break;
+    case GapEventTypePinCodeVerify:
+        furi_hal_bt_pairing_confirm(
+            bt_pin_code_verify_event_handler(bt, event.data.pin_code));
+        break;
+    case GapEventTypeLinkSecured:
+        break;
     }
 }
 
@@ -567,11 +582,7 @@ int32_t bt_srv(void* p) {
             (void*)message.result);
         if(message.type == BtMessageTypeUpdateStatus) {
             // Update view ports
-            bt_statusbar_update(bt);
-            bt_pin_code_hide(bt);
-            if(bt->status_changed_cb) {
-                bt->status_changed_cb(bt->status, bt->status_changed_ctx);
-            }
+            bt_status_update(bt);
         } else if(message.type == BtMessageTypeUpdateBatteryLevel) {
             // Update battery level
             furi_hal_bt_update_battery_level(message.data.battery_level);
@@ -580,6 +591,8 @@ int32_t bt_srv(void* p) {
         } else if(message.type == BtMessageTypePinCodeShow) {
             // Display PIN code
             bt_pin_code_show(bt, message.data.pin_code);
+        } else if(message.type == BtMessageTypeGapEvent) {
+            bt_gap_event_process(bt, message.data.gap_event);
         } else if(message.type == BtMessageTypeKeysStorageUpdated) {
             bt_keys_storage_update(
                 bt->keys_storage,

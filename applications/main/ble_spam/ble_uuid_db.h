@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <esp_gap_ble_api.h>
+#include "ble_types.h"
 
 #define BLE_UUID_DB_DIR "/ext/ble"
 // Files loaded (each optional):
@@ -24,8 +24,8 @@ void ble_uuid_db_deinit(void);
 
 // Look up a service UUID name. Returns NULL if unknown.
 // Search order: SD services → SD members → built-in SIG service table.
-const char* ble_uuid_db_lookup_service(const esp_bt_uuid_t* uuid);
+const char* ble_uuid_db_lookup_service(const BleUuid* uuid);
 
 // Look up a characteristic UUID name. Returns NULL if unknown.
 // Search order: SD chars → built-in SIG characteristic table.
-const char* ble_uuid_db_lookup_char(const esp_bt_uuid_t* uuid);
+const char* ble_uuid_db_lookup_char(const BleUuid* uuid);

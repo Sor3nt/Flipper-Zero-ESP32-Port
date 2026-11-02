@@ -1,6 +1,9 @@
 #include "furi_hal_usb_tinyusb_composite.h"
 
 #include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "furi_hal_usb_hid_u2f.h"
+#endif
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
 
@@ -9,6 +12,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "furi_hal_usb.h"
+#include "furi_hal_usb_hid_backend.h"
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #include "class/hid/hid_device.h"
@@ -33,9 +38,14 @@
 #define REPORT_ID_CONSUMER 3
 
 /* Endpoint layout */
-#define HID_EP_IN       0x81
 #define HID_EP_BUF_SIZE 16
 #define HID_POLL_MS     5
+
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+#define HID_EP_IN 0x86
+#else
+#define HID_EP_IN 0x81
+#endif
 
 #define CDC_EP_NOTIF      0x82
 #define CDC_EP_NOTIF_SIZE 8
@@ -43,18 +53,32 @@
 #define CDC_EP_IN         0x83
 #define CDC_EP_BUF_SIZE   64
 
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+#define CDC2_EP_NOTIF      0x84
+#define CDC2_EP_OUT        0x05
+#define CDC2_EP_IN         0x85
+#define MSC_EP_OUT         0x01
+#define MSC_EP_IN          0x81
+#define ITF_NUM_CDC2_NOTIF 3
+#define ITF_NUM_MSC        5
+#define ITF_TOTAL          6
+#define MSC_STRING_INDEX   7
+#define COMP_CONFIG_TOTAL_LEN \
+    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + 2 * TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
+#else
 #define MSC_EP_OUT      0x04
 #define MSC_EP_IN       0x84
+#define ITF_NUM_MSC     3
+#define ITF_TOTAL       4
+#define MSC_STRING_INDEX 6
+#define COMP_CONFIG_TOTAL_LEN \
+    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
+#endif
 #define MSC_EP_BUF_SIZE 64
 
 #define ITF_NUM_HID       0
 #define ITF_NUM_CDC_NOTIF 1
 #define ITF_NUM_CDC_DATA  2
-#define ITF_NUM_MSC       3
-#define ITF_TOTAL         4
-
-#define COMP_CONFIG_TOTAL_LEN \
-    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
 
 /* Forward-declared from furi_hal_usb_hid_tinyusb.c */
 extern const uint8_t* furi_hal_usb_hid_report_desc(size_t* out_len);
@@ -62,6 +86,7 @@ extern const uint8_t* furi_hal_usb_hid_report_desc(size_t* out_len);
 /* Bridge from tinyusb_cdcacm events to user-supplied CdcCallbacks.
  * Implemented in furi_hal_usb_cdc.c. */
 extern void furi_hal_cdc_internal_register_tinyusb_callbacks(void);
+extern void furi_hal_cdc_internal_reset_line_state(bool notify);
 
 static const uint8_t s_composite_config_desc[] = {
     TUD_CONFIG_DESCRIPTOR(
@@ -89,10 +114,20 @@ static const uint8_t s_composite_config_desc[] = {
         CDC_EP_OUT,
         CDC_EP_IN,
         CDC_EP_BUF_SIZE),
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    TUD_CDC_DESCRIPTOR(
+        ITF_NUM_CDC2_NOTIF,
+        6 /* iInterface = "Flipper Serial 1" */,
+        CDC2_EP_NOTIF,
+        CDC_EP_NOTIF_SIZE,
+        CDC2_EP_OUT,
+        CDC2_EP_IN,
+        CDC_EP_BUF_SIZE),
+#endif
     /* MSC */
     TUD_MSC_DESCRIPTOR(
         ITF_NUM_MSC,
-        6 /* iInterface = "Flipper Storage" */,
+        MSC_STRING_INDEX,
         MSC_EP_OUT,
         MSC_EP_IN,
         MSC_EP_BUF_SIZE),
@@ -121,7 +156,12 @@ static tusb_desc_device_t s_device_descriptor = {
 static char s_manuf[64];
 static char s_product[64];
 static char s_serial[17];
-static const char* s_string_descriptor[7];
+/* String descriptor 0 is the LANGID table (0x0409, English US). esp_tinyusb only
+ * keeps the pointers and TinyUSB reads this one on every enumeration, so it must
+ * have static storage: a block-scope compound literal lives on the stack and
+ * dangles as soon as composite_install() returns. */
+static const char s_langid_descriptor[] = {0x09, 0x04};
+static const char* s_string_descriptor[8];
 
 static bool s_installed = false;
 
@@ -134,6 +174,12 @@ bool furi_hal_usb_composite_install(
     uint16_t pid,
     const char* manuf,
     const char* product) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        FURI_LOG_E(TAG, "Cannot install composite USB while U2F is active");
+        return false;
+    }
+#endif
     FURI_LOG_I(TAG, "composite_install entered: vid=%04x pid=%04x s_installed=%d", vid, pid, (int)s_installed);
     if(s_installed) {
         /* Identity changes after first install need a reboot to take effect. */
@@ -143,7 +189,23 @@ bool furi_hal_usb_composite_install(
                 TAG,
                 "VID/PID change ignored (composite already installed). Reboot to apply.");
         }
+        furi_hal_usb_backend_set_light_sleep_inhibited(true);
+        if(!furi_hal_usb_backend_force_reenumeration()) {
+            FURI_LOG_E(TAG, "Composite already installed but host re-enumeration request failed");
+        }
         return true;
+    }
+
+    /* A HID session (BadUSB, Remote) leaves its own TinyUSB stack installed after
+     * the app exits; tinyusb_driver_install() would then fail and the composite
+     * users (USB-UART, qFlipper) report "USB init failed". */
+    if(furi_hal_usb_get_config() == &usb_hid) {
+        FURI_LOG_E(TAG, "Cannot install composite USB while HID is active");
+        return false;
+    }
+    if(!furi_hal_usb_hid_backend_release_stack()) {
+        FURI_LOG_E(TAG, "Could not release the previous HID USB stack");
+        return false;
     }
 
     /* Strings */
@@ -154,13 +216,18 @@ bool furi_hal_usb_composite_install(
     snprintf(s_product, sizeof(s_product), "%s", product_str);
     snprintf(s_serial, sizeof(s_serial), "FZESP32");
 
-    s_string_descriptor[0] = (const char[]){0x09, 0x04};
+    s_string_descriptor[0] = s_langid_descriptor;
     s_string_descriptor[1] = s_manuf;
     s_string_descriptor[2] = s_product;
     s_string_descriptor[3] = s_serial;
     s_string_descriptor[4] = "Flipper HID";
     s_string_descriptor[5] = "Flipper Serial";
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    s_string_descriptor[6] = "Flipper Serial 1";
+    s_string_descriptor[7] = "Flipper Storage";
+#else
     s_string_descriptor[6] = "Flipper Storage";
+#endif
 
     /* VID/PID */
     if(vid) s_device_descriptor.idVendor = vid;
@@ -182,8 +249,7 @@ bool furi_hal_usb_composite_install(
     tinyusb_config_t tusb_cfg = {
         .device_descriptor = &s_device_descriptor,
         .string_descriptor = s_string_descriptor,
-        .string_descriptor_count =
-            sizeof(s_string_descriptor) / sizeof(s_string_descriptor[0]),
+        .string_descriptor_count = CONFIG_TINYUSB_CDC_COUNT > 1 ? 8 : 7,
         .external_phy = false,
 #if (TUD_OPT_HIGH_SPEED)
         .fs_configuration_descriptor = s_config_desc_writable,
@@ -193,6 +259,9 @@ bool furi_hal_usb_composite_install(
         .configuration_descriptor = s_config_desc_writable,
 #endif
     };
+
+    /* A fresh device has no host yet: drop the previous session's DTR/RTS. */
+    furi_hal_cdc_internal_reset_line_state(false);
 
     esp_err_t err = tinyusb_driver_install(&tusb_cfg);
     if(err != ESP_OK) {
@@ -213,18 +282,53 @@ bool furi_hal_usb_composite_install(
     err = tusb_cdc_acm_init(&cdc_cfg);
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tusb_cdc_acm_init failed: %d", err);
+        esp_err_t uninstall_err = tinyusb_driver_uninstall();
+        if(uninstall_err != ESP_OK) {
+            FURI_LOG_E(TAG, "TinyUSB rollback failed: %d", uninstall_err);
+        }
+        furi_hal_usb_composite_restore_serial_jtag();
         return false;
     }
+
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    cdc_cfg.cdc_port = TINYUSB_CDC_ACM_1;
+    err = tusb_cdc_acm_init(&cdc_cfg);
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "tusb_cdc_acm_init for CDC 1 failed: %d", err);
+        esp_err_t uninstall_err = tinyusb_driver_uninstall();
+        if(uninstall_err != ESP_OK) {
+            FURI_LOG_E(TAG, "TinyUSB rollback failed: %d", uninstall_err);
+        }
+        esp_err_t deinit_err = tusb_cdc_acm_deinit(TINYUSB_CDC_ACM_0);
+        if(deinit_err != ESP_OK) {
+            FURI_LOG_E(TAG, "CDC 0 rollback failed: %d", deinit_err);
+        }
+        furi_hal_usb_composite_restore_serial_jtag();
+        return false;
+    }
+#endif
 
     /* Wire CDC events into furi_hal_cdc state. */
     furi_hal_cdc_internal_register_tinyusb_callbacks();
 
     s_installed = true;
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    FURI_LOG_I(
+        TAG,
+        "TinyUSB Composite installed: vid=%04x pid=%04x (HID + CDC 0/1 + MSC)",
+        s_device_descriptor.idVendor,
+        s_device_descriptor.idProduct);
+#else
     FURI_LOG_I(
         TAG,
         "TinyUSB Composite installed: vid=%04x pid=%04x (HID + CDC)",
         s_device_descriptor.idVendor,
         s_device_descriptor.idProduct);
+#endif
+    furi_hal_usb_backend_set_light_sleep_inhibited(true);
+    if(!furi_hal_usb_backend_force_reenumeration()) {
+        FURI_LOG_E(TAG, "Composite installed but host re-enumeration request failed");
+    }
     return true;
 }
 
@@ -239,8 +343,7 @@ bool furi_hal_usb_composite_uninstall(void) {
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);
-        /* Fall through and try the PHY switch anyway — partial teardown still
-         * left the OTG controller idle. */
+        return false;
     }
 
     /* 2) Free the esp_tinyusb CDC-ACM wrapper (cdc_obj). tinyusb_driver_uninstall
@@ -254,11 +357,19 @@ bool furi_hal_usb_composite_uninstall(void) {
     if(cdc_err != ESP_OK) {
         FURI_LOG_W(TAG, "tusb_cdc_acm_deinit failed: %d", cdc_err);
     }
+#if CONFIG_TINYUSB_CDC_COUNT > 1
+    cdc_err = tusb_cdc_acm_deinit(TINYUSB_CDC_ACM_1);
+    if(cdc_err != ESP_OK) {
+        FURI_LOG_W(TAG, "tusb_cdc_acm_deinit for CDC 1 failed: %d", cdc_err);
+    }
+#endif
 
     /* 3) Re-route the shared internal FSLS PHY from the OTG controller back to
      *    the USB-Serial-JTAG controller and re-enable its pads, so the host
      *    re-enumerates the JTAG/serial device and esptool can flash again. */
     furi_hal_usb_composite_restore_serial_jtag();
+    furi_hal_cdc_internal_reset_line_state(true);
+    furi_hal_usb_backend_set_light_sleep_inhibited(false);
 
     s_installed = false;
     FURI_LOG_I(TAG, "Composite uninstalled, USB-Serial-JTAG restored");

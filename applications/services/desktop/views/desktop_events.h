@@ -26,6 +26,8 @@ typedef enum {
     DesktopLockedEventUpdate,
     DesktopLockedEventShowPinInput,
     DesktopLockedEventDoorsClosed,
+    DesktopLockedEventCoversClosed,
+    DesktopLockedEventOpenPowerOff,
 
     DesktopPinInputEventResetWrongPinLabel,
     DesktopPinInputEventUnlocked,
@@ -94,6 +96,7 @@ typedef enum {
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
+    DesktopAnimationEventNewExternalAnimation,
     DesktopAnimationEventInteractAnimation,
 
     DesktopSlideshowCompleted,
@@ -110,6 +113,7 @@ typedef enum {
     DesktopGlobalApiUnlock,
     DesktopGlobalSaveSettings,
     DesktopGlobalReloadSettings,
+    DesktopGlobalReloadAnimation,
     DesktopGlobalIdleEnter,
     DesktopGlobalIdleExit,
 } DesktopEvent;

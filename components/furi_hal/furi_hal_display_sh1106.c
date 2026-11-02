@@ -120,6 +120,21 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
     }
 }
 
+/* Direct RGB565 drawing and the frame-diff cache of the colour LCD backend have no
+ * counterpart on a 1-bpp OLED: commit() always sends the whole frame. They still
+ * have to exist because the GUI (gui_direct_draw_release) and the Sub-GHz spectrum
+ * view call them on every board; leaving them out broke linking this board. */
+void furi_hal_display_blit(int x0, int y0, int x1, int y1, const void* data) {
+    (void)x0;
+    (void)y0;
+    (void)x1;
+    (void)y1;
+    (void)data;
+}
+
+void furi_hal_display_invalidate(void) {
+}
+
 void furi_hal_display_set_backlight(uint8_t brightness) {
     (void)brightness;
 }

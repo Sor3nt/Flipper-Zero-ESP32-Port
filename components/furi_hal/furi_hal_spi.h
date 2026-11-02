@@ -9,8 +9,16 @@
 extern "C" {
 #endif
 
+void furi_hal_spi_init(void);
+
 void furi_hal_spi_bus_handle_init(const FuriHalSpiBusHandle* handle);
 void furi_hal_spi_bus_handle_deinit(const FuriHalSpiBusHandle* handle);
+
+/** Re-point a handle at another chip-select pad (same bus, MOSI/MISO/SCK untouched).
+ *  The old SPI device is removed so its CS pad is released; the new one is
+ *  created on the next furi_hal_spi_acquire(). Returns false (nothing changed)
+ *  while the handle is acquired. */
+bool furi_hal_spi_bus_handle_set_cs(const FuriHalSpiBusHandle* handle, const GpioPin* cs);
 
 void furi_hal_spi_acquire(const FuriHalSpiBusHandle* handle);
 void furi_hal_spi_release(const FuriHalSpiBusHandle* handle);

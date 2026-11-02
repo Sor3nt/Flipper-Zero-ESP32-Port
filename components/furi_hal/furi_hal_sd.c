@@ -1,14 +1,15 @@
 /**
  * @file furi_hal_sd.c
- * SD Card HAL for ESP32-C6 (Waveshare ESP32-C6-LCD-1.9)
+ * SD Card HAL for ESP32 boards with an SDSPI-connected card
  *
  * Uses ESP-IDF SDSPI driver + raw FatFs diskio registration.
- * Shares SPI2_HOST with the display (CS-based device selection).
+ * On shared-SPI boards, shares SPI2_HOST with the display and radio devices.
  */
 
 #include "furi_hal_sd.h"
 #include "../fatfs.h"
 #include "furi_hal_resources.h"
+#include "furi_hal_power.h"
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
 
@@ -24,10 +25,17 @@
 
 static const char* TAG = "FuriHalSd";
 
+/* Off by default: the diagnostics probe re-runs a full card identification
+ * sequence purely for logging, doubling the SPI-bus-lock hold time on every
+ * failed mount (i.e. every boot without a card). Flip to 1 only for manual
+ * SD debugging builds. */
+#define FURI_SD_MOUNT_DIAGNOSTICS 0
+
 #define SD_FATFS_DRIVE "0:"
 #define SD_SPI_HOST    SPI2_HOST
-#define SD_MAX_FREQ    (20 * 1000) /* 20 MHz — conservative for shared bus */
+#define SD_MAX_FREQ    (20 * 1000)
 #define SD_BOUNCE_SECTORS 8 /* 4 KiB persistent DMA bounce buffer */
+#define SD_IO_RETRIES 3
 
 static sdmmc_card_t* sd_card = NULL;
 static sdspi_dev_handle_t sd_handle = 0;
@@ -59,16 +67,129 @@ static bool sd_buf_is_dma_capable(const void* buf) {
     return !esp_ptr_external_ram(buf);
 }
 
+static esp_err_t sd_recover_and_retry_read(
+    sdmmc_card_t* card,
+    void* buffer,
+    uint32_t sector,
+    uint32_t count,
+    esp_err_t previous_error);
+static esp_err_t sd_recover_and_retry_write(
+    sdmmc_card_t* card,
+    const void* buffer,
+    uint32_t sector,
+    uint32_t count,
+    esp_err_t previous_error);
+
+static esp_err_t sd_read_sectors_with_retry(
+    sdmmc_card_t* card,
+    void* buffer,
+    uint32_t sector,
+    uint32_t count) {
+    esp_err_t err = ESP_FAIL;
+    for(uint8_t attempt = 0; attempt < SD_IO_RETRIES; attempt++) {
+        err = sdmmc_read_sectors(card, buffer, sector, count);
+        if(err == ESP_OK) break;
+        if(err != ESP_ERR_TIMEOUT && err != ESP_ERR_INVALID_STATE) break;
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return sd_recover_and_retry_read(card, buffer, sector, count, err);
+}
+
+static esp_err_t sd_write_sectors_with_retry(
+    sdmmc_card_t* card,
+    const void* buffer,
+    uint32_t sector,
+    uint32_t count) {
+    esp_err_t err = ESP_FAIL;
+    for(uint8_t attempt = 0; attempt < SD_IO_RETRIES; attempt++) {
+        err = sdmmc_write_sectors(card, buffer, sector, count);
+        if(err == ESP_OK) break;
+        if(err != ESP_ERR_TIMEOUT && err != ESP_ERR_INVALID_STATE) break;
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return sd_recover_and_retry_write(card, buffer, sector, count, err);
+}
+
+/* Caller must hold furi_hal_spi_bus_lock(). Re-identify the card in place so
+ * FatFs keeps its registered disk and mounted volume after a transient bus or
+ * card-state failure. The temporary structure preserves valid card metadata
+ * if identification fails. */
+static esp_err_t sd_reinitialize_card_locked(void) {
+    if(!sd_card || !sd_handle) return ESP_ERR_INVALID_STATE;
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = SD_MAX_FREQ;
+    host.slot = sd_handle;
+
+    sdmmc_card_t recovered_card;
+    esp_err_t err = sdmmc_card_init(&host, &recovered_card);
+    if(err == ESP_OK) {
+        ESP_LOGI(TAG, "SD card protocol reinitialized");
+    }
+
+    if(err == ESP_OK) {
+        memcpy(sd_card, &recovered_card, sizeof(*sd_card));
+    } else {
+        ESP_LOGW(TAG, "SD card reinitialization failed: %s", esp_err_to_name(err));
+    }
+
+    return err;
+}
+
+static esp_err_t sd_recover_and_retry_read(
+    sdmmc_card_t* card,
+    void* buffer,
+    uint32_t sector,
+    uint32_t count,
+    esp_err_t previous_error) {
+    if((previous_error != ESP_ERR_TIMEOUT && previous_error != ESP_ERR_INVALID_STATE) ||
+       card != sd_card) {
+        return previous_error;
+    }
+
+    const esp_err_t recovery_error = sd_reinitialize_card_locked();
+    return recovery_error == ESP_OK ? sdmmc_read_sectors(card, buffer, sector, count) :
+                                      previous_error;
+}
+
+static esp_err_t sd_recover_and_retry_write(
+    sdmmc_card_t* card,
+    const void* buffer,
+    uint32_t sector,
+    uint32_t count,
+    esp_err_t previous_error) {
+    if((previous_error != ESP_ERR_TIMEOUT && previous_error != ESP_ERR_INVALID_STATE) ||
+       card != sd_card) {
+        return previous_error;
+    }
+
+    const esp_err_t recovery_error = sd_reinitialize_card_locked();
+    return recovery_error == ESP_OK ? sdmmc_write_sectors(card, buffer, sector, count) :
+                                      previous_error;
+}
+
 static bool sd_host_conflicts_with(const FuriHalSpiBus* bus) {
     if(!bus || !bus->initialized) return false;
 
     /* No conflict if bus shares the same SPI host (CS-based multiplexing) */
     if(bus->host_id == SD_SPI_HOST) return false;
 
-    return bus->mosi_pin == gpio_sdcard_miso.pin || bus->miso_pin == gpio_sdcard_miso.pin ||
-           bus->mosi_pin == gpio_sdcard_cs.pin || bus->miso_pin == gpio_sdcard_cs.pin ||
-           bus->sck_pin == gpio_sdcard_cs.pin;
+    const uint16_t sd_mosi = gpio_sdcard_mosi.pin;
+    const uint16_t sd_miso = gpio_sdcard_miso.pin;
+    const uint16_t sd_sck = gpio_sdcard_sck.pin;
+    const uint16_t sd_cs = gpio_sdcard_cs.pin;
+    return bus->mosi_pin == sd_mosi || bus->mosi_pin == sd_miso ||
+           bus->mosi_pin == sd_sck || bus->mosi_pin == sd_cs ||
+           bus->miso_pin == sd_mosi || bus->miso_pin == sd_miso ||
+           bus->miso_pin == sd_sck || bus->miso_pin == sd_cs ||
+           bus->sck_pin == sd_mosi || bus->sck_pin == sd_miso ||
+           bus->sck_pin == sd_sck || bus->sck_pin == sd_cs;
 }
+
+#if FURI_SD_MOUNT_DIAGNOSTICS
+/* Everything in this block exists only to serve sd_run_mount_diagnostics().
+ * Guarded together so disabling diagnostics doesn't leave unused-function
+ * warnings (which some build configs treat as errors). */
 
 static uint16_t sd_read_le16(const uint8_t* data) {
     return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
@@ -346,13 +467,18 @@ static void sd_run_mount_diagnostics(const sdspi_device_config_t* dev_cfg, const
     sdspi_host_remove_device(handle);
     sdspi_host_deinit();
 }
+#endif /* FURI_SD_MOUNT_DIAGNOSTICS */
 
 static DSTATUS sd_fatfs_card_available(BYTE pdrv) {
-    if((pdrv != sd_pdrv) || (sd_card == NULL)) {
+    if(pdrv != sd_pdrv) {
         return STA_NOINIT;
     }
 
     furi_hal_spi_bus_lock();
+    if(sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        return STA_NOINIT;
+    }
     const esp_err_t err = sdmmc_get_status(sd_card);
     furi_hal_spi_bus_unlock();
 
@@ -373,19 +499,27 @@ static DSTATUS sd_fatfs_status(BYTE pdrv) {
         return sd_fatfs_card_available(pdrv);
     }
 
-    return ((pdrv == sd_pdrv) && (sd_card != NULL)) ? 0 : STA_NOINIT;
+    furi_hal_spi_bus_lock();
+    const DSTATUS status = ((pdrv == sd_pdrv) && (sd_card != NULL)) ? 0 : STA_NOINIT;
+    furi_hal_spi_bus_unlock();
+    return status;
 }
 
 static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
-    if((pdrv != sd_pdrv) || (sd_card == NULL)) {
+    if(pdrv != sd_pdrv) {
         return RES_PARERR;
     }
 
     esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
 
+    if(sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        return RES_PARERR;
+    }
+
     if(sd_buf_is_dma_capable(buff)) {
-        err = sdmmc_read_sectors(sd_card, buff, sector, count);
+        err = sd_read_sectors_with_retry(sd_card, buff, sector, count);
     } else if(sd_ensure_bounce_buf()) {
         /* PSRAM destination: stage through persistent DMA-capable buffer.
          * This avoids ESP-IDF allocating a per-call temp buffer that fails
@@ -396,7 +530,7 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         BYTE* cur_dst = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            err = sd_read_sectors_with_retry(sd_card, sd_bounce_buf, cur_sector, chunk);
             if(err != ESP_OK) break;
             memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
             cur_dst += block_size * chunk;
@@ -418,15 +552,22 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
 }
 
 static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
-    if((pdrv != sd_pdrv) || (sd_card == NULL)) {
+    if(pdrv != sd_pdrv) {
         return RES_PARERR;
     }
 
+    furi_hal_power_light_sleep_inhibit_enter();
     esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
 
+    if(sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        furi_hal_power_light_sleep_inhibit_exit();
+        return RES_PARERR;
+    }
+
     if(sd_buf_is_dma_capable(buff)) {
-        err = sdmmc_write_sectors(sd_card, buff, sector, count);
+        err = sd_write_sectors_with_retry(sd_card, buff, sector, count);
     } else if(sd_ensure_bounce_buf()) {
         const size_t block_size = sd_card->csd.sector_size;
         UINT remaining = count;
@@ -435,7 +576,7 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
             memcpy(sd_bounce_buf, cur_src, block_size * chunk);
-            err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            err = sd_write_sectors_with_retry(sd_card, sd_bounce_buf, cur_sector, chunk);
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
             cur_sector += chunk;
@@ -446,6 +587,7 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
     }
 
     furi_hal_spi_bus_unlock();
+    furi_hal_power_light_sleep_inhibit_exit();
 
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "SD write failed: %s", esp_err_to_name(err));
@@ -456,44 +598,57 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
 }
 
 static DRESULT sd_fatfs_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
-    if((pdrv != sd_pdrv) || (sd_card == NULL)) {
+    if(pdrv != sd_pdrv) {
         return RES_PARERR;
     }
 
+    /* CTRL_SYNC needs no card access at all — keep it lock-free and fast. */
+    if(cmd == CTRL_SYNC) {
+        return RES_OK;
+    }
+
+    furi_hal_spi_bus_lock();
+    if(sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        return RES_PARERR;
+    }
+
+    DRESULT result;
     switch(cmd) {
-    case CTRL_SYNC:
-        return RES_OK;
     case GET_SECTOR_COUNT:
-        *((DWORD*)buff) = sd_card->csd.capacity;
-        return RES_OK;
+        *((DWORD*)buff) = sd_card->csd.capacity; /* now inside lock — was a raw UAF window before */
+        result = RES_OK;
+        break;
     case GET_SECTOR_SIZE:
-        *((WORD*)buff) = sd_card->csd.sector_size;
-        return RES_OK;
+        *((WORD*)buff) = sd_card->csd.sector_size; /* now inside lock */
+        result = RES_OK;
+        break;
     case GET_BLOCK_SIZE:
-        return RES_ERROR;
+        result = RES_ERROR;
+        break;
 #if FF_USE_TRIM
     case CTRL_TRIM: {
         if(sdmmc_can_trim(sd_card) != ESP_OK) {
-            return RES_PARERR;
+            result = RES_PARERR;
+            break;
         }
-
         const DWORD start_sector = ((DWORD*)buff)[0];
         const DWORD end_sector = ((DWORD*)buff)[1];
-
-        furi_hal_spi_bus_lock();
         const esp_err_t err = sdmmc_erase_sectors(
             sd_card,
             start_sector,
             end_sector - start_sector + 1,
             sdmmc_can_discard(sd_card) == ESP_OK ? SDMMC_DISCARD_ARG : SDMMC_ERASE_ARG);
-        furi_hal_spi_bus_unlock();
-
-        return (err == ESP_OK) ? RES_OK : RES_ERROR;
+        result = (err == ESP_OK) ? RES_OK : RES_ERROR;
+        break;
     }
 #endif
     default:
-        return RES_ERROR;
+        result = RES_ERROR;
+        break;
     }
+    furi_hal_spi_bus_unlock();
+    return result;
 }
 
 static void sd_register_fatfs_diskio(void) {
@@ -511,6 +666,7 @@ static void sd_register_fatfs_diskio(void) {
 }
 
 static void sd_release_host(void) {
+    furi_hal_spi_bus_lock(); /* serialize teardown vs any in-flight diskio I/O on sd_card */
     if(sd_diskio_registered) {
         ff_diskio_unregister(sd_pdrv);
         sd_diskio_registered = false;
@@ -524,10 +680,11 @@ static void sd_release_host(void) {
     sdspi_host_deinit();
 
     free(sd_card);
-    sd_card = NULL;
+    sd_card = NULL; /* now atomic w.r.t. every sd_card dereference below, all lock-guarded */
     sd_initialized = false;
     sd_mounted = false;
-    fatfs_init();
+    furi_hal_spi_bus_unlock();
+    fatfs_init(); /* no shared SD state touched — safe outside the lock */
 }
 
 static bool sd_prepare_card(void) {
@@ -589,8 +746,13 @@ static bool sd_prepare_card(void) {
 
     if(ret != ESP_OK) {
         ESP_LOGE(TAG, "SD init failed: %s", esp_err_to_name(ret));
-        sd_run_mount_diagnostics(&dev_cfg, &host);
+        /* Tear down the failed attempt's host/device FIRST — sd_run_mount_diagnostics()
+         * re-inits the same SPI2_HOST/CS pin from scratch, and must not do so while
+         * sd_handle's device from this attempt is still registered on it. */
         sd_release_host();
+#if FURI_SD_MOUNT_DIAGNOSTICS
+        sd_run_mount_diagnostics(&dev_cfg, &host);
+#endif
         return false;
     }
 
@@ -618,7 +780,14 @@ bool furi_hal_sd_is_present(void) {
 }
 
 FuriStatus furi_hal_sd_init(bool power_reset) {
-    (void)power_reset;
+    if(power_reset) {
+        furi_hal_spi_bus_lock();
+        const bool card_ready = sd_initialized && sd_card;
+        const esp_err_t err = card_ready ? sd_reinitialize_card_locked() : ESP_OK;
+        furi_hal_spi_bus_unlock();
+        if(card_ready) return err == ESP_OK ? FuriStatusOk : FuriStatusError;
+    }
+
     return sd_prepare_card() ? FuriStatusOk : FuriStatusError;
 }
 
@@ -628,7 +797,12 @@ FuriStatus furi_hal_sd_get_card_state(void) {
 
 FuriStatus furi_hal_sd_info(FuriHalSdInfo* info) {
     if(!info) return FuriStatusError;
-    if(!sd_initialized || !sd_card) return FuriStatusError;
+
+    furi_hal_spi_bus_lock(); /* guard every sd_card-> read below vs concurrent sd_release_host() */
+    if(!sd_initialized || !sd_card) {
+        furi_hal_spi_bus_unlock();
+        return FuriStatusError;
+    }
 
     memset(info, 0, sizeof(FuriHalSdInfo));
 
@@ -645,13 +819,21 @@ FuriStatus furi_hal_sd_info(FuriHalSdInfo* info) {
     info->product_revision_major = (sd_card->cid.revision >> 4) & 0x0F;
     info->product_revision_minor = sd_card->cid.revision & 0x0F;
     info->product_serial_number = sd_card->cid.serial;
-    info->manufacturing_month = sd_card->cid.date % 100;
-    info->manufacturing_year = 2000 + sd_card->cid.date / 100;
+    /* cid.date is the raw MDT field, not a decimal YYMM value. SD: month in bits 3:0,
+     * year - 2000 in bits 11:4. MMC (v1): month in bits 7:4, year - 1997 in bits 3:0. */
+    if(sd_card->is_mmc) {
+        info->manufacturing_month = (sd_card->cid.date >> 4) & 0x0F;
+        info->manufacturing_year = 1997 + (sd_card->cid.date & 0x0F);
+    } else {
+        info->manufacturing_month = sd_card->cid.date & 0x0F;
+        info->manufacturing_year = 2000 + ((sd_card->cid.date >> 4) & 0xFF);
+    }
 
     /* Capacity in bytes = sector count * sector size */
     info->sector_size = sd_card->csd.sector_size;
     info->capacity = (uint64_t)sd_card->csd.capacity * sd_card->csd.sector_size;
 
+    furi_hal_spi_bus_unlock();
     return FuriStatusOk;
 }
 
@@ -706,13 +888,18 @@ bool furi_hal_sd_release_fatfs(void) {
 }
 
 bool furi_hal_sd_read_sectors_raw(uint32_t sector, void* buf, uint32_t count) {
-    if(!sd_initialized || sd_card == NULL || buf == NULL) return false;
+    if(buf == NULL) return false;
 
     esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
 
+    if(!sd_initialized || sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        return false;
+    }
+
     if(sd_buf_is_dma_capable(buf)) {
-        err = sdmmc_read_sectors(sd_card, buf, sector, count);
+        err = sd_read_sectors_with_retry(sd_card, buf, sector, count);
     } else if(sd_ensure_bounce_buf()) {
         const size_t block_size = sd_card->csd.sector_size;
         uint32_t remaining = count;
@@ -720,7 +907,7 @@ bool furi_hal_sd_read_sectors_raw(uint32_t sector, void* buf, uint32_t count) {
         uint8_t* cur_dst = buf;
         while(remaining > 0) {
             uint32_t chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            err = sd_read_sectors_with_retry(sd_card, sd_bounce_buf, cur_sector, chunk);
             if(err != ESP_OK) break;
             memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
             cur_dst += block_size * chunk;
@@ -736,13 +923,20 @@ bool furi_hal_sd_read_sectors_raw(uint32_t sector, void* buf, uint32_t count) {
 }
 
 bool furi_hal_sd_write_sectors_raw(uint32_t sector, const void* buf, uint32_t count) {
-    if(!sd_initialized || sd_card == NULL || buf == NULL) return false;
+    if(buf == NULL) return false;
 
+    furi_hal_power_light_sleep_inhibit_enter();
     esp_err_t err = ESP_OK;
     furi_hal_spi_bus_lock();
 
+    if(!sd_initialized || sd_card == NULL) { /* re-checked inside lock: atomic vs sd_release_host() */
+        furi_hal_spi_bus_unlock();
+        furi_hal_power_light_sleep_inhibit_exit();
+        return false;
+    }
+
     if(sd_buf_is_dma_capable(buf)) {
-        err = sdmmc_write_sectors(sd_card, buf, sector, count);
+        err = sd_write_sectors_with_retry(sd_card, buf, sector, count);
     } else if(sd_ensure_bounce_buf()) {
         const size_t block_size = sd_card->csd.sector_size;
         uint32_t remaining = count;
@@ -751,7 +945,7 @@ bool furi_hal_sd_write_sectors_raw(uint32_t sector, const void* buf, uint32_t co
         while(remaining > 0) {
             uint32_t chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
             memcpy(sd_bounce_buf, cur_src, block_size * chunk);
-            err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            err = sd_write_sectors_with_retry(sd_card, sd_bounce_buf, cur_sector, chunk);
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
             cur_sector += chunk;
@@ -762,15 +956,20 @@ bool furi_hal_sd_write_sectors_raw(uint32_t sector, const void* buf, uint32_t co
     }
 
     furi_hal_spi_bus_unlock();
+    furi_hal_power_light_sleep_inhibit_exit();
     return err == ESP_OK;
 }
 
 uint32_t furi_hal_sd_sector_count(void) {
-    if(!sd_initialized || sd_card == NULL) return 0;
-    return (uint32_t)sd_card->csd.capacity;
+    furi_hal_spi_bus_lock();
+    uint32_t result = (!sd_initialized || sd_card == NULL) ? 0 : (uint32_t)sd_card->csd.capacity;
+    furi_hal_spi_bus_unlock();
+    return result;
 }
 
 uint16_t furi_hal_sd_sector_size(void) {
-    if(!sd_initialized || sd_card == NULL) return 0;
-    return (uint16_t)sd_card->csd.sector_size;
+    furi_hal_spi_bus_lock();
+    uint16_t result = (!sd_initialized || sd_card == NULL) ? 0 : (uint16_t)sd_card->csd.sector_size;
+    furi_hal_spi_bus_unlock();
+    return result;
 }

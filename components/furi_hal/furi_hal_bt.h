@@ -65,8 +65,8 @@ static inline bool ble_glue_wait_for_c2_start(uint32_t timeout) {
 /* ---- Radio stack ---- */
 
 /** Start the BLE radio stack.
- *  On ESP32, the Bluedroid stack is initialized lazily when the first
- *  profile is allocated (ble_hid_alloc). This function is kept for
+ *  On ESP32, the selected BLE host is initialized lazily when the first
+ *  profile is allocated. This function is kept for
  *  STM32 bt_service compatibility and always returns true. */
 bool furi_hal_bt_start_radio_stack(void);
 
@@ -103,6 +103,10 @@ bool furi_hal_bt_check_profile_type(
     FuriHalBleProfileBase* profile,
     const FuriHalBleProfileTemplate* profile_template);
 
+/** One-time HAL BT init. Creates the lock that serialises light-sleep inhibit
+ *  transitions. Call once at boot before any BLE profile or beacon can start. */
+void furi_hal_bt_init(void);
+
 /* ---- Advertising ---- */
 
 void furi_hal_bt_start_advertising(void);
@@ -110,6 +114,14 @@ void furi_hal_bt_stop_advertising(void);
 
 /** Reset HAL profile state (call when BLE stack is fully stopped). */
 void furi_hal_bt_reinit(void);
+/** Returns true when a profile teardown failed and the BT stack must be restarted. */
+bool furi_hal_bt_profile_recovery_required(void);
+/** Stop and detach the active profile before a full BT-stack shutdown. */
+bool furi_hal_bt_stop_current_profile(void);
+
+/** Answer a GapEventTypePinCodeVerify request: true = the codes match.
+ *  Safe from any thread; no-op when no comparison is pending. */
+void furi_hal_bt_pairing_confirm(bool accept);
 
 /* ---- Battery / power (stubs) ---- */
 
@@ -140,7 +152,7 @@ bool furi_hal_bt_extra_beacon_stop(void);
 
 /* True if this board has a usable BLE radio. Boards with BOARD_HAS_BLE=0 (BLE
  * removed to free RAM, e.g. Waveshare C6-1.47) return false, so bt_srv skips
- * the whole radio-stack init (BT controller + Bluedroid, ~100KB heap). */
+ * the whole radio-stack init (BT controller + BLE host and its heap). */
 bool furi_hal_bt_is_available(void);
 
 #ifdef __cplusplus

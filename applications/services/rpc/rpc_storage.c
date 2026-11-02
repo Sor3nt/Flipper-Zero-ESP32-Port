@@ -7,7 +7,6 @@
 #include <storage/storage.h>
 #include <lib/toolbox/md5_calc.h>
 #include <lib/toolbox/path.h>
-#include <update_util/int_backup.h>
 #include <toolbox/tar/tar_archive.h>
 
 #include <pb_decode.h>
@@ -381,12 +380,9 @@ static void rpc_system_storage_read_process(const PB_Main* request, void* contex
 
                 response->has_next = fs_operation_success && (size_left > 0);
             } else {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
                 response->content.storage_read_response.file.data =
-                    malloc(PB_BYTES_ARRAY_T_ALLOCSIZE(0));
+                    malloc(sizeof(pb_bytes_array_t));
                 response->content.storage_read_response.file.data->size = 0;
-#pragma GCC diagnostic pop
                 response->content.storage_read_response.has_file = true;
                 response->has_next = false;
                 fs_operation_success = true;
@@ -654,11 +650,13 @@ static void rpc_system_storage_backup_create_process(const PB_Main* request, voi
 
     rpc_system_storage_reset_state(rpc_storage, session, true);
 
-    bool backup_ok = int_backup_create(
+    FS_Error backup_error = storage_int_backup(
         rpc_storage->api, request->content.storage_backup_create_request.archive_path);
 
     rpc_send_and_release_empty(
-        session, request->command_id, backup_ok ? PB_CommandStatus_OK : PB_CommandStatus_ERROR);
+        session,
+        request->command_id,
+        rpc_system_storage_get_error(backup_error));
 }
 
 static void rpc_system_storage_backup_restore_process(const PB_Main* request, void* context) {
@@ -674,11 +672,13 @@ static void rpc_system_storage_backup_restore_process(const PB_Main* request, vo
 
     rpc_system_storage_reset_state(rpc_storage, session, true);
 
-    bool backup_ok = int_backup_unpack(
-        rpc_storage->api, request->content.storage_backup_restore_request.archive_path);
+    FS_Error restore_error = storage_int_restore(
+        rpc_storage->api, request->content.storage_backup_restore_request.archive_path, NULL);
 
     rpc_send_and_release_empty(
-        session, request->command_id, backup_ok ? PB_CommandStatus_OK : PB_CommandStatus_ERROR);
+        session,
+        request->command_id,
+        rpc_system_storage_get_error(restore_error));
 }
 
 static void rpc_system_storage_tar_extract_process(const PB_Main* request, void* context) {

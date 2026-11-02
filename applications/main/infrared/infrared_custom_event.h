@@ -10,6 +10,7 @@ typedef enum {
     InfraredCustomEventTypeTransmitStarted,
     InfraredCustomEventTypeTransmitStopped,
     InfraredCustomEventTypeSignalReceived,
+    InfraredCustomEventTypeRxError,
     InfraredCustomEventTypeTextEditDone,
     InfraredCustomEventTypePopupClosed,
     InfraredCustomEventTypeButtonSelected,
@@ -24,9 +25,6 @@ typedef enum {
     InfraredCustomEventTypeRpcButtonPressReleaseName,
     InfraredCustomEventTypeRpcButtonPressReleaseIndex,
     InfraredCustomEventTypeRpcSessionClose,
-
-    InfraredCustomEventTypeGpioTxPinChanged,
-    InfraredCustomEventTypeGpioOtgChanged,
 } InfraredCustomEventType;
 
 #pragma pack(push, 1)

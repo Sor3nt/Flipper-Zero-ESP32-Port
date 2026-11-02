@@ -20,6 +20,7 @@ typedef struct {
     uint8_t anim_frame;
     BadUsbHidInterface interface;
     bool usb_supported;
+    bool stopping;
 } BadUsbModel;
 
 static void bad_usb_draw_callback(Canvas* canvas, void* _model) {
@@ -42,6 +43,13 @@ static void bad_usb_draw_callback(Canvas* canvas, void* _model) {
         canvas, 2, 8 + canvas_current_font_height(canvas), furi_string_get_cstr(disp_str));
 
     furi_string_reset(disp_str);
+
+    if(model->stopping) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str_aligned(canvas, 64, 42, AlignCenter, AlignCenter, "Stopping HID...");
+        furi_string_free(disp_str);
+        return;
+    }
 
     if(model->interface == BadUsbHidInterfaceBle) {
         canvas_draw_icon(canvas, 22, 24, &I_Bad_BLE_48x22);
@@ -181,6 +189,10 @@ static bool bad_usb_input_callback(InputEvent* event, void* context) {
     BadUsb* bad_usb = context;
     bool consumed = false;
 
+    bool stopping = false;
+    with_view_model(bad_usb->view, BadUsbModel * model, { stopping = model->stopping; }, false);
+    if(stopping) return true;
+
     if(event->type == InputTypeShort) {
         if(event->key == InputKeyLeft) {
             consumed = true;
@@ -227,6 +239,7 @@ BadUsb* bad_usb_view_alloc(void) {
         {
             model->interface = BadUsbHidInterfaceBle;
             model->usb_supported = true;
+            model->stopping = false;
         },
         true);
 
@@ -298,6 +311,10 @@ void bad_usb_view_set_interface(BadUsb* bad_usb, BadUsbHidInterface interface) {
     with_view_model(bad_usb->view, BadUsbModel * model, { model->interface = interface; }, true);
 }
 
+void bad_usb_view_set_stopping(BadUsb* bad_usb, bool stopping) {
+    with_view_model(bad_usb->view, BadUsbModel * model, { model->stopping = stopping; }, true);
+}
+
 void bad_usb_view_set_usb_supported(BadUsb* bad_usb, bool supported) {
     with_view_model(bad_usb->view, BadUsbModel * model, { model->usb_supported = supported; }, true);
 }
@@ -308,9 +325,9 @@ bool bad_usb_view_is_idle_state(BadUsb* bad_usb) {
         bad_usb->view,
         BadUsbModel * model,
         {
-            if((model->state.state == BadUsbStateIdle) ||
+            if(!model->stopping && ((model->state.state == BadUsbStateIdle) ||
                (model->state.state == BadUsbStateDone) ||
-               (model->state.state == BadUsbStateNotConnected)) {
+               (model->state.state == BadUsbStateNotConnected))) {
                 is_idle = true;
             }
         },

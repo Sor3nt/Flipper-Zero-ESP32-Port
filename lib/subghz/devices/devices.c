@@ -177,11 +177,13 @@ void subghz_devices_flush_rx(const SubGhzDevice* device) {
     }
 }
 
-void subghz_devices_start_async_rx(const SubGhzDevice* device, void* callback, void* context) {
+bool subghz_devices_start_async_rx(const SubGhzDevice* device, void* callback, void* context) {
     furi_check(device);
+    bool ret = false;
     if(device->interconnect->start_async_rx) {
-        device->interconnect->start_async_rx(callback, context);
+        ret = device->interconnect->start_async_rx(callback, context);
     }
+    return ret;
 }
 
 void subghz_devices_stop_async_rx(const SubGhzDevice* device) {

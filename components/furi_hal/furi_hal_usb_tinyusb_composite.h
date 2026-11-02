@@ -9,15 +9,16 @@ extern "C" {
 #endif
 
 /**
- * Lazy one-shot installer for the TinyUSB Composite Device used on
+ * Installer for the TinyUSB Composite Device used on
  * ESP32-S3-class boards (HID + CDC-ACM with IAD).
  *
- * `esp_tinyusb` does not expose a reliable `uninstall`. Once installed, the
- * Composite stays up for the rest of the boot cycle. VID/PID/strings can only
- * be set on the *first* call; later calls return true but log a warning.
+ * VID/PID/strings are set on the first install; later calls return true but
+ * log a warning if a different identity is requested. Calling while already
+ * installed requests a fresh host enumeration without reinstalling the stack.
  *
  * Returns true if installed (either now or previously). Pass NULLs/zeros for
- * fields that should fall back to defaults.
+ * fields that should fall back to defaults. Callers must uninstall only after
+ * the last consumer has released the shared composite device.
  */
 bool furi_hal_usb_composite_install(
     uint16_t vid,

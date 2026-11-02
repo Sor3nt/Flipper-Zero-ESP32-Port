@@ -15,15 +15,8 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_16mb.csv"
 # ESP32-S3 is dual-core Xtensa — keep unicore for Furi compatibility
 CONFIG_FREERTOS_UNICORE=y
 
-# BLE: Use legacy 4.2 advertising (5.0 extended adv not seen by all phones)
-CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
-# CONFIG_BT_BLE_50_FEATURES_SUPPORTED is not set
-# Allocate Bluedroid host buffers (GATT/HCI/ACL) from PSRAM first, so internal
-# RAM stays free for the BLE controller's DMA TX buffers. Without this, starting
-# a RAM-heavy app (e.g. Sub-GHz: 61 decoders + presets) while screen-streaming
-# over BLE RPC exhausts internal RAM -> controller "BLE_INIT: Malloc failed" ->
-# TX stall -> GATT timeout -> disconnect.
-CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
+# NimBLE is selected by sdkconfig.defaults for every supported target.
+# Raw payload advertisers use extended advertising configured as a legacy PDU.
 
 # Don't cache PHY calibration in NVS. With BT buffers in PSRAM (above), the NVS
 # flash-write that phy_init does on boot ("Saving new calibration data") briefly
@@ -71,9 +64,8 @@ CONFIG_MBEDTLS_DES_C=y
 # TinyUSB (USB HID for BadUSB + CDC for RPC + MSC for SD-Card USB-Stick)
 # Composite descriptor lives in components/furi_hal/furi_hal_usb_tinyusb_composite.c
 CONFIG_TINYUSB_HID_COUNT=1
-CONFIG_TINYUSB_HID_BUFSIZE=16
 CONFIG_TINYUSB_CDC_ENABLED=y
-CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_CDC_COUNT=2
 CONFIG_TINYUSB_MSC_ENABLED=y
 # 4 KiB MSC FIFO → 8 sectors/transfer. Higher = faster, but pulls from internal RAM.
 CONFIG_TINYUSB_MSC_BUFSIZE=4096

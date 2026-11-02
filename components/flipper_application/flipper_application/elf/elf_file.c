@@ -40,6 +40,77 @@ static inline void* elf_psram_malloc(size_t size) {
 #define elf_psram_malloc(size) malloc(size)
 #endif
 
+/* Small file-read buffers: internal DMA-capable RAM first, malloc as fallback. */
+static void* elf_internal_malloc(size_t size) {
+#ifdef ESP_PLATFORM
+    void* p = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if(p) return p;
+#endif
+    return malloc(size);
+}
+
+/* The proto_pirate .rela.text (clean file) once showed 5 entries (60 bytes at
+ * table offset 7476) shifted by 4 bytes, deterministically. Cause not proven
+ * (bad read vs. a stray writer into the PSRAM block). The same buffers carry
+ * .text/.rodata/.data and the symbol tables, where such damage would not be
+ * reported - it would surface later as a crash. So every bulk-loaded region is
+ * re-read here in odd sized sequential pieces (a different access pattern from
+ * the bulk read), compared, and repaired from the piecewise copy on any
+ * difference. This catches damage that happened up to this point only; a
+ * writer that strikes after loading is out of its reach. */
+#define ELF_VERIFY_PIECE 244
+
+/* `scratch` must hold at least ELF_VERIFY_PIECE bytes. Returns false only on a
+ * file read error; mismatches are repaired in place and logged. */
+static bool elf_verify_repair(
+    ELFFile* elf,
+    off_t offset,
+    void* data,
+    size_t size,
+    void* scratch,
+    const char* what) {
+    uint8_t* d = data;
+    size_t done = 0;
+    size_t bad_pieces = 0;
+    size_t first_bad = 0;
+
+    if(!storage_file_seek(elf->fd, offset, true)) return false;
+
+    while(done < size) {
+        size_t n = size - done;
+        if(n > ELF_VERIFY_PIECE) n = ELF_VERIFY_PIECE;
+        if(storage_file_read(elf->fd, scratch, n) != n) return false;
+        if(memcmp(d + done, scratch, n) != 0) {
+            if(bad_pieces == 0) first_bad = done;
+            bad_pieces++;
+            memcpy(d + done, scratch, n);
+        }
+        done += n;
+    }
+
+    if(bad_pieces) {
+        FURI_LOG_W(
+            TAG,
+            "  %s: bulk read differed from piecewise re-read in %u piece(s), first at +%u of %u; repaired",
+            what,
+            (unsigned)bad_pieces,
+            (unsigned)first_bad,
+            (unsigned)size);
+    }
+    return true;
+}
+
+static bool elf_verify_region(ELFFile* elf, off_t offset, void* data, size_t size, const char* what) {
+    void* scratch = elf_internal_malloc(ELF_VERIFY_PIECE);
+    if(!scratch) {
+        FURI_LOG_E(TAG, "  %s: no RAM for verify buffer", what);
+        return false;
+    }
+    bool ok = elf_verify_repair(elf, offset, data, size, scratch, what);
+    free(scratch);
+    return ok;
+}
+
 #define ELF_INVALID_ADDRESS 0xFFFFFFFF
 
 /* ESP32-S3: Convert PSRAM data bus address to instruction bus address.
@@ -257,6 +328,7 @@ __attribute__((unused)) static const char* elf_reloc_type_to_str(int symt) {
         STRCASE(R_XTENSA_32)
         STRCASE(R_XTENSA_PLT)
         STRCASE(R_XTENSA_ASM_EXPAND)
+        STRCASE(R_XTENSA_ASM_SIMPLIFY)
         STRCASE(R_XTENSA_DIFF8)
         STRCASE(R_XTENSA_DIFF16)
         STRCASE(R_XTENSA_DIFF32)
@@ -406,7 +478,10 @@ static bool
     case R_XTENSA_SLOT0_OP:
         return elf_relocate_slot0(relAddr, symAddr, addend);
     case R_XTENSA_ASM_EXPAND:
-        /* Assembler expansion marker - no-op at link time */
+    case R_XTENSA_ASM_SIMPLIFY:
+        /* Assembler expand/simplify markers - hints for the linker's relaxation
+         * pass only. The code is already in its final form at load time (we do
+         * no relaxation), so there is nothing to patch. */
         break;
     case R_XTENSA_DIFF8:
         *((uint8_t*)relAddr) += (uint8_t)(symAddr + addend);
@@ -429,25 +504,65 @@ static bool
     return true;
 }
 
+static bool elf_reloc_type_known(int type) {
+    switch(type) {
+    case R_XTENSA_NONE:
+    case R_XTENSA_32:
+    case R_XTENSA_SLOT0_OP:
+    case R_XTENSA_ASM_EXPAND:
+    case R_XTENSA_ASM_SIMPLIFY:
+    case R_XTENSA_DIFF8:
+    case R_XTENSA_DIFF16:
+    case R_XTENSA_DIFF32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+#define RELA_CHUNK 128
+
+/* Read `count` RELA entries starting at entry `first`, then cross-check them
+ * with a piecewise re-read (a lone bulk read was observed to hand back 5
+ * entries shifted by 4 bytes from a clean .fap). `verify` must hold >=
+ * ELF_VERIFY_PIECE bytes. */
+static bool elf_read_rela_chunk(
+    ELFFile* elf,
+    off_t table_offset,
+    size_t first,
+    size_t count,
+    Elf32_Rela* buf,
+    Elf32_Rela* verify) {
+    size_t bytes = count * sizeof(Elf32_Rela);
+    off_t pos = table_offset + first * sizeof(Elf32_Rela);
+
+    return storage_file_seek(elf->fd, pos, true) &&
+           storage_file_read(elf->fd, buf, bytes) == bytes &&
+           elf_verify_repair(elf, pos, buf, bytes, verify, "RELA");
+}
+
 static bool elf_relocate(ELFFile* elf, ELFSection* s) {
     if(s->data) {
         size_t relEntries = s->rel_count;
 
-        /* Read ALL relocation entries at once into RAM (bulk read).
-         * This avoids thousands of individual 12-byte SD card reads. */
-        size_t rela_size = relEntries * sizeof(Elf32_Rela);
-        Elf32_Rela* rela_table = elf_psram_malloc(rela_size);
-        if(!rela_table) {
-            FURI_LOG_E(TAG, "Failed to alloc %u bytes for RELA table", (unsigned)rela_size);
-            return false;
-        }
-
-        if(!storage_file_seek(elf->fd, s->rel_offset, true) ||
-           storage_file_read(elf->fd, rela_table, rela_size) != rela_size) {
-            FURI_LOG_E(TAG, "Failed to read RELA table");
+        /* Read the relocation entries in RELA_CHUNK-entry slices into small
+         * INTERNAL-RAM buffers, each slice cross-checked against a piecewise
+         * re-read. The old single 86 KB table in PSRAM had 5 entries (623..627,
+         * ~40 ms into the loop, i.e. while this thread slept in the yield below)
+         * turn into a +4-byte-shifted copy of themselves although the .fap is
+         * clean: the signature of another task writing into that PSRAM block,
+         * not of a bad file read. Keeping only a short-lived slice in internal
+         * RAM takes the table out of reach of such a writer. */
+        Elf32_Rela* rela_table = elf_internal_malloc(RELA_CHUNK * sizeof(Elf32_Rela));
+        Elf32_Rela* rela_verify = elf_internal_malloc(RELA_CHUNK * sizeof(Elf32_Rela));
+        if(!rela_table || !rela_verify) {
+            FURI_LOG_E(TAG, "Failed to alloc RELA chunk buffers");
             free(rela_table);
+            free(rela_verify);
             return false;
         }
+        size_t chunk_first = 0;
+        size_t chunk_count = 0;
 
         int relocate_result = true;
         size_t resolved_ok = 0;
@@ -459,8 +574,41 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
                 furi_delay_tick(1);
             }
 
-            Elf32_Rela* rela = &rela_table[relCount];
+            if(relCount >= chunk_first + chunk_count) {
+                chunk_first = relCount;
+                chunk_count = relEntries - relCount;
+                if(chunk_count > RELA_CHUNK) chunk_count = RELA_CHUNK;
+                if(!elf_read_rela_chunk(
+                       elf, s->rel_offset, chunk_first, chunk_count, rela_table, rela_verify)) {
+                    FURI_LOG_E(TAG, "Failed to read RELA entries %u..%u", (unsigned)chunk_first,
+                        (unsigned)(chunk_first + chunk_count - 1));
+                    furi_string_free(symbol_name);
+                    free(rela_table);
+                    free(rela_verify);
+                    return false;
+                }
+            }
+
+            Elf32_Rela* rela = &rela_table[relCount - chunk_first];
             Elf32_Addr symAddr;
+
+            /* Last line of defence: an entry with a type no Xtensa toolchain emits
+             * is a bad read, not a bad file. Re-read just that 12-byte entry. */
+            if(!elf_reloc_type_known(ELF32_R_TYPE(rela->r_info))) {
+                Elf32_Rela fresh;
+                if(storage_file_seek(
+                       elf->fd, s->rel_offset + relCount * sizeof(Elf32_Rela), true) &&
+                   storage_file_read(elf->fd, &fresh, sizeof(fresh)) == sizeof(fresh) &&
+                   elf_reloc_type_known(ELF32_R_TYPE(fresh.r_info))) {
+                    FURI_LOG_W(
+                        TAG,
+                        "  reloc #%u type %d invalid, single re-read gave type %d: using it",
+                        (unsigned)relCount,
+                        (int)ELF32_R_TYPE(rela->r_info),
+                        (int)ELF32_R_TYPE(fresh.r_info));
+                    *rela = fresh;
+                }
+            }
 
             int symEntry = ELF32_R_SYM(rela->r_info);
             int relType = ELF32_R_TYPE(rela->r_info);
@@ -473,6 +621,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
                     FURI_LOG_E(TAG, "  symbol read fail for entry %d", symEntry);
                     furi_string_free(symbol_name);
                     free(rela_table);
+                    free(rela_verify);
                     return false;
                 }
 
@@ -487,6 +636,31 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
             if(symAddr != ELF_INVALID_ADDRESS) {
                 if(!elf_relocate_symbol(elf, relAddr, relType, symAddr, rela->r_addend)) {
                     relocate_result = false;
+                    /* Name the offending relocation so an unloadable FAP can be
+                     * diagnosed: a relocation type outside the Xtensa ABI range
+                     * (>66) means the .fap is stale/corrupt or built with an
+                     * incompatible toolchain and must be rebuilt, not a firmware
+                     * gap. Reading the symbol here is cheap (only on failure).
+                     * The entry was read twice and matched, so this is what the
+                     * file really contains. */
+                    Elf32_Sym bad_sym;
+                    furi_string_reset(symbol_name);
+                    elf_read_symbol(elf, symEntry, &bad_sym, symbol_name);
+                    FURI_LOG_E(
+                        TAG,
+                        "  reloc FAIL type=%d%s off=0x%X sym[%d]='%s'",
+                        relType,
+                        (relType > 66) ? " (INVALID: not a Xtensa reloc; rebuild the FAP)" : "",
+                        (unsigned)rela->r_offset,
+                        symEntry,
+                        furi_string_get_cstr(symbol_name));
+                    FURI_LOG_E(
+                        TAG,
+                        "  reloc #%u raw: off=0x%X info=0x%08X add=%d",
+                        (unsigned)relCount,
+                        (unsigned)rela->r_offset,
+                        (unsigned)rela->r_info,
+                        (int)rela->r_addend);
                 } else {
                     resolved_ok++;
                 }
@@ -497,6 +671,7 @@ static bool elf_relocate(ELFFile* elf, ELFSection* s) {
         }
         furi_string_free(symbol_name);
         free(rela_table);
+        free(rela_verify);
 
         FURI_LOG_I(TAG, "Relocation: %u OK, %u FAILED out of %u",
             (unsigned)resolved_ok, (unsigned)resolved_fail, (unsigned)relEntries);
@@ -567,6 +742,12 @@ static ELFLoadSectionResult
 #else
     section->data = aligned_malloc(section_header->sh_size, section_header->sh_addralign);
 #endif
+    if(!section->data) {
+        /* Without this check the read below (or the memset for .bss) runs on
+         * NULL and crashes the whole system instead of failing the app load. */
+        FURI_LOG_E(TAG, "    no memory for %lu bytes", (unsigned long)section_header->sh_size);
+        return ELFLoadSectionResultNoMemory;
+    }
     section->size = section_header->sh_size;
 
     if(section_header->sh_type == SHT_NOBITS) {
@@ -582,6 +763,12 @@ static ELFLoadSectionResult
        (storage_file_read(elf->fd, section->data, section_header->sh_size) !=
         section_header->sh_size)) {
         FURI_LOG_E(TAG, "    seek/read fail");
+        return ELFLoadSectionResultError;
+    }
+
+    if(!elf_verify_region(
+           elf, section_header->sh_offset, section->data, section_header->sh_size, "section data")) {
+        FURI_LOG_E(TAG, "    verify read fail");
         return ELFLoadSectionResultError;
     }
 
@@ -689,7 +876,9 @@ static SectionTypeInfo elf_preload_section(
         if(elf->sym_cache) {
             if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
                storage_file_read(elf->fd, elf->sym_cache, section_header->sh_size) !=
-                   section_header->sh_size) {
+                   section_header->sh_size ||
+               !elf_verify_region(
+                   elf, section_header->sh_offset, elf->sym_cache, section_header->sh_size, "symtab")) {
                 free(elf->sym_cache);
                 elf->sym_cache = NULL;
             }
@@ -711,7 +900,9 @@ static SectionTypeInfo elf_preload_section(
         if(elf->str_cache) {
             if(!storage_file_seek(elf->fd, section_header->sh_offset, true) ||
                storage_file_read(elf->fd, elf->str_cache, section_header->sh_size) !=
-                   section_header->sh_size) {
+                   section_header->sh_size ||
+               !elf_verify_region(
+                   elf, section_header->sh_offset, elf->str_cache, section_header->sh_size, "strtab")) {
                 free(elf->str_cache);
                 elf->str_cache = NULL;
                 elf->str_cache_size = 0;
@@ -1022,6 +1213,34 @@ ElfProcessSectionResult elf_process_section(
     return result;
 }
 
+/* Failure diagnostic: CRC32 (zlib/PNG flavour, same as `crc32` on a PC) and size
+ * of the file exactly as the SD stack delivers it. Compare with the PC copy to
+ * tell a bad file on the card from a bad copy/read path. */
+static void elf_log_file_crc(ELFFile* elf) {
+    static const uint32_t nib[16] = {
+        0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac, 0x76dc4190, 0x6b6b51f4,
+        0x4db26158, 0x5005713c, 0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c,
+        0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c};
+    uint8_t* buf = elf_internal_malloc(512);
+    if(!buf || !elf->fd || !storage_file_seek(elf->fd, 0, true)) {
+        free(buf);
+        return;
+    }
+
+    uint32_t crc = 0xFFFFFFFF;
+    size_t total = 0;
+    size_t n;
+    while((n = storage_file_read(elf->fd, buf, 512)) > 0) {
+        for(size_t i = 0; i < n; i++) {
+            crc = nib[(crc ^ buf[i]) & 0x0F] ^ (crc >> 4);
+            crc = nib[(crc ^ (buf[i] >> 4)) & 0x0F] ^ (crc >> 4);
+        }
+        total += n;
+    }
+    free(buf);
+    FURI_LOG_E(TAG, "FAP file as read from SD: size=%u crc32=%08X", (unsigned)total, (unsigned)~crc);
+}
+
 ELFFileLoadStatus elf_file_load_sections(ELFFile* elf) {
     furi_check(elf->fd != NULL);
     ELFFileLoadStatus status = ELFFileLoadStatusSuccess;
@@ -1064,6 +1283,10 @@ ELFFileLoadStatus elf_file_load_sections(ELFFile* elf) {
             total_size += itref->value.size;
         }
         FURI_LOG_I(TAG, "Total size of loaded sections: %zu", total_size);
+    }
+
+    if(status == ELFFileLoadStatusMissingImports) {
+        elf_log_file_crc(elf);
     }
 
     elf_file_maybe_release_fd(elf);

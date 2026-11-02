@@ -89,6 +89,9 @@ bool subghz_protocol_raw_save_to_file_init(
     SubGhzRadioPreset* preset) {
     furi_check(instance);
 
+    // Never leak a recording that is still open (its handle would be overwritten).
+    subghz_protocol_raw_save_to_file_stop(instance);
+
     instance->storage = furi_record_open(RECORD_STORAGE);
     instance->flipper_file = flipper_format_file_alloc(instance->storage);
 
@@ -159,12 +162,27 @@ bool subghz_protocol_raw_save_to_file_init(
         }
 
         instance->upload_raw = malloc(SUBGHZ_DOWNLOAD_MAX_SIZE * sizeof(int32_t));
+        if(!instance->upload_raw) {
+            FURI_LOG_E(TAG, "Unable to allocate RAW buffer");
+            break;
+        }
         instance->file_is_open = RAWFileIsOpenWrite;
         instance->sample_write = 0;
+        instance->ind_write = 0;
         instance->last_level = false;
         instance->pause = false;
         init = true;
     } while(0);
+
+    if(!init) {
+        // save_to_file_stop() only cleans up an open recording, so release
+        // what this attempt allocated here (e.g. no SD card on every REC press).
+        flipper_format_file_close(instance->flipper_file);
+        flipper_format_free(instance->flipper_file);
+        instance->flipper_file = NULL;
+        furi_record_close(RECORD_STORAGE);
+        instance->storage = NULL;
+    }
 
     furi_string_free(temp_str);
 
@@ -267,14 +285,19 @@ void subghz_protocol_decoder_raw_feed(void* context, bool level, uint32_t durati
     // Add check if we got duration higher than 1 second, we skipping it, temp fix
     if((!instance->pause && (instance->upload_raw != NULL)) && (duration < ((uint32_t)1000000))) {
         if(duration > subghz_protocol_raw_const.te_short) {
-            if(instance->last_level != level) {
+            if(instance->last_level != level && instance->ind_write < SUBGHZ_DOWNLOAD_MAX_SIZE) {
                 instance->last_level = (level ? true : false);
                 instance->upload_raw[instance->ind_write++] = (level ? duration : -duration);
             }
         }
 
-        if(instance->ind_write == SUBGHZ_DOWNLOAD_MAX_SIZE) {
-            subghz_protocol_raw_save_to_file_write(instance);
+        if(instance->ind_write >= SUBGHZ_DOWNLOAD_MAX_SIZE &&
+           !subghz_protocol_raw_save_to_file_write(instance)) {
+            // Storage write failed (card full/removed). Drop this block instead of
+            // keeping ind_write at MAX: the next sample would be stored past the end
+            // of upload_raw and the `== MAX` flush would never trigger again.
+            FURI_LOG_E(TAG, "Dropped %u RAW samples", (unsigned)instance->ind_write);
+            instance->ind_write = 0;
         }
     }
 }
@@ -303,6 +326,7 @@ void* subghz_protocol_encoder_raw_alloc(SubGhzEnvironment* environment) {
     instance->file_name = furi_string_alloc();
     instance->radio_device_name = furi_string_alloc();
     instance->is_running = false;
+    instance->file_worker_encoder = NULL;
     return instance;
 }
 
@@ -310,9 +334,10 @@ void subghz_protocol_encoder_raw_stop(void* context) {
     furi_check(context);
     SubGhzProtocolEncoderRAW* instance = context;
     instance->is_running = false;
-    if(instance->file_worker_encoder &&
-       subghz_file_encoder_worker_is_running(instance->file_worker_encoder)) {
-        subghz_file_encoder_worker_stop(instance->file_worker_encoder);
+    if(instance->file_worker_encoder) {
+        if(subghz_file_encoder_worker_is_running(instance->file_worker_encoder)) {
+            subghz_file_encoder_worker_stop(instance->file_worker_encoder);
+        }
         subghz_file_encoder_worker_free(instance->file_worker_encoder);
         instance->file_worker_encoder = NULL;
     }
@@ -342,14 +367,27 @@ static bool subghz_protocol_encoder_raw_worker_init(SubGhzProtocolEncoderRAW* in
     furi_check(!instance->file_worker_encoder);
 
     instance->file_worker_encoder = subghz_file_encoder_worker_alloc();
-    if(subghz_file_encoder_worker_start(
+    if(instance->file_worker_encoder &&
+       subghz_file_encoder_worker_start(
            instance->file_worker_encoder,
            furi_string_get_cstr(instance->file_name),
            furi_string_get_cstr(instance->radio_device_name))) {
-        //the worker needs a file in order to open and read part of the file
-        furi_delay_ms(100);
+        SubGhzFileEncoderWorkerPreloadResult preload_result =
+            subghz_file_encoder_worker_wait_for_data(instance->file_worker_encoder, 32, 600);
+        if(preload_result == SubGhzFileEncoderWorkerPreloadFailed) {
+            FURI_LOG_E(
+                TAG,
+                "Raw signal file could not be preloaded for transmission: %s",
+                furi_string_get_cstr(instance->file_name));
+            subghz_protocol_encoder_raw_stop(instance);
+            return false;
+        }
+        if(preload_result == SubGhzFileEncoderWorkerPreloadTimeout) {
+            FURI_LOG_W(TAG, "Raw signal preload timed out; continuing with streaming data");
+        }
         instance->is_running = true;
     } else {
+        FURI_LOG_E(TAG, "Unable to start raw signal file worker");
         subghz_protocol_encoder_raw_stop(instance);
     }
     return instance->is_running;

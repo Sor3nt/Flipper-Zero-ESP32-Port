@@ -22,7 +22,7 @@ typedef struct {
 
 typedef struct {
     void (*adjust_config)(BadUsbHidConfig* hid_cfg);
-    void* (*init)(BadUsbHidConfig* hid_cfg);
+    bool (*init)(BadUsbHidConfig* hid_cfg, void** inst);
     void (*deinit)(void* inst);
     void (*set_state_callback)(void* inst, HidStateCallback cb, void* context);
     bool (*is_connected)(void* inst);
@@ -44,6 +44,8 @@ const BadUsbHidApi* bad_usb_hid_get_interface(BadUsbHidInterface interface);
 bool bad_usb_hid_supports_usb(void);
 
 void bad_usb_hid_ble_remove_pairing(void);
+
+void bad_usb_hid_ble_restore_default(void);
 
 #ifdef __cplusplus
 }

@@ -17,6 +17,7 @@ typedef enum {
     SubGhzTxRxStartTxStateOk,
     SubGhzTxRxStartTxStateErrorOnlyRx,
     SubGhzTxRxStartTxStateErrorParserOthers,
+    SubGhzTxRxStartTxStateErrorAsyncTx,
 } SubGhzTxRxStartTxState;
 
 /**
@@ -57,12 +58,16 @@ void subghz_txrx_set_preset(
     uint8_t* preset_data,
     size_t preset_data_size);
 
+/** Number of TX Power menu entries ("Preset" + 8 power levels); valid indexes are 0..COUNT-1. */
+#define SUBGHZ_TXRX_TX_POWER_COUNT 9
+
 /**
  * Set TX Power
- * 
+ *
  * @param preset_data Data of preset
  * @param preset_data_size Size of preset data
  * @param tx_power Menu Index of TX Power Setting. (Saves iterating in Config enter)
+ *                 Out-of-range indexes are treated as 0 (preset default).
  */
 uint8_t* subghz_txrx_set_tx_power(uint8_t* preset_data, size_t preset_data_size, uint8_t tx_power);
 
@@ -107,10 +112,19 @@ SubGhzTxRxStartTxState subghz_txrx_tx_start(SubGhzTxRx* instance, FlipperFormat*
 
 /**
  * Start RX CC1101
- * 
+ *
  * @param instance Pointer to a SubGhzTxRx
+ * @return true if the radio is receiving; false leaves it IDLE (error logged)
  */
-void subghz_txrx_rx_start(SubGhzTxRx* instance);
+bool subghz_txrx_rx_start(SubGhzTxRx* instance);
+
+/**
+ * Whether asynchronous RX is actually running (it may have failed to start)
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @return true if receiving
+ */
+bool subghz_txrx_is_receiving(SubGhzTxRx* instance);
 
 /**
  * Stop TX/RX CC1101

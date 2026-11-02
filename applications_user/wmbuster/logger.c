@@ -28,6 +28,7 @@ bool wmbus_log_telegram(
     }
 
     File* f = storage_file_alloc(storage);
+    if(!f) return false;
     if(!storage_file_open(f, path, FSAM_WRITE, FSOM_OPEN_APPEND)) {
         storage_file_free(f); return false;
     }

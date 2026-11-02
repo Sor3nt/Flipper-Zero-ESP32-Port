@@ -84,10 +84,20 @@ static WlanApp* wlan_app_alloc(void) {
     view_set_context(app->view_deauther, app->view_dispatcher);
     view_dispatcher_add_view(app->view_dispatcher, WlanAppViewDeauther, app->view_deauther);
 
+    app->view_deauth_all = wlan_deauth_all_view_alloc();
+    view_set_context(app->view_deauth_all, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, WlanAppViewDeauthAll, app->view_deauth_all);
+
     app->view_smart_deauth = wlan_smart_deauth_view_alloc();
     view_set_context(app->view_smart_deauth, app->view_dispatcher);
     view_dispatcher_add_view(
         app->view_dispatcher, WlanAppViewSmartDeauth, app->view_smart_deauth);
+
+    app->view_live_scan = wlan_live_scan_view_alloc();
+    view_set_context(app->view_live_scan, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, WlanAppViewLiveScan, app->view_live_scan);
 
     app->sniffer_view_obj = wlan_sniffer_view_alloc();
     app->view_sniffer = wlan_sniffer_view_get_view(app->sniffer_view_obj);
@@ -267,7 +277,9 @@ static void wlan_app_free(WlanApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewHandshake);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewHandshakeChannel);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewDeauther);
+    view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewDeauthAll);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSmartDeauth);
+    view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewLiveScan);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSniffer);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortal);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewEvilPortalCaptured);
@@ -288,7 +300,9 @@ static void wlan_app_free(WlanApp* app) {
     wlan_handshake_view_free(app->view_handshake);
     wlan_handshake_channel_view_free(app->view_handshake_channel);
     wlan_deauther_view_free(app->view_deauther);
+    wlan_deauth_all_view_free(app->view_deauth_all);
     wlan_smart_deauth_view_free(app->view_smart_deauth);
+    wlan_live_scan_view_free(app->view_live_scan);
     wlan_sniffer_view_free(app->sniffer_view_obj);
     wlan_evil_portal_view_free(app->evil_portal_view_obj);
     wlan_evil_portal_captured_view_free(app->evil_portal_captured_view_obj);

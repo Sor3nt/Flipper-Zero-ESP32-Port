@@ -4,6 +4,8 @@
 #include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
 
 static void jammer_radio_device_loader_power_on() {
+    /* A header-powered external module needs no 5 V (OTG) rail. */
+    if(furi_hal_subghz_ext_supported()) return;
     uint8_t attempts = 0;
     while(!furi_hal_power_is_otg_enabled() && attempts++ < 5) {
         furi_hal_power_enable_otg();
@@ -12,6 +14,7 @@ static void jammer_radio_device_loader_power_on() {
 }
 
 static void jammer_radio_device_loader_power_off() {
+    if(furi_hal_subghz_ext_supported()) return;
     if(furi_hal_power_is_otg_enabled()) furi_hal_power_disable_otg();
 }
 
@@ -44,8 +47,9 @@ const SubGhzDevice* jammer_radio_device_loader_set(
        jammer_radio_device_loader_is_connect_external(SUBGHZ_DEVICE_CC1101_EXT_NAME)) {
         jammer_radio_device_loader_power_on();
         radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_EXT_NAME);
-        if(radio_device) {
-            subghz_devices_begin(radio_device);
+        if(!radio_device || !subghz_devices_begin(radio_device)) {
+            /* The module could not be started (pad taken since the probe): stay internal. */
+            radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
         }
     } else if(current_radio_device == NULL) {
         radio_device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);

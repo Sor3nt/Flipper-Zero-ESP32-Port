@@ -22,6 +22,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <furi_hal_spi_bus.h>
 #include <furi_hal_speaker.h>
+#include <boards/board.h>
 
 #include "wolf3d_glue.h"
 
@@ -71,7 +72,11 @@ int32_t wolf3d_app(void* p) {
     wolf3d_glue_show_splash();
 
     /* Speaker-HAL freigeben — Wolf3D will I2S_NUM_0 selbst. (TODO Stage 3) */
+    /* Nur auf Boards mit I2S-Speaker (T-Embed). Boards mit Buzzer (paradoxt)
+     * haben keinen I2S-Ausgang; dort bleibt die HAL aktiv, SFX ist aus. */
+#if defined(BOARD_HAS_SPEAKER) && BOARD_HAS_SPEAKER
     furi_hal_speaker_deinit();
+#endif
 
     /* BT-Teardown — gibt ~80 KB DRAM frei. Irreversibel; weil wir am Ende
      * via esp_restart() reboot, ist das OK. (Pattern aus Doom-Port.) */

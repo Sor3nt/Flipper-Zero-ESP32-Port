@@ -2,6 +2,43 @@ cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS "components")
 
+# Keep the hardware profile aligned with the selected ESP target when the
+# caller has not explicitly selected a board. ESP32-S3 defaults to Smoochie;
+# C6 retains the existing Waveshare default. Other S3 boards can still be
+# selected explicitly with -DFLIPPER_BOARD=...
+if(NOT DEFINED FLIPPER_BOARD)
+    if(DEFINED ENV{FLIPPER_BOARD})
+        set(FLIPPER_BOARD "$ENV{FLIPPER_BOARD}" CACHE STRING "Target board")
+    else()
+        set(_configured_idf_target "$ENV{IDF_TARGET}")
+        if(NOT _configured_idf_target AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig")
+            file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig" _idf_target_line
+                REGEX "^CONFIG_IDF_TARGET=\"")
+            string(REGEX REPLACE "^CONFIG_IDF_TARGET=\"([^\"]+)\"$" "\\1"
+                _configured_idf_target "${_idf_target_line}")
+        endif()
+        if(_configured_idf_target STREQUAL "esp32s3")
+            set(FLIPPER_BOARD "smoochie" CACHE STRING "Target board")
+        else()
+            set(FLIPPER_BOARD "waveshare_c6_1.9" CACHE STRING "Target board")
+        endif()
+    endif()
+endif()
+set(ENV{FLIPPER_BOARD} "${FLIPPER_BOARD}")
+
+# Paradoxt shares GPIO43/44 with UART1, so keep its console on USB Serial/JTAG.
+if(FLIPPER_BOARD STREQUAL "paradoxt")
+    if(NOT DEFINED SDKCONFIG_DEFAULTS OR SDKCONFIG_DEFAULTS STREQUAL "")
+        set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
+    endif()
+    list(FIND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.paradoxt"
+        _paradoxt_defaults_index)
+    if(_paradoxt_defaults_index EQUAL -1)
+        list(APPEND SDKCONFIG_DEFAULTS
+            "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.paradoxt")
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Patch libnet80211.a to allow raw TX of deauth/disassoc management frames.
 # The closed-source WiFi blob rejects frame types 0xC0/0xA0; we patch

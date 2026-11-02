@@ -31,8 +31,16 @@ typedef struct {
     const char* name;
 } InputPin;
 
+typedef struct {
+    const GpioPin* pin;
+    const char* name;
+    bool debug;
+} GpioPinRecord;
+
 extern const InputPin input_pins[];
 extern const size_t input_pins_count;
+extern const GpioPinRecord gpio_pins[];
+extern const size_t gpio_pins_count;
 
 /* Hardware Button Pins (Waveshare ESP32-C6-Touch-LCD-1.9) */
 extern const GpioPin gpio_button_boot; /* GPIO9 - BOOT button (active low) */
@@ -47,6 +55,8 @@ extern const GpioPin gpio_lcd_rst;  /* GPIO14 - Reset */
 extern const GpioPin gpio_lcd_bl;   /* GPIO15 - Backlight (PWM) */
 
 /* SD Card Pins (Waveshare ESP32-C6-LCD-1.9, shared SPI2_HOST) */
+extern const GpioPin gpio_sdcard_mosi; /* Shared with LCD MOSI */
+extern const GpioPin gpio_sdcard_sck;  /* Shared with LCD SCLK */
 extern const GpioPin gpio_sdcard_cs;   /* GPIO20 - SD Chip Select */
 extern const GpioPin gpio_sdcard_miso; /* GPIO19 - SD MISO */
 

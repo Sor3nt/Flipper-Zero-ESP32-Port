@@ -396,6 +396,8 @@ static void rpc_system_storage_read_process(const PB_Main* request, void* contex
 
             if(fs_operation_success) {
                 rpc_send_and_release(session, response);
+            } else if(response->content.storage_read_response.has_file) {
+                free(response->content.storage_read_response.file.data);
             }
         } while((size_left != 0) && fs_operation_success);
     }

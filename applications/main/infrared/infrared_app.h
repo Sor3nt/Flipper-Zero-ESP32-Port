@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 /**
  * @brief InfraredApp opaque type declaration.
  */
@@ -23,3 +25,6 @@ typedef struct {
     FuriHalInfraredTxPin tx_pin;
     bool otg_enabled;
 } InfraredSettings;
+
+bool infrared_settings_load(InfraredSettings* settings);
+bool infrared_settings_save(const InfraredSettings* settings);

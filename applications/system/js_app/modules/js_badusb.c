@@ -170,7 +170,7 @@ static void js_badusb_setup(struct mjs* mjs) {
         // No arguments: start USB HID with default settings
         args_correct = true;
     } else if(num_args == 1) {
-        badusb->hid_cfg = malloc(sizeof(FuriHalUsbHidConfig));
+        badusb->hid_cfg = calloc(1, sizeof(FuriHalUsbHidConfig));
         // Parse argument object
         args_correct = setup_parse_params(badusb, mjs, mjs_arg(mjs, 0), badusb->hid_cfg);
     }
@@ -488,7 +488,7 @@ static void js_badusb_alt_println(struct mjs* mjs) {
 
 static void* js_badusb_create(struct mjs* mjs, mjs_val_t* object, JsModules* modules) {
     UNUSED(modules);
-    JsBadusbInst* badusb = malloc(sizeof(JsBadusbInst));
+    JsBadusbInst* badusb = calloc(1, sizeof(JsBadusbInst));
     mjs_val_t badusb_obj = mjs_mk_object(mjs);
     mjs_set(mjs, badusb_obj, INST_PROP_NAME, ~0, mjs_mk_foreign(mjs, badusb));
     mjs_set(mjs, badusb_obj, "setup", ~0, MJS_MK_FN(js_badusb_setup));

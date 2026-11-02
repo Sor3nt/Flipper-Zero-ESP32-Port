@@ -14,6 +14,7 @@
 
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
+#include <esp_attr.h>
 #include <stdint.h>
 #include <freertos/task.h>
 #include <esp_rom_sys.h>
@@ -225,6 +226,20 @@ static StackType_t* furi_thread_alloc_stack(const char* name, uint32_t stack_siz
 FuriThread* furi_thread_alloc(void) {
     /* FuriThread contains StaticTask_t (TCB) which FreeRTOS requires in internal RAM */
     FuriThread* thread = heap_caps_calloc(1, sizeof(FuriThread), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if(!thread) {
+        /* Internal DRAM is chronically scarce and fragmented on this S3 port
+           (SD/radio/BT traffic holds the large blocks). When the TCB cannot be
+           placed, return NULL so callers that check it (e.g. the spectrum view)
+           can degrade gracefully, rather than faulting on a NULL write inside
+           furi_thread_init_common (StoreProhibited). Service threads keep using
+           furi_check() instead — they are boot-critical and must not fail. */
+        FURI_LOG_E(
+            TAG,
+            "furi_thread_alloc: no internal RAM for TCB (%u B, largest free %u)",
+            (unsigned)sizeof(FuriThread),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        return NULL;
+    }
 
     furi_thread_init_common(thread);
 
@@ -260,8 +275,20 @@ FuriThread* furi_thread_alloc_ex(
     FuriThreadCallback callback,
     void* context) {
     FuriThread* thread = furi_thread_alloc();
+    if(!thread) return NULL; // out of internal RAM; the setters below furi_check(thread)
     furi_thread_set_name(thread, name);
     furi_thread_set_stack_size(thread, stack_size);
+    /* The stack prefers PSRAM but falls back to internal RAM; under the same
+       memory pressure both can be exhausted, leaving a NULL stack that would
+       fault later in xTaskCreateStatic. Bail out cleanly so the caller's
+       NULL-check handles it (state is Stopped and is_service false here, so
+       furi_thread_free is valid on this partially-initialised thread). */
+    if(!thread->stack_buffer) {
+        FURI_LOG_E(TAG, "furi_thread_alloc_ex: no RAM for '%s' stack (%lu B)",
+            name ? name : "?", (unsigned long)stack_size);
+        furi_thread_free(thread);
+        return NULL;
+    }
     furi_thread_set_callback(thread, callback);
     furi_thread_set_context(thread, context);
     return thread;
@@ -436,10 +463,8 @@ bool furi_thread_join(FuriThread* thread) {
      * when the join is triggered by synchronous event dispatch. */
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
     UBaseType_t my_prio = uxTaskPriorityGet(self);
-    TaskHandle_t target = (TaskHandle_t)thread;
-    UBaseType_t target_prio = uxTaskPriorityGet(target);
-    if(my_prio > target_prio) {
-        vTaskPrioritySet(self, target_prio);
+    if(my_prio > FuriThreadPriorityInit) {
+        vTaskPrioritySet(self, FuriThreadPriorityInit);
     }
 
     while(thread->state != FuriThreadStateStopped) {
@@ -529,6 +554,17 @@ uint32_t furi_thread_flags_set(FuriThreadId thread_id, uint32_t flags) {
     furi_event_loop_thread_flag_callback(thread_id);
 
     return rflags;
+}
+
+bool IRAM_ATTR furi_thread_flags_set_from_isr(FuriThreadId thread_id, uint32_t flags) {
+    TaskHandle_t hTask = (TaskHandle_t)thread_id;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+
+    if((hTask == NULL) || ((flags & THREAD_FLAGS_INVALID_BITS) != 0U)) return false;
+
+    (void)xTaskNotifyIndexedFromISR(
+        hTask, THREAD_NOTIFY_INDEX, flags, eSetBits, &higher_priority_task_woken);
+    return higher_priority_task_woken == pdTRUE;
 }
 
 uint32_t furi_thread_flags_clear(uint32_t flags) {

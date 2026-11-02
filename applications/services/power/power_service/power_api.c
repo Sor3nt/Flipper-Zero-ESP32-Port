@@ -11,6 +11,17 @@ void power_off(Power* power) {
         furi_message_queue_put(power->message_queue, &msg, FuriWaitForever) == FuriStatusOk);
 }
 
+void power_show_poweroff_confirmation(Power* power) {
+    furi_check(power);
+
+    PowerMessage msg = {
+        .type = PowerMessageTypeShowPoweroffConfirmation,
+    };
+
+    furi_check(
+        furi_message_queue_put(power->message_queue, &msg, FuriWaitForever) == FuriStatusOk);
+}
+
 void power_reboot(Power* power, PowerBootMode mode) {
     PowerMessage msg = {
         .type = PowerMessageTypeReboot,

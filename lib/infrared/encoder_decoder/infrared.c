@@ -183,12 +183,29 @@ const InfraredMessage*
 
 InfraredDecoderHandler* infrared_alloc_decoder(void) {
     InfraredDecoderHandler* handler = malloc(sizeof(InfraredDecoderHandler));
+    if(!handler) return NULL;
+
     handler->ctx = malloc(sizeof(void*) * COUNT_OF(infrared_encoder_decoder));
+    if(!handler->ctx) {
+        free(handler);
+        return NULL;
+    }
 
     for(size_t i = 0; i < COUNT_OF(infrared_encoder_decoder); ++i) {
         handler->ctx[i] = 0;
         if(infrared_encoder_decoder[i].decoder.alloc)
             handler->ctx[i] = infrared_encoder_decoder[i].decoder.alloc();
+        if(infrared_encoder_decoder[i].decoder.alloc && !handler->ctx[i]) {
+            for(size_t j = i; j > 0; --j) {
+                size_t cleanup_index = j - 1;
+                if(infrared_encoder_decoder[cleanup_index].decoder.free)
+                    infrared_encoder_decoder[cleanup_index].decoder.free(
+                        handler->ctx[cleanup_index]);
+            }
+            free(handler->ctx);
+            free(handler);
+            return NULL;
+        }
     }
 
     infrared_reset_decoder(handler);
@@ -237,6 +254,8 @@ const InfraredMessage* infrared_check_decoder_ready(InfraredDecoderHandler* hand
 
 InfraredEncoderHandler* infrared_alloc_encoder(void) {
     InfraredEncoderHandler* handler = malloc(sizeof(InfraredEncoderHandler));
+    if(!handler) return NULL;
+
     handler->handler = NULL;
     handler->encoder = NULL;
     return handler;
@@ -285,6 +304,7 @@ void infrared_reset_encoder(InfraredEncoderHandler* handler, const InfraredMessa
         }
         handler->encoder = required_encoder;
         handler->handler = handler->encoder->alloc();
+        furi_check(handler->handler);
     }
 
     handler->encoder->reset(handler->handler, message);

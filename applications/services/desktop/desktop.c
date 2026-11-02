@@ -19,6 +19,7 @@
 #include "helpers/mesh_service.h"
 #include "helpers/mesh_capture.h"
 #include "helpers/qflipper_bridge.h"
+#include <furi_hal_usb.h>
 #include <furi_hal_usb_tinyusb_composite.h>
 #include "helpers/qflipper_usj_cmd.h"
 #include <fw_ota/fw_ota.h>
@@ -27,6 +28,7 @@
 
 #include <btshim.h>
 #include <wifi.h>
+#include <momentum_settings.h>
 
 #define TAG "Desktop"
 /* Verzoegerung fuer den qFlipper-Bridge-Resume nach einem OTA-Reboot. */
@@ -50,7 +52,13 @@ static int32_t desktop_system_task_worker(void* context) {
     case DesktopSystemTaskQflipperStop:
         task_name = "qFlipper stop";
         qflipper_bridge_stop();
-        success = furi_hal_usb_composite_uninstall();
+        if(furi_hal_usb_is_locked()) {
+            /* Auto-off after the PC closed qFlipper while the USB-UART bridge
+             * still uses the composite (CDC1): the bridge removes it on exit. */
+            FURI_LOG_I(TAG, "USB in use; keeping composite after qFlipper stop");
+        } else {
+            success = furi_hal_usb_composite_uninstall();
+        }
         break;
     case DesktopSystemTaskBluetoothToggle: {
         bool enable = desktop->system_task_enable;
@@ -257,6 +265,7 @@ static void desktop_storage_callback(const void* message, void* context) {
     const StorageEvent* event = message;
 
     if(event->type == StorageEventTypeCardMount) {
+        momentum_settings_load();
         view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopGlobalReloadSettings);
     }
 }
@@ -415,6 +424,14 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
 
+    } else if(event == DesktopGlobalReloadAnimation) {
+        /* A Graphics setting changed (asset pack / speed / cycle / unlock):
+         * momentum_settings is a shared global already updated by the menu, so
+         * just pick a fresh idle animation now instead of waiting for the cycle
+         * timer. new_idle_process only acts while idle on the desktop. */
+        __atomic_store_n(&desktop->animation_reload_pending, false, __ATOMIC_RELEASE);
+        animation_manager_new_idle_process(desktop->animation_manager);
+
     } else if(event == DesktopMeshEventClientPairRequest) {
         /* Auch im Lock-Menü/anderen Scenes Pair-Confirm zeigen. Push eine neue
          * Scene; bei Yes/No navigiert die zurück zur Main-Scene (search). */
@@ -572,6 +589,8 @@ static void desktop_clock_timer_callback(void* context) {
 static void desktop_apply_settings(Desktop* desktop) {
     desktop->in_transition = true;
 
+    gui_set_status_bar_background(
+        desktop->gui, desktop->settings.display_status_bar_background != 0);
     desktop_clock_reconfigure(desktop);
 
     // Dummy mode disabled on ESP32 port — always use normal mode
@@ -587,12 +606,16 @@ static void desktop_apply_settings(Desktop* desktop) {
 static void desktop_init_settings(Desktop* desktop) {
     furi_pubsub_subscribe(storage_get_pubsub(desktop->storage), desktop_storage_callback, desktop);
 
+    momentum_settings_load();
+    desktop_settings_load(&desktop->settings);
+    gui_set_status_bar_background(
+        desktop->gui, desktop->settings.display_status_bar_background != 0);
+
     if(storage_sd_status(desktop->storage) != FSE_OK) {
         FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
         return;
     }
 
-    desktop_settings_load(&desktop->settings);
     desktop_apply_settings(desktop);
 }
 
@@ -613,8 +636,11 @@ static Desktop* desktop_alloc(void) {
 
     view_dispatcher_attach_to_gui(
         desktop->view_dispatcher, desktop->gui, ViewDispatcherTypeDesktop);
+    /* No desktop scene handles SceneManagerEventTypeTick (they all use their own
+     * timers), so a 500 ms tick would only wake the SoC twice a second, also in
+     * light sleep. Period 0 = no tick; set one here if a scene ever needs it. */
     view_dispatcher_set_tick_event_callback(
-        desktop->view_dispatcher, desktop_tick_event_callback, 500);
+        desktop->view_dispatcher, desktop_tick_event_callback, 0);
 
     view_dispatcher_set_event_callback_context(desktop->view_dispatcher, desktop);
     view_dispatcher_set_custom_event_callback(
@@ -776,9 +802,17 @@ static Desktop* desktop_alloc(void) {
 void desktop_lock(Desktop* desktop) {
     furi_assert(!desktop->locked);
 
-    furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    /* The RTC Lock flag means "PIN-locked": it persists across reboots (NVS) so
+     * Lock-on-Boot and the RPC-while-locked gate (rpc_session_open) key off it.
+     * A lock without a PIN is only a screen lock and clears the flag. */
+    const bool with_pin = desktop_pin_code_is_set();
+    if(with_pin) {
+        furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    } else {
+        furi_hal_rtc_reset_flag(FuriHalRtcFlagLock);
+    }
 
-    if(desktop_pin_code_is_set()) {
+    if(with_pin && !momentum_settings.allow_locked_rpc_usb) {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_disable(cli_vcp);
         furi_record_close(RECORD_CLI_VCP);
@@ -805,10 +839,11 @@ void desktop_unlock(Desktop* desktop) {
     desktop_view_locked_unlock(desktop->locked_view);
     scene_manager_search_and_switch_to_previous_scene(desktop->scene_manager, DesktopSceneMain);
     desktop_auto_lock_arm(desktop);
+    const bool was_pin_locked = furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock);
     furi_hal_rtc_reset_flag(FuriHalRtcFlagLock);
     furi_hal_rtc_set_pin_fails(0);
 
-    if(desktop_pin_code_is_set()) {
+    if(was_pin_locked && !momentum_settings.allow_locked_rpc_usb) {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_enable(cli_vcp);
         furi_record_close(RECORD_CLI_VCP);
@@ -852,6 +887,14 @@ bool desktop_api_is_locked(Desktop* instance) {
 void desktop_api_unlock(Desktop* instance) {
     furi_assert(instance);
     view_dispatcher_send_custom_event(instance->view_dispatcher, DesktopGlobalApiUnlock);
+}
+
+void desktop_api_reload_animation(Desktop* instance) {
+    furi_assert(instance);
+    /* One queued reload is enough: each one re-reads the manifest and every
+     * frame of the picked animation from the SD card. */
+    if(__atomic_exchange_n(&instance->animation_reload_pending, true, __ATOMIC_ACQ_REL)) return;
+    view_dispatcher_send_custom_event(instance->view_dispatcher, DesktopGlobalReloadAnimation);
 }
 
 FuriPubSub* desktop_api_get_status_pubsub(Desktop* instance) {
@@ -902,9 +945,15 @@ int32_t desktop_srv(void* p) {
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 
-    if(desktop_pin_code_is_set()) {
+    /* Lock on boot when a PIN is set and either the user enabled Lock-on-Boot
+     * or the device was still PIN-locked before the reboot (persisted flag). */
+    bool enable_cli_vcp = true;
+    if(desktop_pin_code_is_set() &&
+       (momentum_settings.lock_on_boot || furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock))) {
+        enable_cli_vcp = momentum_settings.allow_locked_rpc_usb;
         desktop_lock(desktop);
-    } else {
+    }
+    if(enable_cli_vcp) {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_enable(cli_vcp);
         furi_record_close(RECORD_CLI_VCP);

@@ -74,6 +74,13 @@ bool subghz_scene_rpc_on_event(void* context, SceneManagerEvent event) {
                     rpc_system_app_set_error_text(
                         subghz->rpc_ctx, "Error in protocol parameters description");
                     break;
+                case SubGhzTxRxStartTxStateErrorAsyncTx:
+                    subghz_block_generic_global.endless_tx = false;
+                    rpc_system_app_set_error_code(
+                        subghz->rpc_ctx, RpcAppSystemErrorCodeInternalParse);
+                    rpc_system_app_set_error_text(
+                        subghz->rpc_ctx, "Radio failed to start transmission");
+                    break;
 
                 default: //if(SubGhzTxRxStartTxStateOk)
                     result = true;

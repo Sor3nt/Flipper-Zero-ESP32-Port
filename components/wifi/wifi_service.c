@@ -255,6 +255,7 @@ int32_t wifi_srv(void* p) {
     wifi->statusbar_vp = view_port_alloc();
     view_port_set_width(wifi->statusbar_vp, 8);
     view_port_draw_callback_set(wifi->statusbar_vp, wifi_draw_statusbar_callback, wifi);
+    view_port_set_statusbar_icon(wifi->statusbar_vp, ViewPortStatusBarIconWifi);
     view_port_enabled_set(wifi->statusbar_vp, false);
     gui_add_view_port(wifi->gui, wifi->statusbar_vp, GuiLayerStatusBarLeft);
     wifi->icon_connected = false;

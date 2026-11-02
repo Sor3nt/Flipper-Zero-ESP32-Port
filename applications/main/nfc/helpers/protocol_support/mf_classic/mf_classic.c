@@ -102,13 +102,9 @@ static void nfc_scene_read_on_enter_mf_classic(NfcApp* instance) {
     nfc_poller_start(instance->poller, nfc_scene_read_poller_callback_mf_classic, instance);
 }
 
-static bool nfc_scene_read_on_event_mf_classic(NfcApp* instance, SceneManagerEvent event) {
-    if(event.type == SceneManagerEventTypeCustom &&
-       event.event == NfcCustomEventPollerIncomplete) {
-        scene_manager_next_scene(instance->scene_manager, NfcSceneMfClassicDictAttack);
-    }
-
-    return true;
+static bool nfc_scene_read_on_event_mf_classic(NfcApp*, SceneManagerEvent event) {
+    return event.type != SceneManagerEventTypeCustom ||
+           event.event != NfcCustomEventPollerIncomplete;
 }
 
 static void nfc_scene_read_menu_on_enter_mf_classic(NfcApp* instance) {

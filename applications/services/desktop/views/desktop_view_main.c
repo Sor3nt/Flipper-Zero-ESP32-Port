@@ -13,14 +13,22 @@ struct DesktopMainView {
     DesktopMainViewCallback callback;
     void* context;
     FuriTimer* poweroff_timer;
+    FuriTimer* animation_timer;
     bool dummy_mode;
+    bool select_long_pressed;
 };
 
-#define DESKTOP_MAIN_VIEW_POWEROFF_TIMEOUT 1300
+#define DESKTOP_MAIN_VIEW_POWEROFF_TIMEOUT 2500
+#define DESKTOP_MAIN_VIEW_ANIMATION_TIMEOUT 2500
 
 static void desktop_main_poweroff_timer_callback(void* context) {
     DesktopMainView* main_view = context;
     main_view->callback(DesktopMainEventOpenPowerOff, main_view->context);
+}
+
+static void desktop_main_animation_timer_callback(void* context) {
+    DesktopMainView* main_view = context;
+    main_view->callback(DesktopAnimationEventNewExternalAnimation, main_view->context);
 }
 
 void desktop_main_set_callback(
@@ -52,6 +60,36 @@ bool desktop_main_input_callback(InputEvent* event, void* context) {
     esp_rom_printf("\r\n[DMAIN] key=%d type=%d dummy=%d\r\n",
         event->key, event->type, main_view->dummy_mode);
 
+    if(event->key == InputKeyOk) {
+        if(event->type == InputTypePress) {
+            main_view->select_long_pressed = false;
+            if(!main_view->dummy_mode) {
+                furi_timer_start(main_view->animation_timer, DESKTOP_MAIN_VIEW_ANIMATION_TIMEOUT);
+            }
+        } else if(event->type == InputTypeShort) {
+            furi_timer_stop(main_view->animation_timer);
+            main_view->select_long_pressed = false;
+        } else if(event->type == InputTypeRelease) {
+            bool animation_timer_running = furi_timer_is_running(main_view->animation_timer);
+            furi_timer_stop(main_view->animation_timer);
+            if(main_view->select_long_pressed) {
+                if(main_view->dummy_mode) {
+                    main_view->callback(DesktopDummyEventOpenOkLong, main_view->context);
+                } else if(animation_timer_running &&
+                          furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
+                    main_view->callback(
+                        DesktopAnimationEventNewExternalAnimation, main_view->context);
+                } else if(animation_timer_running) {
+                    main_view->callback(
+                        DesktopMainEventOpenFavoriteOkLong, main_view->context);
+                }
+            }
+            main_view->select_long_pressed = false;
+        } else if(event->type == InputTypeLong) {
+            main_view->select_long_pressed = true;
+        }
+    }
+
     if(main_view->dummy_mode == false) {
         if(event->type == InputTypeShort) {
             if(event->key == InputKeyOk) {
@@ -73,12 +111,6 @@ bool desktop_main_input_callback(InputEvent* event, void* context) {
                 main_view->callback(DesktopMainEventOpenFavoriteLeftLong, main_view->context);
             } else if(event->key == InputKeyRight) {
                 main_view->callback(DesktopMainEventOpenFavoriteRightLong, main_view->context);
-            } else if(event->key == InputKeyOk) {
-                if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
-                    main_view->callback(DesktopAnimationEventNewIdleAnimation, main_view->context);
-                } else {
-                    main_view->callback(DesktopMainEventOpenFavoriteOkLong, main_view->context);
-                }
             }
         }
     } else {
@@ -94,13 +126,7 @@ bool desktop_main_input_callback(InputEvent* event, void* context) {
             }
             // Right key short is handled by animation manager
         } else if(event->type == InputTypeLong) {
-            if(event->key == InputKeyOk) {
-                // Not working in DummyMode
-                // if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
-                //     main_view->callback(DesktopAnimationEventNewIdleAnimation, main_view->context);
-                // }
-                main_view->callback(DesktopDummyEventOpenOkLong, main_view->context);
-            } else if(event->key == InputKeyUp) {
+            if(event->key == InputKeyUp) {
                 main_view->callback(DesktopDummyEventOpenUpLong, main_view->context);
             } else if(event->key == InputKeyDown) {
                 main_view->callback(DesktopDummyEventOpenDownLong, main_view->context);
@@ -132,12 +158,15 @@ DesktopMainView* desktop_main_alloc(void) {
 
     main_view->poweroff_timer =
         furi_timer_alloc(desktop_main_poweroff_timer_callback, FuriTimerTypeOnce, main_view);
+    main_view->animation_timer =
+        furi_timer_alloc(desktop_main_animation_timer_callback, FuriTimerTypeOnce, main_view);
 
     return main_view;
 }
 
 void desktop_main_free(DesktopMainView* main_view) {
     furi_assert(main_view);
+    furi_timer_free(main_view->animation_timer);
     view_free(main_view->view);
     furi_timer_free(main_view->poweroff_timer);
     free(main_view);

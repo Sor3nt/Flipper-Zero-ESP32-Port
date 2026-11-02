@@ -23,8 +23,8 @@ typedef enum {
 } NotificationLedLayerIndex;
 
 /* WS2812 ring effect modes (T-Embed Plus). Solid is the static settings.led_color.
- * Off is unconditional dark. The rest are animated and run on a periodic timer
- * whose interval comes from settings.led_speed_tick_ms.
+ * Off is unconditional dark. The rest are animated and run on a dedicated
+ * thread whose frame interval comes from settings.led_speed_tick_ms.
  * Storage uses uint8_t for forward compat. */
 typedef enum {
     LedEffectSolid     = 0,
@@ -93,6 +93,8 @@ typedef struct {
      * Controls whether the "#RRGGBB" entry is offered in the UI Background
      * value cycle (it persists as a selectable preset until replaced). */
     bool ui_custom_color_set;
+    /* Turn off the WS2812 ring when USB is connected and the display is off. */
+    bool led_usb_auto_off;
 } NotificationSettings;
 
 struct NotificationApp {
@@ -102,8 +104,21 @@ struct NotificationApp {
     FuriTimer* night_shift_timer;
     FuriTimer* night_shift_demo_timer;
     FuriTimer* led_off_timer;
-    FuriTimer* led_effect_timer;
+    FuriTimer* led_usb_auto_off_timer;
+    /* Animated WS2812 effects run on their own thread, not on a FuriTimer: the
+     * timer daemon has priority 1, so whenever both cores are busy (Sub-GHz
+     * Frequency Analyzer locking a signal, Spectrum) frames were delayed and
+     * bunched up and the ring visibly stuttered. */
+    FuriThread* led_effect_thread;
+    FuriMutex* led_effect_mutex; // held while a frame renders
+    volatile uint32_t led_effect_period; // ticks between frames, 0 = stopped
     FuriTimer* ui_spectrum_timer;
+    FuriMutex* led_suspend_mutex;
+    /* Serializes notification_apply_led_color(): it is reached from the
+     * notification, input, power and settings-UI threads, and each run stops the
+     * effect, renders frame 0 and restarts it, so two overlapping runs interleave
+     * frames and corrupt the effect phase. */
+    FuriMutex* led_apply_mutex;
 
     NotificationDisplayLayer display;
     bool display_led_lock;
@@ -112,6 +127,8 @@ struct NotificationApp {
      * effect) and a cheap idle-timer re-arm that leaves a running animation
      * untouched. */
     bool led_idle_off;
+    volatile bool led_sleep_suspended;
+    volatile bool led_usb_suspended;
 
     NotificationSettings settings;
     float current_night_shift;

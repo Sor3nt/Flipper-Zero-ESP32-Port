@@ -34,11 +34,18 @@ typedef enum {
     GapEventTypeUpdateMTU,
     GapEventTypeBeaconStart,
     GapEventTypeBeaconStop,
+    /** ESP32 only: the link is encrypted and authenticated (safe to open RPC). */
+    GapEventTypeLinkSecured,
+    /** ESP32 only: pairing/encryption finished, data.pairing_ok tells how (hide pairing UI). */
+    GapEventTypePairingDone,
+    /** ESP32 only: connected but the peer never started pairing (stale bond on the peer). */
+    GapEventTypePairingStalled,
 } GapEventType;
 
 typedef union {
     uint32_t pin_code;
     uint16_t max_packet_size;
+    bool pairing_ok;
 } GapEventData;
 
 typedef struct {
@@ -61,7 +68,7 @@ typedef enum {
 #include <extra_beacon.h>
 
 /** Callback fired when BLE key storage changes (STM32: NVM SRAM).
- *  On ESP32, Bluedroid manages bonding via NVS — this is never called. */
+ *  ESP32 NimBLE persists bonds through its configured NVS store — this is never called. */
 typedef void (*BleGlueKeyStorageChangedCallback)(uint8_t* addr, uint16_t size, void* context);
 
 #ifdef __cplusplus

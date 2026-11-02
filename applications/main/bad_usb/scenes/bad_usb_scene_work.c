@@ -4,6 +4,12 @@
 #include <furi_hal.h>
 #include "toolbox/path.h"
 
+static bool bad_usb_script_is_idle(BadUsbScript* script) {
+    BadUsbWorkerState state = bad_usb_script_get_state(script)->state;
+    return (state == BadUsbStateIdle) || (state == BadUsbStateDone) ||
+           (state == BadUsbStateNotConnected);
+}
+
 void bad_usb_scene_work_button_callback(InputKey key, void* context) {
     furi_assert(context);
     BadUsbApp* app = context;
@@ -16,12 +22,8 @@ bool bad_usb_scene_work_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == InputKeyLeft) {
-            if(bad_usb_view_is_idle_state(app->bad_usb_view)) {
-                bad_usb_script_close(app->bad_usb_script);
-                app->bad_usb_script = NULL;
-
-                scene_manager_set_scene_state(app->scene_manager, BadUsbSceneConfig, 0);
-                scene_manager_next_scene(app->scene_manager, BadUsbSceneConfig);
+            if(bad_usb_script_is_idle(app->bad_usb_script)) {
+                bad_usb_app_stop_script_async(app, BadUsbShutdownConfig);
             }
             consumed = true;
         } else if(event.event == InputKeyOk) {
@@ -32,17 +34,18 @@ bool bad_usb_scene_work_on_event(void* context, SceneManagerEvent event) {
                 return false;
             }
 
-            if(bad_usb_view_is_idle_state(app->bad_usb_view)) {
-                bad_usb_set_interface(
-                    app,
+            if(bad_usb_script_is_idle(app->bad_usb_script)) {
+                BadUsbHidInterface interface =
                     app->interface == BadUsbHidInterfaceBle ? BadUsbHidInterfaceUsb :
-                                                              BadUsbHidInterfaceBle);
-                bad_usb_script_close(app->bad_usb_script);
-                app->bad_usb_script = bad_usb_script_open(
-                    app->file_path, &app->interface, &app->script_hid_cfg, false);
-                bad_usb_script_set_keyboard_layout(app->bad_usb_script, app->keyboard_layout);
+                                                              BadUsbHidInterfaceBle;
+                bad_usb_script_switch_interface(app->bad_usb_script, interface);
             } else {
-                bad_usb_script_pause_resume(app->bad_usb_script);
+                BadUsbWorkerState state =
+                    bad_usb_script_get_state(app->bad_usb_script)->state;
+                if((state == BadUsbStateRunning) || (state == BadUsbStateDelay) ||
+                   (state == BadUsbStateStringDelay) || (state == BadUsbStatePaused)) {
+                    bad_usb_script_pause_resume(app->bad_usb_script);
+                }
             }
             consumed = true;
         }
@@ -56,6 +59,7 @@ bool bad_usb_scene_work_on_event(void* context, SceneManagerEvent event) {
 void bad_usb_scene_work_on_enter(void* context) {
     BadUsbApp* app = context;
 
+    bad_usb_view_set_stopping(app->bad_usb_view, false);
     bad_usb_view_set_interface(app->bad_usb_view, app->interface);
 
     // Opening script the first time:

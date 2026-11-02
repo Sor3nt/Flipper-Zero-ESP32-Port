@@ -621,7 +621,7 @@ bool dlna_soap_seek(const DlnaTarget* t, uint32_t position_sec) {
     unsigned h = position_sec / 3600;
     unsigned m = (position_sec % 3600) / 60;
     unsigned sec = position_sec % 60;
-    char inner[96];
+    char inner[128];
     snprintf(tgt, sizeof(tgt), "%u:%02u:%02u", h, m, sec);
     snprintf(inner, sizeof(inner), "<Unit>REL_TIME</Unit><Target>%s</Target>", tgt);
     return soap_call(t, t->av_control, "AVTransport", "Seek", inner, NULL, 0);

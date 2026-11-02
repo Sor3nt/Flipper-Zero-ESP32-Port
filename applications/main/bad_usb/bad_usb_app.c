@@ -9,22 +9,105 @@
 #define BAD_USB_SETTINGS_FILE_TYPE      "Flipper BadUSB Settings File"
 #define BAD_USB_SETTINGS_VERSION        1
 #define BAD_USB_SETTINGS_DEFAULT_LAYOUT BAD_USB_APP_PATH_LAYOUT_FOLDER "/en-US.kl"
+#define BAD_USB_APP_EVENT_SCRIPT_STOPPED UINT32_MAX
+#define BAD_USB_STOP_WARNING_MS 3000U
+
+static void bad_usb_app_script_stopped(void* context) {
+    BadUsbApp* app = context;
+    view_dispatcher_send_custom_event(
+        app->view_dispatcher, BAD_USB_APP_EVENT_SCRIPT_STOPPED);
+}
 
 static bool bad_usb_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     BadUsbApp* app = context;
+    if((event == BAD_USB_APP_EVENT_SCRIPT_STOPPED) &&
+       (app->shutdown_action != BadUsbShutdownNone)) {
+        FURI_LOG_I(
+            "BadUsb",
+            "Worker stopped; completing shutdown action=%u",
+            (unsigned)app->shutdown_action);
+        bad_usb_script_close(app->bad_usb_script);
+        app->bad_usb_script = NULL;
+        /* A stopped BLE script leaves the app alive on file selection or
+         * configuration. Restore the normal serial profile now; app_free keeps
+         * the same call as a fallback for exits that bypass this callback. */
+        bad_usb_hid_ble_restore_default();
+        BadUsbShutdownAction action = app->shutdown_action;
+        app->shutdown_action = BadUsbShutdownNone;
+        app->shutdown_warning_logged = false;
+        bad_usb_view_set_stopping(app->bad_usb_view, false);
+        if(action == BadUsbShutdownConfig) {
+            scene_manager_set_scene_state(app->scene_manager, BadUsbSceneConfig, 0);
+            scene_manager_next_scene(app->scene_manager, BadUsbSceneConfig);
+        } else if((action == BadUsbShutdownPreviousScene) &&
+                  scene_manager_previous_scene(app->scene_manager)) {
+            return true;
+        } else {
+            view_dispatcher_stop(app->view_dispatcher);
+        }
+        return true;
+    }
     return scene_manager_handle_custom_event(app->scene_manager, event);
+}
+
+void bad_usb_app_stop_script_async(BadUsbApp* app, BadUsbShutdownAction action) {
+    furi_assert(app);
+    furi_assert(app->bad_usb_script);
+    furi_assert(action != BadUsbShutdownNone);
+    if(app->shutdown_action != BadUsbShutdownNone) return;
+
+    app->shutdown_action = action;
+    app->shutdown_started_tick = furi_get_tick();
+    app->shutdown_warning_logged = false;
+    FURI_LOG_I("BadUsb", "Script stop requested action=%u", (unsigned)action);
+    bad_usb_view_set_stopping(app->bad_usb_view, true);
+    bad_usb_script_stop_async(app->bad_usb_script, bad_usb_app_script_stopped, app);
 }
 
 static bool bad_usb_app_back_event_callback(void* context) {
     furi_assert(context);
     BadUsbApp* app = context;
-    return scene_manager_handle_back_event(app->scene_manager);
+    if(app->shutdown_action != BadUsbShutdownNone) {
+        FURI_LOG_W("BadUsb", "Back ignored while script shutdown is pending");
+        return true;
+    }
+
+    if((scene_manager_get_current_scene(app->scene_manager) == BadUsbSceneWork) &&
+       app->bad_usb_script) {
+        bad_usb_app_stop_script_async(app, BadUsbShutdownPreviousScene);
+        return true;
+    }
+
+    /* File selection is the root scene. A Back here must leave BadUSB so the
+     * loader returns to the launcher, even if stale scene history remains. */
+    if(scene_manager_get_current_scene(app->scene_manager) == BadUsbSceneFileSelect) {
+        return false;
+    }
+
+    if(scene_manager_handle_back_event(app->scene_manager)) return true;
+    if(app->bad_usb_script) {
+        bad_usb_app_stop_script_async(app, BadUsbShutdownExit);
+        return true;
+    }
+    return false;
 }
 
 static void bad_usb_app_tick_event_callback(void* context) {
     furi_assert(context);
     BadUsbApp* app = context;
+    if((app->shutdown_action != BadUsbShutdownNone) && !app->shutdown_warning_logged &&
+       ((furi_get_tick() - app->shutdown_started_tick) >= BAD_USB_STOP_WARNING_MS)) {
+        BadUsbState* state =
+            app->bad_usb_script ? bad_usb_script_get_state(app->bad_usb_script) : NULL;
+        FURI_LOG_E(
+            "BadUsb",
+            "Script shutdown still pending action=%u worker_state=%d elapsed=%lu ms",
+            (unsigned)app->shutdown_action,
+            state ? (int)state->state : -1,
+            (unsigned long)(furi_get_tick() - app->shutdown_started_tick));
+        app->shutdown_warning_logged = true;
+    }
     scene_manager_handle_tick_event(app->scene_manager);
 }
 
@@ -116,6 +199,9 @@ void bad_usb_set_interface(BadUsbApp* app, BadUsbHidInterface interface) {
 BadUsbApp* bad_usb_app_alloc(char* arg) {
     BadUsbApp* app = malloc(sizeof(BadUsbApp));
 
+    app->shutdown_action = BadUsbShutdownNone;
+    app->shutdown_started_tick = 0;
+    app->shutdown_warning_logged = false;
     app->bad_usb_script = NULL;
 
     app->file_path = furi_string_alloc();
@@ -195,6 +281,7 @@ BadUsbApp* bad_usb_app_alloc(char* arg) {
 
 void bad_usb_app_free(BadUsbApp* app) {
     furi_assert(app);
+    FURI_LOG_I("BadUsb", "app_free begin");
 
     if(app->bad_usb_script) {
         bad_usb_script_close(app->bad_usb_script);
@@ -238,11 +325,21 @@ void bad_usb_app_free(BadUsbApp* app) {
     furi_string_free(app->file_path);
     furi_string_free(app->keyboard_layout);
 
+    if(!furi_hal_usb_hid_release_stack()) {
+        FURI_LOG_E("BadUsb", "Failed to release the USB HID stack on app exit");
+    }
+
     if(app->usb_if_prev) {
         furi_check(furi_hal_usb_set_config(app->usb_if_prev, NULL));
     }
 
+    /* Queue BLE profile restoration only after detaching BadUSB's GUI views.
+     * The BT service may wait for GATT startup, but that wait must not keep the
+     * BadUSB screen attached or delay returning to the launcher. */
+    bad_usb_hid_ble_restore_default();
+
     free(app);
+    FURI_LOG_I("BadUsb", "app_free end");
 }
 
 int32_t bad_usb_app(void* p) {

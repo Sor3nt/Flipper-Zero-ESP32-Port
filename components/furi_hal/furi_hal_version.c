@@ -75,7 +75,12 @@ static void furi_hal_version_refresh_ble_advertisement(void) {
 }
 
 static void furi_hal_version_refresh_names(const char* name) {
-    snprintf(furi_hal_version.name, sizeof(furi_hal_version.name), "%s", name);
+    /* The Version record keeps a pointer to furi_hal_version.name as its custom name, so
+     * `name` can be that very buffer (e.g. version_get_custom_name() on a repeated init).
+     * snprintf() onto its own source is undefined behaviour: skip the copy then. */
+    if(name != furi_hal_version.name) {
+        snprintf(furi_hal_version.name, sizeof(furi_hal_version.name), "%s", name);
+    }
     snprintf(
         furi_hal_version.device_name,
         sizeof(furi_hal_version.device_name),

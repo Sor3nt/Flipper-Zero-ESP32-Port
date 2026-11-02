@@ -3,6 +3,7 @@
 #include "../canvas.h"
 #include <furi.h>
 #include <assets_icons.h>
+#include <boards/board.h>
 #include <m-array.h>
 #include <stdint.h>
 
@@ -143,7 +144,8 @@ static void variable_item_list_draw_callback(Canvas* canvas, void* _model) {
 
     elements_scrollbar(canvas, model->position, VariableItemArray_size(model->items));
 
-    if(model->locked_message_visible) {
+    if(model->locked_message_visible &&
+       model->position < VariableItemArray_size(model->items)) {
         canvas_set_color(canvas, ColorWhite);
         canvas_draw_box(canvas, 8, 10, 110, 48);
         canvas_set_color(canvas, ColorBlack);
@@ -296,11 +298,13 @@ void variable_item_list_process_up(VariableItemList* variable_item_list) {
             if(model->editing) {
                 // In editing mode: spin CCW decreases value
                 VariableItem* item = variable_item_list_get_selected_item(model);
-                if(item->locked) {
+                if(!item) {
+                    model->editing = false;
+                } else if(item->locked) {
                     model->locked_message_visible = true;
                     furi_timer_start(
                         variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
-                } else if(item->current_value_index > 0) {
+                } else if(item->values_count > 0 && item->current_value_index > 0) {
                     item->current_value_index--;
                     model->scroll_counter = 0;
                     if(item->change_callback) {
@@ -311,14 +315,18 @@ void variable_item_list_process_up(VariableItemList* variable_item_list) {
                 // Normal mode: spin CCW scrolls up through items
                 model->editing = false;
                 uint8_t items_on_screen = variable_item_list_items_on_screen(model);
-                if(model->position > 0) {
+                size_t item_count = VariableItemArray_size(model->items);
+                if(item_count == 0) {
+                    model->position = 0;
+                    model->window_position = 0;
+                } else if(model->position > 0) {
                     model->position--;
                     if((model->position == model->window_position) &&
                        (model->window_position > 0)) {
                         model->window_position--;
                     }
                 } else {
-                    model->position = VariableItemArray_size(model->items) - 1;
+                        model->position = item_count - 1;
                     if(model->position > (items_on_screen - 1)) {
                         model->window_position = model->position - (items_on_screen - 1);
                     }
@@ -337,11 +345,15 @@ void variable_item_list_process_down(VariableItemList* variable_item_list) {
             if(model->editing) {
                 // In editing mode: spin CW increases value
                 VariableItem* item = variable_item_list_get_selected_item(model);
-                if(item->locked) {
+                if(!item) {
+                    model->editing = false;
+                } else if(item->locked) {
                     model->locked_message_visible = true;
                     furi_timer_start(
                         variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
-                } else if(item->current_value_index < (item->values_count - 1)) {
+                } else if(
+                    item->values_count > 0 &&
+                    item->current_value_index < (item->values_count - 1)) {
                     item->current_value_index++;
                     model->scroll_counter = 0;
                     if(item->change_callback) {
@@ -352,11 +364,17 @@ void variable_item_list_process_down(VariableItemList* variable_item_list) {
                 // Normal mode: spin CW scrolls down through items
                 model->editing = false;
                 uint8_t items_on_screen = variable_item_list_items_on_screen(model);
-                if(model->position < (VariableItemArray_size(model->items) - 1)) {
+                size_t item_count = VariableItemArray_size(model->items);
+                if(item_count == 0) {
+                    model->position = 0;
+                    model->window_position = 0;
+                } else if(model->position < (item_count - 1)) {
                     model->position++;
-                    if((model->position - model->window_position) > (items_on_screen - 2) &&
-                       model->window_position <
-                           (VariableItemArray_size(model->items) - items_on_screen)) {
+                    const size_t max_window_position =
+                        item_count > items_on_screen ? item_count - items_on_screen : 0;
+                    if(items_on_screen > 2 &&
+                       (model->position - model->window_position) > (items_on_screen - 2) &&
+                       model->window_position < max_window_position) {
                         model->window_position++;
                     }
                 } else {
@@ -370,22 +388,8 @@ void variable_item_list_process_down(VariableItemList* variable_item_list) {
 }
 
 VariableItem* variable_item_list_get_selected_item(VariableItemListModel* model) {
-    VariableItem* item = NULL;
-
-    VariableItemArray_it_t it;
-    uint8_t position = 0;
-    for(VariableItemArray_it(it, model->items); !VariableItemArray_end_p(it);
-        VariableItemArray_next(it)) {
-        if(position == model->position) {
-            break;
-        }
-        position++;
-    }
-
-    item = VariableItemArray_ref(it);
-
-    furi_assert(item);
-    return item;
+    if(model->position >= VariableItemArray_size(model->items)) return NULL;
+    return VariableItemArray_get(model->items, model->position);
 }
 
 void variable_item_list_process_left(VariableItemList* variable_item_list) {
@@ -394,11 +398,13 @@ void variable_item_list_process_left(VariableItemList* variable_item_list) {
         VariableItemListModel * model,
         {
             VariableItem* item = variable_item_list_get_selected_item(model);
-            if(item->locked) {
+            if(!item) {
+                model->editing = false;
+            } else if(item->locked) {
                 model->locked_message_visible = true;
                 furi_timer_start(
                     variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
-            } else if(item->current_value_index > 0) {
+            } else if(item->values_count > 0 && item->current_value_index > 0) {
                 item->current_value_index--;
                 model->scroll_counter = 0;
                 if(item->change_callback) {
@@ -415,11 +421,15 @@ void variable_item_list_process_right(VariableItemList* variable_item_list) {
         VariableItemListModel * model,
         {
             VariableItem* item = variable_item_list_get_selected_item(model);
-            if(item->locked) {
+            if(!item) {
+                model->editing = false;
+            } else if(item->locked) {
                 model->locked_message_visible = true;
                 furi_timer_start(
                     variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
-            } else if(item->current_value_index < (item->values_count - 1)) {
+            } else if(
+                item->values_count > 0 &&
+                item->current_value_index < (item->values_count - 1)) {
                 item->current_value_index++;
                 model->scroll_counter = 0;
                 if(item->change_callback) {
@@ -436,16 +446,22 @@ void variable_item_list_process_ok(VariableItemList* variable_item_list) {
         VariableItemListModel * model,
         {
             VariableItem* item = variable_item_list_get_selected_item(model);
-            if(item->locked) {
+            if(!item) {
+                model->editing = false;
+            } else if(item->locked) {
                 model->locked_message_visible = true;
                 furi_timer_start(
                     variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
+#if !(defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD)
+            /* Encoder only: a D-pad edits values with Left/Right, so Ok
+             * always calls the enter callback as on Flipper. */
             } else if(model->editing) {
                 // Second Ok press: exit editing mode
                 model->editing = false;
             } else if(item->values_count > 1) {
                 // Item has values to edit: enter editing mode
                 model->editing = true;
+#endif
             } else if(variable_item_list->callback) {
                 // Item has no values (it's a pure action): call enter callback
                 variable_item_list->callback(variable_item_list->context, model->position);
@@ -544,6 +560,10 @@ void variable_item_list_reset(VariableItemList* variable_item_list) {
                 furi_string_free(VariableItemArray_ref(it)->locked_message);
             }
             VariableItemArray_reset(model->items);
+            model->position = 0;
+            model->window_position = 0;
+            model->editing = false;
+            model->locked_message_visible = false;
             furi_string_reset(model->header);
         },
         false);

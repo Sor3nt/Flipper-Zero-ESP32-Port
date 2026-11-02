@@ -234,6 +234,10 @@ static bool pn532_wait_ready(uint32_t timeout_ms) {
 #endif
 }
 
+/* Largest single I2C read: RDY + 00 00 FF + LEN + LCS + TFI + CMD (8 bytes) in front
+ * of the payload, for the biggest caller buffer (262 bytes, Type-4 APDU requests). */
+#define PN532_I2C_READ_MAX 270
+
 /** Read a PN532 I2C response frame.
  *
  * PN532 I2C delivers the complete response in a single read transaction,
@@ -241,9 +245,10 @@ static bool pn532_wait_ready(uint32_t timeout_ms) {
  * Frame: [RDY(1)] [00 00 FF] [LEN] [LCS] [TFI] [CMD] [payload...] [DCS] [00]
  */
 static FuriHalNfcError pn532_read_response(uint8_t* response, size_t* response_len, size_t max_len) {
-    /* Read enough for: RDY(1) + preamble(3) + LEN(1) + LCS(1) + data(max_len) + DCS(1) + postamble(1) */
+    /* Read enough for: RDY(1) + preamble(3) + LEN(1) + LCS(1) + TFI/CMD(2) + payload(max_len).
+     * DCS and the postamble are not needed. The payload starts at rx_buf[8]. */
     size_t read_len = max_len + 8;
-    if(read_len > 255) read_len = 255;
+    if(read_len > PN532_I2C_READ_MAX) read_len = PN532_I2C_READ_MAX;
 
     uint8_t rx_buf[read_len];
     esp_err_t err = i2c_master_read_from_device(
@@ -263,6 +268,8 @@ static FuriHalNfcError pn532_read_response(uint8_t* response, size_t* response_l
     size_t payload_len = data_len - 2;
     if(response && response_len) {
         if(payload_len > *response_len) return FuriHalNfcErrorBufferOverflow;
+        /* Never copy bytes that were not clocked in (the read above is capped). */
+        if(8 + payload_len > read_len) return FuriHalNfcErrorBufferOverflow;
         memcpy(response, &rx_buf[8], payload_len);
         *response_len = payload_len;
     }
@@ -288,6 +295,10 @@ static FuriHalNfcError pn532_send_command_raw(
     size_t* response_len,
     uint32_t timeout_ms) {
 
+    /* LEN counts TFI + command bytes in a single byte: a longer command would wrap
+     * and be sent as a corrupt frame, so refuse it instead. */
+    if(cmd_len > 254) return FuriHalNfcErrorBufferOverflow;
+
     /* Build I2C frame: [SFI=0x00] [00 00 FF] [LEN] [LCS] [TFI=0xD4] [cmd...] [DCS] [00] */
     uint8_t frame[cmd_len + 9];
     size_t idx = 0;
@@ -308,10 +319,10 @@ static FuriHalNfcError pn532_send_command_raw(
     frame[idx++] = (~checksum) + 1;
     frame[idx++] = 0x00;
 
-    /* Reset I2C FIFOs */
-    i2c_reset_tx_fifo(BOARD_NFC_I2C_PORT);
-    i2c_reset_rx_fifo(BOARD_NFC_I2C_PORT);
-
+    /* No explicit FIFO reset here: i2c_master_cmd_begin() resets both FIFOs itself
+     * under the port mutex. i2c_reset_tx/rx_fifo() touch the registers without that
+     * mutex, and this port is shared with the BQ25896 / BQ27220, so calling them
+     * could wipe a transaction another task is running on the bus. */
     esp_err_t err = i2c_master_write_to_device(
         BOARD_NFC_I2C_PORT, PN532_I2C_ADDR, frame, idx, pdMS_TO_TICKS(1000));
     if(err != ESP_OK) {
@@ -457,7 +468,7 @@ FuriHalNfcError furi_hal_nfc_init(void) {
 
     /* Verify PN532 with GetFirmwareVersion */
     uint8_t cmd[] = {PN532_CMD_GETFIRMWAREVERSION};
-    uint8_t resp[4];
+    uint8_t resp[4] = {0};
     size_t resp_len = sizeof(resp);
     FuriHalNfcError nfc_err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 2000);
     if(nfc_err != FuriHalNfcErrorNone) {
@@ -533,7 +544,7 @@ FuriHalNfcError furi_hal_nfc_low_power_mode_stop(void) {
 FuriHalNfcError furi_hal_nfc_set_mode(FuriHalNfcMode mode, FuriHalNfcTech tech) {
     if(!nfc_hal_ready) return FuriHalNfcErrorCommunication;
     /* Preserve cached target across set_mode() within the same tech.
-     * Sor3nt's NfcScanner allocs a new NfcPoller per child protocol it tries
+     * NfcScanner allocs a new NfcPoller per child protocol it tries
      * (Ntag4xx -> Type4Tag -> Emv, all under Iso14443_4a -> Iso14443_3a).
      * Each cycle calls nfc_set_mode() which wiped the activation cache,
      * forcing the chip to re-poll. PN532's InListPassiveTarget issues REQA,
@@ -631,6 +642,8 @@ FuriHalNfcEvent furi_hal_nfc_poller_wait_event(uint32_t timeout_ms) {
  * Short enough that an abort request from another thread is honored within
  * ~200 ms; the outer loop continues until the caller's overall timeout. */
 #define PN532_LISTENER_POLL_MS 200U
+/* Pause after a failed (not timed-out) listener command before retrying. */
+#define PN532_LISTENER_RETRY_MS 10U
 
 static bool nfc_listener_abort_requested(void) {
     if(!nfc_event_flags) return false;
@@ -952,6 +965,13 @@ FuriHalNfcEvent furi_hal_nfc_listener_wait_event(uint32_t timeout_ms) {
                 return ev;
             }
 
+            if(err != FuriHalNfcErrorNone && err != FuriHalNfcErrorCommunicationTimeout) {
+                /* The bus or the PN532 failed (not just "no reader yet"). Without a pause
+                 * this loop re-sends the command and logs an error as fast as the I2C
+                 * driver can fail, and with WAIT_FOREVER nothing else would ever end it. */
+                furi_delay_ms(PN532_LISTENER_RETRY_MS);
+            }
+
             if(timeout_ms != FURI_HAL_NFC_EVENT_WAIT_FOREVER) {
                 if(remaining <= slice) return FuriHalNfcEventTimeout;
                 remaining -= slice;
@@ -1247,10 +1267,13 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         size_t resp_len = sizeof(resp);
         FuriHalNfcError err = pn532_send_command(ilpt_cmd, payload_len + 3, resp, &resp_len, 500);
 
-        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] > 0) {
+        if(err == FuriHalNfcErrorNone && resp_len >= 2 && resp[0] > 0) {
             /* Response: [NbTg] [Tg] [LEN] [ResponseCode=0x01] [IDm(8)] [PMm(8)] [RD...] */
             pn532_target_number = resp[1];
             size_t felica_resp_len = (resp_len >= 3) ? resp[2] : 0;
+            /* LEN is chosen by the card: only the bytes the PN532 really returned may be
+             * copied (resp[2 .. resp_len)), not whatever lies behind them on the stack. */
+            if(resp_len >= 3 && felica_resp_len > resp_len - 2) felica_resp_len = resp_len - 2;
 
             /* Build POLLING_RESPONSE for the stack:
              * [LEN] [0x01] [IDm(8)] [PMm(8)] [RD(0 or 2)] */
@@ -1287,7 +1310,7 @@ FuriHalNfcError furi_hal_nfc_poller_tx(const uint8_t* tx_data, size_t tx_bits) {
         size_t resp_len = sizeof(resp);
         FuriHalNfcError err = pn532_send_command(ilpt_cmd, sizeof(ilpt_cmd), resp, &resp_len, 300);
 
-        if(err == FuriHalNfcErrorNone && resp_len >= 1 && resp[0] > 0) {
+        if(err == FuriHalNfcErrorNone && resp_len >= 2 && resp[0] > 0) {
             pn532_target_number = resp[1];
             /* Return ATQB to stack: everything after NbTg and Tg */
             if(resp_len > 2) {
@@ -1578,7 +1601,7 @@ FuriHalNfcError furi_hal_nfc_iso14443a_poller_trx_short_frame(FuriHalNfcaShortFr
     FURI_LOG_D(TAG, "InListPassiveTarget");
 
     uint8_t cmd[] = {PN532_CMD_INLISTPASSIVETARGET, 0x01, PN532_BRTY_ISO14443A};
-    uint8_t resp[64];
+    uint8_t resp[64] = {0}; /* zeroed: the "no target" log reads resp[0] on failure too */
     size_t resp_len = sizeof(resp);
     FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
 
@@ -1926,7 +1949,9 @@ FuriHalNfcError furi_hal_nfc_pn532_mf_auth(
     memcpy(&cmd[10], uid, copy_len);
     if(copy_len < 4) memset(&cmd[10 + copy_len], 0, 4 - copy_len);
 
-    uint8_t resp[4];
+    /* Zeroed: on a failed command resp_len keeps its initial value, and the log below
+     * would otherwise print an indeterminate resp[0]. */
+    uint8_t resp[4] = {0};
     size_t resp_len = sizeof(resp);
     FuriHalNfcError err = pn532_send_command(cmd, sizeof(cmd), resp, &resp_len, 1000);
 

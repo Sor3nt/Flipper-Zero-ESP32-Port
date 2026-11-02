@@ -4,10 +4,10 @@
  *
  * Features:
  *   - 6-way button pad (Up/Down/Left/Right) + Select/OK (BOOT pin)
- *   - Back button (pin 21) with long-press detection for shutdown
+ *   - Back button (pin 21); holding it 2.5s is handled by the Desktop, which
+ *     opens the power-off dialog (Power app with arg "off")
  *   - Back button also wired to BQ25896 QON for power-on wake
  *   - Debouncing (2 polls)
- *   - Long-press detection: hold Back for 2.5s opens power-off confirmation
  *   - Repeat-while-held for Up/Down/Left/Right/OK (fast scroll)
  *   - Up + Down held for 5s triggers an unconditional reboot
  */
@@ -17,7 +17,6 @@
 #include <furi_hal_resources.h>
 #include <furi_hal_power.h>
 #include <furi.h>
-#include <power/power_service/power.h>
 #include <boards/board.h>
 #include <driver/gpio.h>
 #include <esp_attr.h>
@@ -62,9 +61,6 @@ static ButtonState btn_left;
 static ButtonState btn_right;
 static ButtonState btn_ok;
 static ButtonState btn_back;
-static bool shutdown_press_armed;
-static bool shutdown_longpress_sent;
-static bool shutdown_confirmation_pending;
 static esp_timer_handle_t reboot_timer;
 static SemaphoreHandle_t idle_wake_sem;
 static StaticSemaphore_t idle_wake_sem_buffer;
@@ -84,9 +80,7 @@ static void input_publish(FuriPubSub* pubsub, InputKey key, InputType type, uint
 }
 
 static void input_emit_short(FuriPubSub* pubsub, InputKey key, uint32_t sequence) {
-    input_publish(pubsub, key, InputTypePress, sequence);
     input_publish(pubsub, key, InputTypeShort, sequence);
-    input_publish(pubsub, key, InputTypeRelease, sequence);
 }
 
 static bool button_is_pressed(ButtonState* btn) {
@@ -199,6 +193,9 @@ static void button_poll(
     } else {
         btn->raw_pressed = raw;
         btn->debounce_polls = 1;
+        if(raw && !btn->debounced_pressed && btn == &btn_back) {
+            btn->press_start_us = esp_timer_get_time();
+        }
     }
 
     if(btn->debounce_polls < INPUT_DEBOUNCE_POLLS) return;
@@ -231,7 +228,7 @@ static void button_poll(
     }
 
     const bool pressed = btn->raw_pressed;
-    if(pressed) btn->press_start_us = esp_timer_get_time();
+    if(pressed && !btn->press_start_us) btn->press_start_us = esp_timer_get_time();
     btn->debounced_pressed = pressed;
 
     if(pressed) {
@@ -318,7 +315,7 @@ static bool input_buttons_idle(void) {
             return false;
         }
     }
-    return !shutdown_confirmation_pending && !reboot_combo_armed;
+    return !reboot_combo_armed;
 }
 
 bool target_input_idle_wait(uint32_t timeout_ms) {
@@ -370,15 +367,12 @@ void target_input_init(void) {
 
     button_init_gpio((gpio_num_t)BOARD_SHUTDOWN_BUTTON, false, false);
     button_init_state(&btn_back, (gpio_num_t)BOARD_SHUTDOWN_BUTTON, false);
-    shutdown_press_armed = !btn_back.debounced_pressed;
-    shutdown_longpress_sent = false;
-    shutdown_confirmation_pending = false;
     reboot_timer_init(btn_up.raw_pressed || btn_down.raw_pressed);
     if(!idle_wake_ready) idle_wake_init();
 
     FURI_LOG_I(
         TAG,
-        "Custom board input initialized; hold Back (GPIO%d) for %ldms for power-off confirmation",
+        "Custom board input initialized; hold Back (GPIO%d) for %ldms for the power-off dialog",
         BOARD_SHUTDOWN_BUTTON,
         (long)BOARD_LONGPRESS_SHUTDOWN_MS);
 }
@@ -391,24 +385,9 @@ void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
     button_poll(&btn_left, pubsub, InputKeyLeft, true, false, sequence_counter);
     button_poll(&btn_right, pubsub, InputKeyRight, true, false, sequence_counter);
     button_poll(&btn_ok, pubsub, InputKeyOk, false, false, sequence_counter);
+    /* Back long-press -> power-off dialog is owned by the Desktop (its 2.5 s
+     * poweroff_timer launches "Power" with arg "off"). Launching Power here too
+     * opened the Power settings list first and left the Desktop's request as a
+     * deferred launch that only showed after Back closed the list. */
     button_poll(&btn_back, pubsub, InputKeyBack, false, false, sequence_counter);
-
-    if(!btn_back.debounced_pressed) {
-        shutdown_press_armed = true;
-        shutdown_longpress_sent = false;
-    } else if(shutdown_press_armed && !shutdown_longpress_sent &&
-              esp_timer_get_time() - btn_back.press_start_us >= LONGPRESS_THRESHOLD_US) {
-        FURI_LOG_W(
-            TAG,
-            "Long-press detected on Back (pin %d), waiting for release before confirmation",
-            BOARD_SHUTDOWN_BUTTON);
-        shutdown_longpress_sent = true;
-        shutdown_confirmation_pending = true;
-    }
-    if(shutdown_confirmation_pending && !btn_back.debounced_pressed) {
-        shutdown_confirmation_pending = false;
-        Power* power = furi_record_open(RECORD_POWER);
-        power_show_poweroff_confirmation(power);
-        furi_record_close(RECORD_POWER);
-    }
 }

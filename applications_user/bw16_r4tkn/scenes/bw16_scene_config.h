@@ -1,0 +1,6 @@
+ADD_SCENE(bw16, start, Start)
+ADD_SCENE(bw16, console, Console)
+ADD_SCENE(bw16, ap_list, ApList)
+ADD_SCENE(bw16, station_action, StationAction)
+ADD_SCENE(bw16, client_list, ClientList)
+ADD_SCENE(bw16, about, About)

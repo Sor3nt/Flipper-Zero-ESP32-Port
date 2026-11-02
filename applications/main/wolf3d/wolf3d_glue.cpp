@@ -13,7 +13,6 @@
 #include <furi.h>
 #include <furi_hal.h>
 #include <furi_hal_display.h>
-#include <furi_hal_spi_bus.h>
 #include <gui/gui.h>
 
 #include <esp_lcd_panel_ops.h>
@@ -92,12 +91,10 @@ void wolf3d_glue_show_splash(void) {
     /* TODO: PNG → RGB565-C-Array wie doom_splash.c. Vorerst: schwarz. */
     if(!s_panel || !s_rgb_stripe) return;
     memset(s_rgb_stripe, 0, static_cast<size_t>(s_panel_w) * STRIPE_H * sizeof(uint16_t));
-    furi_hal_spi_bus_lock();
     for(int y = 0; y < s_panel_h; y += STRIPE_H) {
         int rows = (y + STRIPE_H > s_panel_h) ? (s_panel_h - y) : STRIPE_H;
-        esp_lcd_panel_draw_bitmap(s_panel, 0, y, s_panel_w, y + rows, s_rgb_stripe);
+        furi_hal_display_blit(0, y, s_panel_w, y + rows, s_rgb_stripe);
     }
-    furi_hal_spi_bus_unlock();
 }
 
 int wolf3d_glue_set_quit_jmp(void) {
@@ -132,7 +129,6 @@ void wolf3d_glue_present_indexed(const uint8_t* pixels,
     const uint16_t game_w = static_cast<uint16_t>(width);
     const uint16_t game_h = static_cast<uint16_t>(height);
 
-    furi_hal_spi_bus_lock();
     for(uint16_t y0 = 0; y0 < panel_h; y0 += STRIPE_H) {
         uint16_t rows = (y0 + STRIPE_H > panel_h) ? (panel_h - y0) : STRIPE_H;
         for(uint16_t row = 0; row < rows; row++) {
@@ -151,9 +147,8 @@ void wolf3d_glue_present_indexed(const uint8_t* pixels,
             }
             for(uint16_t x = copy_w; x < panel_w; x++) dst_row[x] = 0;
         }
-        esp_lcd_panel_draw_bitmap(s_panel, 0, y0, panel_w, y0 + rows, s_rgb_stripe);
+        furi_hal_display_blit(0, y0, panel_w, y0 + rows, s_rgb_stripe);
     }
-    furi_hal_spi_bus_unlock();
 }
 
 uint32_t wolf3d_glue_ticks_ms(void) {

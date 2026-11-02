@@ -13,6 +13,8 @@
 #include <input.h>
 #include <saved_struct.h>
 #include <storage/storage.h>
+#include <stddef.h>
+#include <string.h>
 #include "notification_app.h"
 #include "notification_messages.h"
 
@@ -22,13 +24,16 @@
 
 #define NOTIFICATION_SETTINGS_PATH    INT_PATH(".notification.settings")
 #define NOTIFICATION_SETTINGS_MAGIC   0x42
-#define NOTIFICATION_SETTINGS_VERSION 0x0A
+#define NOTIFICATION_SETTINGS_VERSION        0x0B
+#define NOTIFICATION_SETTINGS_LEGACY_VERSION 0x0A
+#define LED_USB_AUTO_OFF_POLL_MS             5000U
 
 typedef enum {
     NotificationLayerMessage,
     InternalLayerMessage,
     SaveSettingsMessage,
     SoundToneMessage,
+    UsbAutoOffCheckMessage,
 } NotificationAppMessageType;
 
 typedef struct {
@@ -39,7 +44,41 @@ typedef struct {
     float tone_volume;
 } NotificationAppMessage;
 
-static bool lcd_backlight_is_on = false;
+typedef struct {
+    float display_brightness;
+    uint32_t display_off_delay_ms;
+    float speaker_volume;
+    bool vibro_on;
+    float night_shift;
+    uint32_t night_shift_start;
+    uint32_t night_shift_end;
+    uint32_t led_color;
+    float led_brightness;
+    uint32_t led_off_delay_ms;
+    uint8_t led_effect;
+    uint32_t led_speed_tick_ms;
+    uint8_t ui_color_index;
+    uint8_t ui_fg_color_index;
+    uint32_t ui_custom_color;
+    bool ui_custom_color_set;
+} NotificationSettingsLegacy;
+
+_Static_assert(
+    offsetof(NotificationSettings, led_usb_auto_off) >=
+        offsetof(NotificationSettingsLegacy, ui_custom_color_set) + sizeof(bool),
+    "Legacy notification settings fields must retain their original layout");
+
+static volatile bool lcd_backlight_is_on = false;
+/* Light-sleep idle state, set from the power service thread. */
+static volatile bool notification_power_idle = false;
+
+static bool notification_save_settings(NotificationApp* app);
+static void notification_reconcile_usb_led_auto_off(NotificationApp* app);
+static void notification_message_send(
+    NotificationApp* app,
+    NotificationAppMessageType type,
+    const NotificationSequence* sequence,
+    FuriEventFlag* back_event);
 
 static uint8_t notification_clamp_u8(float value) {
     if(value <= 0.0f) return 0;
@@ -72,6 +111,11 @@ static void notification_apply_internal_display_layer(NotificationApp* app, uint
     if(app->display.index == LayerInternal) {
         furi_hal_display_set_backlight(app->display.value[LayerInternal]);
     }
+}
+
+void notification_update_usb_led_auto_off(NotificationApp* app) {
+    if(!app) return;
+    notification_message_send(app, UsbAutoOffCheckMessage, &sequence_empty, NULL);
 }
 
 static void notification_apply_notification_display_layer(NotificationApp* app, uint8_t layer_value) {
@@ -151,6 +195,15 @@ static void night_shift_timer_callback(void* context) {
     } else {
         app->current_night_shift = app->settings.night_shift;
     }
+}
+
+/* The buzzer is a square wave at up to 50% duty straight off the board rail.
+ * While it sounds, the WS2812 ring can latch a corrupted frame (seen as random
+ * colours when the Frequency Analyzer locks and plays its melody). Re-sending
+ * the current frame once the buzzer stops puts the ring back to its real state;
+ * it costs ~100 us and is a no-op while the ring is suspended. */
+static void notification_heal_ws2812(void) {
+    furi_hal_light_refresh();
 }
 
 static void notification_process_notification_message(
@@ -248,6 +301,7 @@ static void notification_process_notification_message(
             if(furi_hal_speaker_is_mine()) {
                 furi_hal_speaker_stop();
                 furi_hal_speaker_release();
+                notification_heal_ws2812();
             }
             break;
         case NotificationMessageTypeDelay:
@@ -275,6 +329,7 @@ static void notification_process_notification_message(
     if(reset_notifications) {
         notification_reset_notification_layer(app, reset_display, display_brightness_setting);
     }
+    notification_reconcile_usb_led_auto_off(app);
 }
 
 static void notification_process_internal_message(
@@ -315,6 +370,7 @@ static void notification_process_tone_message(
     } else if(furi_hal_speaker_is_mine()) {
         furi_hal_speaker_stop();
         furi_hal_speaker_release();
+        notification_heal_ws2812();
     }
 }
 
@@ -343,6 +399,18 @@ static void input_event_callback(const void* value, void* context) {
         notification_apply_led_color(app);
     } else if(app->led_off_timer && app->settings.led_off_delay_ms > 0) {
         furi_timer_start(app->led_off_timer, furi_ms_to_ticks(app->settings.led_off_delay_ms));
+    }
+}
+
+static void notification_usb_auto_off_timer_callback(void* context) {
+    furi_assert(context);
+    NotificationApp* app = context;
+    NotificationAppMessage message = {
+        .sequence = &sequence_empty,
+        .type = UsbAutoOffCheckMessage,
+    };
+    if(furi_message_queue_put(app->queue, &message, 0) != FuriStatusOk) {
+        FURI_LOG_W(TAG, "USB LED auto-off check deferred: notification queue is full");
     }
 }
 
@@ -380,7 +448,22 @@ static bool notification_load_settings(NotificationApp* app) {
             (double)app->settings.speaker_volume,
             (unsigned)app->settings.display_off_delay_ms);
     } else {
-        FURI_LOG_W(TAG, "LOAD failed — using defaults");
+        NotificationSettingsLegacy legacy;
+        if(saved_struct_load(
+               NOTIFICATION_SETTINGS_PATH,
+               &legacy,
+               sizeof(legacy),
+               NOTIFICATION_SETTINGS_MAGIC,
+               NOTIFICATION_SETTINGS_LEGACY_VERSION)) {
+            memcpy(&app->settings, &legacy, offsetof(NotificationSettings, led_usb_auto_off));
+            app->settings.led_usb_auto_off = false;
+            FURI_LOG_I(TAG, "Migrated notification settings from version 0x%02X",
+                NOTIFICATION_SETTINGS_LEGACY_VERSION);
+            notification_save_settings(app);
+            ok = true;
+        } else {
+            FURI_LOG_W(TAG, "LOAD failed — using defaults");
+        }
     }
     /* Sanity: never let a 0ms delay sneak through and instantly blank the screen. */
     if(app->settings.display_off_delay_ms < 2000) app->settings.display_off_delay_ms = 2000;
@@ -582,7 +665,7 @@ static void render_wipe(NotificationApp* app) {
 static void notification_led_effect_tick(void* context) {
     furi_assert(context);
     NotificationApp* app = context;
-    if(app->led_sleep_suspended) return;
+    if(app->led_sleep_suspended || app->led_usb_suspended) return;
     led_effect_phase++;
     switch(app->settings.led_effect) {
         case LedEffectBreathing: render_breathing(app); break;
@@ -596,23 +679,94 @@ static void notification_led_effect_tick(void* context) {
     }
 }
 
+#define LED_EFFECT_FLAG_UPDATE (1UL << 0)
+#define LED_EFFECT_THREAD_STACK 3072
+
+static bool notification_led_effect_is_running(NotificationApp* app) {
+    return __atomic_load_n(&app->led_effect_period, __ATOMIC_ACQUIRE) != 0;
+}
+
+/* Stop the animation. Returns only once no frame is being rendered, so a frame
+ * already in flight cannot land on top of what the caller pushes next. */
+static void notification_led_effect_stop(NotificationApp* app) {
+    if(!app->led_effect_thread) return;
+    __atomic_store_n(&app->led_effect_period, 0, __ATOMIC_RELEASE);
+    furi_check(furi_mutex_acquire(app->led_effect_mutex, FuriWaitForever) == FuriStatusOk);
+    furi_mutex_release(app->led_effect_mutex);
+    furi_thread_flags_set(furi_thread_get_id(app->led_effect_thread), LED_EFFECT_FLAG_UPDATE);
+}
+
+/* Start (or restart) the animation; the first frame follows one period later
+ * (the caller renders frame 0 itself). */
+static void notification_led_effect_start(NotificationApp* app, uint32_t period_ticks) {
+    if(!app->led_effect_thread) return;
+    if(period_ticks == 0) period_ticks = 1;
+    __atomic_store_n(&app->led_effect_period, period_ticks, __ATOMIC_RELEASE);
+    furi_thread_flags_set(furi_thread_get_id(app->led_effect_thread), LED_EFFECT_FLAG_UPDATE);
+}
+
+/* Fixed-cadence frame loop. Runs above the app threads (FuriThreadPriorityHigh)
+ * so a busy radio worker or display redraw cannot starve it; one frame is a
+ * few pixel computations plus one short DMA transfer, so the CPU it takes from
+ * them is negligible. Blocks forever while no animated effect is active, so it
+ * adds no wakeups to light sleep. */
+static int32_t notification_led_effect_thread(void* context) {
+    NotificationApp* app = context;
+    bool scheduled = false;
+    uint32_t next_frame = 0;
+
+    for(;;) {
+        const uint32_t period = __atomic_load_n(&app->led_effect_period, __ATOMIC_ACQUIRE);
+        uint32_t timeout = FuriWaitForever;
+        if(period == 0) {
+            scheduled = false;
+        } else {
+            uint32_t now = furi_get_tick();
+            if(!scheduled) {
+                next_frame = now + period;
+                scheduled = true;
+            }
+            if((int32_t)(next_frame - now) <= 0) {
+                furi_check(
+                    furi_mutex_acquire(app->led_effect_mutex, FuriWaitForever) == FuriStatusOk);
+                if(notification_led_effect_is_running(app)) notification_led_effect_tick(app);
+                furi_mutex_release(app->led_effect_mutex);
+                next_frame += period;
+                now = furi_get_tick();
+                // After a stall, resume the cadence instead of bursting to catch up.
+                if((int32_t)(next_frame - now) <= 0) next_frame = now + period;
+            }
+            timeout = next_frame - now;
+        }
+
+        const uint32_t flags =
+            furi_thread_flags_wait(LED_EFFECT_FLAG_UPDATE, FuriFlagWaitAny, timeout);
+        if(!(flags & FuriFlagError)) scheduled = false; // started/stopped: new cadence
+    }
+    return 0;
+}
+
 /* Push the current settings to the WS2812 ring. Static effects (Solid/Off)
  * push once and stop the effect timer. Animated effects start the timer.
  * Also (re)starts the idle-off timer. */
+static void notification_apply_led_color_locked(NotificationApp* app);
+
 void notification_apply_led_color(NotificationApp* app) {
     if(!app) return;
-    if(app->led_sleep_suspended) {
-        if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-            furi_timer_stop(app->led_effect_timer);
-        }
+    furi_check(furi_mutex_acquire(app->led_apply_mutex, FuriWaitForever) == FuriStatusOk);
+    notification_apply_led_color_locked(app);
+    furi_mutex_release(app->led_apply_mutex);
+}
+
+static void notification_apply_led_color_locked(NotificationApp* app) {
+    if(app->led_sleep_suspended || app->led_usb_suspended) {
+        notification_led_effect_stop(app);
         return;
     }
     /* About to re-light the ring — clear the idle-off marker. */
     app->led_idle_off = false;
-    /* Always stop the effect timer; we'll restart for animated effects. */
-    if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-        furi_timer_stop(app->led_effect_timer);
-    }
+    /* Always stop the effect; we'll restart it for animated effects. */
+    notification_led_effect_stop(app);
 
     LedEffect eff = (LedEffect)app->settings.led_effect;
     uint8_t r, g, b;
@@ -629,10 +783,10 @@ void notification_apply_led_color(NotificationApp* app) {
         case LedEffectWipe:
             led_effect_phase = 0;
             notification_led_effect_tick(app);          /* render frame 0 immediately */
-            if(app->led_effect_timer) {
+            {
                 uint32_t tick = app->settings.led_speed_tick_ms;
                 if(tick == 0) tick = LED_EFFECT_TICK_MS; /* sane fallback */
-                furi_timer_start(app->led_effect_timer, furi_ms_to_ticks(tick));
+                notification_led_effect_start(app, furi_ms_to_ticks(tick));
             }
             break;
         case LedEffectSolid:
@@ -652,17 +806,67 @@ void notification_apply_led_color(NotificationApp* app) {
     }
 }
 
-void notification_set_led_sleeping(NotificationApp* app, bool sleeping) {
-    if(!app || app->led_sleep_suspended == sleeping) return;
-    app->led_sleep_suspended = sleeping;
-    if(sleeping) {
-        if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-            furi_timer_stop(app->led_effect_timer);
-        }
-        furi_hal_light_set_ws2812_sleep(true);
+static void notification_set_led_suspension(
+    NotificationApp* app,
+    bool sleep_reason,
+    bool suspended) {
+    furi_assert(app);
+    furi_check(furi_mutex_acquire(app->led_suspend_mutex, FuriWaitForever) == FuriStatusOk);
+
+    const bool was_suspended = app->led_sleep_suspended || app->led_usb_suspended;
+    if(sleep_reason) {
+        app->led_sleep_suspended = suspended;
     } else {
-        furi_hal_light_set_ws2812_sleep(false);
+        app->led_usb_suspended = suspended;
+    }
+    const bool is_suspended = app->led_sleep_suspended || app->led_usb_suspended;
+
+    if(was_suspended != is_suspended) {
+        if(is_suspended) {
+            notification_led_effect_stop(app);
+            furi_hal_light_set_ws2812_sleep(true);
+        } else {
+            furi_hal_light_set_ws2812_sleep(false);
+        }
+    }
+
+    furi_mutex_release(app->led_suspend_mutex);
+    if(was_suspended && !is_suspended) {
         notification_apply_led_color(app);
+    }
+}
+
+void notification_set_led_sleeping(NotificationApp* app, bool sleeping) {
+    if(!app) return;
+    notification_set_led_suspension(app, true, sleeping);
+}
+
+static void notification_reconcile_usb_led_auto_off(NotificationApp* app) {
+    if(!app) return;
+
+    /* Never while light-sleeping: the 5 s poll would wake the SoC for nothing
+     * (the ring is already dark, and plugging USB in wakes the device). */
+    /* "Screen off" is the panel state, not lcd_backlight_is_on: that flag also
+     * goes false when the display timer expires under an enforced-on backlight
+     * (Spectrum, Frequency Analyzer), where the screen stays lit at the enforced
+     * level. Keying on it darkened the ring on USB while the screen was visibly on. */
+    const bool should_monitor =
+        app->settings.led_usb_auto_off && furi_hal_display_is_asleep() &&
+        !notification_power_idle && furi_hal_light_pixel_count() > 0;
+    if(!should_monitor) {
+        if(app->led_usb_auto_off_timer &&
+           furi_timer_is_running(app->led_usb_auto_off_timer)) {
+            furi_timer_stop(app->led_usb_auto_off_timer);
+        }
+        notification_set_led_suspension(app, false, false);
+        return;
+    }
+
+    notification_set_led_suspension(
+        app, false, furi_hal_power_is_usb_connected());
+    if(app->led_usb_auto_off_timer &&
+       !furi_timer_is_running(app->led_usb_auto_off_timer)) {
+        furi_timer_start(app->led_usb_auto_off_timer, furi_ms_to_ticks(LED_USB_AUTO_OFF_POLL_MS));
     }
 }
 
@@ -672,9 +876,7 @@ void notification_set_led_sleeping(NotificationApp* app, bool sleeping) {
 static void notification_led_off_timer_cb(void* context) {
     furi_assert(context);
     NotificationApp* app = context;
-    if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-        furi_timer_stop(app->led_effect_timer);
-    }
+    notification_led_effect_stop(app);
     furi_hal_light_set_rgb_all(0, 0, 0);
     app->led_idle_off = true;
 }
@@ -783,11 +985,20 @@ static bool notification_ui_spectrum_paused = false;
 static void notification_power_idle_callback(const void* message, void* context) {
     const FuriHalPowerIdleEvent* event = message;
     NotificationApp* app = context;
+    notification_power_idle = event->idle;
     if(event->idle) {
         night_shift_timer_stop(app);
+        furi_timer_stop(app->led_usb_auto_off_timer); /* 5 s poll, see reconcile */
         notification_ui_spectrum_paused = furi_timer_is_running(app->ui_spectrum_timer);
         if(notification_ui_spectrum_paused) furi_timer_stop(app->ui_spectrum_timer);
     } else {
+        /* Re-arm the poll if enabled. Never block the power thread on the
+         * notification queue; the next processed message reconciles anyway. */
+        NotificationAppMessage check = {
+            .sequence = &sequence_empty,
+            .type = UsbAutoOffCheckMessage,
+        };
+        (void)furi_message_queue_put(app->queue, &check, 0);
         night_shift_timer_start(app); /* only runs when night shift is enabled */
         if(notification_ui_spectrum_paused) {
             notification_ui_spectrum_paused = false;
@@ -804,10 +1015,18 @@ static NotificationApp* notification_app_alloc(void) {
     app->night_shift_timer = furi_timer_alloc(night_shift_timer_callback, FuriTimerTypePeriodic, app);
     app->night_shift_demo_timer = furi_timer_alloc(night_shift_demo_timer_callback, FuriTimerTypeOnce, app);
     app->led_off_timer = furi_timer_alloc(notification_led_off_timer_cb, FuriTimerTypeOnce, app);
-    app->led_effect_timer =
-        furi_timer_alloc(notification_led_effect_tick, FuriTimerTypePeriodic, app);
+    app->led_usb_auto_off_timer =
+        furi_timer_alloc(notification_usb_auto_off_timer_callback, FuriTimerTypePeriodic, app);
+    app->led_effect_period = 0;
+    app->led_effect_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    app->led_effect_thread = furi_thread_alloc_ex(
+        "LedEffect", LED_EFFECT_THREAD_STACK, notification_led_effect_thread, app);
+    furi_thread_set_priority(app->led_effect_thread, FuriThreadPriorityHigh);
+    furi_thread_start(app->led_effect_thread);
     app->ui_spectrum_timer =
         furi_timer_alloc(notification_ui_spectrum_tick, FuriTimerTypePeriodic, app);
+    app->led_suspend_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    app->led_apply_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
 
     app->settings.display_brightness = 1.0f;
     app->settings.display_off_delay_ms = 30000;
@@ -819,6 +1038,7 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.led_color = 0;  /* Off by default */
     app->settings.led_brightness = 0.30f; /* 30% pre-gamma → ~2.7% drive after cubic gamma; gentle ambient */
     app->settings.led_off_delay_ms = 0; /* Always on by default; user can pick a timeout */
+    app->settings.led_usb_auto_off = false;
     app->settings.led_effect = (uint8_t)LedEffectSolid; /* Default: static color */
     app->settings.led_speed_tick_ms = 33; /* Default ~30fps */
     app->settings.ui_color_index = 1; /* Default: Orange (preserves stock Flipper UI) */
@@ -826,6 +1046,8 @@ static NotificationApp* notification_app_alloc(void) {
     app->settings.ui_custom_color = UI_CUSTOM_DEFAULT_RGB; /* picker start color */
     app->settings.ui_custom_color_set = false; /* no custom color defined yet */
     app->current_night_shift = 1.0f;
+    app->led_sleep_suspended = false;
+    app->led_usb_suspended = false;
 
     /* Try to load persisted settings (NVS-backed via saved_struct).
      * Fails silently on first boot or version mismatch — defaults stay in place. */
@@ -840,7 +1062,7 @@ static NotificationApp* notification_app_alloc(void) {
     app->display.value[LayerNotification] = 0x00;
     app->display.index = LayerInternal;
     app->display_led_lock = false;
-    app->led_sleep_suspended = false;
+    app->led_idle_off = false;
 
     app->event_record = furi_record_open(RECORD_INPUT_EVENTS);
     furi_pubsub_subscribe(app->event_record, input_event_callback, app);
@@ -901,6 +1123,9 @@ int32_t notification_srv(void* p) {
         case SoundToneMessage:
             notification_process_tone_message(app, &message);
             break;
+        case UsbAutoOffCheckMessage:
+            notification_reconcile_usb_led_auto_off(app);
+            break;
         }
 
         if(message.back_event != NULL) {
@@ -924,6 +1149,14 @@ void notification_message_tone(NotificationApp* app, float frequency, float volu
         .tone_frequency = frequency,
         .tone_volume = volume,
     };
+    if(frequency > 0.0f && volume > 0.0f) {
+        /* A tone update is superseded by the next one (the Spectrum sends one per
+         * sweep from its worker thread). Never block the caller on a busy
+         * notification thread and never crash on a full queue: drop it. */
+        (void)furi_message_queue_put(app->queue, &message, 0);
+        return;
+    }
+    /* The stop request must not be lost or the buzzer would stay on. */
     furi_check(furi_message_queue_put(app->queue, &message, FuriWaitForever) == FuriStatusOk);
 }
 

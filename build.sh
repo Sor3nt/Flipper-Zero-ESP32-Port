@@ -14,6 +14,8 @@ SELECTED_BOARD=""
 # Hardware Definitions
 declare -A TARGETS=(
     ["esp32s3"]="esp32s3"
+    ["smoochie"]="esp32s3"
+    ["paradoxt"]="esp32s3"
     ["waveshare_c6"]="esp32c6"
     ["waveshare_c6_1.9"]="esp32c6"
     ["waveshare_c6_1.47"]="esp32c6"
@@ -21,6 +23,8 @@ declare -A TARGETS=(
 )
 declare -A NAMES=(
     ["esp32s3"]="esp32s3_generic"
+    ["smoochie"]="smoochie"
+    ["paradoxt"]="paradoxt"
     ["waveshare_c6"]="waveshare_c6_1.9"
     ["waveshare_c6_1.9"]="waveshare_c6_1.9"
     ["waveshare_c6_1.47"]="waveshare_c6_1.47"
@@ -28,6 +32,8 @@ declare -A NAMES=(
 )
 declare -A DIRS=(
     ["esp32s3"]="build_s3"
+    ["smoochie"]="build_smoochie"
+    ["paradoxt"]="build_paradoxt"
     ["waveshare_c6"]="build_waveshare_c6"
     ["waveshare_c6_1.9"]="build_waveshare_c6"
     ["waveshare_c6_1.47"]="build_waveshare_c6_1.47"
@@ -37,7 +43,7 @@ declare -A DIRS=(
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --board <name> [options]
-Boards: esp32s3, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47, t_embed
+Boards: esp32s3, smoochie, paradoxt, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47, t_embed
 Options: -p|--port, -m|--monitor, --build-only
 EOF
 }
@@ -80,7 +86,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${SELECTED_BOARD}" || -z "${NAMES[$SELECTED_BOARD]+x}" ]]; then
-    echo "Error: Valid --board required (esp32s3, waveshare_c6, t_embed)." >&2
+    echo "Error: Valid --board required (esp32s3, smoochie, paradoxt, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47, t_embed)." >&2
     exit 1
 fi
 
@@ -122,10 +128,17 @@ if [[ -f "${BUILD_DIR}/sdkconfig" ]]; then
     fi
 fi
 
-# Check for board-specific sdkconfig defaults
-BOARD_DEFAULTS_OPTS=()
+# Layer generic, target, and board-specific sdkconfig defaults in that order.
+SDKCONFIG_DEFAULTS="sdkconfig.defaults"
+if [[ -f "sdkconfig.defaults.${TARGET}" ]]; then
+    SDKCONFIG_DEFAULTS+=";sdkconfig.defaults.${TARGET}"
+fi
 if [[ -f "sdkconfig.defaults.${BOARD}" ]]; then
-    BOARD_DEFAULTS_OPTS=("-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.${BOARD}")
+    SDKCONFIG_DEFAULTS+=";sdkconfig.defaults.${BOARD}"
+fi
+BOARD_DEFAULTS_OPTS=("-DSDKCONFIG_DEFAULTS=${SDKCONFIG_DEFAULTS}")
+if [[ "${BOARD}" == "paradoxt" ]]; then
+    BOARD_DEFAULTS_OPTS+=("-DSDKCONFIG=${SCRIPT_DIR}/${BUILD_DIR}/sdkconfig")
 fi
 
 # Set target (creates/updates sdkconfig)

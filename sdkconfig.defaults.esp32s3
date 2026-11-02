@@ -1,4 +1,14 @@
 # Target-specific overrides for ESP32-S3 boards (e.g. LilyGo T-Embed CC1101)
+# GPTimer control functions are called from the infrared RX ISR.
+CONFIG_GPTIMER_ISR_HANDLER_IN_IRAM=y
+CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_ISR_IRAM_SAFE=y
+# RMT RX ISR and callbacks must remain callable while flash cache is disabled.
+CONFIG_RMT_ISR_IRAM_SAFE=y
+# Smoochie forced-reboot chord is checked from the ESP Timer ISR, independent
+# of FreeRTOS tasks and the UI.
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
+
 # These are merged ON TOP OF sdkconfig.defaults when building with:
 #   idf.py -B build_s3 set-target esp32s3
 #   idf.py -B build_s3 -DFLIPPER_BOARD=lilygo_t_embed_cc1101 build
@@ -12,18 +22,8 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_16mb.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_16mb.csv"
 
-# ESP32-S3 is dual-core Xtensa — keep unicore for Furi compatibility
-CONFIG_FREERTOS_UNICORE=y
-
-# BLE: Use legacy 4.2 advertising (5.0 extended adv not seen by all phones)
-CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
-# CONFIG_BT_BLE_50_FEATURES_SUPPORTED is not set
-# Allocate Bluedroid host buffers (GATT/HCI/ACL) from PSRAM first, so internal
-# RAM stays free for the BLE controller's DMA TX buffers. Without this, starting
-# a RAM-heavy app (e.g. Sub-GHz: 61 decoders + presets) while screen-streaming
-# over BLE RPC exhausts internal RAM -> controller "BLE_INIT: Malloc failed" ->
-# TX stall -> GATT timeout -> disconnect.
-CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
+# NimBLE is selected by sdkconfig.defaults for every supported target.
+# Raw payload advertisers use extended advertising configured as a legacy PDU.
 
 # Don't cache PHY calibration in NVS. With BT buffers in PSRAM (above), the NVS
 # flash-write that phy_init does on boot ("Saving new calibration data") briefly
@@ -54,8 +54,10 @@ CONFIG_SPIRAM_USE_MALLOC=y
 # into internal RAM, dropping it to ~1.5KB free and starving the BLE controller's
 # TX buffers. With 1024 those chunks go to the abundant (5MB) PSRAM instead.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
-# Reserve 64KB internal RAM for DMA/stacks/TCBs
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Reserve 80KB internal RAM for DMA/stacks/TCBs (raised from 64KB: keeps more
+# internal free for MALLOC_CAP_INTERNAL/DMA + WiFi/pthread task-spawn, pushing
+# generic small allocations to PSRAM instead of starving internal)
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=81920
 # Allow task stacks in PSRAM (needed for large apps)
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 # Enable code execution from PSRAM (needed for FAP dynamic loading)
@@ -71,7 +73,6 @@ CONFIG_MBEDTLS_DES_C=y
 # TinyUSB (USB HID for BadUSB + CDC for RPC + MSC for SD-Card USB-Stick)
 # Composite descriptor lives in components/furi_hal/furi_hal_usb_tinyusb_composite.c
 CONFIG_TINYUSB_HID_COUNT=1
-CONFIG_TINYUSB_HID_BUFSIZE=16
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=1
 CONFIG_TINYUSB_MSC_ENABLED=y

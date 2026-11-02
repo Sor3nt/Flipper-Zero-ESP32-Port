@@ -18,6 +18,7 @@
 
 #include <furi.h>
 #include <gui/scene_manager.h>
+#include <esp_attr.h>
 
 #include "../desktop_i.h"
 #include "../views/desktop_view_mesh_clients.h"
@@ -51,7 +52,7 @@ typedef struct {
 } ClientStatus;
 
 /* Scene-State (single-instance Scene → file-static OK). */
-static struct {
+static EXT_RAM_BSS_ATTR struct {
     /* Vereinigte Liste: erst gepairte, dann session-discovered. Wird beim
      * Refresh aus mesh_config_load_clients + s_discovered neu aufgebaut. */
     MeshPeer all[MESH_CLIENTS_MAX];

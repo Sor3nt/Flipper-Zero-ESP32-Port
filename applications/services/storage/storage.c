@@ -6,7 +6,8 @@
 #include "storages/storage_ext.h"
 #include <assets_icons.h>
 
-#define STORAGE_TICK 1000
+#define STORAGE_TICK      1000
+#define STORAGE_IDLE_TICK 60000
 
 #define ICON_SD_MOUNTED &I_SDcardMounted_11x8
 #define ICON_SD_ERROR   &I_SDcardFail_11x8
@@ -48,6 +49,7 @@ Storage* storage_app_alloc(void) {
     app->sd_gui.view_port = view_port_alloc();
     view_port_set_width(app->sd_gui.view_port, icon_get_width(ICON_SD_MOUNTED));
     view_port_draw_callback_set(app->sd_gui.view_port, storage_app_sd_icon_draw_callback, app);
+    view_port_set_statusbar_icon(app->sd_gui.view_port, ViewPortStatusBarIconSdCard);
     view_port_enabled_set(app->sd_gui.view_port, app->sd_gui.enabled);
 
     Gui* gui = furi_record_open(RECORD_GUI);
@@ -109,7 +111,11 @@ int32_t storage_srv(void* p) {
 
     StorageMessage message;
     while(1) {
-        if(furi_message_queue_get(app->message_queue, &message, STORAGE_TICK) == FuriStatusOk) {
+        /* Light-sleep idle: the card-presence tick would wake the SoC every
+         * second. There is no detect pin and nothing to notice while the device
+         * is asleep; the tick resumes within STORAGE_IDLE_TICK of waking. */
+        const uint32_t tick_ms = furi_hal_power_is_idle() ? STORAGE_IDLE_TICK : STORAGE_TICK;
+        if(furi_message_queue_get(app->message_queue, &message, tick_ms) == FuriStatusOk) {
             storage_process_message(app, &message);
         } else {
             storage_tick(app);

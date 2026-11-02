@@ -6,16 +6,20 @@
 #include <flipper_format/flipper_format.h>
 
 bool findmy_state_load(FindMyState* out_state) {
-    FindMyState state;
+    if(!out_state) return false;
+    FindMyState state = {0};
 
     // Try to load from file
     bool loaded_from_file = false;
     Storage* storage = furi_record_open(RECORD_STORAGE);
-    if(storage_file_exists(storage, FINDMY_STATE_PATH)) {
-        FlipperFormat* file = flipper_format_file_alloc(storage);
+    FlipperFormat* file = NULL;
+    FuriString* str = NULL;
+    if(storage && storage_file_exists(storage, FINDMY_STATE_PATH)) {
+        file = flipper_format_file_alloc(storage);
+        str = furi_string_alloc();
+        if(!file || !str) goto load_done;
         do {
             uint32_t tmp;
-            FuriString* str = furi_string_alloc();
             if(!flipper_format_file_open_existing(file, FINDMY_STATE_PATH)) break;
             if(!flipper_format_read_header(file, str, &tmp)) break;
             if(furi_string_cmp_str(str, FINDMY_STATE_HEADER)) break;
@@ -24,15 +28,18 @@ bool findmy_state_load(FindMyState* out_state) {
             if(!flipper_format_read_bool(file, "beacon_active", &state.beacon_active, 1)) break;
 
             if(!flipper_format_read_uint32(file, "broadcast_interval", &tmp, 1)) break;
+            if(tmp < 1U || tmp > 10U) break;
             state.broadcast_interval = tmp;
 
             if(!flipper_format_read_uint32(file, "transmit_power", &tmp, 1)) break;
+            if(tmp > 6U) break;
             state.transmit_power = tmp;
 
             if(!flipper_format_read_uint32(file, "tag_type", &tmp, 1)) {
                 tmp = FindMyTypeApple;
                 flipper_format_rewind(file);
             }
+            if(findmy_state_data_size((FindMyType)tmp) == 0) break;
             state.tag_type = tmp;
 
             if(!flipper_format_read_bool(file, "show_mac", &state.show_mac, 1)) {
@@ -49,9 +56,11 @@ bool findmy_state_load(FindMyState* out_state) {
 
             loaded_from_file = true;
         } while(0);
-        flipper_format_free(file);
     }
-    furi_record_close(RECORD_STORAGE);
+load_done:
+    if(str) furi_string_free(str);
+    if(file) flipper_format_free(file);
+    if(storage) furi_record_close(RECORD_STORAGE);
 
     // Otherwise set default values
     if(!loaded_from_file) {
@@ -60,6 +69,7 @@ bool findmy_state_load(FindMyState* out_state) {
         state.transmit_power = 6;
         state.show_mac = false;
         state.tag_type = FindMyTypeApple;
+        state.battery_level = BATTERY_FULL;
 
         // Set default mac
         uint8_t default_mac[EXTRA_BEACON_MAC_ADDR_SIZE] = {0x66, 0x55, 0x44, 0x33, 0x22, 0x11};
@@ -97,6 +107,11 @@ bool findmy_state_load(FindMyState* out_state) {
 }
 
 void findmy_state_apply(FindMyState* state) {
+    if(!state || findmy_state_data_size(state->tag_type) == 0 ||
+       state->broadcast_interval < 1 || state->broadcast_interval > 10 ||
+       state->transmit_power > 6) {
+        return;
+    }
     // This function applies initial state to the beacon (loaded values)
     if(furi_hal_bt_extra_beacon_is_active()) {
         furi_check(furi_hal_bt_extra_beacon_stop());
@@ -112,6 +127,11 @@ void findmy_state_apply(FindMyState* state) {
 }
 
 void findmy_state_sync_config(FindMyState* state) {
+    if(!state || findmy_state_data_size(state->tag_type) == 0 ||
+       state->broadcast_interval < 1 || state->broadcast_interval > 10 ||
+       state->transmit_power > 6) {
+        return;
+    }
     state->config.min_adv_interval_ms = state->broadcast_interval * 1000; // Converting s to ms
     state->config.max_adv_interval_ms = (state->broadcast_interval * 1000) + 150;
     state->config.adv_power_level = GapAdvPowerLevel_0dBm + state->transmit_power;
@@ -143,9 +163,19 @@ void findmy_update_payload_battery(uint8_t* data, uint8_t battery_level, FindMyT
 }
 
 void findmy_state_save(FindMyState* state) {
+    if(!state || findmy_state_data_size(state->tag_type) == 0 ||
+       state->broadcast_interval < 1 || state->broadcast_interval > 10 ||
+       state->transmit_power > 6) {
+        return;
+    }
     Storage* storage = furi_record_open(RECORD_STORAGE);
+    if(!storage) return;
     storage_simply_mkdir(storage, FINDMY_STATE_DIR);
     FlipperFormat* file = flipper_format_file_alloc(storage);
+    if(!file) {
+        furi_record_close(RECORD_STORAGE);
+        return;
+    }
 
     do {
         uint32_t tmp;

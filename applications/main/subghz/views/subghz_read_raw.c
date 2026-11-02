@@ -14,6 +14,7 @@ struct SubGhzReadRAW {
     View* view;
     SubGhzReadRAWCallback callback;
     void* context;
+    FuriTimer* animation_timer;
 };
 
 typedef struct {
@@ -73,7 +74,9 @@ void subghz_read_raw_add_data_rssi(SubGhzReadRAW* instance, float rssi, bool tra
     if(rssi < SUBGHZ_RAW_THRESHOLD_MIN) {
         u_rssi = 0;
     } else {
-        u_rssi = (uint8_t)((rssi - SUBGHZ_RAW_THRESHOLD_MIN) / 2.7f);
+        float level = (rssi - SUBGHZ_RAW_THRESHOLD_MIN) / 2.7f;
+        if(level > 35.0f) level = 35.0f;
+        u_rssi = (uint8_t)level;
     }
 
     with_view_model(
@@ -138,15 +141,26 @@ void subghz_read_raw_stop_send(SubGhzReadRAW* instance) {
 
 void subghz_read_raw_update_sin(SubGhzReadRAW* instance) {
     furi_assert(instance);
+    bool animating = false;
     with_view_model(
         instance->view,
         SubGhzReadRAWModel * model,
         {
-            if(model->ind_sin++ > 62) {
-                model->ind_sin = 0;
+            if(model->status == SubGhzReadRAWStatusTX ||
+               model->status == SubGhzReadRAWStatusTXRepeat ||
+               model->status == SubGhzReadRAWStatusLoadKeyTX ||
+               model->status == SubGhzReadRAWStatusLoadKeyTXRepeat) {
+                model->ind_sin = (model->ind_sin + 1) % 64;
+                animating = true;
             }
         },
-        true);
+        // The 100 ms animation timer runs for as long as the view is shown; only
+        // redraw while the TX wave actually moves (a full-screen push otherwise).
+        animating);
+}
+
+static void subghz_read_raw_animation_timer_callback(void* context) {
+    subghz_read_raw_update_sin(context);
 }
 
 static int8_t subghz_read_raw_tab_sin(uint8_t x) {
@@ -401,6 +415,11 @@ bool subghz_read_raw_input(InputEvent* event, void* context) {
             },
             ret);
     } else if(event->key == InputKeyOk && event->type == InputTypeRelease) {
+        // Flipper behaviour: releasing OK only ends the repeat. The file that is
+        // playing is sent to the end; the end-of-file callback then stops TX
+        // (status TX -> IDLE) or restarts it while OK is held (TXRepeat).
+        // Stopping here cut a short click's transmission off after a few ms.
+        // Back still aborts a playback early (SubGhzCustomEventViewReadRAWTXRXStop).
         with_view_model(
             instance->view,
             SubGhzReadRAWModel * model,
@@ -413,7 +432,7 @@ bool subghz_read_raw_input(InputEvent* event, void* context) {
                     model->status = SubGhzReadRAWStatusLoadKeyTX;
                 }
             },
-            false);
+            true);
     } else if(event->key == InputKeyBack && event->type == InputTypeShort) {
         with_view_model(
             instance->view,
@@ -578,12 +597,14 @@ void subghz_read_raw_set_status(
 
 void subghz_read_raw_enter(void* context) {
     furi_assert(context);
-    //SubGhzReadRAW* instance = context;
+    SubGhzReadRAW* instance = context;
+    furi_check(furi_timer_start(instance->animation_timer, furi_ms_to_ticks(100)) == FuriStatusOk);
 }
 
 void subghz_read_raw_exit(void* context) {
     furi_assert(context);
     SubGhzReadRAW* instance = context;
+    furi_check(furi_timer_stop(instance->animation_timer) == FuriStatusOk);
 
     with_view_model(
         instance->view,
@@ -611,6 +632,9 @@ SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
     view_set_input_mode(instance->view, ViewInputModeLeftRight);
     view_set_enter_callback(instance->view, subghz_read_raw_enter);
     view_set_exit_callback(instance->view, subghz_read_raw_exit);
+    instance->animation_timer =
+        furi_timer_alloc(subghz_read_raw_animation_timer_callback, FuriTimerTypePeriodic, instance);
+    furi_check(instance->animation_timer);
 
     with_view_model(
         instance->view,
@@ -621,7 +645,7 @@ SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
             model->sample_write = furi_string_alloc();
             model->file_name = furi_string_alloc();
             model->raw_send_only = raw_send_only;
-            model->rssi_history = malloc(SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE * sizeof(uint8_t));
+            model->rssi_history = calloc(SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE, sizeof(uint8_t));
             model->raw_threshold_rssi = -127.0f;
         },
         true);
@@ -632,6 +656,8 @@ SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
 void subghz_read_raw_free(SubGhzReadRAW* instance) {
     furi_assert(instance);
 
+    furi_check(furi_timer_stop(instance->animation_timer) == FuriStatusOk);
+    furi_timer_free(instance->animation_timer);
     with_view_model(
         instance->view,
         SubGhzReadRAWModel * model,

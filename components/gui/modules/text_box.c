@@ -193,7 +193,10 @@ static void text_box_update_screen_text(Canvas* canvas, TextBoxModel* model) {
             &model->text[current_line_text_offset],
             next_line_text_offset - current_line_text_offset);
         size_t str_len = furi_string_size(model->text_line);
-        if(furi_string_get_char(model->text_line, str_len - 1) != '\n') {
+        // An empty line (str_len == 0) would underflow str_len - 1 to SIZE_MAX and trip the
+        // string_get_char index assert; it happens when the text box is drawn with an empty
+        // string or a zero-width seek. Treat it as a line that still needs its '\n'.
+        if(str_len == 0 || furi_string_get_char(model->text_line, str_len - 1) != '\n') {
             furi_string_push_back(model->text_line, '\n');
         }
         furi_string_cat(model->text_on_screen, model->text_line);

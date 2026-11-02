@@ -69,6 +69,11 @@ static void signal_received_callback(void* context, InfraredWorkerSignal* receiv
     }
 }
 
+static void rx_error_callback(void* context) {
+    /* Worker thread: only flag it, the CLI loop reports and stops the worker. */
+    *(volatile bool*)context = true;
+}
+
 static void infrared_cli_print_universal_remotes(void) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     File* dir = storage_file_alloc(storage);
@@ -138,15 +143,31 @@ static void infrared_cli_start_ir_rx(PipeSide* pipe, FuriString* args) {
     }
 
     InfraredWorker* worker = infrared_worker_alloc();
+    if(!worker) {
+        printf("Unable to allocate infrared worker.\r\n");
+        return;
+    }
+    volatile bool rx_failed = false;
     infrared_worker_rx_enable_signal_decoding(worker, enable_decoding);
-    infrared_worker_rx_start(worker);
+    infrared_worker_rx_set_error_callback(worker, rx_error_callback, (void*)&rx_failed);
+    if(!infrared_worker_rx_start(worker)) {
+        printf("Unable to start infrared receiver.\r\n");
+        infrared_worker_free(worker);
+        return;
+    }
     infrared_worker_rx_set_received_signal_callback(worker, signal_received_callback, pipe);
 
     printf("Receiving %s INFRARED...\r\nPress Ctrl+C to abort\r\n", enable_decoding ? "" : "RAW");
-    while(!cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
+    while(!rx_failed && !cli_is_pipe_broken_or_is_etx_next_char(pipe)) {
         furi_delay_ms(50);
     }
 
+    if(rx_failed) {
+        printf("Infrared receiver stopped working.\r\n");
+    }
+
+    /* Detach before rx_stop(): the worker must not touch rx_failed afterwards. */
+    infrared_worker_rx_set_error_callback(worker, NULL, NULL);
     infrared_worker_rx_stop(worker);
     infrared_worker_free(worker);
 }

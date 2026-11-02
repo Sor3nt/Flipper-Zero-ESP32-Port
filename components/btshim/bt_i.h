@@ -32,6 +32,8 @@ typedef enum {
     BtMessageTypeUpdateBatteryLevel,
     BtMessageTypeUpdatePowerState,
     BtMessageTypePinCodeShow,
+    BtMessageTypePairingStalled,
+    BtMessageTypePairingDone,
     BtMessageTypeKeysStorageUpdated,
     BtMessageTypeSetProfile,
     BtMessageTypeDisconnect,
@@ -41,6 +43,7 @@ typedef enum {
     BtMessageTypeReloadKeysSettings,
     BtMessageTypeStopStack,
     BtMessageTypeStartStack,
+    BtMessageTypeRecoverStack,
     BtMessageTypeSleepSuspend,
     BtMessageTypeSleepResume,
 } BtMessageType;
@@ -84,9 +87,11 @@ struct Bt {
     FuriMessageQueue* message_queue;
     NotificationApp* notification;
     Gui* gui;
+    ViewPort* beacon_view_port;
     ViewPort* statusbar_view_port;
     ViewPort* pin_code_view_port;
     uint32_t pin_code;
+    bool pairing_stalled;
     Rpc* rpc;
     RpcSession* rpc_session;
     FuriEventFlag* rpc_event;
@@ -96,6 +101,8 @@ struct Bt {
     bool suppress_pin_screen;
     /* BLE stack stopped by the power service for light sleep (settings still enabled). */
     bool sleep_suspended;
+    bool stack_recovery_requested;
+    bool stack_recovery_pending;
 
     /* Intermediate RX buffer: GATTS callback writes here (non-blocking),
      * dedicated feeder thread drains into RPC session (can block safely). */

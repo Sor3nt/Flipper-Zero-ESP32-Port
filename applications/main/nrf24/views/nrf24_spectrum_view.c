@@ -11,10 +11,10 @@
 #define BAR_BOTTOM 52
 #define SCALE_Y    54
 
-/* Map an NRF24 channel index (0..79) to an x-pixel on the 128 px wide canvas */
+/* Map an NRF24 channel index (0..125) to an x-pixel on the 128 px canvas. */
 #define BAR_X(ch) (((int)(ch) * 128) / NRF24_SPECTRUM_CHANNELS)
 
-static const uint8_t scale_marks[] = {0, 10, 20, 30, 40, 50, 60, 70};
+static const uint8_t scale_marks[] = {0, 25, 50, 75, 100, 125};
 
 static void nrf24_spectrum_draw_callback(Canvas* canvas, void* _model) {
     Nrf24SpectrumModel* model = _model;
@@ -23,6 +23,15 @@ static void nrf24_spectrum_draw_callback(Canvas* canvas, void* _model) {
     canvas_set_color(canvas, ColorBlack);
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 64, 0, AlignCenter, AlignTop, "NRF24 Spectrum");
+    if(model->sample_errors) {
+        char error_text[12];
+        if(model->sample_errors > 99) {
+            snprintf(error_text, sizeof(error_text), "E:99+");
+        } else {
+            snprintf(error_text, sizeof(error_text), "E:%lu", (unsigned long)model->sample_errors);
+        }
+        canvas_draw_str_aligned(canvas, 127, 0, AlignRight, AlignTop, error_text);
+    }
 
     if(!model->hardware_ok) {
         canvas_draw_icon(canvas, 60, 22, &I_Quest_7x8);
@@ -50,15 +59,18 @@ static void nrf24_spectrum_draw_callback(Canvas* canvas, void* _model) {
         }
     }
 
-    /* Channel scale labels — every 10 channels */
+    /* Channel scale labels across the full nRF24 channel range. */
     canvas_set_font(canvas, FontSecondary);
     char tick[4];
     for(size_t i = 0; i < sizeof(scale_marks) / sizeof(scale_marks[0]); i++) {
         uint8_t ch = scale_marks[i];
-        int x = BAR_X(ch) + (BAR_X(ch + 1) - BAR_X(ch)) / 2 + 4;
+        int x = BAR_X(ch);
         canvas_draw_dot(canvas, x, BAR_BOTTOM + 1);
         snprintf(tick, sizeof(tick), "%u", ch);
-        canvas_draw_str_aligned(canvas, x, SCALE_Y + 1, AlignCenter, AlignTop, tick);
+        const Align align = (i == 0) ? AlignLeft :
+                            (i + 1 == sizeof(scale_marks) / sizeof(scale_marks[0])) ? AlignRight :
+                                                                                     AlignCenter;
+        canvas_draw_str_aligned(canvas, x, SCALE_Y + 1, align, AlignTop, tick);
     }
 }
 

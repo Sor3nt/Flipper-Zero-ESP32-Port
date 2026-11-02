@@ -10,6 +10,12 @@ typedef void (*SubGhzFileEncoderWorkerCallbackEnd)(void* context);
 
 typedef struct SubGhzFileEncoderWorker SubGhzFileEncoderWorker;
 
+typedef enum {
+    SubGhzFileEncoderWorkerPreloadReady,
+    SubGhzFileEncoderWorkerPreloadTimeout,
+    SubGhzFileEncoderWorkerPreloadFailed,
+} SubGhzFileEncoderWorkerPreloadResult;
+
 /** 
  * End callback SubGhzWorker.
  * @param instance SubGhzFileEncoderWorker instance
@@ -59,6 +65,12 @@ bool subghz_file_encoder_worker_start(
     SubGhzFileEncoderWorker* instance,
     const char* file_path,
     const char* radio_device_name);
+
+/** Wait for initial signal data, producer EOF, or timeout. */
+SubGhzFileEncoderWorkerPreloadResult subghz_file_encoder_worker_wait_for_data(
+    SubGhzFileEncoderWorker* instance,
+    size_t min_samples,
+    uint32_t timeout_ms);
 
 /** 
  * Stop SubGhzFileEncoderWorker

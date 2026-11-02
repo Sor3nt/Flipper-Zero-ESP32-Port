@@ -25,6 +25,9 @@
 
 static httpd_handle_t s_http = NULL;
 static esp_netif_t* s_ap_netif = NULL;
+// True ONLY when this module created WIFI_AP_DEF itself. If wlan_hal or another
+// feature already owns it, we reuse the handle and must NEVER destroy it.
+static bool s_ap_netif_created_here = false;
 static bool s_running = false;
 static bool s_is_ap = false;
 static bool s_evt_registered = false;
@@ -414,6 +417,22 @@ static bool start_http(void) {
 
 /* ─────────────────────── AP lifecycle (wlan_hal worker) ─────────────────────── */
 
+// Zentrale Destroy-Stelle für s_ap_netif. Muss auf JEDEM Fehlerpfad nach dem
+// Create aufgerufen werden — sonst bleibt der esp_netif-Key "WIFI_AP_DEF"
+// registriert, obwohl s_running==false, und der nächste AP-Start (egal ob
+// webfs selbst oder ein anderes Feature wie Evil-Portal) crasht mit
+// "esp_netif_new_api: ... duplicate key" (assert in wifi_default.c:374).
+static void webfs_destroy_ap_netif(void) {
+    // Only destroy a netif WE created fresh. A shared WIFI_AP_DEF owned by
+    // wlan_hal (or persisted from an earlier start) must survive — destroying
+    // it dangles their cached handle and crashes the next WiFi start.
+    if(s_ap_netif && s_ap_netif_created_here) {
+        esp_netif_destroy_default_wifi(s_ap_netif);
+        s_ap_netif_created_here = false;
+    }
+    s_ap_netif = NULL;
+}
+
 static void webfs_wifi_event(void* arg, esp_event_base_t base, int32_t id, void* data) {
     (void)arg;
     (void)data;
@@ -447,7 +466,14 @@ static void webfs_ap_worker(void* arg) {
     }
 
     if(!s_ap_netif) {
-        s_ap_netif = esp_netif_create_default_wifi_ap();
+        // Reuse an already-registered WIFI_AP_DEF (owned by wlan_hal or a
+        // previous start) instead of creating a duplicate — a second create
+        // for the same key asserts in wifi_default.c:374 and reboots.
+        s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if(!s_ap_netif) {
+            s_ap_netif = esp_netif_create_default_wifi_ap();
+            s_ap_netif_created_here = true;
+        }
         if(!s_ap_netif) {
             FURI_LOG_E(TAG, "AP netif alloc failed");
             return;
@@ -460,6 +486,10 @@ static void webfs_ap_worker(void* arg) {
     cfg.dynamic_tx_buf_num = 6;
     if(esp_wifi_init(&cfg) != ESP_OK) {
         FURI_LOG_E(TAG, "wifi_init failed");
+        // Netif wurde oben schon angelegt — ohne Destroy bleibt der
+        // "WIFI_AP_DEF"-Key für immer belegt (nächster AP-Start, egal
+        // welches Feature, crasht dann mit "duplicate key").
+        webfs_destroy_ap_netif();
         return;
     }
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
@@ -481,6 +511,7 @@ static void webfs_ap_worker(void* arg) {
        esp_wifi_set_config(WIFI_IF_AP, &ap) != ESP_OK) {
         FURI_LOG_E(TAG, "set_mode/config failed");
         esp_wifi_deinit();
+        webfs_destroy_ap_netif();
         return;
     }
 
@@ -492,6 +523,7 @@ static void webfs_ap_worker(void* arg) {
     if(esp_wifi_start() != ESP_OK) {
         FURI_LOG_E(TAG, "wifi_start failed");
         esp_wifi_deinit();
+        webfs_destroy_ap_netif();
         return;
     }
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -515,6 +547,7 @@ static void webfs_ap_worker(void* arg) {
     if(!start_http()) {
         esp_wifi_stop();
         esp_wifi_deinit();
+        webfs_destroy_ap_netif();
         return;
     }
 
@@ -536,10 +569,7 @@ static void webfs_ap_stop_worker(void* arg) {
     }
     esp_wifi_stop();
     esp_wifi_deinit();
-    if(s_ap_netif) {
-        esp_netif_destroy_default_wifi(s_ap_netif);
-        s_ap_netif = NULL;
-    }
+    webfs_destroy_ap_netif();
     s_running = false;
     s_clients = 0;
 }

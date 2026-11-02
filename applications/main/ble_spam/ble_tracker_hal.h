@@ -2,7 +2,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <esp_gap_ble_api.h>
 
 #define TRACKER_MAX_DEVICES 24
 
@@ -17,7 +16,7 @@ typedef enum {
 
 typedef struct {
     uint8_t addr[6];
-    esp_ble_addr_type_t addr_type;
+    uint8_t addr_type;
     TrackerKind kind;
     char name[24];        // model name (Apple PP) or empty
     int8_t rssi;

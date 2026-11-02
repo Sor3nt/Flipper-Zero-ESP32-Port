@@ -1,6 +1,8 @@
 #include "infrared_app_i.h"
 
 #include <power/power_service/power.h>
+#include <furi_hal_power.h>
+#include <boards/board.h>
 
 #include <string.h>
 #include <toolbox/path.h>
@@ -144,6 +146,10 @@ static void infrared_find_vacant_remote_name(FuriString* name, const char* path)
 
 static InfraredApp* infrared_alloc(void) {
     InfraredApp* infrared = malloc(sizeof(InfraredApp));
+    if(!infrared) {
+        FURI_LOG_E(TAG, "Unable to allocate application state");
+        return NULL;
+    }
 
     infrared->task_thread =
         furi_thread_alloc_ex("InfraredTask", INFRARED_TASK_STACK_SIZE, NULL, infrared);
@@ -153,6 +159,9 @@ static InfraredApp* infrared_alloc(void) {
     InfraredAppState* app_state = &infrared->app_state;
     app_state->is_learning_new_remote = false;
     app_state->is_debug_enabled = furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug);
+    app_state->is_transmitting = false;
+    app_state->is_otg_enabled = false;
+    app_state->tx_pin = FuriHalInfraredTxPinInternal;
     app_state->edit_target = InfraredEditTargetNone;
     app_state->edit_mode = InfraredEditModeNone;
     app_state->current_button_index = InfraredButtonIndexNone;
@@ -173,6 +182,7 @@ static InfraredApp* infrared_alloc(void) {
     infrared->notifications = furi_record_open(RECORD_NOTIFICATION);
 
     infrared->worker = infrared_worker_alloc();
+    furi_check(infrared->worker);
     infrared->remote = infrared_remote_alloc();
     infrared->current_signal = infrared_signal_alloc();
     infrared->brute_force = infrared_brute_force_alloc();
@@ -370,6 +380,7 @@ void infrared_tx_start(InfraredApp* infrared) {
     if(infrared->app_state.is_transmitting) {
         return;
     }
+    if(!furi_hal_infrared_is_available()) return;
 
     const uint32_t time_elapsed = furi_get_tick() - infrared->app_state.last_transmit_time;
 
@@ -391,7 +402,11 @@ void infrared_tx_start(InfraredApp* infrared) {
 
     infrared_worker_tx_set_get_signal_callback(
         infrared->worker, infrared_worker_tx_get_signal_steady_callback, infrared);
-    infrared_worker_tx_start(infrared->worker);
+    if(!infrared_worker_tx_start(infrared->worker)) {
+        infrared_worker_tx_set_get_signal_callback(infrared->worker, NULL, NULL);
+        infrared_show_tx_error(infrared);
+        return;
+    }
 
     infrared->app_state.is_transmitting = true;
 }
@@ -484,6 +499,19 @@ void infrared_show_error_message(const InfraredApp* infrared, const char* fmt, .
     va_end(args);
 }
 
+void infrared_show_tx_error(const InfraredApp* infrared) {
+#if defined(BOARD_PIN_IR_TX_EXT)
+    if(!furi_hal_infrared_is_tx_output_free()) {
+        infrared_show_error_message(
+            infrared,
+            "External IR pin GPIO%d\nis in use by another\nfunction",
+            BOARD_PIN_IR_TX_EXT);
+        return;
+    }
+#endif
+    infrared_show_error_message(infrared, "Infrared transmitter unavailable");
+}
+
 void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin) {
     if(tx_pin < FuriHalInfraredTxPinMax) {
         furi_hal_infrared_set_tx_output(tx_pin);
@@ -500,30 +528,36 @@ void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin) {
 
 void infrared_enable_otg(InfraredApp* infrared, bool enable) {
     Power* power = furi_record_open(RECORD_POWER);
-
-    power_enable_otg(power, enable);
+    bool hardware_enable = enable;
+#if defined(BOARD_IR_TX_REQUIRES_VBUS) && BOARD_IR_TX_REQUIRES_VBUS
+    /* External VBUS supplies 5 V directly; do not enable charger boost on USB. */
+    hardware_enable = enable && furi_hal_power_is_running_on_battery();
+#endif
+    power_enable_otg(power, hardware_enable);
     infrared->app_state.is_otg_enabled = enable;
 
     furi_record_close(RECORD_POWER);
 }
 
 static void infrared_load_settings(InfraredApp* infrared) {
-    InfraredSettings settings = {0};
+    InfraredSettings settings = {
+        .tx_pin = FuriHalInfraredTxPinInternal,
+        .otg_enabled = false,
+    };
 
-    if(!saved_struct_load(
-           INFRARED_SETTINGS_PATH,
-           &settings,
-           sizeof(InfraredSettings),
-           INFRARED_SETTINGS_MAGIC,
-           INFRARED_SETTINGS_VERSION)) {
+    if(!infrared_settings_load(&settings)) {
         FURI_LOG_D(TAG, "Failed to load settings, using defaults");
-        infrared_save_settings(infrared);
+        infrared_settings_save(&settings);
     }
 
     infrared_set_tx_pin(infrared, settings.tx_pin);
+#if defined(BOARD_IR_TX_REQUIRES_VBUS) && BOARD_IR_TX_REQUIRES_VBUS
+    infrared_enable_otg(infrared, settings.otg_enabled);
+#else
     if(settings.tx_pin < FuriHalInfraredTxPinMax) {
         infrared_enable_otg(infrared, settings.otg_enabled);
     }
+#endif
 }
 
 void infrared_save_settings(InfraredApp* infrared) {
@@ -532,14 +566,31 @@ void infrared_save_settings(InfraredApp* infrared) {
         .otg_enabled = infrared->app_state.is_otg_enabled,
     };
 
-    if(!saved_struct_save(
-           INFRARED_SETTINGS_PATH,
-           &settings,
-           sizeof(InfraredSettings),
-           INFRARED_SETTINGS_MAGIC,
-           INFRARED_SETTINGS_VERSION)) {
+    infrared_settings_save(&settings);
+}
+
+bool infrared_settings_load(InfraredSettings* settings) {
+    furi_assert(settings);
+    return saved_struct_load(
+        INFRARED_SETTINGS_PATH,
+        settings,
+        sizeof(InfraredSettings),
+        INFRARED_SETTINGS_MAGIC,
+        INFRARED_SETTINGS_VERSION);
+}
+
+bool infrared_settings_save(const InfraredSettings* settings) {
+    furi_assert(settings);
+    const bool success = saved_struct_save(
+        INFRARED_SETTINGS_PATH,
+        settings,
+        sizeof(InfraredSettings),
+        INFRARED_SETTINGS_MAGIC,
+        INFRARED_SETTINGS_VERSION);
+    if(!success) {
         FURI_LOG_E(TAG, "Failed to save settings");
     }
+    return success;
 }
 
 void infrared_signal_received_callback(void* context, InfraredWorkerSignal* received_signal) {
@@ -565,6 +616,12 @@ void infrared_signal_received_callback(void* context, InfraredWorkerSignal* rece
         infrared->view_dispatcher, InfraredCustomEventTypeSignalReceived);
 }
 
+void infrared_rx_error_callback(void* context) {
+    furi_assert(context);
+    InfraredApp* infrared = context;
+    view_dispatcher_send_custom_event(infrared->view_dispatcher, InfraredCustomEventTypeRxError);
+}
+
 void infrared_text_input_callback(void* context) {
     furi_assert(context);
     InfraredApp* infrared = context;
@@ -581,6 +638,7 @@ void infrared_popup_closed_callback(void* context) {
 
 int32_t infrared_app(void* p) {
     InfraredApp* infrared = infrared_alloc();
+    if(!infrared) return -1;
 
     infrared_load_settings(infrared);
     infrared_make_app_folder(infrared);
@@ -633,8 +691,13 @@ int32_t infrared_app(void* p) {
 
     view_dispatcher_run(infrared->view_dispatcher);
 
+    infrared_tx_stop(infrared);
     infrared_set_tx_pin(infrared, FuriHalInfraredTxPinInternal);
+#if defined(BOARD_IR_TX_REQUIRES_VBUS) && BOARD_IR_TX_REQUIRES_VBUS
+    infrared_enable_otg(infrared, infrared->app_state.is_otg_enabled);
+#else
     infrared_enable_otg(infrared, false);
+#endif
     infrared_free(infrared);
 
     return 0;

@@ -29,6 +29,8 @@ typedef struct Expansion Expansion;
  * If expansion module support was disabled in settings, this function
  * does nothing.
  *
+ * @note Availability depends on the selected board's UART routing.
+ *
  * @param[in,out] instance pointer to the Expansion instance.
  */
 void expansion_enable(Expansion* instance);

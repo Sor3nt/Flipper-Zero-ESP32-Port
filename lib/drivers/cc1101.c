@@ -153,6 +153,8 @@ void cc1101_set_pa_table(const FuriHalSpiBusHandle* handle, const uint8_t value[
 uint8_t cc1101_write_fifo(const FuriHalSpiBusHandle* handle, const uint8_t* data, uint8_t size) {
     uint8_t buff_tx[64];
     uint8_t buff_rx[64];
+    // Header byte + payload must fit the 64-byte buffer (and the CC1101 TX FIFO).
+    if(size > sizeof(buff_tx) - 1) size = sizeof(buff_tx) - 1;
     buff_tx[0] = CC1101_FIFO | CC1101_BURST;
     memcpy(&buff_tx[1], data, size);
 
