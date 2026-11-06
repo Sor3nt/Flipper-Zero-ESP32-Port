@@ -3,6 +3,9 @@
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include <esp_intr_alloc.h> /* esp_intr_noniram_disable/enable */
+#if !CONFIG_FREERTOS_UNICORE
+#include <esp_ipc_isr.h> /* esp_ipc_isr_stall_other_cpu */
+#endif
 #endif
 
 #include <toolbox/path.h>
@@ -204,10 +207,22 @@ FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplicatio
          * region accessed" (seen as an RMT TX ISR crash during plugin load).
          * Mask non-IRAM interrupts across the cache ops — the same guard the
          * IDF flash driver uses for cache-disabled sections. */
+#if !CONFIG_FREERTOS_UNICORE
+        /* Dual core: the mask above is per core. Stay on this core (critical
+         * section, so no migration between disable and enable) and stall the
+         * other CPU so it does not run from the cache while it is flushed. */
+        static portMUX_TYPE fap_cache_lock = portMUX_INITIALIZER_UNLOCKED;
+        portENTER_CRITICAL(&fap_cache_lock);
+        esp_ipc_isr_stall_other_cpu();
+#endif
         esp_intr_noniram_disable();
         Cache_WriteBack_All();
         Cache_Invalidate_ICache_All();
         esp_intr_noniram_enable();
+#if !CONFIG_FREERTOS_UNICORE
+        esp_ipc_isr_release_other_cpu();
+        portEXIT_CRITICAL(&fap_cache_lock);
+#endif
         FURI_LOG_I(TAG, "Cache flushed: DCache writeback + ICache invalidate");
 #endif
 

@@ -9,6 +9,28 @@
 const InputPin input_pins[] = {};
 const size_t input_pins_count = 0;
 
+#if defined(BOARD_PIN_EXT_GPIO_1)
+#if !defined(BOARD_PIN_EXT_GPIO_2) || !defined(BOARD_PIN_EXT_GPIO_3) || \
+    !defined(BOARD_PIN_EXT_GPIO_4) || !defined(BOARD_PIN_EXT_GPIO_5)
+#error "An external GPIO header needs BOARD_PIN_EXT_GPIO_1..5"
+#endif
+#define FURI_HAL_STRINGIFY_INNER(value) #value
+#define FURI_HAL_STRINGIFY(value)       FURI_HAL_STRINGIFY_INNER(value)
+static const GpioPin gpio_header_ext_1 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_1};
+static const GpioPin gpio_header_ext_2 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_2};
+static const GpioPin gpio_header_ext_3 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_3};
+static const GpioPin gpio_header_ext_4 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_4};
+static const GpioPin gpio_header_ext_5 = {.port = NULL, .pin = BOARD_PIN_EXT_GPIO_5};
+const GpioPinRecord gpio_pins[] = {
+    {.pin = &gpio_header_ext_1, .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_1), .debug = false},
+    {.pin = &gpio_header_ext_2, .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_2), .debug = false},
+    {.pin = &gpio_header_ext_3, .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_3), .debug = false},
+    {.pin = &gpio_header_ext_4, .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_4), .debug = false},
+    {.pin = &gpio_header_ext_5, .name = "GPIO" FURI_HAL_STRINGIFY(BOARD_PIN_EXT_GPIO_5), .debug = false},
+};
+const size_t gpio_pins_count = sizeof(gpio_pins) / sizeof(gpio_pins[0]);
+#endif
+
 /* Hardware Button Pins */
 const GpioPin gpio_button_boot  = {.port = NULL, .pin = BOARD_PIN_BUTTON_BOOT};
 const GpioPin gpio_battery_sense = {.port = NULL, .pin = BOARD_PIN_BATTERY_ADC};

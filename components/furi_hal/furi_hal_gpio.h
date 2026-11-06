@@ -158,6 +158,51 @@ void furi_hal_gpio_write(const GpioPin* gpio, const bool state);
  */
 bool furi_hal_gpio_read(const GpioPin* gpio);
 
+/**
+ * Install the shared GPIO interrupt service. Called once from furi_hal_init()
+ * so the service (and every GPIO ISR) is allocated on the boot core instead
+ * of whichever core a later caller happens to run on.
+ */
+void furi_hal_gpio_init_isr_service(void);
+
+/**
+ * Check whether a GPIO is configured as an input or output.
+ * Bidirectional pins report true for both checks.
+ */
+bool furi_hal_gpio_is_input(const GpioPin* gpio);
+bool furi_hal_gpio_is_output(const GpioPin* gpio);
+
+/**
+ * Reserve a pin for a HAL-driven peripheral (e.g. external IR TX).
+ *
+ * While reserved, furi_hal_gpio_init*() calls from anyone else are ignored, so
+ * scripts or apps cannot reroute a pin the peripheral is currently driving.
+ * Nothing is reserved unless a driver asks for it, so boards without such a
+ * driver behave exactly as before.
+ *
+ * @param gpio  pin to reserve
+ * @param owner static string identifying the owner, also shown to users
+ * @return true if the pin was free or is already held by the same owner
+ */
+bool furi_hal_gpio_reserve(const GpioPin* gpio, const char* owner);
+
+/**
+ * Same as furi_hal_gpio_init(), but a pin reserved by `owner` is configured too.
+ * `owner` must be the same string pointer passed to furi_hal_gpio_reserve().
+ */
+void furi_hal_gpio_init_owned(
+    const GpioPin* gpio,
+    const GpioMode mode,
+    const GpioPull pull,
+    const GpioSpeed speed,
+    const char* owner);
+
+/** Release a reservation taken by the same owner with furi_hal_gpio_reserve(). */
+void furi_hal_gpio_unreserve(const GpioPin* gpio, const char* owner);
+
+/** @return owner name of a reserved pin, or NULL if the pin is free */
+const char* furi_hal_gpio_get_reservation(const GpioPin* gpio);
+
 #ifdef __cplusplus
 }
 #endif

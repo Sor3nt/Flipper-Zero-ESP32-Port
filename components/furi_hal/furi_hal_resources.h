@@ -36,6 +36,18 @@ typedef struct {
 extern const InputPin input_pins[];
 extern const size_t input_pins_count;
 
+#if defined(BOARD_PIN_EXT_GPIO_1)
+/* External header GPIOs (only on boards that define BOARD_PIN_EXT_GPIO_1..5). */
+typedef struct {
+    const GpioPin* pin;
+    const char* name;
+    bool debug;
+} GpioPinRecord;
+
+extern const GpioPinRecord gpio_pins[];
+extern const size_t gpio_pins_count;
+#endif
+
 /* Hardware Button Pins (Waveshare ESP32-C6-Touch-LCD-1.9) */
 extern const GpioPin gpio_button_boot; /* GPIO9 - BOOT button (active low) */
 extern const GpioPin gpio_battery_sense; /* GPIO0 - BAT_ADC (VCC / 3) */

@@ -1,6 +1,7 @@
 #include "furi_hal.h"
 #include "boards/board.h"
 #include <furi_hal_gpio.h>
+#include "furi_hal_uart_shared.h"
 #include <esp_log.h>
 #include "furi_hal_external_uart.h"
 #include <nvs_flash.h>
@@ -10,6 +11,43 @@ static const char* TAG = "FuriHal";
 
 bool furi_hal_external_uart_available(void) {
 #if CONFIG_T_EMBED_EXTERNAL_UART && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG && defined(BOARD_EXTERNAL_UART_TX)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool furi_hal_usb_uart_bridge_available(void) {
+#if !(CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_USB_UART_BRIDGE) && BOARD_HAS_USB_UART_BRIDGE && \
+      defined(BOARD_USB_UART_NUM) && defined(BOARD_USB_UART_TX) && defined(BOARD_USB_UART_RX) && \
+      BOARD_USB_UART_NUM >= 0 && BOARD_USB_UART_TX >= 0 && BOARD_USB_UART_RX >= 0)
+    /* Board has no USB-UART bridge mapping (or is not an ESP32-S3). */
+    return false;
+#elif defined(BOARD_PIN_NRF24_CE) && defined(BOARD_PIN_NRF24_CSN) &&                     \
+    (BOARD_PIN_NRF24_CE == BOARD_USB_UART_TX || BOARD_PIN_NRF24_CE == BOARD_USB_UART_RX || \
+     BOARD_PIN_NRF24_CSN == BOARD_USB_UART_TX || BOARD_PIN_NRF24_CSN == BOARD_USB_UART_RX)
+    /* The bridge pads overlap the NRF24 control pins (T-Embed CC1101 routes
+     * CE=GPIO43 / CSN=GPIO44 onto the UART1 pads). Driving them as a UART while
+     * the NRF24 is present corrupts the shared SPI select lines, so the bridge
+     * is only safe in the external-UART profile that declares the NRF absent. */
+    return furi_hal_external_uart_available();
+#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    /* Dedicated bridge pads with no NRF24 overlap (e.g. Paradoxt: NRF on
+     * GPIO13/14, UART1 on GPIO43/44). Available whenever the log console runs
+     * over USB Serial/JTAG, so UART0 is not driving GPIO43/44. */
+    return true;
+#else
+    /* UART0 console would fight the bridge for the pads. */
+    return false;
+#endif
+}
+
+bool furi_hal_usb_uart_bridge_get_pins(int* uart_num, int* tx, int* rx) {
+    if(!furi_hal_usb_uart_bridge_available()) return false;
+#if defined(BOARD_USB_UART_NUM) && defined(BOARD_USB_UART_TX) && defined(BOARD_USB_UART_RX)
+    if(uart_num) *uart_num = BOARD_USB_UART_NUM;
+    if(tx) *tx = BOARD_USB_UART_TX;
+    if(rx) *rx = BOARD_USB_UART_RX;
     return true;
 #else
     return false;
@@ -78,18 +116,30 @@ void furi_hal_deinit_early(void) {
 }
 
 void furi_hal_init(void) {
+    /* GPIO ISRs are allocated on the core that installs the service: do it
+     * here, on the boot core, rather than in whichever thread asks first. */
+    furi_hal_gpio_init_isr_service();
+    furi_hal_uart_shared_init();
+    furi_hal_crypto_init();
+
     /* NVS is required by WiFi and BLE — init once at boot */
     esp_err_t nvs_err = nvs_flash_init();
     if(nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        nvs_flash_erase();
-        nvs_flash_init();
+        esp_err_t erase_err = nvs_flash_erase();
+        nvs_err = erase_err == ESP_OK ? nvs_flash_init() : erase_err;
+    }
+    if(nvs_err == ESP_OK || nvs_err == ESP_ERR_INVALID_STATE) {
+        if(!furi_hal_crypto_u2f_storage_key_migrate()) {
+            ESP_LOGE(TAG, "Unable to migrate the U2F storage key");
+        }
+    } else {
+        ESP_LOGE(TAG, "NVS initialization failed: %s", esp_err_to_name(nvs_err));
     }
 
     furi_hal_rtc_init();
     furi_hal_version_init();
     furi_hal_info_init();
     furi_hal_power_init();
-    furi_hal_crypto_init();
 #if CONFIG_T_EMBED_PLUS_SD_RECOVERY
     /* Adding the radio handle initializes SPI2 but sends no radio commands.
      * The SD card must enter SPI mode before either radio or LCD traffic.
