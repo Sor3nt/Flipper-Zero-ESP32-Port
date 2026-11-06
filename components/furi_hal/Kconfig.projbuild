@@ -34,3 +34,17 @@ menu "T-Embed Plus SD recovery"
             retry failed SD initialization and recover failed startup mounts.
             Does not switch power rails or disable brownout protection.
 endmenu
+
+menu "Forced reboot combo"
+    config FURI_HAL_REBOOT_COMBO
+        bool "Forced reboot by holding two buttons (esp_timer ISR on CPU1)"
+        depends on IDF_TARGET_ESP32S3 && !FREERTOS_UNICORE && ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
+        default n
+        help
+            Holding the board's two reboot buttons for 5 s arms a reset that
+            fires once both are released (never while GPIO0/BOOT is held).
+            The check runs from an ISR-dispatched esp_timer on CPU1, so it
+            still works when CPU0 is stuck. The board header names the pins
+            (BOARD_REBOOT_COMBO_PIN_A/B). Enabled per board in
+            sdkconfig.defaults.<board>.
+endmenu

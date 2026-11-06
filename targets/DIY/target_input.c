@@ -8,6 +8,7 @@
 #include <stdbool.h>
 
 #include "target_input.h"
+#include "input_wake.h"
 
 #include <furi_hal_resources.h>
 #include <boards/board.h>
@@ -162,6 +163,11 @@ void target_input_init(void) {
         b->last_repeat_at    = 0;
     }
 
+    /* Auto Light Sleep wake sources: all six buttons. */
+    gpio_num_t wake_pins[NUM_BUTTONS];
+    for(int i = 0; i < NUM_BUTTONS; i++) wake_pins[i] = buttons[i].gpio;
+    input_wake_init(wake_pins, NUM_BUTTONS);
+
     FURI_LOG_I(TAG, "6-button input initialized");
 }
 
@@ -173,4 +179,21 @@ void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
     for(int i = 0; i < NUM_BUTTONS; i++) {
         button_poll(&buttons[i], pubsub, now, long_press_ticks, repeat_ticks, sequence_counter);
     }
+}
+
+bool target_input_idle_wait(uint32_t timeout_ms) {
+    /* A press, release, long press or debounce in progress needs polling. */
+    for(int i = 0; i < NUM_BUTTONS; i++) {
+        const ButtonState* b = &buttons[i];
+        if(b->raw_pressed || b->debounced_pressed || b->debounce_polls < INPUT_DEBOUNCE_POLLS) {
+            return false;
+        }
+    }
+    /* Auto Light Sleep: any button press (all active low) wakes the SoC. */
+    InputWakePin pins[NUM_BUTTONS];
+    for(int i = 0; i < NUM_BUTTONS; i++) {
+        pins[i].pin = buttons[i].gpio;
+        pins[i].level = GPIO_INTR_LOW_LEVEL;
+    }
+    return input_wake_wait(pins, NUM_BUTTONS, timeout_ms);
 }

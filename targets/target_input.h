@@ -30,6 +30,16 @@ void target_input_init(void);
  */
 void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter);
 
+/**
+ * Auto Light Sleep only: called instead of the poll delay while light sleep
+ * is allowed. Arm the board's buttons / encoder as GPIO wake sources and
+ * block until one changes or timeout_ms elapses (see input_wake.h).
+ * Return false, without waiting, while any input is still pressed, settling
+ * or mid-rotation: the service then keeps polling. Boards without an
+ * implementation use a weak default that returns false.
+ */
+bool target_input_idle_wait(uint32_t timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

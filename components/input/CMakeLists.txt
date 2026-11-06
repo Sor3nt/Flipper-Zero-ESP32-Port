@@ -12,6 +12,7 @@ endif()
 idf_component_register(
     SRCS
         "input.c"
+        "input_wake.c"
         "${TARGET_INPUT_DIR}/target_input.c"
     INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../targets"
     REQUIRES furi

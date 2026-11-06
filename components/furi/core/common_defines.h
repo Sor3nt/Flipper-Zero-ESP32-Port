@@ -15,6 +15,13 @@ extern "C" {
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+/* Core for background workers that should stay off the core running WiFi/BT
+ * and the UI: CPU1 on a dual-core build, CPU0 (the only one) on a single-core
+ * build, where pinning to core 1 would trip the FreeRTOS core-ID assert. */
+#ifndef FURI_CORE_ID_SECONDARY
+#define FURI_CORE_ID_SECONDARY ((BaseType_t)(portNUM_PROCESSORS - 1))
+#endif
+
 #ifndef FURI_WARN_UNUSED
 #define FURI_WARN_UNUSED __attribute__((warn_unused_result))
 #endif

@@ -12,8 +12,12 @@ __FuriCriticalInfo __furi_critical_enter(void) {
     info.from_isr = FURI_IS_ISR();
     info.kernel_running = (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING);
 
+    /* From an ISR (or with interrupts already masked) take the same spinlock
+     * as task context. Masking the local core alone would leave tasks on the
+     * other core free to enter the section on a dual-core build. On a
+     * single-core build the spinlock reduces to the same interrupt mask. */
     if(info.from_isr) {
-        info.isrm = taskENTER_CRITICAL_FROM_ISR();
+        portENTER_CRITICAL_ISR(&furi_critical_mutex);
     } else if(info.kernel_running) {
         taskENTER_CRITICAL(&furi_critical_mutex);
     } else {
@@ -25,7 +29,7 @@ __FuriCriticalInfo __furi_critical_enter(void) {
 
 void __furi_critical_exit(__FuriCriticalInfo info) {
     if(info.from_isr) {
-        taskEXIT_CRITICAL_FROM_ISR(info.isrm);
+        portEXIT_CRITICAL_ISR(&furi_critical_mutex);
     } else if(info.kernel_running) {
         taskEXIT_CRITICAL(&furi_critical_mutex);
     } else {

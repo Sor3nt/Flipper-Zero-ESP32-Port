@@ -197,6 +197,14 @@ void furi_thread_scrub(void) {
 
         TaskHandle_t task = (TaskHandle_t)thread_to_scrub;
 
+        /* The finishing thread posts itself here right before vTaskSuspend().
+         * On a dual-core build it may still be running on the other core, so
+         * wait until it has actually suspended before deleting it (and before
+         * its owner can free the stack). Single-core: usually already true. */
+        while(eTaskGetState(task) != eSuspended) {
+            vTaskDelay(1);
+        }
+
         vTaskDelete(task);
         furi_check(furi_thread_local_get(task) == thread_to_scrub);
         furi_thread_local_set(task, NULL);

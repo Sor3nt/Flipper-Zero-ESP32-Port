@@ -19,6 +19,7 @@
  */
 
 #include "target_input.h"
+#include "input_wake.h"
 
 #include <furi_hal_resources.h>
 #include <boards/board.h>
@@ -306,6 +307,15 @@ void target_input_init(void) {
     button_init_gpio((gpio_num_t)BOARD_PIN_BUTTON_KEY, true);
     button_init_state(&key_btn, (gpio_num_t)BOARD_PIN_BUTTON_KEY, true);
 
+    /* Auto Light Sleep wake sources: encoder A/B, encoder button, side key. */
+    const gpio_num_t wake_pins[] = {
+        (gpio_num_t)BOARD_PIN_ENCODER_A,
+        (gpio_num_t)BOARD_PIN_ENCODER_B,
+        (gpio_num_t)BOARD_PIN_ENCODER_BTN,
+        (gpio_num_t)BOARD_PIN_BUTTON_KEY,
+    };
+    input_wake_init(wake_pins, COUNT_OF(wake_pins));
+
     FURI_LOG_I(TAG, "Encoder + buttons input initialized");
 }
 
@@ -328,4 +338,28 @@ void target_input_poll(FuriPubSub* pubsub, uint32_t* sequence_counter) {
         InputKeyBack, InputKeyBack,
         now, long_press_ticks, repeat_ticks,
         sequence_counter);
+}
+
+static bool button_is_idle(const ButtonState* b) {
+    return !b->raw_pressed && !b->debounced_pressed && b->debounce_polls >= INPUT_DEBOUNCE_POLLS;
+}
+
+bool target_input_idle_wait(uint32_t timeout_ms) {
+    /* Buttons released and settled. */
+    if(!button_is_idle(&encoder_btn) || !button_is_idle(&key_btn)) return false;
+    /* Encoder resting where the decoder last saw it. */
+    const int a = gpio_get_level((gpio_num_t)BOARD_PIN_ENCODER_A);
+    const int b = gpio_get_level((gpio_num_t)BOARD_PIN_ENCODER_B);
+    if((uint8_t)((a << 1) | b) != encoder.ab_state) return false;
+
+    /* Auto Light Sleep wake: A/B on the opposite of their resting level, so
+     * any quarter-step of the knob wakes the SoC; the decoder state survives
+     * light sleep and carries on. Encoder button and side key active low. */
+    const InputWakePin pins[] = {
+        {(gpio_num_t)BOARD_PIN_ENCODER_A, a ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL},
+        {(gpio_num_t)BOARD_PIN_ENCODER_B, b ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL},
+        {(gpio_num_t)BOARD_PIN_ENCODER_BTN, GPIO_INTR_LOW_LEVEL},
+        {(gpio_num_t)BOARD_PIN_BUTTON_KEY, GPIO_INTR_LOW_LEVEL},
+    };
+    return input_wake_wait(pins, COUNT_OF(pins), timeout_ms);
 }

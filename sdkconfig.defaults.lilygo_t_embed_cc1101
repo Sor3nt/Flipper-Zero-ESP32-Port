@@ -2,3 +2,13 @@
 # Applied only to this board; other S3 board console choices remain unchanged.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Dual-core: the forced-reboot combo (BOOT + KEY, 5 s, fires after release)
+# runs from an esp_timer ISR on CPU1, so it still works when CPU0 is stuck.
+# esp32s3_generic shares the board header but not this file: it stays
+# single-core.
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_ESP_TIMER_SHOW_EXPERIMENTAL=y
+CONFIG_ESP_TIMER_ISR_AFFINITY_CPU1=y
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
+CONFIG_FURI_HAL_REBOOT_COMBO=y
