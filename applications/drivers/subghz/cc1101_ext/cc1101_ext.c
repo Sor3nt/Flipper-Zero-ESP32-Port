@@ -128,10 +128,10 @@ uint32_t subghz_device_cc1101_ext_set_frequency(uint32_t value) {
     return furi_hal_subghz_set_frequency(value);
 }
 
-void subghz_device_cc1101_ext_start_async_rx(
+bool subghz_device_cc1101_ext_start_async_rx(
     SubGhzDeviceCC1101ExtCaptureCallback callback,
     void* context) {
-    furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
+    return furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
 }
 
 void subghz_device_cc1101_ext_stop_async_rx(void) {

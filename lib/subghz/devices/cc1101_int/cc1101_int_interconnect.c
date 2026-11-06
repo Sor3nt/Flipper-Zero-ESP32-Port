@@ -21,8 +21,8 @@ static bool subghz_device_cc1101_int_interconnect_start_async_tx(void* callback,
     return furi_hal_subghz_start_async_tx((FuriHalSubGhzAsyncTxCallback)callback, context);
 }
 
-static void subghz_device_cc1101_int_interconnect_start_async_rx(void* callback, void* context) {
-    furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
+static bool subghz_device_cc1101_int_interconnect_start_async_rx(void* callback, void* context) {
+    return furi_hal_subghz_start_async_rx((FuriHalSubGhzCaptureCallback)callback, context);
 }
 
 static void subghz_device_cc1101_int_interconnect_load_preset(

@@ -39,7 +39,7 @@ typedef void (*SubGhzStopAsyncTx)(void);
 
 typedef void (*SubGhzSetRx)(void);
 typedef void (*SubGhzFlushRx)(void);
-typedef void (*SubGhzStartAsyncRx)(void* callback, void* context);
+typedef bool (*SubGhzStartAsyncRx)(void* callback, void* context);
 typedef void (*SubGhzStopAsyncRx)(void);
 
 typedef float (*SubGhzGetRSSI)(void);

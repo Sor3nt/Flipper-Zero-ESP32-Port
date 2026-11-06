@@ -58,7 +58,10 @@ uint32_t furi_hal_subghz_set_frequency(uint32_t value);
 void furi_hal_subghz_set_path(FuriHalSubGhzPath path);
 
 typedef void (*FuriHalSubGhzCaptureCallback)(bool level, uint32_t duration, void* context);
-void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context);
+/** Start capturing signal timings on GDO0. Always true: the return value exists so that the
+ *  device API above it can return bool like the stock API (prebuilt FAPs read it). One capture
+ *  at a time: stop it before starting another. */
+bool furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context);
 void furi_hal_subghz_stop_async_rx(void);
 
 typedef LevelDuration (*FuriHalSubGhzAsyncTxCallback)(void* context);

@@ -750,7 +750,7 @@ void furi_hal_subghz_set_path(FuriHalSubGhzPath path) {
 #endif
 }
 
-void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context) {
+bool furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void* context) {
     furi_check(callback);
 
     /* Hold insomnia for the whole RX session. The CC1101 GDO0 capture is a plain
@@ -781,6 +781,7 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
         status.raw, cc1101_status_state(status),
         furi_hal_gpio_read(&gpio_cc1101_g0),
         (unsigned long)furi_hal_subghz_rx_irq_count);
+    return true;
 }
 
 void furi_hal_subghz_stop_async_rx(void) {
