@@ -55,7 +55,7 @@ static void protopirate_view_receiver_update_offset(ProtoPirateReceiver* r){}
 #include "receiver.inc"
 typedef const char FuriString;
 typedef struct {bool replay_only,is_transmitting;unsigned rotary_button,original_button,current_counter;FuriString* protocol_name;void* flipper_format;} EmulateContext;
-static EmulateContext* emulate_context;static InputKey mapped_key;
+static EmulateContext* emulate_context;static InputKey mapped_key;static bool emulate_dpad;
 static const char* furi_string_get_cstr(FuriString* s){return s;}
 static bool furi_string_equal(FuriString* s,const char* t){return !strcmp(s,t);}
 #define RENAULT_PROTOCOL_V0_NAME "Renault V0"
@@ -77,6 +77,7 @@ static void variable_item_list_process_down(VariableItemList* v){down_calls++;}
 static void variable_item_list_process_left(VariableItemList* v){left_calls++;}
 static void variable_item_list_process_right(VariableItemList* v){right_calls++;}
 static void variable_item_list_process_ok(VariableItemList* v){ok_calls++;}
+static bool vil_dpad;static bool protopirate_vil_dpad(void){return vil_dpad;}
 #include "variable_input.inc"
 static void enter(void* c){}
 static void leave(void* c){}
@@ -122,12 +123,25 @@ int main(void){
  event.key=InputKeyOk;event.type=InputTypePress;emulate_input_callback(&event,&app);
  assert(ctx.is_transmitting && mapped_key==InputKeyDown && last_event==ProtoPirateCustomEventEmulateTransmit);
  event.type=InputTypeRelease;emulate_input_callback(&event,&app);assert(last_event==ProtoPirateCustomEventEmulateStop);
+ /* Paradoxt D-pad: each key transmits its own button while held, one Press = one TX. */
+ EmulateContext dctx={.rotary_button=1,.protocol_name="Chrysler V0"};emulate_context=&dctx;emulate_dpad=true;events=0;
+ event.key=InputKeyLeft;event.type=InputTypePress;emulate_input_callback(&event,&app);
+ assert(dctx.rotary_button==3 && dctx.is_transmitting && mapped_key==InputKeyLeft && events==1);
+ event.key=InputKeyUp;event.type=InputTypePress;emulate_input_callback(&event,&app);assert(dctx.rotary_button==3 && events==1);
+ event.key=InputKeyLeft;event.type=InputTypeShort;emulate_input_callback(&event,&app);assert(events==1);
+ event.type=InputTypeRelease;emulate_input_callback(&event,&app);assert(last_event==ProtoPirateCustomEventEmulateStop && events==2);
+ emulate_dpad=false;emulate_context=&ctx;
  protopirate_scene_start_on_event(&app,(SceneManagerEvent){SceneManagerEventTypeCustom,SubmenuIndexProtoPirateExit});assert(stopped==1);
  VariableItemListModel vm={.items={{false,(void*)1}}};VariableItemList list={&vm};
  event=(InputEvent){InputKeyDown,InputTypeShort};variable_item_list_input_callback(&event,&list);assert(down_calls==1 && !right_calls);
  event.key=InputKeyOk;assert(variable_item_list_input_callback(&event,&list));assert(vm.editing && !ok_calls);
  event.key=InputKeyDown;variable_item_list_input_callback(&event,&list);assert(right_calls==1 && down_calls==1);
  event.key=InputKeyUp;event.type=InputTypeRepeat;variable_item_list_input_callback(&event,&list);assert(left_calls==1 && !up_calls);
+ /* Paradoxt D-pad: OK opens the item (no edit mode), arrows keep their stock meaning. */
+ VariableItemListModel dvm={.items={{false,(void*)1}}};VariableItemList dlist={&dvm};vil_dpad=true;ok_calls=0;up_calls=0;
+ event=(InputEvent){InputKeyOk,InputTypeShort};variable_item_list_input_callback(&event,&dlist);assert(!dvm.editing && ok_calls==1);
+ event.key=InputKeyUp;variable_item_list_input_callback(&event,&dlist);assert(up_calls==1);
+ vil_dpad=false;ok_calls=0;up_calls=0;
  event.key=InputKeyBack;event.type=InputTypeShort;assert(variable_item_list_input_callback(&event,&list));assert(!vm.editing);
  assert(!variable_item_list_input_callback(&event,&list));
  event.key=InputKeyOk;event.type=InputTypeLong;assert(variable_item_list_input_callback(&event,&list));assert(ok_calls==1 && !vm.editing);

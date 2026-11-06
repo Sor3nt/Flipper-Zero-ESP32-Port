@@ -37,6 +37,9 @@ static bool load(WardriverConfig* c) {
 }
 
 #include "wardriver_gps.h"
+#include <furi_hal_uart_shared.h>
+#include <furi_hal_shared_pins.h>
+#include <furi_hal_power.h>
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <assert.h>
@@ -62,6 +65,27 @@ int uart_read_bytes(int uart,void* data,size_t length,unsigned timeout) {
 esp_err_t gpio_reset_pin(int pin) {
     assert(pin==wanted_rx || pin==wanted_tx);++gps_calls;++gps_resets;return ESP_OK;
 }
+/* Firmware arbiters. GPS must hold the UART lease for the whole session, the GPIO43/44
+ * lease and snapshot only for those pins, and give everything back in reverse order. */
+static unsigned uart_leases,pin_leases,pin_saves,pin_restores;
+static bool uart_held,pins_held,pins_saved,uart_lease_busy;
+void furi_delay_ms(uint32_t ms) { (void)ms; }
+FuriHalUartSharedAcquireResult furi_hal_uart_shared_acquire(uint32_t timeout_ms) {
+    assert(timeout_ms==1000);
+    if(uart_lease_busy) return FuriHalUartSharedAcquireBusy;
+    assert(!uart_held);++uart_leases;uart_held=true;return FuriHalUartSharedAcquireAcquired;
+}
+bool furi_hal_uart_shared_release(void) { assert(uart_held && !pins_saved);uart_held=false;return true; }
+bool furi_hal_shared_pins_acquire(const void* owner) { assert(owner && uart_held && !pins_held);++pin_leases;pins_held=true;return true; }
+void furi_hal_shared_pins_release(const void* owner) { assert(owner && pins_held && !pins_saved);pins_held=false; }
+bool furi_hal_shared_pins_save(const void* owner) { assert(owner && pins_held && !pins_saved);++pin_saves;pins_saved=true;return true; }
+void furi_hal_shared_pins_restore(const void* owner) { assert(owner && pins_held && pins_saved);++pin_restores;pins_saved=false; }
+bool furi_hal_shared_pins_is_saved(const void* owner) { (void)owner;return pins_saved; }
+/* Light sleep gates the UART clock: GPS vetoes it for the whole session. */
+static int sleep_depth,sleep_enters;
+void furi_hal_power_light_sleep_inhibit_enter(void) { ++sleep_depth;++sleep_enters; }
+void furi_hal_power_light_sleep_inhibit_exit(void) { assert(sleep_depth>0);--sleep_depth; }
+#define NO_LEASES() assert(!uart_held && !pins_held && !pins_saved && !sleep_depth)
 static void saved(WardriverConfig* c,unsigned mode,unsigned uart,int rx,int tx) {
     static char settings[300];
     snprintf(settings,sizeof(settings),"Filetype: Wardriver settings\nVersion: 1\nGPS Mode: %u\nGPS UART: %u\n"
@@ -94,21 +118,37 @@ int main(void) {
         assert(!gps.installed && !strcmp(gps.status,"PIN IN USE") && gps_calls==before);
     }
     assert(!gps_installs && !gps_deletes && !gps_resets && !gps_reads);
-    puts("PASS: saved AUTO/ON GPS settings, both UARTs, all profile-reserved RX/TX pins blocked before every UART/GPIO call; settings unchanged");
+    assert(!uart_leases && !pin_leases && !pin_saves && !pin_restores && !sleep_enters);NO_LEASES();
+    puts("PASS: saved AUTO/ON GPS settings, both UARTs, all profile-reserved RX/TX pins blocked before every UART/GPIO/lease call; settings unchanged");
 #endif
 #if !CONFIG_T_EMBED_BW16_I2C || CONFIG_T_EMBED_EXTERNAL_UART
     saved(&config,2,2,44,43);wanted_rx=44;wanted_tx=43;
     wardriver_gps_start(&gps,&config);assert(gps.installed && gps.parser.data.enabled);
+    /* The shared header: UART lease + GPIO43/44 lease + snapshot, all held while listening. */
+    assert(uart_held && pins_held && pins_saved && uart_leases==1 && pin_leases==1 && pin_saves==1);
+    assert(sleep_depth==1 && sleep_enters==1);
     wardriver_gps_stop(&gps);assert(gps_resets==2);
-    puts("PASS: non-Plus profile retains prior GPS 44/43 behavior, including UART+I2C");
+    assert(pin_restores==1);NO_LEASES();
+    /* A refused UART lease leaves the driver and GPIO43/44 untouched. */
+    uart_lease_busy=true;unsigned refused=gps_calls;
+    wardriver_gps_start(&gps,&config);wardriver_gps_stop(&gps);
+    assert(!gps.installed && !strcmp(gps.status,"UART BUSY") && gps_calls==refused && pin_leases==1);
+    assert(sleep_enters==1);
+    uart_lease_busy=false;NO_LEASES();
+    puts("PASS: non-Plus profile retains prior GPS 44/43 behavior, including UART+I2C; leases held and returned in order");
 #endif
     saved(&config,0,2,44,43);unsigned before=gps_calls;
     wardriver_gps_start(&gps,&config);wardriver_gps_stop(&gps);
     assert(!gps.installed && !gps.parser.data.enabled && !strcmp(gps.status,"OFF") && gps_calls==before);
     saved(&config,1,1,16,17);wanted_rx=16;wanted_tx=17;
+    unsigned leases_before=uart_leases,pins_before=pin_leases,saves_before=pin_saves;
     wardriver_gps_start(&gps,&config);assert(gps.installed && gps.parser.data.enabled);
+    /* Other pins still take the UART lease (so the RFID reader yields UART1) but
+     * not the GPIO43/44 lease or snapshot. */
+    assert(uart_held && !pins_held && uart_leases==leases_before+1 && pin_leases==pins_before);
+    assert(sleep_depth==1);
     wardriver_gps_poll(&gps,100);wardriver_gps_stop(&gps);
-    assert(!gps.installed && gps_reads==1);
+    assert(!gps.installed && gps_reads==1 && pin_saves==saves_before);NO_LEASES();
     saved(&config,2,2,16,-1);wanted_rx=16;wanted_tx=-1;
     wardriver_gps_start(&gps,&config);assert(gps.installed);
     wardriver_gps_stop(&gps);
@@ -117,6 +157,7 @@ int main(void) {
     config.isolated_uart_pins=true;gps_busy=true;before=gps_installs;
     wardriver_gps_start(&gps,&config);wardriver_gps_stop(&gps);
     assert(!gps.installed && !strcmp(gps.status,"UART BUSY") && gps_installs==before);
+    NO_LEASES();
     puts("PASS: GPS OFF and other explicitly isolated pins retain validation, listen-only mode and cleanup");
     return 0;
 }

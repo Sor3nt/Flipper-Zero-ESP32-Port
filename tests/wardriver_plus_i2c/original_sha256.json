@@ -11,7 +11,7 @@
   "applications_user/wardriver/wardriver_csv.h": "ef0df491e70737ec7952fb28e806c816322d265265c3a7e52955ae984d0754c5",
   "applications_user/wardriver/wardriver_detect.c": "56540a7a774e6879f972f3e526afdccf4fee7e72abf4ca5055b4246239b16b93",
   "applications_user/wardriver/wardriver_detect.h": "fe7760cbd0fafe7d71c54519a43393b4b052e514c4e350d4f3a064295d58bf47",
-  "applications_user/wardriver/wardriver_gps.c": "e5517e418470c85fdb2c6627562985cc12e26c56c2b6dd3cb96eb17813413931",
+  "applications_user/wardriver/wardriver_gps.c": "fa96fcaee1ab0621d63f2ad24dc6d7efa360cb0a95c72323f83afb76477ee8b7",
   "applications_user/wardriver/wardriver_gps.h": "4c0c2aac968b1d120ce91cfc3d742faffe4ecc531dfb66ae8eedffbd487b7255",
   "applications_user/wardriver/wardriver_icon.pbm": "23176fbc9e386b04ef0605b957fc2e41e7ca0fab37380cf94c0032deb09339f8",
   "applications_user/wardriver/wardriver_monitor.c": "1137b116cf3af83deafe0353d10efbff434c376a67fad94c0a67ee08f7c36a4c",

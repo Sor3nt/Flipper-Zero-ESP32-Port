@@ -17,7 +17,7 @@ for profile in (0,1):
     binary=out/f'gps_profile_{profile}'
     run(['gcc','-std=c17','-Wall','-Wextra','-Werror','-O1','-g','-fsanitize=address,undefined',
          f'-DCONFIG_T_EMBED_BW16_I2C={profile}','-I'+str(root/'tests/wardriver_plus_i2c/stubs'),
-         '-I'+str(root/'tests/host/wardriver_host'),'-I'+str(root/'tests/bw16/stubs'),'-I'+str(app),
+         '-I'+str(root/'tests/host/wardriver_host'),'-I'+str(root/'tests/bw16/stubs'),'-I'+str(app),'-I'+str(root/'components/furi_hal'),
          str(root/'tests/wardriver_plus_i2c/test_reserved_gps.c'),str(app/'wardriver_gps.c'),
          str(app/'wardriver_config.c'),str(app/'wardriver_nmea.c'),'-lm','-o',str(binary)],check=True)
     run([str(binary)],check=True)

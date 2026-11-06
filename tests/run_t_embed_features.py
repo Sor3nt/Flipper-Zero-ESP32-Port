@@ -24,6 +24,7 @@ CHECKS = [
     'protopirate_rx/run.py',
     'plus_sd_recovery/hal_run.py', 'plus_sd_recovery/service_run.py',
     'plus_sd_recovery/startup_run.py', 'plus_sd_recovery/usb_handoff_run.py',
+    'plus_sd_recovery/usb_exit_run.py',
 ]
 
 

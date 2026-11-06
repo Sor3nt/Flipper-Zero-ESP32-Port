@@ -32,6 +32,8 @@ static bool furi_hal_usb_msc_start(void) {
 #endif
  ++start_calls;raw=true;return true;
 }
+/* Re-enumerate only after MSC answers with a medium. */
+static void furi_hal_usb_reinit(void) {assert(start_calls==1&&raw);}
 /* PRODUCTION */
 static void reset(FS_Error initial,FS_Error detach) {
  status=initial;unmount_result=detach;pending=initial==FSE_INTERNAL;raw=false;

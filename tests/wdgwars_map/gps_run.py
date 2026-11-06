@@ -30,7 +30,7 @@ d=Path(tempfile.mkdtemp(prefix='wdg_gps_',dir=temporary_root)).resolve()
 try:
     for profile,i2c,uart in (("uart",0,1),("plus",1,0),("uart_i2c",1,1)):
         exe=Path(d)/(f'gps_{profile}.exe' if os.name=='nt' else f'gps_{profile}')
-        includes=['tests/wardriver_plus_i2c/stubs','tests/host/wardriver_host','tests/bw16/stubs','applications_user/wardriver_plus_i2c']
+        includes=['tests/wardriver_plus_i2c/stubs','tests/host/wardriver_host','tests/bw16/stubs','applications_user/wardriver_plus_i2c','components/furi_hal']
         sources=['tests/wardriver_plus_i2c/test_reserved_gps.c','applications_user/wdgwars_map/reuse_wardriver_gps.c','applications_user/wdgwars_map/reuse_wardriver_config.c','applications_user/wdgwars_map/reuse_wardriver_nmea.c']
         host.run(['gcc','-std=c17','-Wall','-Wextra','-Werror','-O1','-g','-fsanitize=address,undefined',f'-DCONFIG_T_EMBED_BW16_I2C={i2c}',f'-DCONFIG_T_EMBED_EXTERNAL_UART={uart}',*['-I'+str(ROOT/p) for p in includes],*[ROOT/p for p in sources],'-lm','-o',exe],check=True,cwd=ROOT)
         host.run([exe],check=True,cwd=ROOT)
