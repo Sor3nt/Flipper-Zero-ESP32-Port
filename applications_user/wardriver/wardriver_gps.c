@@ -1,4 +1,5 @@
 #include "wardriver_gps.h"
+#include "wardriver_gps_uart.h"
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <string.h>
@@ -22,14 +23,17 @@ void wardriver_gps_start(WardriverGps* g,const WardriverConfig* c) {
     if(!c->isolated_uart_pins || !rx_ok || !tx_ok || c->gps_tx==c->gps_rx ||
        c->gps_uart<1 || c->gps_uart>2) { strcpy(g->status,"CHECK PINS"); return; }
     g->uart=(int)c->gps_uart; g->rx=c->gps_rx; g->tx=c->gps_tx;
-    if(uart_is_driver_installed(g->uart)) { strcpy(g->status,"UART BUSY"); return; }
     uart_config_t cfg={.baud_rate=(int)c->gps_baud,.data_bits=UART_DATA_8_BITS,
         .parity=UART_PARITY_DISABLE,.stop_bits=UART_STOP_BITS_1,
         .flow_ctrl=UART_HW_FLOWCTRL_DISABLE,.source_clk=UART_SCLK_DEFAULT};
-    if(uart_driver_install(g->uart,2048,0,0,NULL,0)!=ESP_OK) { strcpy(g->status,"UART ERROR"); return; }
-    g->installed=true;
-    if(uart_param_config(g->uart,&cfg)!=ESP_OK || uart_set_pin(g->uart,g->tx,g->rx,-1,-1)!=ESP_OK) {
-        wardriver_gps_stop(g); strcpy(g->status,"UART ERROR");
+    /* Takes the shared UART/pin leases (making a background RFID reader yield)
+     * before any driver check or install, and rolls everything back on failure. */
+    switch(wardriver_gps_uart_open(g->uart,g->rx,g->tx,&cfg)) {
+    case WardriverGpsUartOk: g->installed=true; break;
+    case WardriverGpsUartBusy: strcpy(g->status,"UART BUSY"); break;
+    case WardriverGpsUartPinsBusy: strcpy(g->status,"PIN IN USE"); break;
+    case WardriverGpsUartCleanup: strcpy(g->status,"UART CLEANUP"); break;
+    default: strcpy(g->status,"UART ERROR"); break;
     }
 }
 void wardriver_gps_poll(WardriverGps* g,uint32_t now) {
@@ -45,8 +49,8 @@ void wardriver_gps_poll(WardriverGps* g,uint32_t now) {
     strcpy(g->status,!d.connected?"WAITING":d.has_fix?"FIX":"NO FIX");
 }
 void wardriver_gps_stop(WardriverGps* g) {
-    if(!g->installed) return;
-    uart_driver_delete(g->uart); g->installed=false;
-    gpio_reset_pin(g->rx);
-    if(g->tx>=0) gpio_reset_pin(g->tx);
+    /* Polling stops now. Not gated on g->installed: a start or an earlier stop
+     * that could not finish may still own leases, and this retries the release. */
+    g->installed=false;
+    wardriver_gps_uart_close();
 }

@@ -5,9 +5,14 @@
 #define BW16_UART UART_NUM_2
 #define BW16_TX 43
 #define BW16_RX 44
+/* Same order of magnitude as USB-UART; lets the background RFID
+ * reader yield its shared-UART lease. */
+#define BW16_UART_LEASE_MS 1000
 
 typedef struct {
     bool installed, awake, tx_failed;
+    /* Firmware arbiters held while the app owns GPIO43/44 (see bw16_uart.c). */
+    bool uart_leased, pins_leased, pins_saved;
     QueueHandle_t events;
     esp_err_t error;
     const char* stage;
