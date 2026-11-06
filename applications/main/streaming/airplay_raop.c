@@ -30,7 +30,7 @@
  * Placed in the FAP's BSS (PSRAM) — lwIP copies into its own pbufs, so a PSRAM
  * source is fine, and it keeps the RAOP task stack small. */
 static EXT_RAM_BSS_ATTR char s_rtsp_req[RTSP_BUF];
-static int16_t s_pcmbuf[RAOP_FRAMES_PER_PKT * 2];
+static EXT_RAM_BSS_ATTR int16_t s_pcmbuf[RAOP_FRAMES_PER_PKT * 2];
 /* RTP header (12) + uncompressed-ALAC frame (23-bit hdr + 352*32 + 3 END, byte
  * aligned ≈ 1412) with headroom. */
 static EXT_RAM_BSS_ATTR uint8_t s_pktbuf[12 + RAOP_FRAMES_PER_PKT * 4 + 32];
@@ -761,7 +761,7 @@ static void raop_send_volume(void) {
     }
     char body[40];
     snprintf(body, sizeof(body), "volume: %.6f\r\n", (double)db);
-    char uri[64], resp[RTSP_BUF], hdr[96], local_str[16];
+    char uri[64], resp[RTSP_BUF], hdr[128], local_str[16];
     ip_to_str(s_local_ip, local_str, sizeof(local_str));
     snprintf(uri, sizeof(uri), "rtsp://%s/%lu", local_str, (unsigned long)s_session_id);
     snprintf(hdr, sizeof(hdr), "Session: %s\r\nContent-Type: text/parameters\r\n", s_session);
@@ -850,7 +850,7 @@ static void raop_send_progress(void) {
     snprintf(
         body, sizeof(body), "progress: %lu/%lu/%lu\r\n", (unsigned long)start, (unsigned long)cur,
         (unsigned long)end);
-    char uri[64], local_str[16], hdr[96], resp[RTSP_BUF];
+    char uri[64], local_str[16], hdr[128], resp[RTSP_BUF];
     ip_to_str(s_local_ip, local_str, sizeof(local_str));
     snprintf(uri, sizeof(uri), "rtsp://%s/%lu", local_str, (unsigned long)s_session_id);
     snprintf(hdr, sizeof(hdr), "Session: %s\r\nContent-Type: text/parameters\r\n", s_session);

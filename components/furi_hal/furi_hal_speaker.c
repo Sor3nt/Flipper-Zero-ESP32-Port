@@ -1,7 +1,7 @@
 /**
  * @file furi_hal_speaker.c
- * Speaker HAL — I2S tone generation for boards with speaker hardware,
- * no-op stubs for boards without.
+ * Speaker HAL — I2S tone generation on T-Embed, LEDC buzzer on Paradoxt,
+ * no-op stubs on boards without speaker hardware.
  *
  * Stays close to the STM32 Flipper Zero firmware API:
  *   - Mutex-based exclusive ownership (acquire/release/is_mine)
@@ -343,7 +343,212 @@ bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count) {
     return true;
 }
 
-#else /* !BOARD_HAS_SPEAKER */
+#elif defined(BOARD_HAS_PARADOXT_POWER_SEQUENCE) && defined(BOARD_HAS_BUZZER) && BOARD_HAS_BUZZER
+
+/* Paradoxt has a passive buzzer on GPIO10. Keep this implementation isolated
+ * from the T-Embed I2S speaker and from boards without the Paradoxt power path. */
+#include "furi_hal_power.h"
+#include <driver/gpio.h>
+#include <driver/ledc.h>
+#include <esp_err.h>
+#include <math.h>
+#include <soc/soc.h>
+
+#ifndef APB_CLK_FREQ
+#define APB_CLK_FREQ (80 * 1000 * 1000)
+#endif
+
+#define BUZZER_LEDC_TIMER    LEDC_TIMER_1
+#define BUZZER_LEDC_CHANNEL  LEDC_CHANNEL_1
+#define BUZZER_LEDC_MODE     LEDC_LOW_SPEED_MODE
+#define BUZZER_DUTY_RES      LEDC_TIMER_14_BIT
+
+static FuriMutex* speaker_mutex = NULL;
+static bool buzzer_ledc_ready = false;
+static uint32_t buzzer_duty_res = BUZZER_DUTY_RES;
+static bool buzzer_is_playing = false;
+static bool buzzer_light_sleep_inhibited = false;
+
+static float buzzer_volume_curve(float volume) {
+    if(volume < 0.0f) volume = 0.0f;
+    if(volume > 1.0f) volume = 1.0f;
+    return volume * volume * volume;
+}
+
+static void buzzer_set_light_sleep_inhibited(bool inhibited) {
+    if(buzzer_light_sleep_inhibited == inhibited) return;
+    buzzer_light_sleep_inhibited = inhibited;
+    if(inhibited) {
+        furi_hal_power_light_sleep_inhibit_enter();
+    } else {
+        furi_hal_power_light_sleep_inhibit_exit();
+    }
+}
+
+static uint32_t buzzer_duty_for_volume(float volume) {
+    const uint32_t max_duty = (1u << buzzer_duty_res) - 1u;
+    return (uint32_t)(max_duty * 0.5f * buzzer_volume_curve(volume));
+}
+
+/* Select the highest duty resolution that still reaches the requested tone. */
+static esp_err_t buzzer_set_frequency(uint32_t frequency) {
+    const uint32_t duty_res = ledc_find_suitable_duty_resolution(APB_CLK_FREQ, frequency);
+    if(duty_res == 0) return ESP_ERR_INVALID_ARG;
+    if(duty_res == buzzer_duty_res) {
+        return ledc_set_freq(BUZZER_LEDC_MODE, BUZZER_LEDC_TIMER, frequency);
+    }
+
+    const ledc_timer_config_t timer_cfg = {
+        .speed_mode = BUZZER_LEDC_MODE,
+        .timer_num = BUZZER_LEDC_TIMER,
+        .duty_resolution = duty_res,
+        .freq_hz = frequency,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    const esp_err_t err = ledc_timer_config(&timer_cfg);
+    if(err == ESP_OK) buzzer_duty_res = duty_res;
+    return err;
+}
+
+static bool buzzer_apply_duty(uint32_t duty) {
+    esp_err_t err = ledc_set_duty(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL, duty);
+    if(err == ESP_OK) err = ledc_update_duty(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL);
+    if(err != ESP_OK) {
+        FURI_LOG_W(TAG, "Could not update buzzer duty: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+void furi_hal_speaker_init(void) {
+    furi_assert(speaker_mutex == NULL);
+    speaker_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    if(!speaker_mutex) {
+        FURI_LOG_E(TAG, "Could not allocate buzzer mutex");
+        return;
+    }
+
+    const ledc_timer_config_t timer_cfg = {
+        .speed_mode = BUZZER_LEDC_MODE,
+        .timer_num = BUZZER_LEDC_TIMER,
+        .duty_resolution = BUZZER_DUTY_RES,
+        .freq_hz = 1000,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    esp_err_t err = ledc_timer_config(&timer_cfg);
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "Buzzer timer setup failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    const ledc_channel_config_t channel_cfg = {
+        .gpio_num = BOARD_PIN_BUZZER,
+        .speed_mode = BUZZER_LEDC_MODE,
+        .channel = BUZZER_LEDC_CHANNEL,
+        .timer_sel = BUZZER_LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    err = ledc_channel_config(&channel_cfg);
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "Buzzer channel setup failed: %s", esp_err_to_name(err));
+        gpio_reset_pin((gpio_num_t)BOARD_PIN_BUZZER);
+        return;
+    }
+
+    buzzer_ledc_ready = true;
+    FURI_LOG_I(TAG, "Buzzer initialized on GPIO%d", BOARD_PIN_BUZZER);
+}
+
+void furi_hal_speaker_deinit(void) {
+    furi_check(speaker_mutex != NULL);
+    if(buzzer_ledc_ready) ledc_stop(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL, 0);
+    buzzer_is_playing = false;
+    buzzer_set_light_sleep_inhibited(false);
+    FuriMutex* mutex = speaker_mutex;
+    speaker_mutex = NULL;
+    furi_mutex_free(mutex);
+    buzzer_ledc_ready = false;
+}
+
+bool furi_hal_speaker_acquire(uint32_t timeout) {
+    furi_check(!FURI_IS_IRQ_MODE());
+    FuriMutex* mutex = speaker_mutex;
+    return mutex && furi_mutex_acquire(mutex, timeout) == FuriStatusOk;
+}
+
+void furi_hal_speaker_release(void) {
+    furi_check(!FURI_IS_IRQ_MODE());
+    furi_check(furi_hal_speaker_is_mine());
+    furi_hal_speaker_stop();
+    furi_check(furi_mutex_release(speaker_mutex) == FuriStatusOk);
+}
+
+bool furi_hal_speaker_is_mine(void) {
+    if(FURI_IS_IRQ_MODE()) return true;
+    FuriMutex* mutex = speaker_mutex;
+    return mutex && furi_mutex_get_owner(mutex) == furi_thread_get_current_id();
+}
+
+void furi_hal_speaker_start(float frequency, float volume) {
+    furi_check(furi_hal_speaker_is_mine());
+    if(!buzzer_ledc_ready || !isfinite(frequency) || !isfinite(volume) ||
+       frequency <= 0.0f || volume <= 0.0f || frequency >= (float)UINT32_MAX) {
+        furi_hal_speaker_stop();
+        return;
+    }
+
+    const uint32_t tone_hz = (uint32_t)(frequency + 0.5f);
+    const esp_err_t err = tone_hz ? buzzer_set_frequency(tone_hz) : ESP_ERR_INVALID_ARG;
+    if(err != ESP_OK) {
+        FURI_LOG_W(TAG, "Buzzer cannot play %lu Hz: %s", (unsigned long)tone_hz, esp_err_to_name(err));
+        furi_hal_speaker_stop();
+        return;
+    }
+
+    const uint32_t duty = buzzer_duty_for_volume(volume);
+    buzzer_is_playing = duty > 0 && buzzer_apply_duty(duty);
+    buzzer_set_light_sleep_inhibited(buzzer_is_playing);
+}
+
+void furi_hal_speaker_start_gdo_mirror(const GpioPin* gdo_pin, float volume) {
+    furi_check(furi_hal_speaker_is_mine());
+    UNUSED(gdo_pin);
+    UNUSED(volume);
+}
+
+void furi_hal_speaker_set_volume(float volume) {
+    furi_check(furi_hal_speaker_is_mine());
+    if(!buzzer_ledc_ready || !buzzer_is_playing) return;
+    if(!isfinite(volume) || volume <= 0.0f) {
+        furi_hal_speaker_stop();
+        return;
+    }
+    const uint32_t duty = buzzer_duty_for_volume(volume);
+    if(duty == 0) {
+        furi_hal_speaker_stop();
+        return;
+    }
+    buzzer_is_playing = buzzer_apply_duty(duty);
+    buzzer_set_light_sleep_inhibited(buzzer_is_playing);
+}
+
+void furi_hal_speaker_stop(void) {
+    furi_check(furi_hal_speaker_is_mine());
+    if(!buzzer_ledc_ready) return;
+    if(!buzzer_apply_duty(0)) ledc_stop(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL, 0);
+    buzzer_is_playing = false;
+    buzzer_set_light_sleep_inhibited(false);
+}
+
+bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count) {
+    furi_check(furi_hal_speaker_is_mine());
+    furi_check(samples || !count);
+    return false;
+}
+
+#else /* !BOARD_HAS_SPEAKER && !Paradoxt buzzer */
 
 /* ---- No-op stubs for boards without speaker hardware ---- */
 
@@ -388,4 +593,4 @@ bool furi_hal_speaker_write_pcm(const int16_t* samples, size_t count) {
     return false;
 }
 
-#endif /* BOARD_HAS_SPEAKER */
+#endif /* I2S speaker, Paradoxt buzzer, or no-op stubs */
