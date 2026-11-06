@@ -230,7 +230,7 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/lfrfid/assets/iso3166.lfrfid` | LF-RFID country code lookup |
 | `/ext/nfc/assets/` | MIFARE & EMV dictionaries |
 | `/ext/subghz/assets/` | SubGHz keystores + `dangerous_settings` |
-| `/ext/u2f/assets/` | U2F cert + key |
+| `/ext/u2f/assets/` | Updated U2F certificate/key pair; replace an older pair together (see [`sdcard/README.md`](sdcard/README.md)) |
 | `/ext/wifi/<ssid>.txt` | Saved WiFi passwords |
 | `/ext/wifi/deauth_all.cfg` | Deauth All scan settings |
 | `/ext/apps_data/wlan/ble_*.csv` | BLE Wardriving CSV exports (no GPS coordinates) |
@@ -238,7 +238,19 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/wifi/evil_portal/login_template/` | Custom captive-portal templates (no verify) |
 | `/ext/wifi/evil_portal/router_template/` | Custom captive-portal templates (with WLAN verify) |
 
+### SD card files included in this repository
+
+The [`sdcard/`](sdcard/) directory mirrors the root of an SD card and keeps files that developers may need to copy or package with the firmware. Copy the contents of this directory to the card root; do not create an extra `sdcard/` directory on the card.
+
+| Repository path | SD card path | Contents |
+|---|---|---|
+| [`sdcard/apps/`](sdcard/apps/) | `/apps/` | Prebuilt FAP packages included with this project. FAP source, where available, is kept under `applications_user/`. |
+| [`sdcard/asset_packs/`](sdcard/asset_packs/) | `/asset_packs/` | 35 desktop animation packs from the supplied SD card; select them in Settings → Interface → Graphics → Asset Pack. |
+| [`sdcard/u2f/assets/`](sdcard/u2f/assets/) | `/u2f/assets/` | Matching `cert.der` and `cert_key.u2f` files required by U2F. On first use, firmware imports and encrypts the certificate key; see the [U2F guide](applications/main/u2f/README.md). |
+
 A complete starter kit is in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/latest/download/sdcard.zip) — extract it onto a FAT32 SD.
+
+The repository-side SD card files, including the FAP binaries required on the card, are documented in [`sdcard/README.md`](sdcard/README.md).
 
 ## Building
 

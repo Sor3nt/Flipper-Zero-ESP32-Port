@@ -1,0 +1,9 @@
+Filetype: Flipper Animation Manifest
+Version: 1
+
+Name: swirl
+Min butthurt: 0
+Max butthurt: 40
+Min level: 1
+Max level: 30
+Weight: 99
