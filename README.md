@@ -221,9 +221,11 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/Manifest` | Desktop (presence check) |
 | `/ext/dolphin/` + `manifest.txt` | Idle animations |
 | `/ext/asset_packs/<pack>/` | Custom desktop animation packs selected in Settings → Interface → Graphics → Asset Pack. The pack manifest may be in the pack root or its `Anims/` subfolder. |
+| `/ext/apps_assets/fmtx/` | MP3 tracks required by the FMTX FAP. |
+| `/ext/apps_assets/proto_pirate/` | ProtoPirate plugins, model database, and keystore data; keep with the updated ProtoPirate FAP. |
 | `/ext/apps_assets/nfc/plugins/` | NFC protocol plugins (.fal) |
 | `/ext/apps_data/nfc/plugins/` | NFC card-parser plugins (.fal) |
-| `/ext/apps_data/js_app/plugins/` | JS module bindings (.fal) |
+| `/ext/apps_data/js_app/plugins/` | JS module bindings (.fal), including the updated `js_badusb.fal` (replace the older file; other plugins are unchanged). |
 | `/ext/apps_data/doom/doom1.wad` | Doom |
 | `/ext/badusb/` | Bad USB scripts + `assets/layouts/*.kl` |
 | `/ext/infrared/assets/` | Universal remote DBs (`tv.ir`, `ac.ir`, `audio.ir`, `projectors.ir`, `fans.ir`, `leds.ir`) |
