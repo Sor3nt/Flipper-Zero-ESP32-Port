@@ -18,11 +18,15 @@ typedef struct {
     uint32_t rx_cnt;
     uint32_t tx_cnt;
     uint32_t baudrate_cur;
+    bool active;
+    bool error;
 } UsbUartState;
 
 UsbUartBridge* usb_uart_enable(UsbUartConfig* cfg);
 
-void usb_uart_disable(UsbUartBridge* usb_uart);
+/* Returns false when cleanup could not safely release all resources.
+ * The bridge object remains valid so the caller may retry. */
+bool usb_uart_disable(UsbUartBridge* usb_uart);
 
 void usb_uart_set_config(UsbUartBridge* usb_uart, UsbUartConfig* cfg);
 

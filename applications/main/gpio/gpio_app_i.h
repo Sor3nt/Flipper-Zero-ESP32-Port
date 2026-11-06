@@ -1,5 +1,6 @@
 #pragma once
 
+#include <furi.h>
 #include "gpio_app.h"
 #include "gpio_items.h"
 #include "scenes/gpio_scene.h"
@@ -18,10 +19,11 @@
 #include "views/gpio_test.h"
 #include "views/gpio_usb_uart.h"
 #include <assets_icons.h>
-#include <expansion/expansion.h>
+/* The upstream GPIO app disables the Expansion service (it shares the UART
+ * pads) while running. This ESP32 port does not build that service, so there is
+ * nothing to disable and the coupling is removed. */
 
 struct GpioApp {
-    Expansion* expansion;
     Gui* gui;
     NotificationApp* notifications;
     ViewDispatcher* view_dispatcher;
@@ -31,7 +33,6 @@ struct GpioApp {
     Power* power;
 
     VariableItemList* var_item_list;
-    VariableItem* var_item_flow;
     GpioTest* gpio_test;
     GpioUsbUart* gpio_usb_uart;
     GPIOItems* gpio_items;

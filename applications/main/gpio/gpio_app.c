@@ -24,9 +24,6 @@ static void gpio_app_tick_event_callback(void* context) {
 GpioApp* gpio_app_alloc(void) {
     GpioApp* app = malloc(sizeof(GpioApp));
 
-    app->expansion = furi_record_open(RECORD_EXPANSION);
-    expansion_disable(app->expansion);
-
     app->gui = furi_record_open(RECORD_GUI);
     app->gpio_items = gpio_items_alloc();
 
@@ -82,6 +79,13 @@ GpioApp* gpio_app_alloc(void) {
 void gpio_app_free(GpioApp* app) {
     furi_assert(app);
 
+    if(app->usb_uart_bridge) {
+        if(!usb_uart_disable(app->usb_uart_bridge)) {
+            FURI_LOG_E("Gpio", "USB UART cleanup incomplete; resources remain reserved");
+        }
+        app->usb_uart_bridge = NULL;
+    }
+
     // Views
     view_dispatcher_remove_view(app->view_dispatcher, GpioAppViewVarItemList);
     view_dispatcher_remove_view(app->view_dispatcher, GpioAppViewGpioTest);
@@ -103,9 +107,6 @@ void gpio_app_free(GpioApp* app) {
     furi_record_close(RECORD_GUI);
     furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_POWER);
-
-    expansion_enable(app->expansion);
-    furi_record_close(RECORD_EXPANSION);
 
     gpio_items_free(app->gpio_items);
     free(app);

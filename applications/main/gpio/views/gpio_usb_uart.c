@@ -3,6 +3,15 @@
 #include <furi_hal.h>
 #include <gui/elements.h>
 #include <assets_icons.h>
+#include "boards/board.h"
+
+#if defined(BOARD_USB_UART_TX) && defined(BOARD_USB_UART_RX)
+#define GPIO_USB_UART_TX_PIN BOARD_USB_UART_TX
+#define GPIO_USB_UART_RX_PIN BOARD_USB_UART_RX
+#else
+#define GPIO_USB_UART_TX_PIN -1
+#define GPIO_USB_UART_RX_PIN -1
+#endif
 
 struct GpioUsbUart {
     View* view;
@@ -15,10 +24,12 @@ typedef struct {
     uint32_t tx_cnt;
     uint32_t rx_cnt;
     uint8_t vcp_port;
-    uint8_t tx_pin;
-    uint8_t rx_pin;
+    int8_t tx_pin;
+    int8_t rx_pin;
     bool tx_active;
     bool rx_active;
+    bool active;
+    bool error;
 } GpioUsbUartModel;
 
 static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
@@ -34,11 +45,15 @@ static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
     canvas_draw_str(canvas, 3, 42, "RX:");
 
     canvas_set_font(canvas, FontSecondary);
-    snprintf(temp_str, 18, "COM PORT:%u", model->vcp_port);
-    canvas_draw_str_aligned(canvas, 126, 8, AlignRight, AlignBottom, temp_str);
-    snprintf(temp_str, 18, "Pin %u", model->tx_pin);
+    if(model->error) {
+        canvas_draw_str_aligned(canvas, 126, 8, AlignRight, AlignBottom, "UART ERROR");
+    } else {
+        snprintf(temp_str, 18, "CDC:%u %s", model->vcp_port, model->active ? "ON" : "WAIT");
+        canvas_draw_str_aligned(canvas, 126, 8, AlignRight, AlignBottom, temp_str);
+    }
+    snprintf(temp_str, 18, "TX GPIO%d", model->tx_pin);
     canvas_draw_str(canvas, 22, 25, temp_str);
-    snprintf(temp_str, 18, "Pin %u", model->rx_pin);
+    snprintf(temp_str, 18, "RX GPIO%d", model->rx_pin);
     canvas_draw_str(canvas, 22, 42, temp_str);
 
     if(model->baudrate == 0)
@@ -152,12 +167,14 @@ void gpio_usb_uart_update_state(GpioUsbUart* instance, UsbUartConfig* cfg, UsbUa
         {
             model->baudrate = st->baudrate_cur;
             model->vcp_port = cfg->vcp_ch;
-            model->tx_pin = (cfg->uart_ch == 0) ? (13) : (15);
-            model->rx_pin = (cfg->uart_ch == 0) ? (14) : (16);
+            model->tx_pin = GPIO_USB_UART_TX_PIN;
+            model->rx_pin = GPIO_USB_UART_RX_PIN;
             model->tx_active = (model->tx_cnt != st->tx_cnt);
             model->rx_active = (model->rx_cnt != st->rx_cnt);
             model->tx_cnt = st->tx_cnt;
             model->rx_cnt = st->rx_cnt;
+            model->active = st->active;
+            model->error = st->error;
         },
         true);
 }

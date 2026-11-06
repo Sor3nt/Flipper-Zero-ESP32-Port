@@ -20,9 +20,26 @@ const char* const gpio_otg_text[GpioOtgSettingsNum] = {
     "ON",
 };
 
-static void gpio_scene_start_var_list_enter_callback(void* context, uint32_t index) {
+/* List position -> GpioItem. "GPIO Manual Control" is listed only on boards with an
+ * external GPIO header (Paradoxt), so positions and GpioItem values can differ. */
+static uint8_t gpio_start_items[3];
+static uint8_t gpio_start_items_count;
+
+static uint32_t gpio_scene_start_item_at(uint32_t position) {
+    return position < gpio_start_items_count ? gpio_start_items[position] : UINT32_MAX;
+}
+
+static uint32_t gpio_scene_start_position_of(uint32_t item) {
+    for(uint8_t i = 0; i < gpio_start_items_count; i++) {
+        if(gpio_start_items[i] == item) return i;
+    }
+    return 0;
+}
+
+static void gpio_scene_start_var_list_enter_callback(void* context, uint32_t position) {
     furi_assert(context);
     GpioApp* app = context;
+    const uint32_t index = gpio_scene_start_item_at(position);
     if(index == GpioItemTest) {
         view_dispatcher_send_custom_event(app->view_dispatcher, GpioStartEventManualControl);
     } else if(index == GpioItemUsbUart) {
@@ -50,10 +67,18 @@ void gpio_scene_start_on_enter(void* context) {
     variable_item_list_set_enter_callback(
         var_item_list, gpio_scene_start_var_list_enter_callback, app);
 
+    gpio_start_items_count = 0;
     variable_item_list_add(var_item_list, "USB-UART Bridge", 0, NULL, NULL);
+    gpio_start_items[gpio_start_items_count++] = GpioItemUsbUart;
 
-    variable_item_list_add(var_item_list, "GPIO Manual Control", 0, NULL, NULL);
+    if(gpio_items_manual_control_supported()) {
+        variable_item_list_add(var_item_list, "GPIO Manual Control", 0, NULL, NULL);
+        gpio_start_items[gpio_start_items_count++] = GpioItemTest;
+    }
 
+    /* On ESP32-S3 boards this is the only place to switch 5V (VBUS / OTG): the Infrared
+     * app no longer offers it there. */
+    gpio_start_items[gpio_start_items_count++] = GpioItemOtg;
     item = variable_item_list_add(
         var_item_list,
         "5V on GPIO",
@@ -69,7 +94,9 @@ void gpio_scene_start_on_enter(void* context) {
     }
 
     variable_item_list_set_selected_item(
-        var_item_list, scene_manager_get_scene_state(app->scene_manager, GpioSceneStart));
+        var_item_list,
+        gpio_scene_start_position_of(
+            scene_manager_get_scene_state(app->scene_manager, GpioSceneStart)));
 
     view_dispatcher_switch_to_view(app->view_dispatcher, GpioAppViewVarItemList);
 }

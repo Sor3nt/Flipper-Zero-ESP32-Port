@@ -1,17 +1,21 @@
 #include "../usb_uart_bridge.h"
 #include "../gpio_app_i.h"
-#include <furi_hal.h>
+#include "boards/board.h"
 
-typedef enum {
-    UsbUartLineIndexVcp,
-    UsbUartLineIndexBaudrate,
-    UsbUartLineIndexUart,
-    UsbUartLineIndexFlow,
-} LineIndex;
+static const char* vcp_ch[] = {"USB CDC 0"};
+static const char* uart_ch[] = {"UART1 GPIO43/44"};
+#define GPIO_USB_UART_STRINGIFY_INNER(value) #value
+#define GPIO_USB_UART_STRINGIFY(value) GPIO_USB_UART_STRINGIFY_INNER(value)
 
-static const char* vcp_ch[] = {"0 (CLI)", "1"};
-static const char* uart_ch[] = {"13,14", "15,16"};
-static const char* flow_pins[] = {"None", "2,3", "6,7", "16,15"};
+#if defined(BOARD_USB_UART_RTS_GPIO) && defined(BOARD_USB_UART_DTR_GPIO) && \
+    BOARD_USB_UART_RTS_GPIO >= 0 && BOARD_USB_UART_DTR_GPIO >= 0
+static const char* flow_pins[] = {
+    "GPIO" GPIO_USB_UART_STRINGIFY(BOARD_USB_UART_RTS_GPIO) "/GPIO" GPIO_USB_UART_STRINGIFY(
+        BOARD_USB_UART_DTR_GPIO)};
+#else
+static const char* flow_pins[] = {"-1 (not wired)"};
+#endif
+
 static const char* baudrate_mode[] = {"Host"};
 static const uint32_t baudrate_list[] = {
     1200,
@@ -27,7 +31,12 @@ static const uint32_t baudrate_list[] = {
     460800,
     921600,
 };
-static const char* software_de_re[] = {"None", "4"};
+#if defined(BOARD_USB_UART_DE_RE_GPIO) && BOARD_USB_UART_DE_RE_GPIO >= 0
+static const char* software_de_re[] = {
+    "GPIO" GPIO_USB_UART_STRINGIFY(BOARD_USB_UART_DE_RE_GPIO)};
+#else
+static const char* software_de_re[] = {"-1 (not wired)"};
+#endif
 
 bool gpio_scene_usb_uart_cfg_on_event(void* context, SceneManagerEvent event) {
     GpioApp* app = context;
@@ -39,23 +48,6 @@ bool gpio_scene_usb_uart_cfg_on_event(void* context, SceneManagerEvent event) {
         }
     }
     return false;
-}
-
-void line_ensure_flow_invariant(GpioApp* app) {
-    // GPIO pins PC0, PC1 (16,15) are unavailable for RTS/DTR when LPUART is
-    // selected. This function enforces that invariant by resetting flow_pins
-    // to None if it is configured to 16,15 when LPUART is selected.
-
-    uint8_t available_flow_pins = app->usb_uart_cfg->uart_ch == FuriHalSerialIdLpuart ? 3 : 4;
-    VariableItem* item = app->var_item_flow;
-    variable_item_set_values_count(item, available_flow_pins);
-
-    if(app->usb_uart_cfg->flow_pins >= available_flow_pins) {
-        app->usb_uart_cfg->flow_pins = 0;
-
-        variable_item_set_current_value_index(item, app->usb_uart_cfg->flow_pins);
-        variable_item_set_current_value_text(item, flow_pins[app->usb_uart_cfg->flow_pins]);
-    }
 }
 
 static void line_vcp_cb(VariableItem* item) {
@@ -76,12 +68,7 @@ static void line_port_cb(VariableItem* item) {
 
     variable_item_set_current_value_text(item, uart_ch[index]);
 
-    if(index == 0)
-        app->usb_uart_cfg->uart_ch = FuriHalSerialIdUsart;
-    else if(index == 1)
-        app->usb_uart_cfg->uart_ch = FuriHalSerialIdLpuart;
-
-    line_ensure_flow_invariant(app);
+    app->usb_uart_cfg->uart_ch = 0;
     view_dispatcher_send_custom_event(app->view_dispatcher, GpioUsbUartEventConfigSet);
 }
 
@@ -137,7 +124,7 @@ void gpio_scene_usb_uart_cfg_on_enter(void* context) {
     VariableItem* item;
     char br_text[8];
 
-    item = variable_item_list_add(var_item_list, "USB Channel", 2, line_vcp_cb, app);
+    item = variable_item_list_add(var_item_list, "USB Channel", 1, line_vcp_cb, app);
     variable_item_set_current_value_index(item, app->usb_uart_cfg->vcp_ch);
     variable_item_set_current_value_text(item, vcp_ch[app->usb_uart_cfg->vcp_ch]);
 
@@ -156,19 +143,17 @@ void gpio_scene_usb_uart_cfg_on_enter(void* context) {
             item, baudrate_mode[app->usb_uart_cfg->baudrate_mode]);
     }
 
-    item = variable_item_list_add(var_item_list, "UART Pins", 2, line_port_cb, app);
+    item = variable_item_list_add(var_item_list, "UART Pins", 1, line_port_cb, app);
     variable_item_set_current_value_index(item, app->usb_uart_cfg->uart_ch);
     variable_item_set_current_value_text(item, uart_ch[app->usb_uart_cfg->uart_ch]);
 
     item = variable_item_list_add(
-        var_item_list, "RTS/DTR Pins", COUNT_OF(flow_pins), line_flow_cb, app);
+        var_item_list, "RTS/DTR Pins", 1, line_flow_cb, app);
     variable_item_set_current_value_index(item, app->usb_uart_cfg->flow_pins);
     variable_item_set_current_value_text(item, flow_pins[app->usb_uart_cfg->flow_pins]);
-    app->var_item_flow = item;
-    line_ensure_flow_invariant(app);
 
     item = variable_item_list_add(
-        var_item_list, "DE/RE Pin", COUNT_OF(software_de_re), line_software_de_re_cb, app);
+        var_item_list, "DE/RE Pin", 1, line_software_de_re_cb, app);
     variable_item_set_current_value_index(item, app->usb_uart_cfg->software_de_re);
     variable_item_set_current_value_text(item, software_de_re[app->usb_uart_cfg->software_de_re]);
 

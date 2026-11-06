@@ -1,23 +1,44 @@
 #include "gpio_items.h"
 
+#include <furi.h>
 #include <furi_hal_resources.h>
 
+/* The pin list exists only on boards with an external GPIO header
+ * (BOARD_PIN_EXT_GPIO_1..5, see furi_hal_resources.h). Everywhere else the list is
+ * empty and "GPIO Manual Control" is not offered. */
+#if defined(BOARD_PIN_EXT_GPIO_1)
+#define GPIO_ITEMS_HAVE_HEADER 1
+#else
+#define GPIO_ITEMS_HAVE_HEADER 0
+#endif
+
+typedef struct {
+    const GpioPin* pin;
+    const char* name;
+} GpioItemPin;
+
 struct GPIOItems {
-    GpioPinRecord* pins;
+    GpioItemPin* pins;
     size_t count;
 };
 
+bool gpio_items_manual_control_supported(void) {
+    return GPIO_ITEMS_HAVE_HEADER;
+}
+
 GPIOItems* gpio_items_alloc(void) {
     GPIOItems* items = malloc(sizeof(GPIOItems));
-
     items->count = 0;
+    items->pins = NULL;
+#if GPIO_ITEMS_HAVE_HEADER
+
     for(size_t i = 0; i < gpio_pins_count; i++) {
         if(!gpio_pins[i].debug) {
             items->count++;
         }
     }
 
-    items->pins = malloc(sizeof(GpioPinRecord) * items->count);
+    items->pins = malloc(sizeof(GpioItemPin) * items->count);
     size_t index = 0;
     for(size_t i = 0; i < gpio_pins_count; i++) {
         if(!gpio_pins[i].debug) {
@@ -26,6 +47,7 @@ GPIOItems* gpio_items_alloc(void) {
             index++;
         }
     }
+#endif
     return items;
 }
 
