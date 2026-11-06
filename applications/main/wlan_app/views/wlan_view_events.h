@@ -36,6 +36,9 @@ typedef enum {
     WlanAppCustomEventDeautherAuto = 165,
     WlanAppCustomEventDeautherChannelUp = 166,
     WlanAppCustomEventDeautherChannelDown = 167,
+    WlanAppCustomEventDeauthAllOk     = 186, // OK/Select — scene bertindak sesuai fokus
+    WlanAppCustomEventDeauthAllNavInc = 187, // Up (T-Embed) / Right (board lain) → naik/next
+    WlanAppCustomEventDeauthAllNavDec = 189, // Down (T-Embed) / Left (board lain) → turun/prev
     WlanAppCustomEventHandshakeChannelUp = 168,
     WlanAppCustomEventHandshakeChannelDown = 169,
     WlanAppCustomEventHandshakeChannelConfirm = 182,
@@ -61,11 +64,25 @@ typedef enum {
     WlanAppCustomEventUpdateSdCancel = 201,
     WlanAppCustomEventUpdateSdFinished = 202,
 
-    WlanAppCustomEventSmartDeauthToggle = 210,
-    WlanAppCustomEventSmartDeauthChannelUp = 211,
-    WlanAppCustomEventSmartDeauthChannelDown = 212,
+    WlanAppCustomEventSmartDeauthOk    = 210,
+    WlanAppCustomEventSmartDeauthLeft  = 211,
+    WlanAppCustomEventSmartDeauthRight = 212,
+    WlanAppCustomEventSmartDeauthUp    = 213,
+    WlanAppCustomEventSmartDeauthDown  = 214,
+
+    WlanAppCustomEventLiveScanOk    = 215,
+    WlanAppCustomEventLiveScanUp    = 216,
+    WlanAppCustomEventLiveScanDown  = 217,
+    WlanAppCustomEventLiveScanLeft  = 218,
+    WlanAppCustomEventLiveScanRight = 219,
 
     WlanAppCustomEventAirSnitchProbeDone = 220,
+
+    WlanAppCustomEventBleScanOk    = 221,
+    WlanAppCustomEventBleScanUp    = 222,
+    WlanAppCustomEventBleScanDown  = 223,
+    WlanAppCustomEventBleScanLeft  = 224,
+    WlanAppCustomEventBleScanRight = 225,
 
     WlanAppCustomEventWebFsSelectWifi = 230,
     WlanAppCustomEventWebFsDedicatedAp = 231,

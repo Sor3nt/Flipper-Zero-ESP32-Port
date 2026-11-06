@@ -22,6 +22,7 @@
 #include "wlan_smb.h"
 #include "wlan_androidtv.h"
 #include "wlan_airprint.h"
+#include "wlan_smart_deauth.h"
 #include "wlan_printhijack.h"
 #include "views/wlan_lan_view.h"
 #include "views/wlan_androidtv_remote_view.h"
@@ -30,7 +31,9 @@
 #include "views/wlan_handshake_view.h"
 #include "views/wlan_handshake_channel_view.h"
 #include "views/wlan_deauther_view.h"
+#include "views/wlan_deauth_all_view.h"
 #include "views/wlan_smart_deauth_view.h"
+#include "views/wlan_live_scan_view.h"
 #include "views/wlan_sniffer_view.h"
 #include "views/wlan_evil_portal_view.h"
 #include "views/wlan_evil_portal_captured_view.h"
@@ -59,7 +62,9 @@ typedef enum {
     WlanAppViewHandshake,
     WlanAppViewHandshakeChannel,
     WlanAppViewDeauther,
+    WlanAppViewDeauthAll,
     WlanAppViewSmartDeauth,
+    WlanAppViewLiveScan,
     WlanAppViewSniffer,
     WlanAppViewEvilPortal,
     WlanAppViewEvilPortalCaptured,
@@ -144,7 +149,9 @@ struct WlanApp {
     View* view_handshake;
     View* view_handshake_channel;
     View* view_deauther;
+    View* view_deauth_all;
     View* view_smart_deauth;
+    View* view_live_scan;
     View* view_sniffer;
     WlanSnifferView* sniffer_view_obj;
     View* view_evil_portal;
@@ -227,6 +234,11 @@ struct WlanApp {
     WlanDeauthClient deauth_clients[WLAN_APP_MAX_DEAUTH_CLIENTS];
     uint8_t deauth_client_count;
     bool deauth_auto;             // Auto-Mode in Deauther-Scene
+    // true → die Connect-Scene wird als Ziel-Picker fürs Deauth benutzt: nach
+    // AP-Auswahl (Short-OK) geht es direkt in die (Single-Target-)Deauth-Scene
+    // statt in den Connect/SsidScreen-Flow. Wird vom Hauptmenü-"Deauth" gesetzt
+    // und in der Connect-Scene wieder gelöscht.
+    bool deauth_pick_flow;
     char picker_associated_ssid[WLAN_APP_SSID_MAX]; // SSID/Channel-Key der Picker-Liste
 
     // Attack-Targets-Settings (live)
