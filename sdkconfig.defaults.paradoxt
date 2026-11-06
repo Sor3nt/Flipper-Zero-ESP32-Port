@@ -1,0 +1,14 @@
+# Paradoxt (ESP32-S3 N16R8). Applied only to FLIPPER_BOARD=paradoxt; builds use
+# their own <build_dir>/sdkconfig, so nothing here reaches other boards.
+
+# UART0's default GPIO43/44 are the shared RFID / USB-UART / expansion pins.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Dual-core: the forced-reboot combo (Up + Down, 5 s) runs from an esp_timer
+# ISR on CPU1, so it still works when CPU0 is stuck.
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_ESP_TIMER_SHOW_EXPERIMENTAL=y
+CONFIG_ESP_TIMER_ISR_AFFINITY_CPU1=y
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
+CONFIG_FURI_HAL_REBOOT_COMBO=y

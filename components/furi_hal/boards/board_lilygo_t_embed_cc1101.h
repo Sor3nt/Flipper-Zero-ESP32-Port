@@ -20,11 +20,17 @@
 #define BOARD_NAME        "LilyGo T-Embed CC1101"
 /* Kurz-ID = Release-Ordner unter https://sor3nt.github.io/release/<BOARD_ID>/latest */
 #define BOARD_ID          "t-embed"
+/* The ported apps (FAPs) are supported on this board; see furi_hal_board_supports_ported_apps(). */
+#define BOARD_PORTED_APPS_SUPPORTED 1
 #define BOARD_TARGET      "esp32s3"
 
 /* ---- Hardware Button / Encoder Pins ---- */
 #define BOARD_PIN_BUTTON_BOOT   0   /* Encoder button (BOOT/IO00, active low) */
 #define BOARD_PIN_BUTTON_KEY    6   /* Side key button */
+/* Forced reboot combo (CONFIG_FURI_HAL_REBOOT_COMBO, dual-core T-Embed build
+ * only): hold BOOT + KEY for 5 s. */
+#define BOARD_REBOOT_COMBO_PIN_A BOARD_PIN_BUTTON_BOOT
+#define BOARD_REBOOT_COMBO_PIN_B BOARD_PIN_BUTTON_KEY
 #define BOARD_PIN_BATTERY_ADC   UINT16_MAX  /* No battery ADC on this board */
 
 /* ---- Rotary Encoder ---- */
@@ -103,6 +109,9 @@
 /* ---- IR ---- */
 #define BOARD_PIN_IR_TX         2       /* IR_EN */
 #define BOARD_PIN_IR_RX         1       /* IR_RX */
+/* Infrared Settings > TX Pin: External. GPIO43 is shared with NRF24 CE /
+ * UART1 TX / RFID: it is leased only while IR transmits and restored after. */
+#define BOARD_PIN_IR_TX_EXT     43
 
 /* ---- NFC / PN532 (via I2C) ---- */
 #define BOARD_PIN_NFC_SCL       18
@@ -141,8 +150,19 @@
 #define BOARD_HAS_RFID          1
 
 /* Physical UART header shared by optional external modules. */
+#define BOARD_EXTERNAL_UART_NUM 1
 #define BOARD_EXTERNAL_UART_TX 43
 #define BOARD_EXTERNAL_UART_RX 44
+#define BOARD_HAS_USB_UART_BRIDGE 1
+#define BOARD_USB_UART_NUM BOARD_EXTERNAL_UART_NUM
+#define BOARD_USB_UART_TX BOARD_EXTERNAL_UART_TX
+#define BOARD_USB_UART_RX BOARD_EXTERNAL_UART_RX
+/* The current external header exposes only TX/RX; no control pins are wired. */
+#define BOARD_USB_UART_RTS_GPIO -1
+#define BOARD_USB_UART_DTR_GPIO -1
+#define BOARD_USB_UART_DE_RE_GPIO -1
+/* Preserve the on-board NRF24 GPIO state while these pins are routed to UART1. */
+#define BOARD_EXTERNAL_UART_SAVE_RESTORE_SHARED_PINS 1
 
 /* ---- RFID / RDM6300 (UART, 125kHz read-only) ---- */
 #define BOARD_PIN_RFID_RX       44      /* GROVE / SERIAL_RX */

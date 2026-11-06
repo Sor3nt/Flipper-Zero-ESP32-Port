@@ -137,22 +137,27 @@ source "${EXPORT_SCRIPT}"
 
 cd "${ESP32_DIR}"
 
+# Board sdkconfig lives in the build dir and is generated from the board
+# defaults (USB-JTAG console, dual-core + forced-reboot combo), so other
+# boards' builds never share or inherit it.
+SDK_OPTS=("-DSDKCONFIG=${BUILD_DIR}/sdkconfig" "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.${BOARD}")
+
 # Set target if build dir doesn't exist yet or target changed
 if [[ ! -f "${BUILD_DIR}/build.ninja" ]]; then
     echo "Setting IDF target to ${IDF_TARGET}..."
-    idf.py -B "${BUILD_DIR}" set-target "${IDF_TARGET}"
+    idf.py -B "${BUILD_DIR}" "${SDK_OPTS[@]}" set-target "${IDF_TARGET}"
 fi
 
 if [[ "${BUILD_ONLY}" -eq 1 ]]; then
-    idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" reconfigure build
+    idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDK_OPTS[@]}" reconfigure build
     echo
     echo "Build complete (--build-only). Nothing flashed."
     exit 0
 fi
 
-idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" -p "${PORT}" reconfigure build flash
+idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDK_OPTS[@]}" -p "${PORT}" reconfigure build flash
 
 if [[ "${RUN_MONITOR}" -eq 1 ]]; then
     release_serial_port "${PORT}"
-    idf.py -B "${BUILD_DIR}" -p "${PORT}" monitor
+    idf.py -B "${BUILD_DIR}" "${SDK_OPTS[@]}" -p "${PORT}" monitor
 fi

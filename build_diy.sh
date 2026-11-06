@@ -71,15 +71,19 @@ echo "Pinout:    ${SCRIPT_DIR}/Pinout.txt"
 echo "Build dir: ${BUILD_DIR}"
 [[ "${BUILD_ONLY}" -eq 0 ]] && echo "Port:      ${PORT}"
 
+# The DIY board keeps its own sdkconfig in its build dir (single-core), so a
+# dual-core T-Embed / paradoxt build can never leak into it.
+SDK_OPTS=("-DSDKCONFIG=${BUILD_DIR}/sdkconfig")
+
 if [[ ! -f "${BUILD_DIR}/build.ninja" ]]; then
-    idf.py -B "${BUILD_DIR}" set-target "${IDF_TARGET}"
+    idf.py -B "${BUILD_DIR}" "${SDK_OPTS[@]}" set-target "${IDF_TARGET}"
 fi
 
 if [[ "${BUILD_ONLY}" -eq 1 ]]; then
-    idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" reconfigure build
+    idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDK_OPTS[@]}" reconfigure build
     echo "Build complete (--build-only), nothing flashed."
     exit 0
 fi
 
-idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" -p "${PORT}" reconfigure build flash
-[[ "${MONITOR}" -eq 1 ]] && idf.py -B "${BUILD_DIR}" -p "${PORT}" monitor
+idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDK_OPTS[@]}" -p "${PORT}" reconfigure build flash
+[[ "${MONITOR}" -eq 1 ]] && idf.py -B "${BUILD_DIR}" "${SDK_OPTS[@]}" -p "${PORT}" monitor

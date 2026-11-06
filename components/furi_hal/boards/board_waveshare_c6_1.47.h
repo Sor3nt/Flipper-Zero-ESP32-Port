@@ -102,7 +102,10 @@
 #define BOARD_HAS_RFID          0
 #define BOARD_HAS_NFC           0
 #define BOARD_HAS_SUBGHZ        0
-
+#define BOARD_HAS_USB_UART_BRIDGE 0
+#define BOARD_USB_UART_RTS_GPIO -1
+#define BOARD_USB_UART_DTR_GPIO -1
+#define BOARD_USB_UART_DE_RE_GPIO -1
 /* ---- Power Management (no fuel gauge / charger present on this board) ---- */
 #define BQ27220_ADDR                    0x55
 #define BQ25896_CHARGE_LIMIT            1280

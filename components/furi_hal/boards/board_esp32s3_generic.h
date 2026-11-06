@@ -15,3 +15,9 @@
 #define BOARD_NAME "ESP32-S3 Generic"
 /* Kurz-ID = Release-Ordner unter https://sor3nt.github.io/release/<BOARD_ID>/latest */
 #define BOARD_ID          "esp32s3_generic"
+
+/* T-Embed-only features stay off on the generic board: no external IR TX pin
+ * (GPIO43 lease), no forced-reboot combo (single-core build anyway). */
+#undef BOARD_PIN_IR_TX_EXT
+#undef BOARD_REBOOT_COMBO_PIN_A
+#undef BOARD_REBOOT_COMBO_PIN_B

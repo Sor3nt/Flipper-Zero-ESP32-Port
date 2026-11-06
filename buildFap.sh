@@ -383,11 +383,15 @@ build_for_target() {
     # wolfssl) but only build a subset of it. fap_lib_info.py reads the .fam and
     # tells us which lib dirs to exclude from the blanket glob, which lib sources
     # to build instead, and the per-lib cdefines/cincludes/cflags to apply.
+    # fap_lib_info.py runs under a native Windows Python when this script is used from Git Bash:
+    # it prints CRLF line ends and backslash paths (lib\x\y.c), which would end up in
+    # object and .su file names. Only the PATH fields are normalised (a backslash inside a
+    # define, e.g. an escaped quote, must stay); fap_app_info.py normalises its own paths.
     local -a LIB_EXCLUDE_DIRS=()
     local -a LIB_SOURCES=()
     if [ -f "$APP_DIR/application.fam" ]; then
         local LIB_INFO
-        LIB_INFO=$(python3 "$SCRIPT_DIR/tools/fap_lib_info.py" "$APP_DIR" 2>/dev/null || true)
+        LIB_INFO=$(python3 "$SCRIPT_DIR/tools/fap_lib_info.py" "$APP_DIR" 2>/dev/null | tr -d '\r' | sed -E '/^(LIBDIR|SOURCE|CINCLUDE)\t/ s|\\|/|g' || true)
         while IFS=$'\t' read -r kind val; do
             case "$kind" in
                 LIBDIR)   LIB_EXCLUDE_DIRS+=("$APP_DIR/lib/$val") ;;

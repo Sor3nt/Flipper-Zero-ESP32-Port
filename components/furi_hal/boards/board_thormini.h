@@ -7,6 +7,8 @@
 #include <stddef.h>
 /* ---- Board metadata ---- */
 #define BOARD_NAME "ESP32-S3 SSD1306"
+/* The ported apps (FAPs) are supported on this board; see furi_hal_board_supports_ported_apps(). */
+#define BOARD_PORTED_APPS_SUPPORTED 1
 #define BOARD_TARGET "esp32s3"
 
 /* ---- Four active-low buttons ---- */
@@ -86,8 +88,11 @@
 #define BOARD_HAS_SUBGHZ  1
 #define BOARD_HAS_NRF24   1
 #define BOARD_HAS_MIC     0
-
-#define BOARD_PIN_NRF24_SCK     BOARD_PIN_CC1101_SCK   
+#define BOARD_HAS_USB_UART_BRIDGE 0
+#define BOARD_USB_UART_RTS_GPIO -1
+#define BOARD_USB_UART_DTR_GPIO -1
+#define BOARD_USB_UART_DE_RE_GPIO -1
+#define BOARD_PIN_NRF24_SCK     BOARD_PIN_CC1101_SCK
 #define BOARD_PIN_NRF24_MISO    BOARD_PIN_CC1101_MISO  
 #define BOARD_PIN_NRF24_MOSI    BOARD_PIN_CC1101_MOSI  
 #define BOARD_PIN_NRF24_CSN     7                     
@@ -98,7 +103,10 @@
 #define BOARD_PIN_SPEAKER_DOUT -1
 #define BOARD_PIN_NFC_SDA 8
 #define BOARD_PIN_NFC_SCL 9
-#define BOARD_NFC_I2C_PORT 0x24
+/* The PN532 sits on the same bus as the SSD1306 (I2C_NUM_0). This used to be 0x24 (the
+ * PN532's I2C *address*): not a valid port, so the bus install failed and every
+ * NFC transfer used a port that does not exist. The address is PN532_I2C_ADDR. */
+#define BOARD_NFC_I2C_PORT I2C_NUM_0
 /* Power service fallbacks (there is no fuel gauge/charger on this board). */
 #define BQ27220_ADDR                        0x55
 #define BQ25896_CHARGE_LIMIT                1280
