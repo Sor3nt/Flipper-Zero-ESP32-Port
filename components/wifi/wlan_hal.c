@@ -1,14 +1,15 @@
 #include "wlan_hal.h"
 
 #include <esp_wifi.h>
+#include <furi_hal_power.h>
+#include <notification/notification.h>
+#include <notification/notification_messages.h>
 #include <esp_private/wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
 #include <esp_sntp.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
-#include <esp_bt.h>
-#include <esp_bt_main.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -22,6 +23,19 @@
 // um internes RAM für esp_wifi_init zu sparen. Bei Stack-Overflow erhöhen.
 #define WLAN_HAL_WORKER_STACK 4096
 
+// ============================================================================
+// TIMEOUT CONSTANTS — Fix caller stuck selamanya
+// ============================================================================
+#define WLAN_CMD_SYNC_TIMEOUT_MS    5000U    // 5 detik untuk cmd umum
+#define WLAN_SCAN_CMD_TIMEOUT_MS    10000U   // 10 detik untuk scan
+#define WLAN_RUNFN_TIMEOUT_MS       20000U   // 20 detik: run_fn macht teils viel
+                                             // (Evil-Portal-Start etc.), großzügig
+#define WLAN_SCAN_CANCEL_MAX_RETRY  20U      // 20 × 100ms = 2 detik
+#define WLAN_SCAN_NORMAL_MAX_TICKS  500U     // 500 × 10ms = 5 detik
+
+// FIX: queue depth 32 untuk handle burst TX cepat
+#define WLAN_CMD_QUEUE_DEPTH        32U
+
 typedef enum {
     WCMD_INIT_START,
     WCMD_STOP_DEINIT,
@@ -32,19 +46,51 @@ typedef enum {
     WCMD_SET_CHANNEL,
     WCMD_SET_PROMISC,
     WCMD_SEND_RAW,
+    WCMD_SET_AP_MODE,
     WCMD_RUN_FN,
     WCMD_QUIT,
 } WlanCmdType;
 
+// RUN_FN handshake state (single atomic, CAS'd by worker and caller). Exactly
+// one side transitions it out of Pending, so the worker running fn(arg) and the
+// caller abandoning arg (its own stack) can never overlap.
+typedef enum {
+    WlanRunFnPending = 0, // calloc default: neither side has committed
+    WlanRunFnStarted,     // worker is running fn (arg must stay alive)
+    WlanRunFnAbandoned,   // caller gave up on timeout (worker must skip)
+} WlanRunFnState;
+
+// Heap-alloziertes Completion-Token für synchrone Commands. Refcount = 2
+// (Caller + Worker); wer zuletzt released, gibt frei (und befreit ggf. noch
+// nicht abgeholte Scan-Records). So überlebt es einen abgebrochenen Caller.
+typedef struct {
+    volatile bool done;        // Worker fertig
+    volatile bool abandoned;   // Caller hat per Timeout aufgegeben (SCAN)
+    int runfn_state;           // RUN_FN handshake (WlanRunFnState), CAS-only
+    bool result;               // generisches ok/fail des Commands
+    wifi_ap_record_t* scan_records; // Scan-Output (Worker-malloc, Caller übernimmt)
+    uint16_t scan_count;
+    volatile int refs;
+} WlanCmdSync;
+
+// Forward-Decl: der Worker (weiter unten) released das Token, die Definition
+// steht aber erst nach dem Worker.
+static void wlan_sync_release(WlanCmdSync* s);
+
 typedef struct {
     WlanCmdType type;
+    // Survey-owned commands run even while a survey owns the radio; every
+    // other command is rejected by the worker until the survey ends.
     bool survey_owned;
     union {
         struct {
-            wifi_scan_config_t* config;
-            wifi_ap_record_t** out_records;
-            uint16_t* out_count;
+            // Config BY VALUE (nicht als Pointer auf Caller-Stack): bei einem
+            // Sync-Timeout darf der Worker die Config nicht aus totem Stack lesen.
+            wifi_scan_config_t config;
             uint16_t max_count;
+            // cancel zeigt immer auf stabilen Speicher (static/heap) oder NULL —
+            // niemals auf einen Stack der abgebrochen werden kann.
+            const volatile bool* cancel;
         } scan;
         struct {
             char ssid[33];
@@ -65,52 +111,37 @@ typedef struct {
             wifi_promiscuous_cb_t cb;
         } set_promisc;
         struct {
-            uint8_t buf[64];
+            uint8_t buf[256];
             uint16_t len;
         } send_raw;
         struct {
             WlanHalWorkerFn fn;
             void* arg;
         } run_fn;
+        struct {
+            bool enable;
+        } set_ap_mode;
     };
-    volatile bool* done;
-    volatile bool* result;
+    // Heap-Completion-Token (NULL = fire-and-forget). Ersetzt die früheren
+    // done/result-Pointer-auf-Caller-Stack: der Worker schreibt AUSSCHLIESSLICH
+    // in dieses Token, nie in Caller-Speicher. Bei Sync-Timeout markiert der
+    // Caller das Token als abandoned und gibt frei; der Worker fasst danach
+    // keinen Caller-Stack mehr an → kein Use-after-Stack mehr.
+    WlanCmdSync* sync;
 } WlanCmd;
 
 static bool s_sntp_started = false;
 static bool s_started = false;
-static bool s_survey_active = false;
-static bool s_radio_transition = false;
-static bool s_survey_bt_restore = false;
-static const char* s_survey_status = "RADIO READY";
-static struct {
-    bool started, suspended, reconnect, bt_restore, auth_failed, valid;
-    wifi_config_t config;
-    esp_err_t error;
-} s_survey_saved;
-
-const char* wlan_hal_survey_status(void) {
-    return __atomic_load_n(&s_survey_status, __ATOMIC_ACQUIRE);
-}
-static void survey_status(const char* status) {
-    __atomic_store_n(&s_survey_status, status, __ATOMIC_RELEASE);
-    ESP_LOGI(TAG, "survey: %s", status);
-}
-
-static bool survey_active(void) {
-    return __atomic_load_n(&s_survey_active, __ATOMIC_ACQUIRE);
-}
-static bool radio_lock(void) {
-    bool expected = false;
-    return __atomic_compare_exchange_n(
-        &s_radio_transition, &expected, true, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
-}
-static void radio_unlock(void) {
-    __atomic_store_n(&s_radio_transition, false, __ATOMIC_RELEASE);
-}
+// SoftAP interface currently up (raw management-frame TX). Default off: normal
+// station use never exposes an AP. Written only by the worker thread.
+static volatile bool s_ap_mode = false;
+static bool s_light_sleep_inhibited = false;
+static FuriMutex* s_connection_sleep_inhibit_mutex = NULL;
+static bool s_connection_sleep_inhibited = false;
 static bool s_bt_was_on = false;
 static bool s_netif_inited = false;
 static esp_netif_t* s_netif_sta = NULL;
+static esp_netif_t* s_netif_ap = NULL;
 static volatile bool s_wifi_connected = false;
 static volatile bool s_wifi_auto_reconnect = false;
 static volatile bool s_auth_fail_latched = false;
@@ -134,8 +165,125 @@ static bool wlan_reason_is_auth(uint8_t reason) {
     }
 }
 static bool s_event_handlers_registered = false;
+// Serialize set_channel against the deauth/scan apps that lock the channel.
+// Reset on every start/stop so a missed unlock can never wedge it for the
+// rest of the session.
+static volatile bool s_channel_locked = false;
+
+// ----- Exclusive radio survey (WIFITE etc.) -----
+// A survey temporarily owns the whole radio: normal Wi-Fi is suspended and
+// Bluetooth is stopped, then both are restored on end.
+static volatile bool s_survey_active = false;
+static bool s_survey_bt_restore = false;   // restart BT on end
+static bool s_survey_resume_wifi = false;  // restart normal Wi-Fi on end
+static bool s_survey_inhibited = false;    // survey's own light-sleep inhibit
+static const char* s_survey_status = "RADIO READY";
+static wifi_config_t s_survey_sta_config;
+static bool s_survey_sta_config_valid = false;
+static bool s_survey_sta_reconnect = false;
+static bool s_survey_auth_fail_latched = false;
+static esp_err_t s_survey_sta_error = ESP_OK;
+
+static void wlan_set_connection_sleep_inhibited(bool inhibited);
+
+static void survey_save_station(void* unused) {
+    UNUSED(unused);
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    s_survey_sta_config_valid = false;
+    s_survey_sta_error = esp_wifi_get_mode(&mode);
+    if(s_survey_sta_error != ESP_OK || mode != WIFI_MODE_STA) return;
+
+    s_survey_sta_error = esp_wifi_get_config(WIFI_IF_STA, &s_survey_sta_config);
+    s_survey_sta_config_valid = s_survey_sta_error == ESP_OK;
+    s_survey_sta_reconnect = s_wifi_connected || s_wifi_auto_reconnect;
+    s_survey_auth_fail_latched = s_auth_fail_latched;
+}
+
+static void survey_restore_station(void* unused) {
+    UNUSED(unused);
+    s_survey_sta_error = esp_wifi_set_config(WIFI_IF_STA, &s_survey_sta_config);
+    if(s_survey_sta_error != ESP_OK) return;
+
+    s_auth_fail_latched = s_survey_auth_fail_latched;
+    s_wifi_auto_reconnect = s_survey_sta_reconnect;
+    if(s_survey_sta_reconnect) {
+        wlan_set_connection_sleep_inhibited(true);
+        s_survey_sta_error = esp_wifi_connect();
+        if(s_survey_sta_error != ESP_OK) {
+            s_wifi_auto_reconnect = false;
+            wlan_set_connection_sleep_inhibited(false);
+        }
+    }
+}
+
+const char* wlan_hal_survey_status(void) {
+    return __atomic_load_n(&s_survey_status, __ATOMIC_ACQUIRE);
+}
+static void survey_status(const char* status) {
+    __atomic_store_n(&s_survey_status, status, __ATOMIC_RELEASE);
+    ESP_LOGI(TAG, "survey: %s", status);
+}
+static bool survey_active(void) {
+    return __atomic_load_n(&s_survey_active, __ATOMIC_ACQUIRE);
+}
+
+static bool survey_resume_normal_wifi(void) {
+    if(!s_survey_resume_wifi) return true;
+    s_survey_resume_wifi = false;
+
+    bool ok = wlan_hal_start();
+    if(ok && s_survey_sta_config_valid) {
+        const bool worker_ok = wlan_hal_run_in_worker(survey_restore_station, NULL);
+        ok = worker_ok && s_survey_sta_error == ESP_OK;
+        if(!ok) {
+            ESP_LOGE(TAG, "Failed to restore station config after survey: %s",
+                     esp_err_to_name(worker_ok ? s_survey_sta_error : ESP_FAIL));
+        }
+    }
+
+    memset(&s_survey_sta_config, 0, sizeof(s_survey_sta_config));
+    s_survey_sta_config_valid = false;
+    s_survey_sta_reconnect = false;
+    s_survey_auth_fail_latched = false;
+    s_survey_sta_error = ESP_OK;
+    return ok;
+}
 static volatile uint32_t s_own_ip = 0;
 static volatile uint32_t s_own_netmask = 0;
+
+static bool wlan_connection_sleep_inhibit_mutex_init(void) {
+    static portMUX_TYPE init_lock = portMUX_INITIALIZER_UNLOCKED;
+    if(s_connection_sleep_inhibit_mutex) return true;
+
+    FuriMutex* candidate = furi_mutex_alloc(FuriMutexTypeNormal);
+    if(!candidate) return false;
+
+    portENTER_CRITICAL(&init_lock);
+    if(!s_connection_sleep_inhibit_mutex) {
+        s_connection_sleep_inhibit_mutex = candidate;
+    }
+    FuriMutex* installed = s_connection_sleep_inhibit_mutex;
+    portEXIT_CRITICAL(&init_lock);
+
+    if(installed != candidate) furi_mutex_free(candidate);
+    return true;
+}
+
+/* Wi-Fi event callbacks and worker commands may change this concurrently. */
+static void wlan_set_connection_sleep_inhibited(bool inhibited) {
+    furi_check(s_connection_sleep_inhibit_mutex);
+    furi_check(
+        furi_mutex_acquire(s_connection_sleep_inhibit_mutex, FuriWaitForever) == FuriStatusOk);
+    if(s_connection_sleep_inhibited != inhibited) {
+        if(inhibited) {
+            furi_hal_power_light_sleep_inhibit_enter();
+        } else {
+            furi_hal_power_light_sleep_inhibit_exit();
+        }
+        s_connection_sleep_inhibited = inhibited;
+    }
+    furi_check(furi_mutex_release(s_connection_sleep_inhibit_mutex) == FuriStatusOk);
+}
 
 static QueueHandle_t s_cmd_queue = NULL;
 static TaskHandle_t s_worker_task = NULL;
@@ -144,7 +292,9 @@ static StaticTask_t s_worker_buf;
 
 static void wlan_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     UNUSED(arg);
-    if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        if(s_worker_task) xTaskNotifyGive(s_worker_task);
+    } else if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* d = (wifi_event_sta_disconnected_t*)event_data;
         if(d) {
             ESP_LOGW(TAG, "STA disconnected: reason=%u (ssid_len=%u)", (unsigned)d->reason, (unsigned)d->ssid_len);
@@ -153,6 +303,9 @@ static void wlan_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         s_wifi_connected = false;
         s_own_ip = 0;
         s_own_netmask = 0;
+        if(!s_wifi_auto_reconnect) {
+            wlan_set_connection_sleep_inhibited(false);
+        }
         if(s_wifi_auto_reconnect && !survey_active()) {
             esp_wifi_connect();
         }
@@ -161,6 +314,7 @@ static void wlan_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         s_own_ip = event->ip_info.ip.addr;
         s_own_netmask = event->ip_info.netmask.addr;
         s_wifi_connected = true;
+        wlan_set_connection_sleep_inhibited(true);
         // Sync the RTC via SNTP once we have an IP. Without a correct clock
         // NTLMv2 (SMB) and anything else time-sensitive uses ~1970. UTC is
         // fine for these uses. Harmless if the network has no internet (the
@@ -175,6 +329,24 @@ static void wlan_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     }
 }
 
+// Minimal SoftAP used only so WIFI_IF_AP is up for esp_wifi_80211_tx (raw
+// management frames). Hidden SSID + slow beacon + single client: it is not
+// meant to serve clients, and it is brought up only for raw-TX features.
+static void wlan_apply_softap_config(void) {
+    wifi_config_t ap_cfg = {0};
+    const char* dummy_ssid = "x";
+    strncpy((char*)ap_cfg.ap.ssid, dummy_ssid, sizeof(ap_cfg.ap.ssid) - 1);
+    ap_cfg.ap.ssid_len = strlen(dummy_ssid);
+    ap_cfg.ap.ssid_hidden = 1; // do not advertise the SSID in beacons
+    ap_cfg.ap.channel = 1;
+    ap_cfg.ap.authmode = WIFI_AUTH_OPEN;
+    ap_cfg.ap.max_connection = 1; // 0 is out of IDF's valid range
+    ap_cfg.ap.beacon_interval = 60000;
+    ap_cfg.ap.pmf_cfg.required = false;
+    const esp_err_t e = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+    if(e != ESP_OK) ESP_LOGW(TAG, "AP config: %s", esp_err_to_name(e));
+}
+
 static void wlan_worker_fn(void* arg) {
     UNUSED(arg);
     ESP_LOGI(TAG, "Worker started");
@@ -183,17 +355,15 @@ static void wlan_worker_fn(void* arg) {
     while(1) {
         if(xQueueReceive(s_cmd_queue, &cmd, portMAX_DELAY) != pdTRUE) continue;
 
-        /* Also reject commands queued immediately before acquisition. Never
-         * execute another app's connection, active scan or transmit callback
-         * while an external passive survey owns the radio. */
+        // Never run another app's scan/connect/transmit while a survey owns
+        // the radio. Complete the token as failed so the caller unblocks.
         if(survey_active() && !cmd.survey_owned) {
             if(cmd.type == WCMD_SEND_ETH_RAW) free(cmd.send_eth.buf);
-            if(cmd.type == WCMD_SCAN) {
-                *cmd.scan.out_count = 0;
-                *cmd.scan.out_records = NULL;
+            if(cmd.sync) {
+                cmd.sync->result = false;
+                __atomic_store_n(&cmd.sync->done, true, __ATOMIC_RELEASE);
+                wlan_sync_release(cmd.sync);
             }
-            if(cmd.result) *cmd.result = false;
-            if(cmd.done) *cmd.done = true;
             continue;
         }
 
@@ -208,6 +378,11 @@ static void wlan_worker_fn(void* arg) {
                 s_netif_sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
                 if(!s_netif_sta) {
                     s_netif_sta = esp_netif_create_default_wifi_sta();
+                }
+                // FIX: create AP netif — wajib untuk APSTA mode
+                s_netif_ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+                if(!s_netif_ap) {
+                    s_netif_ap = esp_netif_create_default_wifi_ap();
                 }
                 s_netif_inited = true;
             }
@@ -231,17 +406,39 @@ static void wlan_worker_fn(void* arg) {
                 break;
             }
             esp_wifi_set_storage(WIFI_STORAGE_RAM);
-            esp_wifi_set_mode(WIFI_MODE_STA);
+
+            // Normal Wi-Fi use is station-only: no SoftAP is exposed. The AP
+            // interface is brought up for raw management-frame TX (deauth /
+            // beacon / ...) only when a survey owns the radio (wifite), or on
+            // demand via wlan_hal_set_ap_mode() (see WCMD_SET_AP_MODE).
+            if(cmd.survey_owned) {
+                esp_wifi_set_mode(WIFI_MODE_APSTA);
+                wlan_apply_softap_config();
+                s_ap_mode = true;
+            } else {
+                esp_wifi_set_mode(WIFI_MODE_STA);
+                s_ap_mode = false;
+            }
+
             err = esp_wifi_start();
             if(err != ESP_OK) {
                 ESP_LOGE(TAG, "wifi_start: %s", esp_err_to_name(err));
                 esp_wifi_deinit();
                 ok = false;
+                break;
             }
+
+            if(s_ap_mode) {
+                // Let the AP interface settle before the first raw TX.
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+
+            ESP_LOGI(TAG, "WiFi started (%s)", s_ap_mode ? "APSTA" : "STA");
             break;
 
         case WCMD_STOP_DEINIT:
             s_wifi_auto_reconnect = false;
+            wlan_set_connection_sleep_inhibited(false);
             esp_wifi_disconnect();
             s_wifi_connected = false;
             s_own_ip = 0;
@@ -249,10 +446,17 @@ static void wlan_worker_fn(void* arg) {
             esp_wifi_set_promiscuous(false);
             esp_wifi_stop();
             esp_wifi_deinit();
+            s_ap_mode = false;
             break;
 
         case WCMD_CONNECT: {
+            // A normal station connect must never run with the SoftAP exposed.
+            if(s_ap_mode) {
+                esp_wifi_set_mode(WIFI_MODE_STA);
+                s_ap_mode = false;
+            }
             s_wifi_auto_reconnect = false;
+            wlan_set_connection_sleep_inhibited(false);
             esp_wifi_disconnect();
             s_wifi_connected = false;
             s_own_ip = 0;
@@ -278,10 +482,13 @@ static void wlan_worker_fn(void* arg) {
             wcfg.sta.pmf_cfg.capable = false;
             wcfg.sta.pmf_cfg.required = false;
             s_wifi_auto_reconnect = true;
+            wlan_set_connection_sleep_inhibited(true);
             esp_wifi_set_config(WIFI_IF_STA, &wcfg);
             err = esp_wifi_connect();
             if(err != ESP_OK) {
                 ESP_LOGE(TAG, "connect: %s", esp_err_to_name(err));
+                s_wifi_auto_reconnect = false;
+                wlan_set_connection_sleep_inhibited(false);
                 ok = false;
             }
             break;
@@ -289,6 +496,7 @@ static void wlan_worker_fn(void* arg) {
 
         case WCMD_DISCONNECT:
             s_wifi_auto_reconnect = false;
+            wlan_set_connection_sleep_inhibited(false);
             esp_wifi_disconnect();
             s_wifi_connected = false;
             s_own_ip = 0;
@@ -323,62 +531,200 @@ static void wlan_worker_fn(void* arg) {
             break;
 
         case WCMD_SEND_RAW: {
-            // en_sys_seq=true: System füllt die Sequence-Number selbst → keine
-            // duplizierten Frames mit fixem Seq aus dem Template.
-            esp_err_t tx_err = esp_wifi_80211_tx(
-                WIFI_IF_STA, cmd.send_raw.buf, cmd.send_raw.len, true);
+            // FIX KRITIS: pakai WIFI_IF_AP (bukan STA) + en_sys_seq=false
+            // untuk mengikuti strategi Bruce. TX path AP lebih permisif,
+            // dan sequence dari template kita dipakai (bukan di-override driver).
+            esp_err_t tx_err = ESP_FAIL;
+            for(uint8_t attempt = 0; attempt < 8; attempt++) {
+                tx_err = esp_wifi_80211_tx(
+                    WIFI_IF_AP, cmd.send_raw.buf, cmd.send_raw.len, false);
+                if(tx_err != ESP_ERR_NO_MEM) break;
+                vTaskDelay(1);
+            }
             if(tx_err != ESP_OK) {
-                ESP_LOGD(TAG, "80211_tx: %s", esp_err_to_name(tx_err));
+                ESP_LOGD(TAG, "80211_tx(AP): %s", esp_err_to_name(tx_err));
             }
             break;
         }
 
         case WCMD_SCAN: {
-            err = esp_wifi_scan_start(cmd.scan.config, true);
-            if(err != ESP_OK) {
-                ESP_LOGE(TAG, "scan: %s", esp_err_to_name(err));
-                *cmd.scan.out_count = 0;
-                *cmd.scan.out_records = NULL;
+            // Caller hat schon aufgegeben, bevor wir überhaupt starten
+            // (Queue war gestaut) → Scan überspringen.
+            if(cmd.sync && __atomic_load_n(&cmd.sync->abandoned, __ATOMIC_ACQUIRE)) {
                 ok = false;
                 break;
             }
+            if(cmd.scan.cancel &&
+               __atomic_load_n(cmd.scan.cancel, __ATOMIC_ACQUIRE)) {
+                ok = false;
+                break;
+            }
+
+            // FIX: drain notification + delay untuk tutup race window
+            // antara scan lama dan scan baru
+            while(ulTaskNotifyTake(pdTRUE, 0) > 0) {
+            }
+            vTaskDelay(pdMS_TO_TICKS(20));
+            while(ulTaskNotifyTake(pdTRUE, 0) > 0) {
+            }
+
+            err = esp_wifi_scan_start(&cmd.scan.config, false);
+            if(err != ESP_OK) {
+                ESP_LOGE(TAG, "scan: %s", esp_err_to_name(err));
+                ok = false;
+                break;
+            }
+
+            bool scan_done = false;
+            bool cancelled = false;
+            uint32_t normal_ticks = 0;
+
+            while(!scan_done) {
+                if(cmd.scan.cancel &&
+                   __atomic_load_n(cmd.scan.cancel, __ATOMIC_ACQUIRE)) {
+                    cancelled = true;
+                    err = esp_wifi_scan_stop();
+                    bool stop_succeeded = err == ESP_OK;
+                    uint32_t stop_retries = 0;
+                    if(!stop_succeeded) {
+                        ESP_LOGW(TAG, "scan cancel stop: %s", esp_err_to_name(err));
+                    }
+
+                    // FIX: BOUNDED retry max 2 detik
+                    while(!scan_done && stop_retries < WLAN_SCAN_CANCEL_MAX_RETRY) {
+                        scan_done = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) > 0;
+                        stop_retries++;
+                        if(scan_done || stop_succeeded) continue;
+
+                        err = esp_wifi_scan_stop();
+                        stop_succeeded = err == ESP_OK;
+                        if(stop_succeeded) {
+                            ESP_LOGI(TAG, "scan cancel stop on retry");
+                        } else if(stop_retries % 5 == 0) {
+                            ESP_LOGW(TAG, "scan cancel retry #%lu: %s",
+                                     (unsigned long)stop_retries, esp_err_to_name(err));
+                        }
+                    }
+
+                    if(!scan_done) {
+                        ESP_LOGE(TAG, "scan cancel timeout — force exit");
+                    }
+                    break;
+                }
+
+                scan_done = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10)) > 0;
+
+                // FIX: scan normal timeout 5 detik
+                if(!scan_done && ++normal_ticks > WLAN_SCAN_NORMAL_MAX_TICKS) {
+                    ESP_LOGE(TAG, "scan timeout (>5s) — forcing stop");
+                    esp_wifi_scan_stop();
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    scan_done = true;
+                }
+            }
+
+            if(cancelled) {
+                // FIX: force clear scan state 2× setelah cancel
+                esp_wifi_scan_stop();
+                vTaskDelay(pdMS_TO_TICKS(30));
+                esp_wifi_scan_stop();
+                break;
+            }
+
             uint16_t count = 0;
-            esp_wifi_scan_get_ap_num(&count);
+            wifi_ap_record_t* records = NULL;
+            err = esp_wifi_scan_get_ap_num(&count);
+            if(err != ESP_OK) {
+                ESP_LOGW(TAG, "scan result count: %s", esp_err_to_name(err));
+                ok = false;
+                break;
+            }
             if(count > cmd.scan.max_count) count = cmd.scan.max_count;
             if(count > 0) {
-                *cmd.scan.out_records = malloc(count * sizeof(wifi_ap_record_t));
-                if(*cmd.scan.out_records) {
-                    esp_wifi_scan_get_ap_records(&count, *cmd.scan.out_records);
+                records = malloc(count * sizeof(wifi_ap_record_t));
+                if(records) {
+                    err = esp_wifi_scan_get_ap_records(&count, records);
+                    if(err != ESP_OK) {
+                        ESP_LOGW(TAG, "scan records: %s", esp_err_to_name(err));
+                        free(records);
+                        records = NULL;
+                        count = 0;
+                        ok = false;
+                    }
                 } else {
                     count = 0;
+                    ok = false;
                 }
-            } else {
-                *cmd.scan.out_records = NULL;
             }
-            *cmd.scan.out_count = count;
+            // In das Token stellen; die gemeinsame Completion setzt done. Der
+            // Caller holt die Records nach done ab (oder das Token-Release gibt
+            // sie frei, falls der Caller abgebrochen hat → kein Leak, kein UAF).
+            if(cmd.sync) {
+                cmd.sync->scan_records = records;
+                cmd.sync->scan_count = count;
+            } else if(records) {
+                free(records); // Scan ist immer sync; defensiv.
+            }
             break;
         }
 
-        case WCMD_RUN_FN:
+        case WCMD_SET_AP_MODE:
+            // Dynamic mode switch on the worker thread (serialized with all
+            // other esp_wifi calls). Enables/disables the raw-TX SoftAP without
+            // a full radio restart.
+            if(cmd.set_ap_mode.enable) {
+                esp_wifi_set_mode(WIFI_MODE_APSTA);
+                wlan_apply_softap_config();
+                s_ap_mode = true;
+            } else {
+                esp_wifi_set_mode(WIFI_MODE_STA);
+                s_ap_mode = false;
+            }
+            break;
+
+        case WCMD_RUN_FN: {
+            // Claim the run before touching run_fn.arg: CAS Pending→Started.
+            // If it fails, the caller already timed out and CAS'd Abandoned, so
+            // arg points at a dead caller stack — skip the call. Exactly one of
+            // worker/caller wins this CAS, so the two can never overlap (this
+            // closes the use-after-stack window the old started/abandoned pair
+            // left between its separate load and store).
+            if(cmd.sync) {
+                int expected = WlanRunFnPending;
+                if(!__atomic_compare_exchange_n(
+                       &cmd.sync->runfn_state, &expected, WlanRunFnStarted, false,
+                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                    break; // caller abandoned → arg is dead
+                }
+            }
             if(cmd.run_fn.fn) cmd.run_fn.fn(cmd.run_fn.arg);
             break;
+        }
 
         case WCMD_QUIT:
             ESP_LOGI(TAG, "Worker quitting");
-            if(cmd.done) *cmd.done = true;
+            if(cmd.sync) {
+                __atomic_store_n(&cmd.sync->done, true, __ATOMIC_RELEASE);
+                wlan_sync_release(cmd.sync);
+            }
             vTaskDelete(NULL);
             return;
         }
 
-        if(cmd.result) *cmd.result = ok;
-        if(cmd.done) *cmd.done = true;
+        // Gemeinsame Completion: NUR ins Heap-Token schreiben (nie Caller-Stack).
+        // result zuerst, dann done mit Release-Semantik, dann unseren Ref lösen.
+        if(cmd.sync) {
+            cmd.sync->result = ok;
+            __atomic_store_n(&cmd.sync->done, true, __ATOMIC_RELEASE);
+            wlan_sync_release(cmd.sync);
+        }
     }
 }
 
 static bool wlan_ensure_worker(void) {
     if(s_worker_task) return true;
 
-    s_cmd_queue = xQueueCreate(4, sizeof(WlanCmd));
+    s_cmd_queue = xQueueCreate(WLAN_CMD_QUEUE_DEPTH, sizeof(WlanCmd));
     if(!s_cmd_queue) return false;
 
     s_worker_stack = heap_caps_malloc(
@@ -400,48 +746,213 @@ bool wlan_hal_ensure_worker(void) {
     return wlan_ensure_worker();
 }
 
-static void wlan_send_cmd_sync(WlanCmd* cmd) {
-    volatile bool done = false;
-    cmd->done = &done;
-    xQueueSend(s_cmd_queue, cmd, portMAX_DELAY);
-    while(!done) {
-        furi_delay_ms(10);
+// Token-Ref lösen; der letzte Releaser gibt frei (und befreit noch nicht
+// abgeholte Scan-Records → kein Leak). Threadsafe via atomarem Refcount.
+static void wlan_sync_release(WlanCmdSync* s) {
+    if(!s) return;
+    if(__atomic_sub_fetch(&s->refs, 1, __ATOMIC_ACQ_REL) == 0) {
+        if(s->scan_records) free(s->scan_records);
+        free(s);
     }
 }
 
-static bool wlan_start_owned(bool survey) {
-    if(s_started) return true;
+// Führt ein Command synchron aus. Return true = innerhalb timeout fertig.
+// out_result/out_records/out_count (je optional) werden NUR bei Erfolg und
+// NOCH im lebenden Caller-Frame aus dem Token kopiert — der Worker fasst
+// Caller-Speicher nie an. Bei Timeout wird das Token als abandoned markiert
+// und sauber per Refcount freigegeben (kein Use-after-Stack, kein Leak).
+static bool wlan_cmd_exec(
+    WlanCmd* cmd,
+    uint32_t timeout_ms,
+    bool* out_result,
+    wifi_ap_record_t** out_records,
+    uint16_t* out_count) {
+    if(out_records) *out_records = NULL;
+    if(out_count) *out_count = 0;
+    if(out_result) *out_result = false;
 
-    if(!survey) {
-        Bt* bt = furi_record_open(RECORD_BT);
-        s_bt_was_on = bt_is_enabled(bt);
-        if(s_bt_was_on) bt_stop_stack(bt);
-        furi_record_close(RECORD_BT);
-    } else {
-        s_bt_was_on = false; /* Survey owns separate restoration state. */
+    WlanCmdSync* s = calloc(1, sizeof(WlanCmdSync));
+    if(!s) {
+        ESP_LOGE(TAG, "cmd_exec: token OOM (cmd=%d)", (int)cmd->type);
+        return false;
+    }
+    s->refs = 2; // Caller + Worker
+    cmd->sync = s;
+
+    if(xQueueSend(s_cmd_queue, cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "cmd_exec: queue full (cmd=%d)", (int)cmd->type);
+        // Worker bekommt das Command nie → beide Refs gehören dem Caller.
+        wlan_sync_release(s);
+        wlan_sync_release(s);
+        return false;
     }
 
+    TickType_t start = xTaskGetTickCount();
+    TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+    bool completed = false;
+    while(1) {
+        if(__atomic_load_n(&s->done, __ATOMIC_ACQUIRE)) {
+            completed = true;
+            break;
+        }
+        if((xTaskGetTickCount() - start) > timeout_ticks) {
+            // For RUN_FN, claim abandonment atomically: CAS Pending→Abandoned.
+            // If it fails, the worker already CAS'd Started and is dereferencing
+            // arg (often this caller's stack) — keep waiting for `done` rather
+            // than returning into a frame the worker is about to use.
+            if(cmd->type == WCMD_RUN_FN) {
+                int expected = WlanRunFnPending;
+                if(!__atomic_compare_exchange_n(
+                       &s->runfn_state, &expected, WlanRunFnAbandoned, false,
+                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                    continue;
+                }
+            } else {
+                __atomic_store_n(&s->abandoned, true, __ATOMIC_RELEASE);
+            }
+            ESP_LOGW(TAG, "cmd_exec: timeout %lums (cmd=%d)",
+                     (unsigned long)timeout_ms, (int)cmd->type);
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if(completed) {
+        if(out_result) *out_result = s->result;
+        if(out_records) {
+            *out_records = s->scan_records;
+            s->scan_records = NULL; // Ownership übernommen → Release gibt's nicht frei
+        }
+        if(out_count) *out_count = s->scan_count;
+    }
+
+    wlan_sync_release(s); // Caller-Ref
+    return completed;
+}
+
+// Wrapper default — pakai timeout standar 5 detik, Ergebnis ignoriert.
+static void wlan_send_cmd_sync(WlanCmd* cmd) {
+    wlan_cmd_exec(cmd, WLAN_CMD_SYNC_TIMEOUT_MS, NULL, NULL, NULL);
+}
+
+// Survey-owned radio bring-up/-down. Keeps its own light-sleep inhibit and
+// never touches Bluetooth (the survey begin/end does that once).
+static bool survey_radio_start(void) {
+    if(s_started) return true;
     if(!wlan_ensure_worker()) return false;
-
-    volatile bool result = false;
-    WlanCmd cmd = {.type = WCMD_INIT_START, .survey_owned = survey, .result = &result};
-    wlan_send_cmd_sync(&cmd);
-
+    if(!s_survey_inhibited) {
+        furi_hal_power_light_sleep_inhibit_enter();
+        s_survey_inhibited = true;
+    }
+    bool result = false;
+    WlanCmd cmd = {.type = WCMD_INIT_START, .survey_owned = true};
+    wlan_cmd_exec(&cmd, WLAN_CMD_SYNC_TIMEOUT_MS, &result, NULL, NULL);
     if(result) {
         s_started = true;
-        ESP_LOGI(TAG, "WiFi started");
+    } else if(s_survey_inhibited) {
+        s_survey_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
     }
     return result;
 }
-
-static void wlan_stop_owned(bool survey) {
+static void survey_radio_stop(void) {
     if(s_started) {
-        WlanCmd cmd = {.type = WCMD_STOP_DEINIT, .survey_owned = survey};
-        wlan_send_cmd_sync(&cmd);
+        WlanCmd cmd = {.type = WCMD_STOP_DEINIT, .survey_owned = true};
+        wlan_cmd_exec(&cmd, WLAN_CMD_SYNC_TIMEOUT_MS, NULL, NULL, NULL);
         s_started = false;
-        ESP_LOGI(TAG, "WiFi stopped");
     }
+    if(s_survey_inhibited) {
+        s_survey_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
+    }
+    s_channel_locked = false;
+}
 
+bool wlan_hal_survey_begin(bool wifi) {
+    if(survey_active() || wlan_hal_beacon_spam_is_running() ||
+       wlan_hal_evil_portal_is_running()) {
+        survey_status("OTHER RADIO APP ACTIVE");
+        return false;
+    }
+    memset(&s_survey_sta_config, 0, sizeof(s_survey_sta_config));
+    s_survey_sta_config_valid = false;
+    s_survey_sta_reconnect = false;
+    s_survey_auth_fail_latched = false;
+    s_survey_sta_error = ESP_OK;
+
+    // Suspend an existing normal Wi-Fi session first (before claiming the
+    // radio, so wlan_hal_stop's survey guard does not reject it).
+    s_survey_resume_wifi = s_started;
+    if(s_started) {
+        survey_status("SAVING WI-FI STATE");
+        if(!wlan_hal_run_in_worker(survey_save_station, NULL) ||
+           !s_survey_sta_config_valid) {
+            s_survey_resume_wifi = false;
+            survey_status("WI-FI STATE SAVE FAILED");
+            return false;
+        }
+        survey_status("SUSPENDING WI-FI");
+        wlan_hal_stop();
+    }
+    // Stop Bluetooth so the survey has the full radio.
+    Bt* bt = furi_record_open(RECORD_BT);
+    s_survey_bt_restore = bt_is_enabled(bt);
+    if(s_survey_bt_restore) bt_stop_stack(bt);
+    furi_record_close(RECORD_BT);
+
+    __atomic_store_n(&s_survey_active, true, __ATOMIC_RELEASE);
+
+    bool ok = true;
+    if(wifi) {
+        survey_status("STARTING EXCLUSIVE WI-FI");
+        ok = survey_radio_start();
+    }
+    if(!ok) {
+        __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
+        if(s_survey_bt_restore) {
+            bt = furi_record_open(RECORD_BT);
+            bt_start_stack(bt);
+            furi_record_close(RECORD_BT);
+            s_survey_bt_restore = false;
+        }
+        const bool restored = survey_resume_normal_wifi();
+        survey_status(restored ? "WI-FI INIT FAILED" : "RADIO RESTORE FAILED");
+        return false;
+    }
+    survey_status("EXCLUSIVE RADIO READY");
+    return true;
+}
+
+bool wlan_hal_survey_run(WlanHalWorkerFn fn, void* arg) {
+    if(!fn || !survey_active() || !s_cmd_queue) return false;
+    WlanCmd cmd = {.type = WCMD_RUN_FN, .survey_owned = true,
+                   .run_fn = {.fn = fn, .arg = arg}};
+    // Returns true only if the worker actually ran fn to completion.
+    return wlan_cmd_exec(&cmd, WLAN_RUNFN_TIMEOUT_MS, NULL, NULL, NULL);
+}
+
+void wlan_hal_survey_end(void) {
+    if(!survey_active()) return;
+    survey_status("STOPPING SURVEY RADIO");
+    survey_radio_stop();
+    if(s_survey_bt_restore) {
+        Bt* bt = furi_record_open(RECORD_BT);
+        bt_start_stack(bt);
+        furi_record_close(RECORD_BT);
+        s_survey_bt_restore = false;
+    }
+    // Release ownership before resuming normal Wi-Fi so its commands pass.
+    __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
+    const bool restored = survey_resume_normal_wifi();
+    survey_status(restored ? "RADIO RESTORED" : "RADIO RESTORE FAILED");
+}
+
+static void wlan_start_failed_cleanup(void) {
+    if(s_light_sleep_inhibited) {
+        s_light_sleep_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
+    }
     if(s_bt_was_on) {
         Bt* bt = furi_record_open(RECORD_BT);
         bt_start_stack(bt);
@@ -451,139 +962,73 @@ static void wlan_stop_owned(bool survey) {
 }
 
 bool wlan_hal_start(void) {
-    if(!radio_lock()) return false;
-    bool ok = !survey_active() && wlan_start_owned(false);
-    if(!ok && !survey_active() && s_bt_was_on) wlan_stop_owned(false);
-    radio_unlock();
-    return ok;
-}
+    if(survey_active()) return false;
+    if(s_started) return true;
 
-void wlan_hal_stop(void) {
-    if(!radio_lock()) return;
-    if(!survey_active()) wlan_stop_owned(false);
-    radio_unlock();
-}
+    if(!wlan_connection_sleep_inhibit_mutex_init()) {
+        ESP_LOGE(TAG, "Failed to allocate Wi-Fi sleep-inhibit mutex");
+        return false;
+    }
 
-/* Both callbacks run on the existing non-Furi WLAN worker, where the IDF
- * driver's TLS is valid. Do not copy saved credentials into app memory/logs. */
-static void survey_save_station(void* unused) {
-    UNUSED(unused);
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    s_survey_saved.error = esp_wifi_get_mode(&mode);
-    if(s_survey_saved.error != ESP_OK || mode != WIFI_MODE_STA) return;
-    s_survey_saved.error = esp_wifi_get_config(WIFI_IF_STA, &s_survey_saved.config);
-    s_survey_saved.valid = s_survey_saved.error == ESP_OK;
-}
-static void survey_restore_station(void* unused) {
-    UNUSED(unused);
-    s_survey_saved.error = esp_wifi_set_config(WIFI_IF_STA, &s_survey_saved.config);
-    s_auth_fail_latched = s_survey_saved.auth_failed;
-    s_wifi_auto_reconnect = s_survey_saved.reconnect;
-    if(s_survey_saved.error == ESP_OK && s_survey_saved.reconnect)
-        s_survey_saved.error = esp_wifi_connect();
-}
-static bool survey_restore_owned(void) {
-    bool ok = true;
-    if(s_survey_saved.suspended) {
-        survey_status("RESTORING WI-FI");
-        ok = wlan_start_owned(true);
-        if(ok && s_survey_saved.valid)
-            ok = wlan_hal_survey_run(survey_restore_station, NULL) && s_survey_saved.error == ESP_OK;
-        s_bt_was_on = s_survey_saved.bt_restore;
-    } else if(s_survey_bt_restore) {
-        survey_status("RESTORING BLUETOOTH");
-        Bt* bt = furi_record_open(RECORD_BT);
-        bt_start_stack(bt);
-        furi_record_close(RECORD_BT);
-        ok = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED;
-    }
-    memset(&s_survey_saved, 0, sizeof(s_survey_saved));
-    s_survey_bt_restore = false;
-    return ok;
-}
-bool wlan_hal_survey_begin(bool wifi) {
-    if(!radio_lock()) { survey_status("RADIO IS CHANGING"); return false; }
-    if(survey_active() || wlan_hal_beacon_spam_is_running() || wlan_hal_evil_portal_is_running()) {
-        survey_status("OTHER RADIO APP ACTIVE");
-        radio_unlock(); return false;
-    }
-    __atomic_store_n(&s_survey_active, true, __ATOMIC_RELEASE);
-    memset(&s_survey_saved, 0, sizeof(s_survey_saved));
-    s_survey_saved.started = s_started;
-    s_survey_saved.bt_restore = s_bt_was_on;
-    s_survey_saved.reconnect = s_wifi_connected || s_wifi_auto_reconnect;
-    s_survey_saved.auth_failed = s_auth_fail_latched;
-    s_survey_bt_restore = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED;
-    bool ok = true;
-    const char* failure = "RADIO START FAILED";
-    if(s_started) {
-        survey_status("SAVING WI-FI STATE");
-        ok = wlan_hal_survey_run(survey_save_station, NULL) && s_survey_saved.valid;
-        failure = "OTHER WI-FI MODE ACTIVE";
-        if(ok) {
-            survey_status("DISCONNECTING WI-FI");
-            s_bt_was_on = false;
-            wlan_stop_owned(true);
-            s_survey_saved.suspended = true;
-        }
-    }
-    if(ok) {
-        survey_status("RELEASING BLUETOOTH");
-        /* Let the Bluetooth service release its own profile and controller;
-         * the advertising icon alone does not tell us whether they exist. */
-        Bt* bt = furi_record_open(RECORD_BT);
+    /* FIX KRITIS: Light sleep inhibit harus tetap aktif SELAMA WiFi aktif,
+     * bukan hanya saat init. Jika di-exit setelah init selesai, PM (Power
+     * Management) akan wake up berkali-kali saat WiFi di background, memicu
+     * phy_track_pll_init() berulang → timer leak → ESP_ERR_NO_MEM crash. */
+    furi_hal_power_light_sleep_inhibit_enter();
+    s_light_sleep_inhibited = true;
+
+    Bt* bt = furi_record_open(RECORD_BT);
+    s_bt_was_on = bt_is_enabled(bt);
+    if(s_bt_was_on) {
         bt_stop_stack(bt);
-        furi_record_close(RECORD_BT);
-        ok = esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE &&
-             esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED;
-        failure = "BLUETOOTH STOP FAILED";
     }
-    if(ok) {
-        survey_status("ALLOCATING RADIO WORKER");
-        ok = wlan_ensure_worker();
-        failure = "RADIO MEMORY LOW";
-    }
-    if(ok && wifi) {
-        survey_status("STARTING EXCLUSIVE WI-FI");
-        ok = wlan_start_owned(true);
-        failure = "WI-FI INIT FAILED";
-    }
-    if(!ok) {
-        /* If capture was refused, the old radio is still untouched. */
-        if(!s_survey_saved.started || s_survey_saved.suspended) {
-            wlan_stop_owned(true);
-            if(!survey_restore_owned()) failure = "RADIO RESTORE FAILED";
-        } else {
-            memset(&s_survey_saved, 0, sizeof(s_survey_saved));
-            s_survey_bt_restore = false;
-        }
-        __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
-        survey_status(failure);
-    } else survey_status("EXCLUSIVE RADIO READY");
-    radio_unlock();
-    return ok;
-}
+    furi_record_close(RECORD_BT);
 
-bool wlan_hal_survey_run(WlanHalWorkerFn fn, void* arg) {
-    if(!fn || !survey_active() || !s_cmd_queue) return false;
-    volatile bool result = false;
-    WlanCmd cmd = {.type = WCMD_RUN_FN, .survey_owned = true,
-        .run_fn = {.fn = fn, .arg = arg}, .result = &result};
-    wlan_send_cmd_sync(&cmd);
+    if(!wlan_ensure_worker()) {
+        wlan_start_failed_cleanup();
+        return false;
+    }
+
+    bool result = false;
+    WlanCmd cmd = {.type = WCMD_INIT_START};
+    wlan_cmd_exec(&cmd, WLAN_CMD_SYNC_TIMEOUT_MS, &result, NULL, NULL);
+
+    if(result) {
+        s_started = true;
+        s_channel_locked = false;
+        ESP_LOGI(TAG, "WiFi started (light sleep inhibited)");
+        /* FIX: JANGAN exit inhibit di sini — biarkan aktif sampai wlan_hal_stop() */
+    } else {
+        /* Init failed: restore power management and the Bluetooth stack. */
+        wlan_start_failed_cleanup();
+    }
     return result;
 }
 
-void wlan_hal_survey_end(void) {
-    /* Only the owning application calls end, after its worker has stopped. */
-    while(!radio_lock()) furi_delay_ms(1);
-    if(survey_active()) {
-        survey_status("STOPPING SURVEY RADIO");
-        wlan_stop_owned(true);
-        bool restored = survey_restore_owned();
-        __atomic_store_n(&s_survey_active, false, __ATOMIC_RELEASE);
-        survey_status(restored ? "RADIO RESTORED" : "RADIO RESTORE FAILED");
+void wlan_hal_stop(void) {
+    if(survey_active()) return;
+
+    s_channel_locked = false;
+    if(s_started) {
+        WlanCmd cmd = {.type = WCMD_STOP_DEINIT};
+        wlan_send_cmd_sync(&cmd);
+        s_started = false;
+        ESP_LOGI(TAG, "WiFi stopped");
     }
-    radio_unlock();
+
+    /* FIX: Exit light sleep inhibit hanya di stop — biarkan WiFi sepenuhnya
+     * selesai dulu (termasuk timer cleanup di driver) sebelum restore PM. */
+    if(s_light_sleep_inhibited) {
+        s_light_sleep_inhibited = false;
+        furi_hal_power_light_sleep_inhibit_exit();
+    }
+
+    if(s_bt_was_on) {
+        Bt* bt = furi_record_open(RECORD_BT);
+        bt_start_stack(bt);
+        furi_record_close(RECORD_BT);
+        s_bt_was_on = false;
+    }
 }
 
 void wlan_hal_set_bt_restore(bool restore) {
@@ -596,8 +1041,7 @@ bool wlan_hal_is_started(void) {
 }
 
 bool wlan_hal_connect(const char* ssid, const char* password, const uint8_t* bssid, uint8_t channel) {
-    if(survey_active()) return false;
-    if(!s_started || !ssid) return false;
+    if(survey_active() || !s_started || !ssid) return false;
 
     WlanCmd cmd = {.type = WCMD_CONNECT};
     memset(&cmd.connect, 0, sizeof(cmd.connect));
@@ -611,9 +1055,8 @@ bool wlan_hal_connect(const char* ssid, const char* password, const uint8_t* bss
     }
     cmd.connect.channel = channel;
 
-    volatile bool result = false;
-    cmd.result = &result;
-    wlan_send_cmd_sync(&cmd);
+    bool result = false;
+    wlan_cmd_exec(&cmd, WLAN_CMD_SYNC_TIMEOUT_MS, &result, NULL, NULL);
     return result;
 }
 
@@ -673,7 +1116,7 @@ uint32_t wlan_hal_get_gw_ip(void) {
 
 bool wlan_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
     if(!s_started || !s_cmd_queue) {
-        ESP_LOGW(TAG, "send_eth_raw: not started (s=%d q=%p)", s_started, s_cmd_queue);
+        ESP_LOGW(TAG, "send_eth_raw: not started");
         return false;
     }
     if(!data || len < 14 || len > 1600) return false;
@@ -683,7 +1126,7 @@ bool wlan_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
         return false;
     }
     memcpy(buf, data, len);
-    WlanCmd cmd = {.type = WCMD_SEND_ETH_RAW, .done = NULL, .result = NULL};
+    WlanCmd cmd = {.type = WCMD_SEND_ETH_RAW, .sync = NULL};
     cmd.send_eth.buf = buf;
     cmd.send_eth.len = len;
     if(xQueueSend(s_cmd_queue, &cmd, 0) != pdTRUE) {
@@ -692,8 +1135,7 @@ bool wlan_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
         qfull_count++;
         if(qfull_count - qfull_last_log >= 20) {
             qfull_last_log = qfull_count;
-            ESP_LOGW(TAG, "send_eth_raw: cmd queue full (count=%lu)",
-                (unsigned long)qfull_count);
+            ESP_LOGW(TAG, "send_eth_raw: queue full (count=%lu)", (unsigned long)qfull_count);
         }
         free(buf);
         return false;
@@ -701,7 +1143,12 @@ bool wlan_hal_send_eth_raw(const uint8_t* data, uint16_t len) {
     return true;
 }
 
+// Channel lock — cegah channel hop selama attack
 void wlan_hal_set_channel(uint8_t channel) {
+    if(s_channel_locked) {
+        ESP_LOGW(TAG, "set_channel(%u) BLOCKED", channel);
+        return;
+    }
     if(!s_started || channel < 1 || channel > 14) return;
     WlanCmd cmd = {.type = WCMD_SET_CHANNEL, .set_channel = {.channel = channel}};
     wlan_send_cmd_sync(&cmd);
@@ -713,26 +1160,93 @@ void wlan_hal_set_promiscuous(bool enable, wifi_promiscuous_cb_t cb) {
     wlan_send_cmd_sync(&cmd);
 }
 
+// Bring the raw-TX SoftAP up or down. No-op while a survey owns the radio (it
+// already runs APSTA). Called by the raw-TX helpers below the first time they
+// need WIFI_IF_AP, so no feature scene has to manage the mode itself.
+void wlan_hal_set_ap_mode(bool enable) {
+    if(survey_active()) return;
+    if(!s_started) {
+        if(!enable) return;
+        if(!wlan_hal_start()) return; // comes up station-only
+    }
+    if(s_ap_mode == enable) return;
+    WlanCmd cmd = {.type = WCMD_SET_AP_MODE, .set_ap_mode = {.enable = enable}};
+    wlan_send_cmd_sync(&cmd);
+}
+
 bool wlan_hal_send_raw(const uint8_t* data, uint16_t len) {
-    if(!s_started || !s_cmd_queue || len > 64) return false;
-    WlanCmd cmd = {.type = WCMD_SEND_RAW, .done = NULL, .result = NULL};
+    if(!s_started || !s_cmd_queue || !data || len > 256) return false;
+    if(!survey_active() && !s_ap_mode) wlan_hal_set_ap_mode(true);
+    WlanCmd cmd = {.type = WCMD_SEND_RAW, .sync = NULL};
     memcpy(cmd.send_raw.buf, data, len);
     cmd.send_raw.len = len;
     return xQueueSend(s_cmd_queue, &cmd, 0) == pdTRUE;
 }
 
 bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len) {
-    if(survey_active()) return false;
-    // Direkter TX aus dem aufrufenden Task (NICHT über den Worker-Queue-
-    // Roundtrip wie wlan_hal_send_raw) — für High-Rate-Deauth-Bursts. Bei
-    // vollem TX-Ring (ESP_ERR_NO_MEM) kurz warten und erneut versuchen, sonst
-    // gehen im Burst still Frames verloren. en_sys_seq=true → HW füllt die Seq.
-    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, data, len, true);
-    for(int i = 0; err == ESP_ERR_NO_MEM && i < 3; i++) {
-        vTaskDelay(1); // TX-Ring drainen lassen
-        err = esp_wifi_80211_tx(WIFI_IF_STA, data, len, true);
+    /* Serialize raw TX with scan, channel, and promiscuous operations. */
+    if(!s_started || !s_cmd_queue || !data || len > 256) return false;
+    if(!survey_active() && !s_ap_mode) wlan_hal_set_ap_mode(true);
+
+    WlanCmd cmd = {.type = WCMD_SEND_RAW, .sync = NULL};
+    memcpy(cmd.send_raw.buf, data, len);
+    cmd.send_raw.len = len;
+    // FIX: retry 8× pada queue full (Bruce-style)
+    for(int attempt = 0; attempt < 8; attempt++) {
+        if(xQueueSend(s_cmd_queue, &cmd, 0) == pdTRUE) return true;
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
-    return err == ESP_OK;
+    return false;
+}
+
+// ============================================================================
+// SMART DEAUTH SUPPORT — 5 FUNGSI BARU
+// ============================================================================
+
+// Direct TX — bypass queue, cegah context switch overhead
+bool wlan_hal_raw_tx_direct(const uint8_t* data, uint16_t len) {
+    if(!s_started || !data || len > 256) return false;
+    if(!survey_active() && !s_ap_mode) wlan_hal_set_ap_mode(true);
+
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, data, len, false);
+    if(err == ESP_OK) return true;
+
+    // TX ring full → retry cepat tanpa delay
+    if(err == ESP_ERR_NO_MEM) {
+        for(int i = 0; i < 4; i++) {
+            taskYIELD();
+            err = esp_wifi_80211_tx(WIFI_IF_AP, data, len, false);
+            if(err == ESP_OK) return true;
+        }
+    }
+    return false;
+}
+
+void wlan_hal_channel_lock(void) {
+    s_channel_locked = true;
+    ESP_LOGI(TAG, "Channel LOCKED");
+}
+
+void wlan_hal_channel_unlock(void) {
+    s_channel_locked = false;
+    ESP_LOGI(TAG, "Channel UNLOCKED");
+}
+
+bool wlan_hal_channel_is_locked(void) {
+    return s_channel_locked;
+}
+
+// Promiscuous filter — MGMT only / DATA only
+void wlan_hal_set_promiscuous_filter(uint32_t filter_mask) {
+    if(!s_started) return;
+    wifi_promiscuous_filter_t filter = {.filter_mask = filter_mask};
+    esp_wifi_set_promiscuous_filter(&filter);
+}
+
+// Max TX power
+void wlan_hal_set_max_tx_power(int8_t power) {
+    if(!s_started) return;
+    esp_wifi_set_max_tx_power(power);
 }
 
 bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg) {
@@ -741,32 +1255,64 @@ bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg) {
     // the menu without going through wlan_hal_start (no STA scan), so the
     // worker may not exist yet. Safe to call repeatedly; no-ops if already up.
     if(!wlan_ensure_worker()) return false;
-    volatile bool result = false;
-    WlanCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}, .result = &result};
-    wlan_send_cmd_sync(&cmd);
-    return result;
+    WlanCmd cmd = {.type = WCMD_RUN_FN, .run_fn = {.fn = fn, .arg = arg}};
+    // true only if the worker actually ran fn (not queue-full / not timed
+    // out before it started) — callers gate on this.
+    return wlan_cmd_exec(&cmd, WLAN_RUNFN_TIMEOUT_MS, NULL, NULL, NULL);
 }
 
 void wlan_hal_scan(wifi_ap_record_t** out_records, uint16_t* out_count, uint16_t max_count) {
+    wlan_hal_scan_cancellable(out_records, out_count, max_count, NULL);
+}
+
+void wlan_hal_scan_cancellable(
+    wifi_ap_record_t** out_records,
+    uint16_t* out_count,
+    uint16_t max_count,
+    const volatile bool* cancel) {
+    if(!out_records || !out_count) return;
+    *out_records = NULL;
+    *out_count = 0;
     if(!s_started) {
-        if(out_records) *out_records = NULL;
-        *out_count = 0;
         return;
     }
+    furi_hal_power_light_sleep_inhibit_enter();
+    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_message(notification, &sequence_wifi_scan);
+    furi_record_close(RECORD_NOTIFICATION);
+
     wifi_scan_config_t scan_config = {
-        .ssid = NULL, .bssid = NULL, .channel = 0,
-        .show_hidden = true, .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time = {
+            .active = {
+                .min = 80,
+                .max = 120,
+            },
+        },
     };
     WlanCmd cmd = {
         .type = WCMD_SCAN,
         .scan = {
-            .config = &scan_config,
-            .out_records = out_records,
-            .out_count = out_count,
+            .config = scan_config, // BY VALUE kopiert — kein Stack-Pointer mehr
             .max_count = max_count,
+            .cancel = cancel,
         },
     };
-    wlan_send_cmd_sync(&cmd);
+
+    // FIX: pakai timeout variant khusus scan (10s) — kalau worker stuck
+    // karena scan-cancel loop atau driver hang, caller tidak akan stuck
+    // selamanya. out_records/out_count werden im lebenden Frame aus dem Token
+    // kopiert; bei Timeout bleiben sie NULL/0 (statt Use-after-Stack).
+    wlan_cmd_exec(&cmd, WLAN_SCAN_CMD_TIMEOUT_MS, NULL, out_records, out_count);
+
+    notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_message(notification, &sequence_wifi_scan);
+    furi_record_close(RECORD_NOTIFICATION);
+    furi_hal_power_light_sleep_inhibit_exit();
 }
 
 // ---------------------------------------------------------------------------
@@ -774,19 +1320,9 @@ void wlan_hal_scan(wifi_ap_record_t** out_records, uint16_t* out_count, uint16_t
 // esp_wifi_80211_tx() direkt. Frame-Counter + Stop-Flag sind volatile.
 // ---------------------------------------------------------------------------
 
-static const uint8_t beacon_packet_template[] = {
-    0x80, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x83, 0x51, 0xf7, 0x8f, 0x0f, 0x00,
-    0x00, 0x00, 0xe8, 0x03, 0x31, 0x00, 0x00, 0x20, 0x20, 0x20,
-    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x01, 0x08,
-    0x82, 0x84, 0x8b, 0x96, 0x24, 0x30, 0x48, 0x6c, 0x03, 0x01,
-    0x01, 0x30, 0x18, 0x01, 0x00, 0x00, 0x0f, 0xac, 0x02, 0x02,
-    0x00, 0x00, 0x0f, 0xac, 0x04, 0x00, 0x0f, 0xac, 0x04, 0x01,
-    0x00, 0x00, 0x0f, 0xac, 0x02, 0x00, 0x00,
-};
+// Max. Beacon-Framelänge: 24 (MAC-Header) + 12 (Fixed-Params) + 34 (SSID-IE
+// max) + 10 (Rates-IE) + 3 (DS-Param) = 83; auf 128 aufgerundet.
+#define BEACON_MAX_LEN 128
 
 static const char* beacon_funny_ssids[] = {
     "Mom Use This One", "Abraham Linksys", "Benjamin FrankLAN",
@@ -817,16 +1353,43 @@ static TaskHandle_t s_beacon_task = NULL;
 static WlanHalBeaconMode s_beacon_mode = WlanHalBeaconModeFunny;
 static char s_beacon_base_ssid[33] = {0};
 
-static void prepare_beacon_packet(uint8_t* packet, const uint8_t* mac,
-                                  const char* ssid, uint8_t channel) {
-    memcpy(packet, beacon_packet_template, sizeof(beacon_packet_template));
-    memcpy(&packet[10], mac, 6);
-    memcpy(&packet[16], mac, 6);
-    uint8_t ssid_len = (uint8_t)strlen(ssid);
-    if(ssid_len > 32) ssid_len = 32;
-    packet[37] = ssid_len;
-    memcpy(&packet[38], ssid, ssid_len);
-    packet[82] = channel;
+// Baut einen korrekt gepackten Open-Network-Beacon. Gibt die tatsächliche
+// Framelänge zurück. WICHTIG: SSID-IE-Länge MUSS zur SSID-Bytezahl passen und
+// die folgenden IEs müssen unmittelbar anschließen — sonst ist der Beacon
+// malformed und Clients zeigen die SSID nicht an (alter Template-Code war hier
+// fehlerhaft: feste 30-Byte-SSID bei len=32, Channel in RSN-Länge geschrieben).
+static uint16_t build_beacon_packet(uint8_t* p, const uint8_t* mac,
+                                    const char* ssid, uint8_t channel) {
+    uint16_t n = 0;
+
+    // --- 802.11 MAC-Header (24 Byte) ---
+    p[n++] = 0x80; p[n++] = 0x00;          // Frame Control: Beacon
+    p[n++] = 0x00; p[n++] = 0x00;          // Duration
+    for(int i = 0; i < 6; i++) p[n++] = 0xFF; // DA = Broadcast
+    for(int i = 0; i < 6; i++) p[n++] = mac[i]; // SA
+    for(int i = 0; i < 6; i++) p[n++] = mac[i]; // BSSID
+    p[n++] = 0x00; p[n++] = 0x00;          // Sequence Control (HW füllt)
+
+    // --- Fixed Parameters (12 Byte) ---
+    for(int i = 0; i < 8; i++) p[n++] = 0x00; // Timestamp
+    p[n++] = 0x64; p[n++] = 0x00;          // Beacon Interval = 100 TU
+    p[n++] = 0x01; p[n++] = 0x04;          // Capability: ESS (offen, kein Privacy)
+
+    // --- SSID-IE (tag 0) ---
+    uint8_t sl = (uint8_t)strlen(ssid);
+    if(sl > 32) sl = 32;
+    p[n++] = 0x00; p[n++] = sl;
+    for(uint8_t i = 0; i < sl; i++) p[n++] = (uint8_t)ssid[i];
+
+    // --- Supported Rates-IE (tag 1) ---
+    p[n++] = 0x01; p[n++] = 0x08;
+    p[n++] = 0x82; p[n++] = 0x84; p[n++] = 0x8b; p[n++] = 0x96;
+    p[n++] = 0x24; p[n++] = 0x30; p[n++] = 0x48; p[n++] = 0x6c;
+
+    // --- DS-Parameter-IE (tag 3): aktueller Channel ---
+    p[n++] = 0x03; p[n++] = 0x01; p[n++] = channel;
+
+    return n;
 }
 
 static void beacon_spam_task(void* param) {
@@ -834,7 +1397,7 @@ static void beacon_spam_task(void* param) {
     const char** ssid_list = NULL;
     char gen_ssid[64];
     uint8_t mac[6];
-    uint8_t packet[sizeof(beacon_packet_template)];
+    uint8_t packet[BEACON_MAX_LEN];
     int ssid_index = 0;
     int counter = 1;
     uint8_t channel = 1;
@@ -878,9 +1441,8 @@ static void beacon_spam_task(void* param) {
         for(int i = 0; i < 6; i++) mac[i] = rand() & 0xFF;
         mac[0] = (mac[0] & 0xFE) | 0x02;
 
-        prepare_beacon_packet(packet, mac, current_ssid, channel);
-        if(esp_wifi_80211_tx(WIFI_IF_STA, packet,
-               sizeof(beacon_packet_template), false) == ESP_OK) {
+        uint16_t frame_len = build_beacon_packet(packet, mac, current_ssid, channel);
+        if(esp_wifi_80211_tx(WIFI_IF_AP, packet, frame_len, false) == ESP_OK) {
             s_beacon_frames++;
         }
 
@@ -899,11 +1461,11 @@ static void beacon_spam_task(void* param) {
 }
 
 void wlan_hal_beacon_spam_start(WlanHalBeaconMode mode, const char* base_ssid) {
-    if(survey_active()) return;
     if(s_beacon_active || s_beacon_task) return;
     if(!s_started) {
         if(!wlan_hal_start()) return;
     }
+    wlan_hal_set_ap_mode(true); // beacon frames go out on WIFI_IF_AP
     if(s_wifi_connected) wlan_hal_disconnect();
 
     s_beacon_mode = mode;

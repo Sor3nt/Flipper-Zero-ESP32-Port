@@ -31,6 +31,14 @@ bool wlan_hal_ensure_worker(void);
  *  malloc; Caller frees. Bei *out_count == 0 ist *out_records NULL. */
 void wlan_hal_scan(wifi_ap_record_t** out_records, uint16_t* out_count, uint16_t max_count);
 
+/** Like wlan_hal_scan(), but aborts the active scan when *cancel becomes true.
+ *  The cancel flag must remain valid until the call returns. */
+void wlan_hal_scan_cancellable(
+    wifi_ap_record_t** out_records,
+    uint16_t* out_count,
+    uint16_t max_count,
+    const volatile bool* cancel);
+
 /** Versuche Verbindung zu SSID. Nicht-blockierend — polle wlan_hal_is_connected()
  *  oder warte auf den IP_EVENT. Auto-Reconnect ist aktiv bis wlan_hal_disconnect(). */
 bool wlan_hal_connect(const char* ssid, const char* password, const uint8_t* bssid, uint8_t channel);
@@ -72,8 +80,14 @@ void wlan_hal_set_channel(uint8_t channel);
  *  und kann NULL sein (z.B. zum bloßen Channel-Setzen). */
 void wlan_hal_set_promiscuous(bool enable, wifi_promiscuous_cb_t cb);
 
+/** Bring the raw-TX SoftAP (WIFI_IF_AP) up or down at runtime. Normal station
+ *  use never exposes an AP; the raw-TX helpers below call this the first time
+ *  they need the AP interface, so feature code need not manage the mode. No-op
+ *  while a survey (wifite) owns the radio. */
+void wlan_hal_set_ap_mode(bool enable);
+
 /** Sende einen rohen 802.11-Frame (für Deauth/Disassoc) via
- *  esp_wifi_80211_tx(). Frame-Länge bis 64 Bytes. */
+ *  esp_wifi_80211_tx(). Frame-Länge bis 256 Bytes. */
 bool wlan_hal_send_raw(const uint8_t* data, uint16_t len);
 
 /** Direkter roher 802.11-TX auf dem STA-Interface mit Retry bei vollem TX-Ring
@@ -93,17 +107,15 @@ bool wlan_hal_run_in_worker(WlanHalWorkerFn fn, void* arg);
 /** Exclusive, temporary radio use by surveys and bounded WIFITE WPS sessions.
  * Temporarily disconnects/suspends an existing STA connection and restores
  * its configuration/state on end. Persistent user settings are not changed.
- * Refuses active SoftAP/portal/transmit backends and a second survey owner.
- * Wi-Fi initialization and driver work use Sor3nt's existing worker.
+ * Refuses a second survey owner and the beacon-spam / evil-portal backends.
+ * Wi-Fi driver work runs on the existing worker (wlan_hal_survey_run).
  * Call end only after app callbacks have been unregistered and drained.
- * With wifi=false, the caller may run its own passive BLE scan while the
- * normal Bluetooth profile is suspended. Stop that scan/stack before end.
- * These calls must not be made from the GUI or a radio callback.
- */
+ * These calls must not be made from the GUI or a radio callback. */
 bool wlan_hal_survey_begin(bool wifi);
+/** Run fn on the worker while the survey owns the radio; true if it ran. */
 bool wlan_hal_survey_run(WlanHalWorkerFn fn, void* arg);
 void wlan_hal_survey_end(void);
-/** Nonblocking progress/error text, safe to read while begin/end is waiting. */
+/** Non-blocking progress/error text. */
 const char* wlan_hal_survey_status(void);
 
 /** Beacon-Spam-Modi für wlan_hal_beacon_spam_start(). */
@@ -181,3 +193,23 @@ bool wlan_hal_evil_portal_karma_get_current(char* out, size_t out_size);
 // real hostnames and browse the internet via NAT. upstream_ip is in network
 // byte order (matches esp_netif_ip_info_t / lwIP ip4_addr_t layout).
 void wlan_hal_evil_portal_set_dns_upstream(uint32_t upstream_ip_be);
+
+// ============================================================================
+// SMART DEAUTH SUPPORT — 5 DEKLARASI BARU
+// ============================================================================
+
+/** Direct raw TX — bypass queue. Untuk high-rate burst.
+ *  Return true kalau frame masuk TX descriptor. */
+bool wlan_hal_raw_tx_direct(const uint8_t* data, uint16_t len);
+
+/** Channel lock — cegah set_channel selama attack.
+ *  Saat locked, wlan_hal_set_channel() no-op. */
+void wlan_hal_channel_lock(void);
+void wlan_hal_channel_unlock(void);
+bool wlan_hal_channel_is_locked(void);
+
+/** Set promiscuous filter mask (MGMT only, DATA only, dll). */
+void wlan_hal_set_promiscuous_filter(uint32_t filter_mask);
+
+/** Set max TX power (unit 0.25dBm, 80 = 20dBm). */
+void wlan_hal_set_max_tx_power(int8_t power);
