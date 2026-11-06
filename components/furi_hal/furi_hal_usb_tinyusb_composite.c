@@ -8,11 +8,17 @@
 #include <furi_hal_version.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #include "class/hid/hid_device.h"
 #include "class/msc/msc_device.h"
+#include "furi_hal_usb.h"
+#include "furi_hal_usb_hid_backend.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "furi_hal_usb_hid_u2f.h"
+#endif
 
 /* Low-level access to switch the internal USB FSLS PHY mux between the OTG
  * controller and the USB-Serial-JTAG controller (see composite_uninstall). */
@@ -123,19 +129,26 @@ static char s_product[64];
 static char s_serial[17];
 static const char* s_string_descriptor[7];
 
-static bool s_installed = false;
+static atomic_bool s_installed = false;
 
 bool furi_hal_usb_composite_is_installed(void) {
-    return s_installed;
+    return atomic_load_explicit(&s_installed, memory_order_acquire);
 }
 
-bool furi_hal_usb_composite_install(
+static bool furi_hal_usb_composite_install_internal(
     uint16_t vid,
     uint16_t pid,
     const char* manuf,
     const char* product) {
-    FURI_LOG_I(TAG, "composite_install entered: vid=%04x pid=%04x s_installed=%d", vid, pid, (int)s_installed);
-    if(s_installed) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        FURI_LOG_E(TAG, "Cannot install composite USB while U2F is active");
+        return false;
+    }
+#endif
+    const bool installed = atomic_load_explicit(&s_installed, memory_order_acquire);
+    FURI_LOG_I(TAG, "composite_install entered: vid=%04x pid=%04x s_installed=%d", vid, pid, (int)installed);
+    if(installed) {
         /* Identity changes after first install need a reboot to take effect. */
         if((vid && vid != s_device_descriptor.idVendor) ||
            (pid && pid != s_device_descriptor.idProduct)) {
@@ -144,6 +157,15 @@ bool furi_hal_usb_composite_install(
                 "VID/PID change ignored (composite already installed). Reboot to apply.");
         }
         return true;
+    }
+
+    if(furi_hal_usb_get_config() == &usb_hid) {
+        FURI_LOG_E(TAG, "Cannot install composite USB while HID is active");
+        return false;
+    }
+    if(!furi_hal_usb_hid_backend_release_stack()) {
+        FURI_LOG_E(TAG, "Could not release the previous HID USB stack");
+        return false;
     }
 
     /* Strings */
@@ -197,6 +219,7 @@ bool furi_hal_usb_composite_install(
     esp_err_t err = tinyusb_driver_install(&tusb_cfg);
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_install failed: %d", err);
+        furi_hal_usb_composite_restore_serial_jtag();
         return false;
     }
 
@@ -213,13 +236,26 @@ bool furi_hal_usb_composite_install(
     err = tusb_cdc_acm_init(&cdc_cfg);
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tusb_cdc_acm_init failed: %d", err);
+        esp_err_t deinit_err = tusb_cdc_acm_deinit(TINYUSB_CDC_ACM_0);
+        if(deinit_err != ESP_OK) {
+            FURI_LOG_W(TAG, "tusb_cdc_acm_deinit after failed init: %d", deinit_err);
+        }
+        esp_err_t uninstall_err = tinyusb_driver_uninstall();
+        if(uninstall_err != ESP_OK) {
+            FURI_LOG_E(TAG, "TinyUSB cleanup after CDC init failure failed: %d", uninstall_err);
+            atomic_store_explicit(&s_installed, true, memory_order_release);
+            furi_hal_usb_backend_set_light_sleep_inhibited(true);
+            return false;
+        }
+        furi_hal_usb_composite_restore_serial_jtag();
         return false;
     }
 
     /* Wire CDC events into furi_hal_cdc state. */
     furi_hal_cdc_internal_register_tinyusb_callbacks();
 
-    s_installed = true;
+    atomic_store_explicit(&s_installed, true, memory_order_release);
+    furi_hal_usb_backend_set_light_sleep_inhibited(true);
     FURI_LOG_I(
         TAG,
         "TinyUSB Composite installed: vid=%04x pid=%04x (HID + CDC)",
@@ -228,8 +264,8 @@ bool furi_hal_usb_composite_install(
     return true;
 }
 
-bool furi_hal_usb_composite_uninstall(void) {
-    if(!s_installed) return true;
+static bool furi_hal_usb_composite_uninstall_internal(void) {
+    if(!atomic_load_explicit(&s_installed, memory_order_acquire)) return true;
 
     /* 1) Tear down the TinyUSB stack: stops the device task, then tud_deinit()
      *    (real in esp_tinyusb 1.7.x — resets the DWC2 core and drops the D+
@@ -239,8 +275,7 @@ bool furi_hal_usb_composite_uninstall(void) {
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);
-        /* Fall through and try the PHY switch anyway — partial teardown still
-         * left the OTG controller idle. */
+        return false;
     }
 
     /* 2) Free the esp_tinyusb CDC-ACM wrapper (cdc_obj). tinyusb_driver_uninstall
@@ -259,10 +294,48 @@ bool furi_hal_usb_composite_uninstall(void) {
      *    the USB-Serial-JTAG controller and re-enable its pads, so the host
      *    re-enumerates the JTAG/serial device and esptool can flash again. */
     furi_hal_usb_composite_restore_serial_jtag();
+    furi_hal_usb_backend_set_light_sleep_inhibited(false);
 
-    s_installed = false;
+    atomic_store_explicit(&s_installed, false, memory_order_release);
     FURI_LOG_I(TAG, "Composite uninstalled, USB-Serial-JTAG restored");
     return true;
+}
+
+bool furi_hal_usb_composite_install(
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product) {
+    if(!furi_hal_usb_operation_start(NULL)) return false;
+    const bool result = furi_hal_usb_composite_install_internal(vid, pid, manuf, product);
+    furi_hal_usb_operation_finish();
+    return result;
+}
+
+bool furi_hal_usb_composite_install_for_owner(
+    const void* owner,
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product) {
+    if(!owner || !furi_hal_usb_operation_start(owner)) return false;
+    const bool result = furi_hal_usb_composite_install_internal(vid, pid, manuf, product);
+    furi_hal_usb_operation_finish();
+    return result;
+}
+
+bool furi_hal_usb_composite_uninstall(void) {
+    if(!furi_hal_usb_operation_start(NULL)) return false;
+    const bool result = furi_hal_usb_composite_uninstall_internal();
+    furi_hal_usb_operation_finish();
+    return result;
+}
+
+bool furi_hal_usb_composite_uninstall_for_owner(const void* owner) {
+    if(!owner || !furi_hal_usb_operation_start(owner)) return false;
+    const bool result = furi_hal_usb_composite_uninstall_internal();
+    furi_hal_usb_operation_finish();
+    return result;
 }
 
 void furi_hal_usb_composite_restore_serial_jtag(void) {
@@ -277,13 +350,13 @@ void furi_hal_usb_composite_restore_serial_jtag(void) {
 }
 
 size_t furi_hal_usb_serial_jtag_read(uint8_t* buf, size_t len) {
-    if(s_installed || !buf || !len) return 0;
+    if(atomic_load_explicit(&s_installed, memory_order_acquire) || !buf || !len) return 0;
     if(!usb_serial_jtag_ll_rxfifo_data_available()) return 0;
     return usb_serial_jtag_ll_read_rxfifo(buf, (uint32_t)len);
 }
 
 size_t furi_hal_usb_serial_jtag_write(const uint8_t* buf, size_t len) {
-    if(s_installed || !buf || !len) return 0;
+    if(atomic_load_explicit(&s_installed, memory_order_acquire) || !buf || !len) return 0;
     if(!usb_serial_jtag_ll_txfifo_writable()) return 0;
     size_t n = usb_serial_jtag_ll_write_txfifo(buf, (uint32_t)len);
     usb_serial_jtag_ll_txfifo_flush();
@@ -304,11 +377,30 @@ bool furi_hal_usb_composite_install(
     return false;
 }
 
+bool furi_hal_usb_composite_install_for_owner(
+    const void* owner,
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product) {
+    (void)owner;
+    (void)vid;
+    (void)pid;
+    (void)manuf;
+    (void)product;
+    return false;
+}
+
 bool furi_hal_usb_composite_is_installed(void) {
     return false;
 }
 
 bool furi_hal_usb_composite_uninstall(void) {
+    return false;
+}
+
+bool furi_hal_usb_composite_uninstall_for_owner(const void* owner) {
+    (void)owner;
     return false;
 }
 

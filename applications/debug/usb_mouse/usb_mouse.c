@@ -18,10 +18,19 @@ typedef struct {
 } UsbMouseEvent;
 
 static void usb_mouse_render_callback(Canvas* canvas, void* ctx) {
-    UNUSED(ctx);
+    // ctx points at the app's usb_ready flag (NULL-safe: treat as ready).
+    const bool usb_ready = ctx ? *(const bool*)ctx : true;
     canvas_clear(canvas);
 
     canvas_set_font(canvas, FontPrimary);
+    if(!usb_ready) {
+        canvas_draw_str(canvas, 0, 10, "USB is busy");
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 0, 26, "Close qFlipper or the");
+        canvas_draw_str(canvas, 0, 36, "USB app, then reopen.");
+        canvas_draw_str(canvas, 0, 63, "Hold [back] to exit");
+        return;
+    }
     canvas_draw_str(canvas, 0, 10, "USB Mouse Demo");
 
     canvas_set_font(canvas, FontSecondary);
@@ -37,16 +46,26 @@ static void usb_mouse_input_callback(InputEvent* input_event, void* ctx) {
     furi_message_queue_put(event_queue, &event, FuriWaitForever);
 }
 
+// Unique, stable address used as this app's USB lease owner token.
+static const char usb_mouse_usb_owner;
+
 int32_t usb_mouse_app(void* p) {
     UNUSED(p);
     FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(UsbMouseEvent));
     ViewPort* view_port = view_port_alloc();
 
-    FuriHalUsbInterface* usb_mode_prev = furi_hal_usb_get_config();
-    furi_hal_usb_unlock();
-    furi_check(furi_hal_usb_set_config(&usb_hid, NULL) == true);
+    // Take the USB port as a cooperative lease instead of force-unlocking it. A running
+    // RPC / qFlipper session is paused and resumed around this app rather than torn away; if
+    // USB is locked (RPC) or held by USB-Storage the lease is refused and the screen says so.
+    // (Was: furi_hal_usb_unlock() + furi_hal_usb_set_config(), which stole USB from RPC.)
+    FuriHalUsbInterface* usb_mode_prev = NULL;
+    bool usb_ready = furi_hal_usb_lease_acquire(&usb_mouse_usb_owner, &usb_mode_prev);
+    if(usb_ready && !furi_hal_usb_set_config_for_owner(&usb_mouse_usb_owner, &usb_hid, NULL)) {
+        furi_hal_usb_lease_release(&usb_mouse_usb_owner, usb_mode_prev);
+        usb_ready = false;
+    }
 
-    view_port_draw_callback_set(view_port, usb_mouse_render_callback, NULL);
+    view_port_draw_callback_set(view_port, usb_mouse_render_callback, &usb_ready);
     view_port_input_callback_set(view_port, usb_mouse_input_callback, event_queue);
 
     // Open GUI and register view_port
@@ -63,48 +82,51 @@ int32_t usb_mouse_app(void* p) {
                     break;
                 }
 
-                if(event.input.type == InputTypeShort && event.input.key == InputKeyBack) {
-                    furi_hal_hid_mouse_press(HID_MOUSE_BTN_RIGHT);
-                    furi_hal_hid_mouse_release(HID_MOUSE_BTN_RIGHT);
-                }
-
-                if(event.input.key == InputKeyOk) {
-                    if(event.input.type == InputTypePress) {
-                        furi_hal_hid_mouse_press(HID_MOUSE_BTN_LEFT);
-                    } else if(event.input.type == InputTypeRelease) {
-                        furi_hal_hid_mouse_release(HID_MOUSE_BTN_LEFT);
+                // Without the USB lease, only the exit gesture above works: no HID output.
+                if(usb_ready) {
+                    if(event.input.type == InputTypeShort && event.input.key == InputKeyBack) {
+                        furi_hal_hid_mouse_press(HID_MOUSE_BTN_RIGHT);
+                        furi_hal_hid_mouse_release(HID_MOUSE_BTN_RIGHT);
                     }
-                }
 
-                if(event.input.key == InputKeyRight) {
-                    if(event.input.type == InputTypePress) {
-                        furi_hal_hid_mouse_move(MOUSE_MOVE_SHORT, 0);
-                    } else if(event.input.type == InputTypeRepeat) {
-                        furi_hal_hid_mouse_move(MOUSE_MOVE_LONG, 0);
+                    if(event.input.key == InputKeyOk) {
+                        if(event.input.type == InputTypePress) {
+                            furi_hal_hid_mouse_press(HID_MOUSE_BTN_LEFT);
+                        } else if(event.input.type == InputTypeRelease) {
+                            furi_hal_hid_mouse_release(HID_MOUSE_BTN_LEFT);
+                        }
                     }
-                }
 
-                if(event.input.key == InputKeyLeft) {
-                    if(event.input.type == InputTypePress) {
-                        furi_hal_hid_mouse_move(-MOUSE_MOVE_SHORT, 0);
-                    } else if(event.input.type == InputTypeRepeat) {
-                        furi_hal_hid_mouse_move(-MOUSE_MOVE_LONG, 0);
+                    if(event.input.key == InputKeyRight) {
+                        if(event.input.type == InputTypePress) {
+                            furi_hal_hid_mouse_move(MOUSE_MOVE_SHORT, 0);
+                        } else if(event.input.type == InputTypeRepeat) {
+                            furi_hal_hid_mouse_move(MOUSE_MOVE_LONG, 0);
+                        }
                     }
-                }
 
-                if(event.input.key == InputKeyDown) {
-                    if(event.input.type == InputTypePress) {
-                        furi_hal_hid_mouse_move(0, MOUSE_MOVE_SHORT);
-                    } else if(event.input.type == InputTypeRepeat) {
-                        furi_hal_hid_mouse_move(0, MOUSE_MOVE_LONG);
+                    if(event.input.key == InputKeyLeft) {
+                        if(event.input.type == InputTypePress) {
+                            furi_hal_hid_mouse_move(-MOUSE_MOVE_SHORT, 0);
+                        } else if(event.input.type == InputTypeRepeat) {
+                            furi_hal_hid_mouse_move(-MOUSE_MOVE_LONG, 0);
+                        }
                     }
-                }
 
-                if(event.input.key == InputKeyUp) {
-                    if(event.input.type == InputTypePress) {
-                        furi_hal_hid_mouse_move(0, -MOUSE_MOVE_SHORT);
-                    } else if(event.input.type == InputTypeRepeat) {
-                        furi_hal_hid_mouse_move(0, -MOUSE_MOVE_LONG);
+                    if(event.input.key == InputKeyDown) {
+                        if(event.input.type == InputTypePress) {
+                            furi_hal_hid_mouse_move(0, MOUSE_MOVE_SHORT);
+                        } else if(event.input.type == InputTypeRepeat) {
+                            furi_hal_hid_mouse_move(0, MOUSE_MOVE_LONG);
+                        }
+                    }
+
+                    if(event.input.key == InputKeyUp) {
+                        if(event.input.type == InputTypePress) {
+                            furi_hal_hid_mouse_move(0, -MOUSE_MOVE_SHORT);
+                        } else if(event.input.type == InputTypeRepeat) {
+                            furi_hal_hid_mouse_move(0, -MOUSE_MOVE_LONG);
+                        }
                     }
                 }
             }
@@ -112,7 +134,14 @@ int32_t usb_mouse_app(void* p) {
         view_port_update(view_port);
     }
 
-    furi_hal_usb_set_config(usb_mode_prev, NULL);
+    // Give the USB port back: tear the HID stack down and restore the previous interface (this
+    // also resumes a qFlipper session that was paused when the lease was taken).
+    if(usb_ready) {
+        // HID must stop first: the stack is never released under an active HID interface.
+        furi_hal_usb_set_config_for_owner(&usb_mouse_usb_owner, NULL, NULL);
+        furi_hal_usb_hid_release_for_owner(&usb_mouse_usb_owner);
+        furi_hal_usb_lease_release(&usb_mouse_usb_owner, usb_mode_prev);
+    }
 
     // remove & free all stuff created by app
     gui_remove_view_port(gui, view_port);

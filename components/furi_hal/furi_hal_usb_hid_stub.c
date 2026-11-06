@@ -25,6 +25,18 @@ void furi_hal_usb_hid_backend_stop(void) {
     if(s_user_cb) s_user_cb(false, s_user_ctx);
 }
 
+bool furi_hal_usb_hid_backend_release_stack(void) {
+    return true;
+}
+
+bool furi_hal_usb_backend_force_reenumeration(void) {
+    return true;
+}
+
+void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
+    (void)inhibited;
+}
+
 bool furi_hal_hid_is_connected(void) {
     return s_connected;
 }
@@ -104,11 +116,30 @@ bool furi_hal_usb_composite_install(
     return false;
 }
 
+bool furi_hal_usb_composite_install_for_owner(
+    const void* owner,
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product) {
+    (void)owner;
+    (void)vid;
+    (void)pid;
+    (void)manuf;
+    (void)product;
+    return false;
+}
+
 bool furi_hal_usb_composite_is_installed(void) {
     return false;
 }
 
 bool furi_hal_usb_composite_uninstall(void) {
+    return false;
+}
+
+bool furi_hal_usb_composite_uninstall_for_owner(const void* owner) {
+    (void)owner;
     return false;
 }
 

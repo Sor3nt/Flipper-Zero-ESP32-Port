@@ -7,6 +7,7 @@
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
 #include <furi.h>
+#include <freertos/FreeRTOS.h>
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #define FURI_HAL_CDC_HAVE_TINYUSB 1
@@ -19,6 +20,7 @@
 typedef struct {
     CdcCallbacks* callbacks;
     void* context;
+    uint32_t callbacks_in_flight;
     struct usb_cdc_line_coding line_coding;
     uint8_t ctrl_line_state;
 } FuriHalUsbCdcInterfaceState;
@@ -28,6 +30,7 @@ static FuriHalUsbCdcInterfaceState furi_hal_usb_cdc[FURI_HAL_USB_CDC_IF_MAX] = {
         {
             .callbacks = NULL,
             .context = NULL,
+            .callbacks_in_flight = 0,
             .line_coding =
                 {
                     .dwDTERate = 115200,
@@ -47,15 +50,71 @@ static FuriHalUsbCdcInterfaceState* furi_hal_usb_cdc_get(uint8_t if_num) {
     return &furi_hal_usb_cdc[if_num];
 }
 
+#if FURI_HAL_CDC_HAVE_TINYUSB
+static portMUX_TYPE furi_hal_usb_cdc_callback_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static CdcCallbacks* furi_hal_usb_cdc_callback_acquire(
+    FuriHalUsbCdcInterfaceState* interface,
+    void** context) {
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    CdcCallbacks* callbacks = interface->callbacks;
+    *context = interface->context;
+    if(callbacks) interface->callbacks_in_flight++;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    return callbacks;
+}
+
+static void furi_hal_usb_cdc_callback_release(FuriHalUsbCdcInterfaceState* interface) {
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    furi_assert(interface->callbacks_in_flight > 0);
+    interface->callbacks_in_flight--;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+}
+
+static void furi_hal_usb_cdc_callbacks_wait_idle(FuriHalUsbCdcInterfaceState* interface) {
+    while(true) {
+        portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+        bool idle = interface->callbacks_in_flight == 0;
+        portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+        if(idle) break;
+        furi_delay_ms(1);
+    }
+}
+#endif
+
 void furi_hal_cdc_set_callbacks(uint8_t if_num, CdcCallbacks* cb, void* context) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
     if(!interface) {
         return;
     }
 
+#if FURI_HAL_CDC_HAVE_TINYUSB
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
     interface->callbacks = cb;
     interface->context = context;
+    struct usb_cdc_line_coding line_coding = interface->line_coding;
+    uint8_t ctrl_line_state = interface->ctrl_line_state;
+    if(cb) interface->callbacks_in_flight++;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
 
+    if(cb) {
+        if(cb->state_callback) {
+            cb->state_callback(
+                context,
+                (ctrl_line_state & CdcCtrlLineDTR) ? CdcStateConnected :
+                                                     CdcStateDisconnected);
+        }
+        if(cb->ctrl_line_callback) {
+            cb->ctrl_line_callback(context, ctrl_line_state);
+        }
+        if(cb->config_callback) cb->config_callback(context, &line_coding);
+        furi_hal_usb_cdc_callback_release(interface);
+    } else {
+        furi_hal_usb_cdc_callbacks_wait_idle(interface);
+    }
+#else
+    interface->callbacks = cb;
+    interface->context = context;
     if(interface->callbacks && interface->callbacks->state_callback) {
         interface->callbacks->state_callback(
             interface->context,
@@ -68,16 +127,33 @@ void furi_hal_cdc_set_callbacks(uint8_t if_num, CdcCallbacks* cb, void* context)
     if(interface->callbacks && interface->callbacks->config_callback) {
         interface->callbacks->config_callback(interface->context, &interface->line_coding);
     }
+#endif
 }
 
-struct usb_cdc_line_coding* furi_hal_cdc_get_port_settings(uint8_t if_num) {
+bool furi_hal_cdc_get_port_settings(uint8_t if_num, struct usb_cdc_line_coding* settings) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
-    return interface ? &interface->line_coding : NULL;
+    if(!interface || !settings) return false;
+#if FURI_HAL_CDC_HAVE_TINYUSB
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    *settings = interface->line_coding;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+#else
+    *settings = interface->line_coding;
+#endif
+    return true;
 }
 
 uint8_t furi_hal_cdc_get_ctrl_line_state(uint8_t if_num) {
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get(if_num);
-    return interface ? interface->ctrl_line_state : 0;
+    if(!interface) return 0;
+#if FURI_HAL_CDC_HAVE_TINYUSB
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    uint8_t ctrl_line_state = interface->ctrl_line_state;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    return ctrl_line_state;
+#else
+    return interface->ctrl_line_state;
+#endif
 }
 
 #if FURI_HAL_CDC_HAVE_TINYUSB
@@ -116,8 +192,11 @@ void furi_hal_cdc_send(uint8_t if_num, uint8_t* buf, uint16_t len) {
         }
     }
 
-    if(interface->callbacks && interface->callbacks->tx_ep_callback) {
-        interface->callbacks->tx_ep_callback(interface->context);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_usb_cdc_callback_acquire(interface, &context);
+    if(callbacks) {
+        if(callbacks->tx_ep_callback) callbacks->tx_ep_callback(context);
+        furi_hal_usb_cdc_callback_release(interface);
     }
 }
 
@@ -143,8 +222,13 @@ int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len) {
 static void furi_hal_cdc_tusb_rx(int itf, cdcacm_event_t* event) {
     UNUSED(event);
     FuriHalUsbCdcInterfaceState* interface = furi_hal_usb_cdc_get((uint8_t)itf);
-    if(interface && interface->callbacks && interface->callbacks->rx_ep_callback) {
-        interface->callbacks->rx_ep_callback(interface->context);
+    if(interface) {
+        void* context = NULL;
+        CdcCallbacks* callbacks = furi_hal_usb_cdc_callback_acquire(interface, &context);
+        if(callbacks) {
+            if(callbacks->rx_ep_callback) callbacks->rx_ep_callback(context);
+            furi_hal_usb_cdc_callback_release(interface);
+        }
     }
 }
 
@@ -157,10 +241,14 @@ static void furi_hal_cdc_tusb_line_state(int itf, cdcacm_event_t* event) {
     uint8_t ctrl = 0;
     if(event->line_state_changed_data.dtr) ctrl |= CdcCtrlLineDTR;
     if(event->line_state_changed_data.rts) ctrl |= CdcCtrlLineRTS;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
     interface->ctrl_line_state = ctrl;
-
-    if(interface->callbacks && interface->callbacks->ctrl_line_callback) {
-        interface->callbacks->ctrl_line_callback(interface->context, ctrl);
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_usb_cdc_callback_acquire(interface, &context);
+    if(callbacks) {
+        if(callbacks->ctrl_line_callback) callbacks->ctrl_line_callback(context, ctrl);
+        furi_hal_usb_cdc_callback_release(interface);
     }
 }
 
@@ -171,15 +259,22 @@ static void furi_hal_cdc_tusb_line_coding(int itf, cdcacm_event_t* event) {
     }
 
     const cdc_line_coding_t* lc = event->line_coding_changed_data.p_line_coding;
+    struct usb_cdc_line_coding line_coding;
+    portENTER_CRITICAL(&furi_hal_usb_cdc_callback_lock);
     if(lc) {
         interface->line_coding.dwDTERate = lc->bit_rate;
         interface->line_coding.bCharFormat = lc->stop_bits;
         interface->line_coding.bParityType = lc->parity;
         interface->line_coding.bDataBits = lc->data_bits;
     }
+    line_coding = interface->line_coding;
+    portEXIT_CRITICAL(&furi_hal_usb_cdc_callback_lock);
 
-    if(interface->callbacks && interface->callbacks->config_callback) {
-        interface->callbacks->config_callback(interface->context, &interface->line_coding);
+    void* context = NULL;
+    CdcCallbacks* callbacks = furi_hal_usb_cdc_callback_acquire(interface, &context);
+    if(callbacks) {
+        if(callbacks->config_callback) callbacks->config_callback(context, &line_coding);
+        furi_hal_usb_cdc_callback_release(interface);
     }
 }
 

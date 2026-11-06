@@ -24,6 +24,7 @@ typedef struct {
     FuriMessageQueue* event_queue;
     FuriHalUsbCcidConfig ccid_cfg;
     Iso7816Handler* iso7816_handler;
+    bool usb_ready; // got the USB lease (false: USB busy -> show a notice, no CCID)
 } CcidTestApp;
 
 typedef struct {
@@ -40,10 +41,18 @@ typedef enum {
 } SubmenuIndex;
 
 static void ccid_test_app_render_callback(Canvas* canvas, void* ctx) {
-    UNUSED(ctx);
+    const CcidTestApp* app = ctx;
     canvas_clear(canvas);
 
     canvas_set_font(canvas, FontPrimary);
+    if(app && !app->usb_ready) {
+        canvas_draw_str(canvas, 0, 10, "USB is busy");
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 0, 26, "Close qFlipper or the");
+        canvas_draw_str(canvas, 0, 36, "USB app, then reopen.");
+        canvas_draw_str(canvas, 0, 63, "Hold [back] to exit");
+        return;
+    }
     canvas_draw_str(canvas, 0, 10, "CCID Test App");
 
     canvas_set_font(canvas, FontSecondary);
@@ -66,6 +75,7 @@ uint32_t ccid_test_exit(void* context) {
 
 CcidTestApp* ccid_test_app_alloc(void) {
     CcidTestApp* app = malloc(sizeof(CcidTestApp));
+    app->usb_ready = false; // set once the lease is taken, before the view can render
 
     //setup CCID USB
     // On linux: set VID PID using: /usr/lib/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist
@@ -82,7 +92,7 @@ CcidTestApp* ccid_test_app_alloc(void) {
     //viewport
     app->view_port = view_port_alloc();
     gui_add_view_port(app->gui, app->view_port, GuiLayerFullscreen);
-    view_port_draw_callback_set(app->view_port, ccid_test_app_render_callback, NULL);
+    view_port_draw_callback_set(app->view_port, ccid_test_app_render_callback, app);
 
     //message queue
     app->event_queue = furi_message_queue_alloc(8, sizeof(CcidTestAppEvent));
@@ -111,18 +121,30 @@ void ccid_test_app_free(CcidTestApp* app) {
     free(app);
 }
 
+// Unique, stable address used as this app's USB lease owner token.
+static const char ccid_test_usb_owner;
+
 int32_t ccid_test_app(void* p) {
     UNUSED(p);
 
     //setup view
     CcidTestApp* app = ccid_test_app_alloc();
 
-    FuriHalUsbInterface* usb_mode_prev = furi_hal_usb_get_config();
-    furi_hal_usb_unlock();
-
-    furi_check(furi_hal_usb_set_config(&usb_ccid, &app->ccid_cfg) == true);
-    iso7816_handler_set_usb_ccid_callbacks();
-    furi_hal_usb_ccid_insert_smartcard();
+    // Take the USB port as a cooperative lease instead of force-unlocking it: a running
+    // qFlipper / RPC session is paused and resumed rather than torn away, and when USB is
+    // locked (RPC) or held by USB-Storage this app is refused and the screen says so.
+    // (Was: furi_hal_usb_unlock() + furi_hal_usb_set_config(), which stole USB from RPC.)
+    FuriHalUsbInterface* usb_mode_prev = NULL;
+    app->usb_ready = furi_hal_usb_lease_acquire(&ccid_test_usb_owner, &usb_mode_prev);
+    if(app->usb_ready &&
+       !furi_hal_usb_set_config_for_owner(&ccid_test_usb_owner, &usb_ccid, &app->ccid_cfg)) {
+        furi_hal_usb_lease_release(&ccid_test_usb_owner, usb_mode_prev);
+        app->usb_ready = false;
+    }
+    if(app->usb_ready) {
+        iso7816_handler_set_usb_ccid_callbacks();
+        furi_hal_usb_ccid_insert_smartcard();
+    }
 
     //handle button events
     CcidTestAppEvent event;
@@ -140,9 +162,12 @@ int32_t ccid_test_app(void* p) {
         view_port_update(app->view_port);
     }
 
-    //tear down USB
-    iso7816_handler_reset_usb_ccid_callbacks();
-    furi_hal_usb_set_config(usb_mode_prev, NULL);
+    //tear down USB (usb_ccid has no TinyUSB backend to release; lease_release restores the
+    //previous interface and resumes any paused qFlipper session)
+    if(app->usb_ready) {
+        iso7816_handler_reset_usb_ccid_callbacks();
+        furi_hal_usb_lease_release(&ccid_test_usb_owner, usb_mode_prev);
+    }
 
     //teardown view
     ccid_test_app_free(app);

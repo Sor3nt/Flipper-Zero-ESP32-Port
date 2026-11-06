@@ -4,14 +4,20 @@
 
 #include <furi.h>
 #include <furi_hal_version.h>
+#include <furi_hal_power.h>
 #include <string.h>
 #include <stdio.h>
 
+#include "sdkconfig.h"
 #include "tinyusb.h"
 #include "class/hid/hid_device.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "furi_hal_usb_hid_u2f.h"
+#endif
 
 #define TAG "FuriHalUsbHid"
 
+#define USB_REENUMERATE_DISCONNECT_MS 300
 #define REPORT_ID_KEYBOARD 1
 #define REPORT_ID_MOUSE    2
 #define REPORT_ID_CONSUMER 3
@@ -76,6 +82,7 @@ static HidState s_state = {0};
 static FuriMutex* s_state_mutex = NULL;
 static HidStateCallback s_user_cb = NULL;
 static void* s_user_ctx = NULL;
+static bool s_light_sleep_inhibited;
 
 static void hid_state_lock(void) {
     if(s_state_mutex) furi_mutex_acquire(s_state_mutex, FuriWaitForever);
@@ -99,12 +106,24 @@ static void hid_publish_mount(bool mounted) {
 
 /* TinyUSB mount callbacks - invoked from TinyUSB task */
 void tud_mount_cb(void) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        furi_hal_usb_u2f_backend_set_mounted(true);
+        return;
+    }
+#endif
     hid_state_lock();
     hid_publish_mount(true);
     hid_state_unlock();
 }
 
 void tud_umount_cb(void) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        furi_hal_usb_u2f_backend_set_mounted(false);
+        return;
+    }
+#endif
     hid_state_lock();
     hid_publish_mount(false);
     hid_state_unlock();
@@ -112,12 +131,24 @@ void tud_umount_cb(void) {
 
 void tud_suspend_cb(bool remote_wakeup_en) {
     (void)remote_wakeup_en;
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        furi_hal_usb_u2f_backend_set_mounted(false);
+        return;
+    }
+#endif
     hid_state_lock();
     hid_publish_mount(false);
     hid_state_unlock();
 }
 
 void tud_resume_cb(void) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        furi_hal_usb_u2f_backend_set_mounted(tud_mounted());
+        return;
+    }
+#endif
     hid_state_lock();
     hid_publish_mount(tud_mounted());
     hid_state_unlock();
@@ -126,6 +157,11 @@ void tud_resume_cb(void) {
 /* TinyUSB HID callbacks */
 uint8_t const* tud_hid_descriptor_report_cb(uint8_t instance) {
     (void)instance;
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        return furi_hal_usb_u2f_report_descriptor();
+    }
+#endif
     return hid_report_descriptor;
 }
 
@@ -143,6 +179,9 @@ uint16_t tud_hid_get_report_cb(
     uint8_t* buffer,
     uint16_t reqlen) {
     (void)instance;
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) return 0;
+#endif
     (void)report_id;
     (void)report_type;
     (void)buffer;
@@ -157,14 +196,59 @@ void tud_hid_set_report_cb(
     uint8_t const* buffer,
     uint16_t bufsize) {
     (void)instance;
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        if(report_type == HID_REPORT_TYPE_OUTPUT && report_id == 0) {
+            furi_hal_hid_u2f_receive_report(buffer, bufsize);
+        }
+        return;
+    }
+#endif
     if(report_type == HID_REPORT_TYPE_OUTPUT && report_id == REPORT_ID_KEYBOARD &&
        bufsize >= 1) {
         s_state.led_state = buffer[0];
     }
 }
 
+void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
+    if(s_light_sleep_inhibited == inhibited) return;
+    if(inhibited) {
+        furi_hal_power_insomnia_enter();
+    } else {
+        furi_hal_power_insomnia_exit();
+    }
+    s_light_sleep_inhibited = inhibited;
+}
+
+bool furi_hal_usb_backend_force_reenumeration(void) {
+    if(!tud_inited()) {
+        FURI_LOG_E(TAG, "Cannot re-enumerate USB before TinyUSB is initialized");
+        return false;
+    }
+    if(!tud_disconnect()) {
+        FURI_LOG_E(TAG, "TinyUSB disconnect request failed");
+        return false;
+    }
+    furi_delay_ms(USB_REENUMERATE_DISCONNECT_MS);
+    if(!tud_connect()) {
+        FURI_LOG_E(TAG, "TinyUSB reconnect request failed");
+        return false;
+    }
+    return true;
+}
+
 /* Backend start/stop - called from furi_hal_usb.c */
 bool furi_hal_usb_hid_backend_start(const FuriHalUsbHidConfig* cfg) {
+    if(furi_hal_usb_composite_is_installed()) {
+        FURI_LOG_E(TAG, "Cannot start USB HID while the composite USB device is installed");
+        return false;
+    }
+#if CONFIG_IDF_TARGET_ESP32S3
+    if(furi_hal_usb_u2f_backend_is_active()) {
+        FURI_LOG_E(TAG, "Cannot start USB HID while U2F is active");
+        return false;
+    }
+#endif
     if(s_state.installed) {
         /* Already installed. This happens when re-entering BadUsb after a config-
          * menu visit: leaving the work scene calls set_config(NULL) -> backend_stop,
@@ -176,6 +260,12 @@ bool furi_hal_usb_hid_backend_start(const FuriHalUsbHidConfig* cfg) {
         hid_state_lock();
         hid_publish_mount(tud_mounted());
         hid_state_unlock();
+        furi_hal_usb_backend_set_light_sleep_inhibited(true);
+        if(!tud_mounted()) {
+            if(!furi_hal_usb_backend_force_reenumeration()) {
+                FURI_LOG_E(TAG, "HID stack is active but host re-enumeration request failed");
+            }
+        }
         return true;
     }
 
@@ -221,11 +311,16 @@ bool furi_hal_usb_hid_backend_start(const FuriHalUsbHidConfig* cfg) {
     esp_err_t err = tinyusb_driver_install(&tusb_cfg);
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_install failed: %d", err);
+        furi_hal_usb_composite_restore_serial_jtag();
         return false;
     }
 
     s_state.installed = true;
     FURI_LOG_I(TAG, "TinyUSB HID installed vid=%04x pid=%04x", vid, pid);
+    furi_hal_usb_backend_set_light_sleep_inhibited(true);
+    if(!furi_hal_usb_backend_force_reenumeration()) {
+        FURI_LOG_E(TAG, "HID installed but host re-enumeration request failed");
+    }
     return true;
 }
 
@@ -236,6 +331,28 @@ void furi_hal_usb_hid_backend_stop(void) {
     hid_state_lock();
     if(s_state.mounted) hid_publish_mount(false);
     hid_state_unlock();
+}
+
+bool furi_hal_usb_hid_backend_release_stack(void) {
+    if(!s_state.installed) return true;
+    if(furi_hal_usb_composite_is_installed()) {
+        FURI_LOG_E(TAG, "Refusing to release TinyUSB while composite USB is active");
+        return false;
+    }
+
+    esp_err_t err = tinyusb_driver_uninstall();
+    if(err != ESP_OK) {
+        FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);
+        return false;
+    }
+
+    hid_state_lock();
+    s_state.installed = false;
+    if(s_state.mounted) hid_publish_mount(false);
+    hid_state_unlock();
+    furi_hal_usb_backend_set_light_sleep_inhibited(false);
+    furi_hal_usb_composite_restore_serial_jtag();
+    return true;
 }
 
 /* Public HID API */

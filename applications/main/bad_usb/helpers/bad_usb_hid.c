@@ -21,15 +21,56 @@ void hid_usb_adjust_config(BadUsbHidConfig* hid_cfg) {
     if(hid_cfg->usb.pid == 0) hid_cfg->usb.pid = HID_PID_DEFAULT;
 }
 
+/* USB is taken as a cooperative LEASE only while a script is open in USB mode (from opening
+ * the script until leaving its screen or BadUSB). Taking it pauses whatever used the port
+ * before (e.g. the qFlipper bridge) the safe way; giving it back stops HID, tears the TinyUSB
+ * stack down, routes the PHY back to USB-Serial-JTAG and resumes the previous user. A refused
+ * lease (RPC session, USB-Storage, another app's lease) is reported, never a crash. */
+static const char bad_usb_usb_owner[] = "BadUSB";
+static bool bad_usb_usb_leased = false;
+static bool bad_usb_usb_busy = false;
+static FuriHalUsbInterface* bad_usb_usb_previous = NULL;
+
+bool bad_usb_hid_usb_is_busy(void) {
+    return bad_usb_usb_busy;
+}
+
+static void hid_usb_give_back(void) {
+    if(!bad_usb_usb_leased) return;
+    if(!furi_hal_usb_set_config_for_owner(bad_usb_usb_owner, NULL, NULL)) {
+        FURI_LOG_E(TAG, "Failed to stop USB HID");
+    }
+    if(!furi_hal_usb_hid_release_for_owner(bad_usb_usb_owner)) {
+        FURI_LOG_W(TAG, "USB HID stack was not released");
+    }
+    if(!furi_hal_usb_lease_release(bad_usb_usb_owner, bad_usb_usb_previous)) {
+        FURI_LOG_E(TAG, "Failed to release the USB lease");
+    }
+    bad_usb_usb_leased = false;
+    bad_usb_usb_previous = NULL;
+}
+
 void* hid_usb_init(BadUsbHidConfig* hid_cfg) {
     hid_usb_adjust_config(hid_cfg);
+    bad_usb_usb_busy = false;
     if(!bad_usb_hid_supports_usb()) {
         FURI_LOG_W(TAG, "USB HID is not supported on this target");
         return NULL;
     }
 
-    if(!furi_hal_usb_set_config(&usb_hid, &hid_cfg->usb)) {
+    if(!bad_usb_usb_leased) {
+        if(!furi_hal_usb_lease_acquire(bad_usb_usb_owner, &bad_usb_usb_previous)) {
+            FURI_LOG_W(TAG, "USB is busy (locked or used by another feature)");
+            bad_usb_usb_busy = true;
+            return NULL;
+        }
+        bad_usb_usb_leased = true;
+    }
+
+    if(!furi_hal_usb_set_config_for_owner(bad_usb_usb_owner, &usb_hid, &hid_cfg->usb)) {
         FURI_LOG_W(TAG, "Failed to enable USB HID");
+        hid_usb_give_back();
+        bad_usb_usb_busy = true;
         return NULL;
     }
 
@@ -42,7 +83,7 @@ void hid_usb_deinit(void* inst) {
         return;
     }
 
-    furi_check(furi_hal_usb_set_config(NULL, NULL));
+    hid_usb_give_back();
 }
 
 void hid_usb_set_state_callback(void* inst, HidStateCallback cb, void* context) {

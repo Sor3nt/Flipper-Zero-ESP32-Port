@@ -1,6 +1,7 @@
 #include <core/common_defines.h>
 #include "../js_modules.h"
 #include <furi_hal.h>
+#include <string.h>
 
 #define ASCII_TO_KEY(layout, x) (((uint8_t)x < 128) ? (layout[(uint8_t)x]) : HID_KEYBOARD_NONE)
 
@@ -8,8 +9,15 @@ typedef struct {
     FuriHalUsbHidConfig* hid_cfg;
     uint16_t layout[128];
     FuriHalUsbInterface* usb_if_prev;
+    bool started; /* HID running on a USB lease (between setup() and quit()) */
     uint8_t key_hold_cnt;
 } JsBadusbInst;
+
+/* USB is taken as a cooperative LEASE between setup() and quit() (or the script's end):
+ * a previous user such as the qFlipper bridge is paused and resumed afterwards, and the lease
+ * is refused (an error for the script, never a crash) while an RPC session locks USB or
+ * another feature holds it. The lock is never forced open. */
+static const char js_badusb_usb_owner[] = "JS BadUSB";
 
 static const struct {
     char* name;
@@ -81,10 +89,14 @@ static const struct {
 };
 
 static void js_badusb_quit_free(JsBadusbInst* badusb) {
-    if(badusb->usb_if_prev) {
+    if(badusb->started) {
         furi_hal_hid_kb_release_all();
-        furi_check(furi_hal_usb_set_config(badusb->usb_if_prev, NULL));
+        /* Stop HID, release the TinyUSB stack (PHY back to USB-Serial-JTAG), end the lease. */
+        furi_hal_usb_set_config_for_owner(js_badusb_usb_owner, NULL, NULL);
+        furi_hal_usb_hid_release_for_owner(js_badusb_usb_owner);
+        furi_hal_usb_lease_release(js_badusb_usb_owner, badusb->usb_if_prev);
         badusb->usb_if_prev = NULL;
+        badusb->started = false;
     }
     if(badusb->hid_cfg) {
         free(badusb->hid_cfg);
@@ -158,7 +170,7 @@ static void js_badusb_setup(struct mjs* mjs) {
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
 
-    if(badusb->usb_if_prev) {
+    if(badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is already started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -180,10 +192,25 @@ static void js_badusb_setup(struct mjs* mjs) {
         return;
     }
 
-    badusb->usb_if_prev = furi_hal_usb_get_config();
-
-    furi_hal_usb_unlock();
-    furi_hal_usb_set_config(&usb_hid, badusb->hid_cfg);
+    if(!furi_hal_usb_lease_acquire(js_badusb_usb_owner, &badusb->usb_if_prev)) {
+        badusb->usb_if_prev = NULL;
+        free(badusb->hid_cfg);
+        badusb->hid_cfg = NULL;
+        mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "USB is busy");
+        mjs_return(mjs, MJS_UNDEFINED);
+        return;
+    }
+    if(!furi_hal_usb_set_config_for_owner(js_badusb_usb_owner, &usb_hid, badusb->hid_cfg)) {
+        furi_hal_usb_hid_release_for_owner(js_badusb_usb_owner);
+        furi_hal_usb_lease_release(js_badusb_usb_owner, badusb->usb_if_prev);
+        badusb->usb_if_prev = NULL;
+        free(badusb->hid_cfg);
+        badusb->hid_cfg = NULL;
+        mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "USB HID failed to start");
+        mjs_return(mjs, MJS_UNDEFINED);
+        return;
+    }
+    badusb->started = true;
 
     mjs_return(mjs, MJS_UNDEFINED);
 }
@@ -193,7 +220,7 @@ static void js_badusb_quit(struct mjs* mjs) {
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
 
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -209,7 +236,7 @@ static void js_badusb_is_connected(struct mjs* mjs) {
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
 
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -277,7 +304,7 @@ static void js_badusb_press(struct mjs* mjs) {
     mjs_val_t obj_inst = mjs_get(mjs, mjs_get_this(mjs), INST_PROP_NAME, ~0);
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -303,7 +330,7 @@ static void js_badusb_hold(struct mjs* mjs) {
     mjs_val_t obj_inst = mjs_get(mjs, mjs_get_this(mjs), INST_PROP_NAME, ~0);
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -337,7 +364,7 @@ static void js_badusb_release(struct mjs* mjs) {
     mjs_val_t obj_inst = mjs_get(mjs, mjs_get_this(mjs), INST_PROP_NAME, ~0);
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -398,7 +425,7 @@ static void badusb_print(struct mjs* mjs, bool ln, bool alt) {
     mjs_val_t obj_inst = mjs_get(mjs, mjs_get_this(mjs), INST_PROP_NAME, ~0);
     JsBadusbInst* badusb = mjs_get_ptr(mjs, obj_inst);
     furi_assert(badusb);
-    if(badusb->usb_if_prev == NULL) {
+    if(!badusb->started) {
         mjs_prepend_errorf(mjs, MJS_INTERNAL_ERROR, "HID is not started");
         mjs_return(mjs, MJS_UNDEFINED);
         return;
@@ -489,6 +516,7 @@ static void js_badusb_alt_println(struct mjs* mjs) {
 static void* js_badusb_create(struct mjs* mjs, mjs_val_t* object, JsModules* modules) {
     UNUSED(modules);
     JsBadusbInst* badusb = malloc(sizeof(JsBadusbInst));
+    memset(badusb, 0, sizeof(JsBadusbInst)); /* started = false, no lease, no config */
     mjs_val_t badusb_obj = mjs_mk_object(mjs);
     mjs_set(mjs, badusb_obj, INST_PROP_NAME, ~0, mjs_mk_foreign(mjs, badusb));
     mjs_set(mjs, badusb_obj, "setup", ~0, MJS_MK_FN(js_badusb_setup));

@@ -350,6 +350,11 @@ static bool ducky_script_preload(BadUsbScript* bad_usb, File* script_file) {
     }
 
     bad_usb->hid_inst = bad_usb->hid->init(bad_usb->hid_cfg);
+    if(*bad_usb->interface == BadUsbHidInterfaceUsb && bad_usb_hid_usb_is_busy()) {
+        /* The USB lease was refused: say so instead of waiting forever for a connection. */
+        ducky_error(bad_usb, "USB busy: close other USB use");
+        return false;
+    }
     bad_usb->hid->set_state_callback(bad_usb->hid_inst, bad_usb_hid_state_callback, bad_usb);
 
     storage_file_seek(script_file, 0, true);

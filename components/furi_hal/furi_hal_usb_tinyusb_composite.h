@@ -9,17 +9,22 @@ extern "C" {
 #endif
 
 /**
- * Lazy one-shot installer for the TinyUSB Composite Device used on
- * ESP32-S3-class boards (HID + CDC-ACM with IAD).
+ * Installer for the TinyUSB Composite Device used on
+ * ESP32-S3-class boards (HID + CDC-ACM + MSC with IAD).
  *
- * `esp_tinyusb` does not expose a reliable `uninstall`. Once installed, the
- * Composite stays up for the rest of the boot cycle. VID/PID/strings can only
- * be set on the *first* call; later calls return true but log a warning.
+ * VID/PID/strings can only be set on the *first* install; later calls reuse
+ * the existing device and log a warning if a different identity is requested.
  *
  * Returns true if installed (either now or previously). Pass NULLs/zeros for
  * fields that should fall back to defaults.
  */
 bool furi_hal_usb_composite_install(
+    uint16_t vid,
+    uint16_t pid,
+    const char* manuf,
+    const char* product);
+bool furi_hal_usb_composite_install_for_owner(
+    const void* owner,
     uint16_t vid,
     uint16_t pid,
     const char* manuf,
@@ -43,6 +48,7 @@ bool furi_hal_usb_composite_is_installed(void);
  * needed — only call this once the last consumer is done.
  */
 bool furi_hal_usb_composite_uninstall(void);
+bool furi_hal_usb_composite_uninstall_for_owner(const void* owner);
 
 /**
  * Route the shared internal USB FSLS PHY back to the USB-Serial-JTAG

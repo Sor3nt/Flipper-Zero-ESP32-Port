@@ -172,15 +172,10 @@ BadUsbApp* bad_usb_app_alloc(char* arg) {
 
     bad_usb_set_interface(app, app->interface);
 
-    if(!bad_usb_hid_supports_usb()) {
-        app->usb_if_prev = NULL;
-    } else if(furi_hal_usb_is_locked()) {
-        app->usb_if_prev = NULL;
-        bad_usb_set_interface(app, app->interface);
-    } else {
-        app->usb_if_prev = furi_hal_usb_get_config();
-        furi_check(furi_hal_usb_set_config(NULL, NULL));
-    }
+    /* USB is not touched while BadUSB only shows menus: the USB HID helper takes the port as
+     * a lease when a script is opened and gives it back when the script screen is left (see
+     * helpers/bad_usb_hid.c). */
+    app->usb_if_prev = NULL;
 
     if(!furi_string_empty(app->file_path)) {
         scene_manager_set_scene_state(app->scene_manager, BadUsbSceneWork, true);
@@ -237,10 +232,6 @@ void bad_usb_app_free(BadUsbApp* app) {
 
     furi_string_free(app->file_path);
     furi_string_free(app->keyboard_layout);
-
-    if(app->usb_if_prev) {
-        furi_check(furi_hal_usb_set_config(app->usb_if_prev, NULL));
-    }
 
     free(app);
 }

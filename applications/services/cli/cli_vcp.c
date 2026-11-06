@@ -28,7 +28,9 @@ typedef struct {
         CliVcpMessageTypeDisable,
     } type;
     FuriApiLock api_lock;
-    union {};
+    union {
+        bool* enabled;
+    };
 } CliVcpMessage;
 
 typedef enum {
@@ -175,7 +177,8 @@ static void cli_vcp_message_received(FuriEventLoopObject* object, void* context)
         break;
 
     case CliVcpMessageTypeDisable:
-        if(!cli_vcp->is_enabled) break;
+        *message.enabled = cli_vcp->is_enabled;
+        if(!*message.enabled) break;
         FURI_LOG_D(TAG, "Disabling");
         cli_vcp->is_enabled = false;
 
@@ -183,6 +186,7 @@ static void cli_vcp_message_received(FuriEventLoopObject* object, void* context)
         furi_hal_cdc_set_callbacks(VCP_IF_NUM, NULL, NULL);
         furi_hal_usb_set_config(cli_vcp->previous_interface, NULL);
         break;
+
     }
 
     api_lock_unlock(message.api_lock);
@@ -315,10 +319,13 @@ void cli_vcp_enable(CliVcp* cli_vcp) {
     cli_vcp_synchronous_request(cli_vcp, &message);
 }
 
-void cli_vcp_disable(CliVcp* cli_vcp) {
+bool cli_vcp_disable(CliVcp* cli_vcp) {
     furi_check(cli_vcp);
+    bool was_enabled = false;
     CliVcpMessage message = {
         .type = CliVcpMessageTypeDisable,
+        .enabled = &was_enabled,
     };
     cli_vcp_synchronous_request(cli_vcp, &message);
+    return was_enabled;
 }

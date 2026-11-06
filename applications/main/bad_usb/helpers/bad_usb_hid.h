@@ -20,6 +20,10 @@ typedef struct {
     FuriHalUsbHidConfig usb;
 } BadUsbHidConfig;
 
+/** True when the last USB init could not take the USB port (locked by an RPC session, held by
+ *  USB-Storage or another app's lease). */
+bool bad_usb_hid_usb_is_busy(void);
+
 typedef struct {
     void (*adjust_config)(BadUsbHidConfig* hid_cfg);
     void* (*init)(BadUsbHidConfig* hid_cfg);

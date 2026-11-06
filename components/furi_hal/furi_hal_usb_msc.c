@@ -55,12 +55,14 @@ bool furi_hal_usb_msc_start(void) {
 void furi_hal_usb_msc_stop(void) {
     if(!s_active) return;
     s_active = false;
-    /* Tell the host the medium is gone. The next TEST UNIT READY answers
-     * "not ready" with sense NOT_READY/MEDIUM_NOT_PRESENT, which is the
-     * signal macOS/Linux/Windows interpret as an ejected USB drive. */
-    tud_msc_set_sense(0, SCSI_SENSE_NOT_READY, 0x3A /*MEDIUM NOT PRESENT*/, 0x00);
+    /* The host now sees the medium as gone: with s_active false the next TEST
+     * UNIT READY / READ / WRITE fails and TinyUSB fills the default sense
+     * NOT_READY/MEDIUM_NOT_PRESENT itself (msc_device.c), which hosts treat as
+     * an ejected drive. The sense is deliberately not written from here:
+     * tud_msc_set_sense() is plain state of the TinyUSB task and this runs on
+     * the app task, so a write here could interleave with REQUEST SENSE. */
     s_removal_locked = false;
-    FURI_LOG_I(TAG, "MSC stopped (sense=NOT_READY/MEDIUM_NOT_PRESENT)");
+    FURI_LOG_I(TAG, "MSC stopped (host sees MEDIUM_NOT_PRESENT)");
 }
 
 bool furi_hal_usb_msc_is_active(void) {
