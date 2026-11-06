@@ -414,6 +414,8 @@ void* rpc_system_gui_alloc(RpcSession* session) {
         view_port_set_width(rpc_gui->rpc_session_active_viewport, icon_get_width(rpc_gui->icon));
         view_port_draw_callback_set(
             rpc_gui->rpc_session_active_viewport, rpc_active_session_icon_draw_callback, rpc_gui);
+        view_port_set_statusbar_icon(
+            rpc_gui->rpc_session_active_viewport, ViewPortStatusBarIconRpc);
         gui_add_view_port(
             rpc_gui->gui, rpc_gui->rpc_session_active_viewport, GuiLayerStatusBarLeft);
     }

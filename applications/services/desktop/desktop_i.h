@@ -97,6 +97,9 @@ struct Desktop {
     FuriPubSub* status_pubsub;
     FuriPubSub* input_events_pubsub;
     FuriPubSubSubscription* input_events_subscription;
+    FuriPubSub* input_wake_events_pubsub;
+    FuriPubSubSubscription* input_wake_events_subscription;
+    FuriPubSubSubscription* power_idle_subscription;
 
     FuriTimer* auto_lock_timer;
     FuriTimer* qflipper_resume_timer;
@@ -105,6 +108,7 @@ struct Desktop {
 
     AnimationManager* animation_manager;
     FuriSemaphore* animation_semaphore;
+    bool animation_reload_pending;
 
     DesktopClock clock;
     DesktopSettings settings;
@@ -112,6 +116,7 @@ struct Desktop {
     bool in_transition;
     bool app_running;
     bool locked;
+    bool idle;
 
     /* Mesh-State. Der T-Embed ist immer Master (kein Mode mehr). mesh_pending
      * hält die Daten zum letzten Service-Event, das der Background-Service ans

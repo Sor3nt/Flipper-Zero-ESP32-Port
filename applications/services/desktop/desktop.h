@@ -20,6 +20,10 @@ bool desktop_api_is_locked(Desktop* instance);
 
 void desktop_api_unlock(Desktop* instance);
 
+void desktop_api_reload_animation(Desktop* instance);
+
+void desktop_api_set_loader_menu_active(Desktop* instance, bool active);
+
 FuriPubSub* desktop_api_get_status_pubsub(Desktop* instance);
 
 void desktop_api_get_settings(Desktop* instance, DesktopSettings* settings);

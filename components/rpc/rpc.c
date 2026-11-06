@@ -16,7 +16,9 @@
 #include <flipper.pb.h>
 
 #include <furi.h>
+#include <furi_hal.h>
 #include <esp_log.h>
+#include <momentum_settings.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -88,6 +90,18 @@ struct RpcSession {
 struct Rpc {
     FuriMutex* busy_mutex;
 };
+
+static bool rpc_owner_is_allowed(RpcOwner owner) {
+    if(!furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock)) return true;
+
+    if(owner == RpcOwnerBle) {
+        return momentum_settings_get_bool(MomentumSettingsBoolAllowLockedRpcBle);
+    }
+    if(owner == RpcOwnerUsb) {
+        return momentum_settings_get_bool(MomentumSettingsBoolAllowLockedRpcUsb);
+    }
+    return true;
+}
 
 RpcOwner rpc_session_get_owner(RpcSession* session) {
     furi_check(session);
@@ -264,11 +278,15 @@ static int32_t rpc_session_worker(void* context) {
                 (unsigned long)session->decoded_message->which_content,
                 session->decoded_message->has_next);
 
-            if(handler && handler->message_handler) {
+            const bool owner_allowed = rpc_owner_is_allowed(session->owner);
+            if(handler && handler->message_handler && owner_allowed) {
                 ESP_LOGI(TAG, "Handler found, executing...");
                 furi_check(furi_mutex_acquire(rpc->busy_mutex, FuriWaitForever) == FuriStatusOk);
                 handler->message_handler(session->decoded_message, handler->context);
                 furi_check(furi_mutex_release(rpc->busy_mutex) == FuriStatusOk);
+            } else if(handler && handler->message_handler) {
+                rpc_send_and_release_empty(
+                    session, session->decoded_message->command_id, PB_CommandStatus_ERROR);
             } else if(session->decoded_message->which_content == 0) {
                 ESP_LOGE(TAG, "which_content==0, treating as decode error");
                 message_decode_failed = true;
@@ -352,6 +370,10 @@ static void
 
 RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner) {
     furi_check(rpc);
+
+    if(!rpc_owner_is_allowed(owner)) {
+        return NULL;
+    }
 
     RpcSession* session = malloc(sizeof(RpcSession));
     session->callbacks_mutex = furi_mutex_alloc(FuriMutexTypeNormal);

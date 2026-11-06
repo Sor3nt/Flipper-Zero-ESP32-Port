@@ -7,6 +7,11 @@ typedef enum {
     DesktopUsbStorageStateInit,
     DesktopUsbStorageStateActive,
     DesktopUsbStorageStateError,
+    /* Back was pressed while the host still locks the medium (SCSI PREVENT).
+     * Short Back retries, long Back forces the exit. */
+    DesktopUsbStorageStateEjectFirst,
+    /* The host released the medium after the warning: safe to leave. */
+    DesktopUsbStorageStateEjected,
 } DesktopUsbStorageState;
 
 typedef struct DesktopUsbStorageView DesktopUsbStorageView;

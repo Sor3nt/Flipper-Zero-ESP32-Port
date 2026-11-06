@@ -1,6 +1,26 @@
 #include "furi_hal_rtc.h"
 
+#include <esp_err.h>
+#include <esp_log.h>
+#include <nvs.h>
+
 #include <time.h>
+
+#define TAG "FuriHalRtc"
+
+#define FURI_HAL_RTC_NVS_NAMESPACE "furi_rtc"
+#define FURI_HAL_RTC_NVS_KEY_STATE "registers"
+#define FURI_HAL_RTC_NVS_STATE_MAGIC 0x52544331U
+
+/* The ESP32 port has no battery-backed RTC registers. Preserve the RTC
+ * backup state needed by PIN security and desktop lock behavior in internal
+ * NVS so it survives resets and power loss. */
+typedef struct {
+    uint32_t magic;
+    uint32_t flags;
+    uint32_t pin_fails;
+    uint32_t pin_value;
+} FuriHalRtcPersistentState;
 
 typedef struct {
     FuriHalRtcHeapTrackMode heap_track_mode;
@@ -34,6 +54,61 @@ static FuriHalRtcState furi_hal_rtc = {
     .locale_units = FuriHalRtcLocaleUnitsMetric,
 };
 
+static esp_err_t furi_hal_rtc_persistent_state_open(nvs_handle_t* nvs, nvs_open_mode_t mode) {
+    const esp_err_t err = nvs_open(FURI_HAL_RTC_NVS_NAMESPACE, mode, nvs);
+    if(err != ESP_OK && !(mode == NVS_READONLY && err == ESP_ERR_NVS_NOT_FOUND)) {
+        ESP_LOGE(TAG, "Unable to open persistent RTC state: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+static bool furi_hal_rtc_persistent_state_load(void) {
+    nvs_handle_t nvs;
+    esp_err_t err = furi_hal_rtc_persistent_state_open(&nvs, NVS_READONLY);
+    if(err == ESP_ERR_NVS_NOT_FOUND) return true;
+    if(err != ESP_OK) return false;
+
+    FuriHalRtcPersistentState state = {0};
+    size_t state_size = sizeof(state);
+    err = nvs_get_blob(nvs, FURI_HAL_RTC_NVS_KEY_STATE, &state, &state_size);
+    nvs_close(nvs);
+
+    if(err == ESP_ERR_NVS_NOT_FOUND) return true;
+    if(err != ESP_OK || state_size != sizeof(state) ||
+       state.magic != FURI_HAL_RTC_NVS_STATE_MAGIC) {
+        ESP_LOGE(TAG, "RTC state in NVS is unreadable or has an invalid format");
+        return false;
+    }
+
+    furi_hal_rtc.flags = state.flags;
+    furi_hal_rtc.pin_fails = state.pin_fails;
+    furi_hal_rtc.pin_value = state.pin_value;
+    return true;
+}
+
+static bool furi_hal_rtc_persistent_state_save(void) {
+    nvs_handle_t nvs;
+    if(furi_hal_rtc_persistent_state_open(&nvs, NVS_READWRITE) != ESP_OK) return false;
+
+    const FuriHalRtcPersistentState state = {
+        .magic = FURI_HAL_RTC_NVS_STATE_MAGIC,
+        .flags = furi_hal_rtc.flags,
+        .pin_fails = furi_hal_rtc.pin_fails,
+        .pin_value = furi_hal_rtc.pin_value,
+    };
+
+    esp_err_t err = nvs_set_blob(nvs, FURI_HAL_RTC_NVS_KEY_STATE, &state, sizeof(state));
+    if(err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "Unable to persist RTC state in NVS: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    return true;
+}
+
 static time_t furi_hal_rtc_now(void) {
     return time(NULL) + (time_t)furi_hal_rtc.time_offset;
 }
@@ -45,6 +120,7 @@ void furi_hal_rtc_deinit_early(void) {
 }
 
 void furi_hal_rtc_init(void) {
+    furi_hal_rtc_persistent_state_load();
 }
 
 void furi_hal_rtc_prepare_for_shutdown(void) {
@@ -59,6 +135,7 @@ void furi_hal_rtc_reset_registers(void) {
     furi_hal_rtc.pin_fails = 0;
     furi_hal_rtc.pin_value = 0;
     furi_hal_rtc.boot_mode = FuriHalRtcBootModeNormal;
+    furi_hal_rtc_persistent_state_save();
 }
 
 void furi_hal_rtc_set_log_level(uint8_t level) {
@@ -94,15 +171,26 @@ uint32_t furi_hal_rtc_get_fault_data(void) {
 }
 
 void furi_hal_rtc_set_pin_fails(uint32_t value) {
+    if(furi_hal_rtc.pin_fails == value) return;
     furi_hal_rtc.pin_fails = value;
+    furi_hal_rtc_persistent_state_save();
 }
 
 uint32_t furi_hal_rtc_get_pin_fails(void) {
     return furi_hal_rtc.pin_fails;
 }
 
-void furi_hal_rtc_set_pin_value(uint32_t value) {
+bool furi_hal_rtc_set_pin_value(uint32_t value) {
+    if(furi_hal_rtc.pin_value == value) return true;
+
+    const uint32_t previous = furi_hal_rtc.pin_value;
     furi_hal_rtc.pin_value = value;
+    if(!furi_hal_rtc_persistent_state_save()) {
+        furi_hal_rtc.pin_value = previous;
+        return false;
+    }
+
+    return true;
 }
 
 uint32_t furi_hal_rtc_get_pin_value(void) {
@@ -114,11 +202,15 @@ bool furi_hal_rtc_is_flag_set(FuriHalRtcFlag flag) {
 }
 
 void furi_hal_rtc_set_flag(FuriHalRtcFlag flag) {
+    const uint32_t previous = furi_hal_rtc.flags;
     furi_hal_rtc.flags |= flag;
+    if(furi_hal_rtc.flags != previous) furi_hal_rtc_persistent_state_save();
 }
 
 void furi_hal_rtc_reset_flag(FuriHalRtcFlag flag) {
+    const uint32_t previous = furi_hal_rtc.flags;
     furi_hal_rtc.flags &= ~flag;
+    if(furi_hal_rtc.flags != previous) furi_hal_rtc_persistent_state_save();
 }
 
 FuriHalRtcBootMode furi_hal_rtc_get_boot_mode(void) {

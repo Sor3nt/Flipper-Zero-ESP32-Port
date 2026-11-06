@@ -13,9 +13,9 @@ typedef struct {
 
 bool desktop_pin_code_is_set(void);
 
-void desktop_pin_code_set(const DesktopPinCode* pin_code);
+bool desktop_pin_code_set(const DesktopPinCode* pin_code);
 
-void desktop_pin_code_reset(void);
+bool desktop_pin_code_reset(void);
 
 bool desktop_pin_code_check(const DesktopPinCode* pin_code);
 

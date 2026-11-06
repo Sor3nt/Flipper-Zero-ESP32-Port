@@ -27,6 +27,7 @@
  */
 
 #include "qflipper_bridge.h"
+#include <momentum_settings.h>
 
 #include <furi.h>
 #include <furi_hal.h>
@@ -42,6 +43,7 @@
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
 #include "furi_hal_usb_tinyusb_composite.h"
+#include "furi_hal_usb_msc.h"
 #define QFLIPPER_HAVE_COMPOSITE 1
 #else
 #define QFLIPPER_HAVE_COMPOSITE 0
@@ -75,7 +77,7 @@ typedef struct {
     bool session_open;    /* RPC session active */
     bool rpc_mode;        /* false = CLI handshake, true = piping protobuf */
     bool auto_off_armed;  /* host was connected and dropped DTR — grace period running */
-    volatile bool exiting; /* stop() requested — bail out of any blocking loop */
+    bool exiting; /* stop() requested — bail out of any blocking loop */
 
     /* CLI handshake line buffer (qFlipper sends "start_rpc_session\r") */
     char cli_buf[64];
@@ -136,6 +138,8 @@ static CdcCallbacks usb_rpc_cdc_callbacks = {
     .config_callback = NULL,
 };
 
+static bool qflipper_bridge_is_exiting(const UsbRpcSrv* srv);
+
 /* ─────────────────────────────────────────────────────────────────────
  * RPC -> CDC (outbound)
  * ───────────────────────────────────────────────────────────────────── */
@@ -177,6 +181,19 @@ static void usb_rpc_session_close(UsbRpcSrv* srv) {
     FURI_LOG_I(TAG, "RPC session closed");
 }
 
+static size_t usb_rpc_feed(RpcSession* session, const uint8_t* data, size_t length, UsbRpcSrv* srv) {
+    size_t total_fed = 0;
+    while(total_fed < length && !qflipper_bridge_is_exiting(srv)) {
+        size_t fed = rpc_session_feed(
+            session,
+            data + total_fed,
+            length - total_fed,
+            furi_ms_to_ticks(20));
+        total_fed += fed;
+    }
+    return total_fed;
+}
+
 static void usb_rpc_drain_rx(UsbRpcSrv* srv) {
     if(!srv->session_open) {
         uint8_t scratch[64];
@@ -190,11 +207,11 @@ static void usb_rpc_drain_rx(UsbRpcSrv* srv) {
      * wait here so the TinyUSB RX FIFO fills up and USB-NAKs the host — the only
      * flow-control mechanism over USB-CDC. */
     while(true) {
-        if(srv->exiting) return;
+        if(qflipper_bridge_is_exiting(srv)) return;
         size_t avail = rpc_session_get_available_size(srv->session);
         if(avail == 0) {
             furi_delay_ms(1);
-            if(!srv->session_open || srv->exiting) return;
+            if(!srv->session_open || qflipper_bridge_is_exiting(srv)) return;
             continue;
         }
 
@@ -204,9 +221,11 @@ static void usb_rpc_drain_rx(UsbRpcSrv* srv) {
             break;
         }
 
-        size_t fed = rpc_session_feed(srv->session, srv->rx_buf, (size_t)got, FuriWaitForever);
+        size_t fed = usb_rpc_feed(srv->session, srv->rx_buf, (size_t)got, srv);
         if(fed != (size_t)got) {
-            FURI_LOG_E(TAG, "rpc_session_feed underran: %zu/%ld", fed, got);
+            if(!qflipper_bridge_is_exiting(srv)) {
+                FURI_LOG_E(TAG, "rpc_session_feed underran: %zu/%ld", fed, got);
+            }
             break;
         }
     }
@@ -246,8 +265,8 @@ static void qflipper_cli_rx(UsbRpcSrv* srv) {
                     usb_rpc_session_open(srv);
 
                     if(srv->session_open && (i + 1) < got) {
-                        rpc_session_feed(
-                            srv->session, &buf[i + 1], (size_t)(got - i - 1), FuriWaitForever);
+                        usb_rpc_feed(
+                            srv->session, &buf[i + 1], (size_t)(got - i - 1), srv);
                     }
                     return;
                 }
@@ -274,7 +293,7 @@ static void qflipper_bridge_run(UsbRpcSrv* srv) {
                                               FuriWaitForever;
         FuriStatus st = furi_message_queue_get(srv->event_q, &ev, wait);
         if(st == FuriStatusErrorTimeout) {
-            if(srv->auto_off_armed && !srv->connected && !srv->exiting) {
+            if(srv->auto_off_armed && !srv->connected && !qflipper_bridge_is_exiting(srv)) {
                 srv->auto_off_armed = false;
                 FURI_LOG_I(TAG, "host gone for %u ms — leaving qFlipper mode", (unsigned)QFLIPPER_BRIDGE_AUTO_OFF_MS);
                 if(s_auto_off_cb) s_auto_off_cb(s_auto_off_ctx);
@@ -339,14 +358,102 @@ static int32_t qflipper_bridge_thread(void* ctx) {
  * Public API
  * ───────────────────────────────────────────────────────────────────── */
 
-bool qflipper_bridge_start(void) {
-#if !QFLIPPER_HAVE_COMPOSITE
-    return false;
-#else
+#if QFLIPPER_HAVE_COMPOSITE
+static FuriMutex* s_bridge_mutex;
+static bool s_resume_after_u2f;
+
+static bool qflipper_bridge_lock(void) {
+    static uint32_t mutex_init_state;
+    while(__atomic_load_n(&mutex_init_state, __ATOMIC_ACQUIRE) != 2) {
+        uint32_t expected = 0;
+        if(__atomic_compare_exchange_n(
+               &mutex_init_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            s_bridge_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+            if(!s_bridge_mutex) {
+                __atomic_store_n(&mutex_init_state, 0, __ATOMIC_RELEASE);
+                FURI_LOG_E(TAG, "Cannot allocate qFlipper bridge mutex");
+                return false;
+            }
+            __atomic_store_n(&mutex_init_state, 2, __ATOMIC_RELEASE);
+            break;
+        }
+        furi_delay_ms(1);
+    }
+    furi_mutex_acquire(s_bridge_mutex, FuriWaitForever);
+    return true;
+}
+
+static bool qflipper_bridge_is_exiting(const UsbRpcSrv* srv) {
+    return __atomic_load_n(&srv->exiting, __ATOMIC_ACQUIRE);
+}
+
+static void qflipper_bridge_request_exit(UsbRpcSrv* srv) {
+    __atomic_store_n(&srv->exiting, true, __ATOMIC_RELEASE);
+}
+
+static bool qflipper_bridge_start_locked(void);
+static void qflipper_bridge_stop_locked(void);
+
+static bool qflipper_bridge_u2f_preemption(bool acquire, void* context) {
+    UNUSED(context);
+
+    if(!qflipper_bridge_lock()) return false;
+
+    bool result = true;
+    if(acquire) {
+        if(!s_bridge || furi_hal_usb_msc_is_active()) {
+            result = false;
+        } else {
+            qflipper_bridge_stop_locked();
+            if(!furi_hal_usb_composite_uninstall()) {
+                FURI_LOG_E(TAG, "Cannot release qFlipper USB for U2F");
+                if(!qflipper_bridge_start_locked()) {
+                    FURI_LOG_E(TAG, "Failed to restore qFlipper after USB handoff failure");
+                }
+                result = false;
+            } else {
+                s_resume_after_u2f = true;
+            }
+        }
+    } else if(s_resume_after_u2f) {
+        s_resume_after_u2f = false;
+        if(!qflipper_bridge_start_locked()) {
+            FURI_LOG_E(TAG, "Failed to resume qFlipper after U2F released USB");
+            result = false;
+        }
+    }
+
+    furi_mutex_release(s_bridge_mutex);
+    return result;
+}
+
+static bool qflipper_bridge_start_locked(void) {
+    if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock) &&
+       !momentum_settings_get_bool(MomentumSettingsBoolAllowLockedRpcUsb)) {
+        FURI_LOG_W(TAG, "USB RPC bridge is disabled while locked");
+        return false;
+    }
     if(s_bridge) return true; /* already active */
+    /* USB-Storage owns the composite while MSC exposes the SD card. Starting
+     * here would call furi_hal_usb_reinit() and force a re-enumeration in the
+     * middle of host writes (e.g. the OTA-resume timer firing during MSC).
+     * Same rule as the U2F preemption path, which also refuses during MSC. */
+    if(furi_hal_usb_msc_is_active()) {
+        FURI_LOG_W(TAG, "USB-Storage is active; not starting the qFlipper bridge");
+        return false;
+    }
 
     UsbRpcSrv* srv = malloc(sizeof(UsbRpcSrv));
+    if(!srv) {
+        FURI_LOG_E(TAG, "Cannot allocate qFlipper bridge state");
+        return false;
+    }
     srv->event_q = furi_message_queue_alloc(16, sizeof(UsbRpcEvent));
+    if(!srv->event_q) {
+        FURI_LOG_E(TAG, "Cannot allocate qFlipper bridge event queue");
+        free(srv);
+        return false;
+    }
     srv->session = NULL;
     srv->connected = false;
     srv->session_open = false;
@@ -356,11 +463,22 @@ bool qflipper_bridge_start(void) {
     srv->cli_len = 0;
 
     srv->rpc = furi_record_open(RECORD_RPC);
+    furi_check(srv->rpc);
+
+    srv->thread = furi_thread_alloc_ex("QflipperBridge", 8192, qflipper_bridge_thread, srv);
+    if(!srv->thread) {
+        FURI_LOG_E(TAG, "Cannot allocate qFlipper bridge thread");
+        furi_record_close(RECORD_RPC);
+        furi_message_queue_free(srv->event_q);
+        free(srv);
+        return false;
+    }
 
     /* Install the composite as a real Flipper Zero (0483:5740). Idempotent if
      * another consumer (USB-Storage) already installed it. */
     if(!furi_hal_usb_composite_install(0, 0, NULL, NULL)) {
         FURI_LOG_E(TAG, "composite_install failed");
+        furi_thread_free(srv->thread);
         furi_record_close(RECORD_RPC);
         furi_message_queue_free(srv->event_q);
         free(srv);
@@ -371,23 +489,22 @@ bool qflipper_bridge_start(void) {
      * state, so if DTR is already high this seeds a Connected event into the
      * queue (drained once the thread starts). */
     furi_hal_cdc_set_callbacks(USB_RPC_CDC_ITF, &usb_rpc_cdc_callbacks, srv);
+    furi_hal_usb_reinit();
 
-    srv->thread = furi_thread_alloc_ex("QflipperBridge", 8192, qflipper_bridge_thread, srv);
     s_bridge = srv;
+    furi_hal_usb_set_u2f_preemption_callback(qflipper_bridge_u2f_preemption, NULL);
     furi_thread_start(srv->thread);
 
     return true;
-#endif
 }
 
-void qflipper_bridge_stop(void) {
-#if QFLIPPER_HAVE_COMPOSITE
+static void qflipper_bridge_stop_locked(void) {
     UsbRpcSrv* srv = s_bridge;
     if(!srv) return;
     s_bridge = NULL;
 
     /* Wake the loop out of any blocking RX drain, then ask it to exit. */
-    srv->exiting = true;
+    qflipper_bridge_request_exit(srv);
     UsbRpcEvent ev = UsbRpcEventExit;
     furi_message_queue_put(srv->event_q, &ev, FuriWaitForever);
 
@@ -405,11 +522,52 @@ void qflipper_bridge_stop(void) {
 
     furi_message_queue_free(srv->event_q);
     free(srv);
+}
+#endif
+
+bool qflipper_bridge_start(void) {
+#if !QFLIPPER_HAVE_COMPOSITE
+    return false;
+#else
+    /* Lock order is always USB HAL mutex -> bridge mutex. A USB lease or U2F
+     * switch holds the USB mutex while it calls qflipper_bridge_u2f_preemption(),
+     * which then takes the bridge mutex. start_locked() needs the USB mutex too
+     * (composite install, reinit, callback registration); taking it here first
+     * keeps both paths in the same order instead of bridge -> USB, which could
+     * deadlock against a concurrent lease. The USB mutex is recursive, so the
+     * nested HAL calls inside start_locked() re-enter it. Not used by stop():
+     * stop_locked() joins the bridge thread and takes no USB mutex. */
+    if(!furi_hal_usb_operation_start(NULL)) {
+        FURI_LOG_W(TAG, "USB is leased or locked; not starting the qFlipper bridge");
+        return false;
+    }
+    bool result = false;
+    if(qflipper_bridge_lock()) {
+        result = qflipper_bridge_start_locked();
+        furi_mutex_release(s_bridge_mutex);
+    }
+    furi_hal_usb_operation_finish();
+    return result;
+#endif
+}
+
+void qflipper_bridge_stop(void) {
+#if QFLIPPER_HAVE_COMPOSITE
+    if(!qflipper_bridge_lock()) return;
+    qflipper_bridge_stop_locked();
+    furi_mutex_release(s_bridge_mutex);
 #endif
 }
 
 bool qflipper_bridge_is_active(void) {
+#if QFLIPPER_HAVE_COMPOSITE
+    if(!qflipper_bridge_lock()) return false;
+    bool active = s_bridge != NULL;
+    furi_mutex_release(s_bridge_mutex);
+    return active;
+#else
     return s_bridge != NULL;
+#endif
 }
 
 void qflipper_bridge_set_auto_off_callback(QflipperBridgeAutoOffCallback callback, void* context) {

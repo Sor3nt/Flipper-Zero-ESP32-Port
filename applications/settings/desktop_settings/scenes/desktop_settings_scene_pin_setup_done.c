@@ -20,22 +20,30 @@ static void pin_setup_done_callback(const DesktopPinCode* pin_code, void* contex
 
 void desktop_settings_scene_pin_setup_done_on_enter(void* context) {
     DesktopSettingsApp* app = context;
+    const bool pin_saved = desktop_pin_code_set(&app->pincode_buffer);
 
-    desktop_pin_code_set(&app->pincode_buffer);
-
-    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
-    notification_message(notification, &sequence_single_vibro);
-    notification_message(notification, &sequence_blink_green_10);
-    furi_record_close(RECORD_NOTIFICATION);
+    if(pin_saved) {
+        NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+        notification_message(notification, &sequence_single_vibro);
+        notification_message(notification, &sequence_blink_green_10);
+        furi_record_close(RECORD_NOTIFICATION);
+    }
 
     desktop_view_pin_input_set_context(app->pin_input_view, app);
     desktop_view_pin_input_set_back_callback(app->pin_input_view, NULL);
     desktop_view_pin_input_set_done_callback(app->pin_input_view, pin_setup_done_callback);
     desktop_view_pin_input_set_pin(app->pin_input_view, &app->pincode_buffer);
-    desktop_view_pin_input_set_label_button(app->pin_input_view, "Done");
-    desktop_view_pin_input_set_label_primary(app->pin_input_view, 29, 8, "PIN Activated!");
-    desktop_view_pin_input_set_label_secondary(
-        app->pin_input_view, 7, 45, "Remember or write it down");
+    if(pin_saved) {
+        desktop_view_pin_input_set_label_button(app->pin_input_view, "Done");
+        desktop_view_pin_input_set_label_primary(app->pin_input_view, 29, 8, "PIN Activated!");
+        desktop_view_pin_input_set_label_secondary(
+            app->pin_input_view, 7, 45, "Remember or write it down");
+    } else {
+        desktop_view_pin_input_set_label_button(app->pin_input_view, "Back");
+        desktop_view_pin_input_set_label_primary(app->pin_input_view, 22, 8, "PIN not saved!");
+        desktop_view_pin_input_set_label_secondary(
+            app->pin_input_view, 7, 45, "Internal storage error");
+    }
     desktop_view_pin_input_lock_input(app->pin_input_view);
     desktop_view_pin_input_set_pin_position(app->pin_input_view, 64, 24);
     view_dispatcher_switch_to_view(app->view_dispatcher, DesktopSettingsAppViewIdPinInput);

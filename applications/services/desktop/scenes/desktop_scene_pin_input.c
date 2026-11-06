@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <notification/notification.h>
 #include <notification/notification_messages.h>
+#include <storage/storage.h>
+#include <power/power_service/power.h>
+#include <momentum_settings.h>
 
 #include "../desktop.h"
 #include "../desktop_i.h"
@@ -56,8 +59,22 @@ static void desktop_scene_pin_input_done_callback(const DesktopPinCode* pin_code
         view_dispatcher_send_custom_event(desktop->view_dispatcher, DesktopPinInputEventUnlocked);
 
     } else {
-        uint32_t pin_fails = furi_hal_rtc_get_pin_fails();
-        furi_hal_rtc_set_pin_fails(pin_fails + 1);
+        uint32_t pin_fails = furi_hal_rtc_get_pin_fails() + 1;
+        if(pin_fails >= 10 &&
+           momentum_settings_get_bool(MomentumSettingsBoolBadPinsFormat)) {
+            Storage* storage = furi_record_open(RECORD_STORAGE);
+            FS_Error error = storage_sd_format(storage);
+            furi_record_close(RECORD_STORAGE);
+            if(error == FSE_OK) {
+                furi_hal_rtc_reset_registers();
+                Power* power = furi_record_open(RECORD_POWER);
+                power_reboot(power, PowerBootModeNormal);
+                furi_record_close(RECORD_POWER);
+            } else {
+                FURI_LOG_E("Desktop", "Failed to format SD card after bad PINs: %d", error);
+            }
+        }
+        furi_hal_rtc_set_pin_fails(pin_fails);
         view_dispatcher_send_custom_event(
             desktop->view_dispatcher, DesktopPinInputEventUnlockFailed);
     }

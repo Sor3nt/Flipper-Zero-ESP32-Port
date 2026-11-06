@@ -26,6 +26,7 @@ typedef enum {
     DesktopLockedEventUpdate,
     DesktopLockedEventShowPinInput,
     DesktopLockedEventDoorsClosed,
+    DesktopLockedEventOpenPowerOff,
 
     DesktopPinInputEventResetWrongPinLabel,
     DesktopPinInputEventUnlocked,
@@ -69,6 +70,7 @@ typedef enum {
     DesktopMeshHandshakeEventBack,
 
     DesktopUsbStorageEventExit,
+    DesktopUsbStorageEventForceExit, /* long Back on the "eject first" warning */
 
     /* Phase-1 Mesh-Events: gefeuert vom Mesh-Service (sowohl Master- als auch
      * Client-Service) und im jeweils zuständigen Scene-Handler verarbeitet.
@@ -109,4 +111,9 @@ typedef enum {
     DesktopGlobalApiUnlock,
     DesktopGlobalSaveSettings,
     DesktopGlobalReloadSettings,
+    DesktopGlobalReloadAnimation,
+    DesktopGlobalLoaderMenuEnter,
+    DesktopGlobalLoaderMenuExit,
+    DesktopGlobalIdleEnter,
+    DesktopGlobalIdleExit,
 } DesktopEvent;

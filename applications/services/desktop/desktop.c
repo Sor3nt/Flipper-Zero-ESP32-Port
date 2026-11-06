@@ -6,6 +6,8 @@
 #include <cli/cli_vcp.h>
 
 #include <gui/gui_i.h>
+#include <gui/modules/menu.h>
+#include <momentum_settings.h>
 
 #include <locale/locale.h>
 #include <storage/storage.h>
@@ -130,6 +132,33 @@ static void desktop_start_auto_lock_timer(Desktop*);
 static void desktop_qflipper_resume_timer_callback(void* context);
 static void desktop_qflipper_usj_timer_callback(void* context);
 static void desktop_apply_settings(Desktop*);
+static void desktop_clock_reconfigure(Desktop* desktop);
+static void desktop_power_idle_callback(const void* message, void* context);
+
+static void desktop_set_idle(Desktop* desktop, bool idle) {
+    if(desktop->idle == idle) return;
+    desktop->idle = idle;
+    animation_manager_set_pause_reason(
+        desktop->animation_manager, AnimationManagerPauseReasonPowerIdle, idle);
+    if(idle) {
+        furi_timer_stop(desktop->qflipper_usj_timer);
+        furi_timer_stop(desktop->update_clock_timer);
+    } else {
+        furi_timer_start(desktop->qflipper_usj_timer, furi_ms_to_ticks(QFLIPPER_USJ_POLL_MS));
+        desktop_clock_reconfigure(desktop);
+    }
+}
+
+static void desktop_power_idle_callback(const void* message, void* context) {
+    furi_assert(message);
+    Desktop* desktop = context;
+    const FuriHalPowerIdleEvent* event = message;
+    if(!view_dispatcher_send_custom_event_nonblocking(
+           desktop->view_dispatcher,
+           event->idle ? DesktopGlobalIdleEnter : DesktopGlobalIdleExit)) {
+        FURI_LOG_W(TAG, "Display idle event queue full; desktop tick will reconcile");
+    }
+}
 
 static void desktop_loader_callback(const void* message, void* context) {
     furi_assert(context);
@@ -192,7 +221,7 @@ static void desktop_clock_reconfigure(Desktop* desktop) {
 
     desktop_clock_update(desktop);
 
-    if(desktop->settings.display_clock) {
+    if(desktop->settings.display_clock && !desktop->idle) {
         furi_timer_start(desktop->update_clock_timer, furi_ms_to_ticks(1000));
     } else {
         furi_timer_stop(desktop->update_clock_timer);
@@ -244,6 +273,8 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
     Desktop* desktop = (Desktop*)context;
 
     if(event == DesktopGlobalBeforeAppStarted) {
+        animation_manager_set_pause_reason(
+            desktop->animation_manager, AnimationManagerPauseReasonApp, true);
         if(animation_manager_is_animation_loaded(desktop->animation_manager)) {
             animation_manager_unload_and_stall_animation(desktop->animation_manager);
         }
@@ -263,9 +294,24 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         furi_semaphore_release(desktop->animation_semaphore);
 
     } else if(event == DesktopGlobalAfterAppFinished) {
-        animation_manager_load_and_continue_animation(desktop->animation_manager);
+        /* A Graphics change (asset pack / anim speed) made while the app ran: start a fresh
+         * animation directly instead of restoring the old one first and swapping it later. */
+        const bool reload =
+            __atomic_exchange_n(&desktop->animation_reload_pending, false, __ATOMIC_ACQ_REL);
+        animation_manager_load_and_continue_animation_ex(desktop->animation_manager, reload);
+        animation_manager_set_pause_reason(
+            desktop->animation_manager, AnimationManagerPauseReasonApp, false);
         desktop_auto_lock_arm(desktop);
         desktop->app_running = false;
+
+    } else if(event == DesktopGlobalIdleEnter || event == DesktopGlobalIdleExit) {
+        desktop_set_idle(desktop, furi_hal_power_is_idle());
+
+    } else if(event == DesktopGlobalLoaderMenuEnter || event == DesktopGlobalLoaderMenuExit) {
+        animation_manager_set_pause_reason(
+            desktop->animation_manager,
+            AnimationManagerPauseReasonLoaderMenu,
+            event == DesktopGlobalLoaderMenuEnter);
 
     } else if(event == DesktopGlobalAutoLock) {
         if(!desktop->app_running && !desktop->locked) {
@@ -283,6 +329,12 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
     } else if(event == DesktopGlobalReloadSettings) {
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
+
+    } else if(event == DesktopGlobalReloadAnimation) {
+        if(!desktop->app_running &&
+           __atomic_exchange_n(&desktop->animation_reload_pending, false, __ATOMIC_ACQ_REL)) {
+            animation_manager_reload_idle_animation(desktop->animation_manager);
+        }
 
     } else if(event == DesktopMeshEventClientPairRequest) {
         /* Auch im Lock-Menü/anderen Scenes Pair-Confirm zeigen. Push eine neue
@@ -345,6 +397,7 @@ static bool desktop_back_event_callback(void* context) {
 static void desktop_tick_event_callback(void* context) {
     furi_assert(context);
     Desktop* app = context;
+    desktop_set_idle(app, furi_hal_power_is_idle());
     scene_manager_handle_tick_event(app->scene_manager);
 }
 
@@ -402,6 +455,10 @@ static void desktop_auto_lock_arm(Desktop* desktop) {
             desktop->input_events_subscription = furi_pubsub_subscribe(
                 desktop->input_events_pubsub, desktop_input_event_callback, desktop);
         }
+        if(!desktop->input_wake_events_subscription) {
+            desktop->input_wake_events_subscription = furi_pubsub_subscribe(
+                desktop->input_wake_events_pubsub, desktop_input_event_callback, desktop);
+        }
         desktop_start_auto_lock_timer(desktop);
     }
 }
@@ -411,6 +468,11 @@ static void desktop_auto_lock_inhibit(Desktop* desktop) {
     if(desktop->input_events_subscription) {
         furi_pubsub_unsubscribe(desktop->input_events_pubsub, desktop->input_events_subscription);
         desktop->input_events_subscription = NULL;
+    }
+    if(desktop->input_wake_events_subscription) {
+        furi_pubsub_unsubscribe(
+            desktop->input_wake_events_pubsub, desktop->input_wake_events_subscription);
+        desktop->input_wake_events_subscription = NULL;
     }
 }
 
@@ -430,6 +492,8 @@ static void desktop_clock_timer_callback(void* context) {
 static void desktop_apply_settings(Desktop* desktop) {
     desktop->in_transition = true;
 
+    gui_set_status_bar_background(
+        desktop->gui, desktop->settings.display_status_bar_background != 0);
     desktop_clock_reconfigure(desktop);
 
     // Dummy mode disabled on ESP32 port — always use normal mode
@@ -445,17 +509,31 @@ static void desktop_apply_settings(Desktop* desktop) {
 static void desktop_init_settings(Desktop* desktop) {
     furi_pubsub_subscribe(storage_get_pubsub(desktop->storage), desktop_storage_callback, desktop);
 
+    momentum_settings_load();
+    lock_screen_get_style();
+    desktop_settings_load(&desktop->settings);
+    gui_set_status_bar_background(
+        desktop->gui, desktop->settings.display_status_bar_background != 0);
+
     if(storage_sd_status(desktop->storage) != FSE_OK) {
         FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
         return;
     }
 
-    desktop_settings_load(&desktop->settings);
     desktop_apply_settings(desktop);
 }
 
 static Desktop* desktop_alloc(void) {
     Desktop* desktop = malloc(sizeof(Desktop));
+    desktop->animation_reload_pending = false;
+    desktop->idle = false;
+    desktop->input_events_subscription = NULL;
+    desktop->input_wake_events_subscription = NULL;
+
+    /* Load interface settings (asset pack, anim speed, cycle, unlock anims)
+     * before the animation manager picks the first idle animation; otherwise
+     * the first animation after boot ignores the selected asset pack. */
+    momentum_settings_load();
 
     desktop->animation_semaphore = furi_semaphore_alloc(1, 0);
     desktop->animation_manager = animation_manager_alloc();
@@ -601,6 +679,7 @@ static Desktop* desktop_alloc(void) {
     desktop->storage = furi_record_open(RECORD_STORAGE);
     desktop->notification = furi_record_open(RECORD_NOTIFICATION);
     desktop->input_events_pubsub = furi_record_open(RECORD_INPUT_EVENTS);
+    desktop->input_wake_events_pubsub = furi_record_open(RECORD_INPUT_WAKE_EVENTS);
 
     desktop->auto_lock_timer =
         furi_timer_alloc(desktop_auto_lock_timer_callback, FuriTimerTypeOnce, desktop);
@@ -615,7 +694,20 @@ static Desktop* desktop_alloc(void) {
     desktop->update_clock_timer =
         furi_timer_alloc(desktop_clock_timer_callback, FuriTimerTypePeriodic, desktop);
 
+    FuriPubSub* idle_pubsub = furi_hal_power_get_idle_pubsub();
+    if(idle_pubsub) {
+        desktop->power_idle_subscription =
+            furi_pubsub_subscribe(idle_pubsub, desktop_power_idle_callback, desktop);
+        if(furi_hal_power_is_idle()) {
+            desktop_set_idle(desktop, true);
+        }
+    }
+
     desktop->app_running = loader_is_locked(desktop->loader);
+    if(desktop->app_running) {
+        animation_manager_set_pause_reason(
+            desktop->animation_manager, AnimationManagerPauseReasonApp, true);
+    }
 
     furi_record_create(RECORD_DESKTOP, desktop);
 
@@ -629,14 +721,19 @@ static Desktop* desktop_alloc(void) {
 void desktop_lock(Desktop* desktop) {
     furi_assert(!desktop->locked);
 
-    furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    const bool with_pin = desktop_pin_code_is_set();
+    if(with_pin) {
+        furi_hal_rtc_set_flag(FuriHalRtcFlagLock);
+    } else {
+        furi_hal_rtc_reset_flag(FuriHalRtcFlagLock);
+    }
 
-    if(desktop_pin_code_is_set()) {
+    if(with_pin && !momentum_settings_get_bool(MomentumSettingsBoolAllowLockedRpcUsb)) {
+        qflipper_bridge_stop();
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_disable(cli_vcp);
         furi_record_close(RECORD_CLI_VCP);
     }
-
     desktop_auto_lock_inhibit(desktop);
     scene_manager_set_scene_state(
         desktop->scene_manager, DesktopSceneLocked, DesktopSceneLockedStateFirstEnter);
@@ -658,10 +755,11 @@ void desktop_unlock(Desktop* desktop) {
     desktop_view_locked_unlock(desktop->locked_view);
     scene_manager_search_and_switch_to_previous_scene(desktop->scene_manager, DesktopSceneMain);
     desktop_auto_lock_arm(desktop);
+    const bool was_pin_locked = furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock);
     furi_hal_rtc_reset_flag(FuriHalRtcFlagLock);
     furi_hal_rtc_set_pin_fails(0);
 
-    if(desktop_pin_code_is_set()) {
+    if(was_pin_locked && !momentum_settings_get_bool(MomentumSettingsBoolAllowLockedRpcUsb)) {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
         cli_vcp_enable(cli_vcp);
         furi_record_close(RECORD_CLI_VCP);
@@ -705,6 +803,19 @@ bool desktop_api_is_locked(Desktop* instance) {
 void desktop_api_unlock(Desktop* instance) {
     furi_assert(instance);
     view_dispatcher_send_custom_event(instance->view_dispatcher, DesktopGlobalApiUnlock);
+}
+
+void desktop_api_reload_animation(Desktop* instance) {
+    furi_assert(instance);
+    if(__atomic_exchange_n(&instance->animation_reload_pending, true, __ATOMIC_ACQ_REL)) return;
+    view_dispatcher_send_custom_event(instance->view_dispatcher, DesktopGlobalReloadAnimation);
+}
+
+void desktop_api_set_loader_menu_active(Desktop* instance, bool active) {
+    furi_assert(instance);
+    view_dispatcher_send_custom_event(
+        instance->view_dispatcher,
+        active ? DesktopGlobalLoaderMenuEnter : DesktopGlobalLoaderMenuExit);
 }
 
 FuriPubSub* desktop_api_get_status_pubsub(Desktop* instance) {
@@ -755,7 +866,9 @@ int32_t desktop_srv(void* p) {
 
     scene_manager_next_scene(desktop->scene_manager, DesktopSceneMain);
 
-    if(desktop_pin_code_is_set()) {
+    if(desktop_pin_code_is_set() &&
+       (momentum_settings_get_bool(MomentumSettingsBoolLockOnBoot) ||
+        furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock))) {
         desktop_lock(desktop);
     } else {
         CliVcp* cli_vcp = furi_record_open(RECORD_CLI_VCP);
@@ -807,7 +920,9 @@ int32_t desktop_srv(void* p) {
 
     /* qT-Embed kann die Bridge ueber die USB-Serial-JTAG-Konsole anfordern
      * ("qflipper\n"), siehe helpers/qflipper_usj_cmd.h. */
-    furi_timer_start(desktop->qflipper_usj_timer, furi_ms_to_ticks(QFLIPPER_USJ_POLL_MS));
+    if(!desktop->idle) {
+        furi_timer_start(desktop->qflipper_usj_timer, furi_ms_to_ticks(QFLIPPER_USJ_POLL_MS));
+    }
 
     view_dispatcher_run(desktop->view_dispatcher);
 

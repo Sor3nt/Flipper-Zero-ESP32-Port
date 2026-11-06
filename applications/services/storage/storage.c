@@ -48,6 +48,7 @@ Storage* storage_app_alloc(void) {
     app->sd_gui.view_port = view_port_alloc();
     view_port_set_width(app->sd_gui.view_port, icon_get_width(ICON_SD_MOUNTED));
     view_port_draw_callback_set(app->sd_gui.view_port, storage_app_sd_icon_draw_callback, app);
+    view_port_set_statusbar_icon(app->sd_gui.view_port, ViewPortStatusBarIconSdCard);
     view_port_enabled_set(app->sd_gui.view_port, app->sd_gui.enabled);
 
     Gui* gui = furi_record_open(RECORD_GUI);

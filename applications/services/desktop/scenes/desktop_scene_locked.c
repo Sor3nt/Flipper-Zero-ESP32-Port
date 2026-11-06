@@ -10,6 +10,7 @@
 #include "../animations/animation_manager.h"
 #include "../views/desktop_events.h"
 #include "../views/desktop_view_locked.h"
+#include <momentum_settings.h>
 #include "desktop_scene.h"
 #include "desktop_scene_locked.h"
 
@@ -79,19 +80,26 @@ bool desktop_scene_locked_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
+        case DesktopLockedEventOpenPowerOff:
+            if(momentum_settings_get_bool(MomentumSettingsBoolLockscreenPoweroff)) {
+                loader_start_detached_with_gui_error(desktop->loader, "Power", "off");
+            }
+            consumed = true;
+            break;
         case DesktopLockedEventUnlocked:
         case DesktopGlobalApiUnlock:
             desktop_unlock(desktop);
             consumed = true;
             break;
         case DesktopLockedEventDoorsClosed:
-            notification_message(desktop->notification, &sequence_display_backlight_off);
+            /* Start a full configured display timeout once the lock screen is
+             * stable. The prompt should remain visible until that timeout. */
+            notification_message(desktop->notification, &sequence_display_backlight_on);
             consumed = true;
             break;
         case DesktopLockedEventUpdate:
-            if(desktop_view_locked_is_locked_hint_visible(desktop->locked_view)) {
-                notification_message(desktop->notification, &sequence_display_backlight_off);
-            }
+            /* Lock screen clock/date refreshes must not blank the display;
+             * the notification service owns idle backlight shutdown. */
             desktop_view_locked_update(desktop->locked_view);
             consumed = true;
             break;

@@ -38,6 +38,8 @@
 /* Whether the SD was mounted before we took it over — restored on leave.
  * Single-instance scene, so a file-static is fine. */
 static bool s_sd_was_mounted = false;
+/* The "eject from PC first" warning is on screen. */
+static bool s_eject_warning = false;
 
 void desktop_scene_usb_storage_callback(DesktopEvent event, void* context) {
     Desktop* desktop = (Desktop*)context;
@@ -90,6 +92,7 @@ static bool desktop_usb_storage_enter(Desktop* desktop, const char** error_msg) 
         *error_msg = "MSC start failed";
         return false;
     }
+    furi_hal_usb_reinit();
 
     return true;
 }
@@ -113,6 +116,39 @@ static void desktop_usb_storage_leave(Desktop* desktop) {
      * USB-Serial-JTAG — same "leave -> flash" restore as the qFlipper toggle. */
     furi_hal_usb_composite_uninstall();
 }
+
+/* True while the host has the volume mounted and locked (SCSI PREVENT MEDIUM
+ * REMOVAL). This is a heuristic: a host that never sends PREVENT (commonly
+ * Windows with "quick removal") reads as unlocked, so it never blocks Back. */
+static bool desktop_usb_storage_host_holds_medium(void) {
+    return furi_hal_usb_msc_is_active() && furi_hal_usb_msc_is_removal_locked();
+}
+
+/* Back pressed: leave now, or show the "eject first" warning and stay.
+ * force (long Back on the warning) leaves even while the host holds the
+ * medium; unflushed host writes may then be lost. */
+static bool desktop_usb_storage_may_exit(Desktop* desktop, bool force) {
+    if(!desktop_usb_storage_host_holds_medium()) return true;
+    if(force) {
+        FURI_LOG_W(TAG, "Forced exit while the host still holds the medium");
+        return true;
+    }
+    s_eject_warning = true;
+    desktop_usb_storage_set_state(
+        desktop->usb_storage_view, DesktopUsbStorageStateEjectFirst, NULL);
+    return false;
+}
+
+/* While the warning is shown, report as soon as the host releases the medium
+ * (ALLOW or eject). Only a lock-to-unlock change is reported, never a host
+ * that simply never locked. */
+static void desktop_usb_storage_tick(Desktop* desktop) {
+    if(s_eject_warning && !desktop_usb_storage_host_holds_medium()) {
+        s_eject_warning = false;
+        desktop_usb_storage_set_state(
+            desktop->usb_storage_view, DesktopUsbStorageStateEjected, NULL);
+    }
+}
 #endif /* USB_STORAGE_HAVE_USB */
 
 void desktop_scene_usb_storage_on_enter(void* context) {
@@ -122,6 +158,7 @@ void desktop_scene_usb_storage_on_enter(void* context) {
         desktop->usb_storage_view, desktop_scene_usb_storage_callback, desktop);
 
 #if USB_STORAGE_HAVE_USB
+    s_eject_warning = false;
     /* Mutual exclusion: the qFlipper bridge holds the shared composite. */
     qflipper_bridge_stop();
 
@@ -150,12 +187,26 @@ bool desktop_scene_usb_storage_on_event(void* context, SceneManagerEvent event) 
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == DesktopUsbStorageEventExit) {
-            scene_manager_search_and_switch_to_previous_scene(
-                desktop->scene_manager, DesktopSceneMain);
+        if(event.event == DesktopUsbStorageEventExit ||
+           event.event == DesktopUsbStorageEventForceExit) {
+#if USB_STORAGE_HAVE_USB
+            const bool leave = desktop_usb_storage_may_exit(
+                desktop, event.event == DesktopUsbStorageEventForceExit);
+#else
+            const bool leave = true;
+#endif
+            if(leave) {
+                scene_manager_search_and_switch_to_previous_scene(
+                    desktop->scene_manager, DesktopSceneMain);
+            }
             consumed = true;
         }
     }
+#if USB_STORAGE_HAVE_USB
+    else if(event.type == SceneManagerEventTypeTick) {
+        desktop_usb_storage_tick(desktop);
+    }
+#endif
 
     return consumed;
 }

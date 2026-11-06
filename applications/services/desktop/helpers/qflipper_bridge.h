@@ -23,9 +23,9 @@ extern "C" {
 bool qflipper_bridge_start(void);
 
 /** Stop the bridge thread and close the RPC session, but LEAVE the composite
- *  installed (like USB-Storage) — this esp_tinyusb build can't cleanly
- *  reinstall after an uninstall, so re-enabling just reattaches. The composite
- *  stays up until the next reboot. */
+ *  installed (like USB-Storage). The desktop's user-facing disable path also
+ *  uninstalls the composite so USB-Serial-JTAG can be used again; enabling the
+ *  bridge later performs a fresh TinyUSB install and host re-enumeration. */
 void qflipper_bridge_stop(void);
 
 /** True while the bridge thread is running. */

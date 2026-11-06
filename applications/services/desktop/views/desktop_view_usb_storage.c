@@ -57,12 +57,42 @@ static void desktop_usb_storage_draw_callback(Canvas* canvas, void* model) {
             canvas, 64, 28, AlignCenter, AlignCenter, m->error_msg ? m->error_msg : "Fehler");
         elements_button_left(canvas, "Back");
         break;
+    case DesktopUsbStorageStateEjectFirst:
+        canvas_draw_str_aligned(
+            canvas, 64, 22, AlignCenter, AlignCenter, "PC still uses the drive");
+        canvas_set_font(canvas, FontBatteryPercent);
+        canvas_draw_str_aligned(canvas, 64, 36, AlignCenter, AlignCenter, "Eject it on the PC first.");
+        canvas_draw_str_aligned(canvas, 64, 46, AlignCenter, AlignCenter, "Hold Back to force exit.");
+        canvas_set_font(canvas, FontSecondary);
+        elements_button_left(canvas, "Retry");
+        break;
+    case DesktopUsbStorageStateEjected:
+        canvas_draw_str_aligned(
+            canvas, 64, 22, AlignCenter, AlignCenter, "PC ejected the drive");
+        canvas_set_font(canvas, FontBatteryPercent);
+        canvas_draw_str_aligned(canvas, 64, 40, AlignCenter, AlignCenter, "Safe to disconnect.");
+        canvas_set_font(canvas, FontSecondary);
+        elements_button_left(canvas, "Disconnect");
+        break;
     }
 }
 
 static bool desktop_usb_storage_input_callback(InputEvent* event, void* context) {
     furi_assert(context);
     DesktopUsbStorageView* usb_storage = context;
+
+    /* Forcing is only offered on the warning screen, so it always follows an
+     * explicit "PC still uses the drive" notice. */
+    if(event->type == InputTypeLong && event->key == InputKeyBack) {
+        bool warning = false;
+        with_view_model(
+            usb_storage->view,
+            DesktopUsbStorageViewModel * model,
+            { warning = model->state == DesktopUsbStorageStateEjectFirst; },
+            false);
+        if(warning) usb_storage->callback(DesktopUsbStorageEventForceExit, usb_storage->context);
+        return true;
+    }
 
     if(event->type == InputTypeShort &&
        (event->key == InputKeyBack || event->key == InputKeyUp)) {

@@ -107,6 +107,8 @@ void desktop_scene_main_on_enter(void* context) {
 
     desktop_main_set_callback(main_view, desktop_scene_main_callback, desktop);
 
+    animation_manager_set_pause_reason(
+        desktop->animation_manager, AnimationManagerPauseReasonHomeInactive, false);
     view_dispatcher_switch_to_view(desktop->view_dispatcher, DesktopViewIdMain);
 }
 
@@ -252,6 +254,8 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
 void desktop_scene_main_on_exit(void* context) {
     Desktop* desktop = (Desktop*)context;
 
+    animation_manager_set_pause_reason(
+        desktop->animation_manager, AnimationManagerPauseReasonHomeInactive, true);
     animation_manager_set_new_idle_callback(desktop->animation_manager, NULL);
     animation_manager_set_check_callback(desktop->animation_manager, NULL);
     animation_manager_set_interact_callback(desktop->animation_manager, NULL);
