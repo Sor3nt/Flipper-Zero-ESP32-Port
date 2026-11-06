@@ -22,6 +22,7 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 | Board | MCU | Display | Input | SubGHz | NFC | IR | SD Card |
 |---|---|---|---|---|---|---|---|
 | **LilyGo T-Embed CC1101** | ESP32-S3 (Xtensa LX7) | ST7789 320×170 | Rotary encoder + button | CC1101 | PN532 (I2C) | RMT TX + RX | SPI |
+| **Paradoxt** | ESP32-S3 N16R8 (Xtensa LX7) | ST7789 320×170 | 6 buttons (4-way D-pad + OK + Back) | CC1101 + NRF24 | PN532 (I2C) | RMT TX + RX | SPI |
 | **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320×172 | CST816S touch | — | — | — | SPI |
 | **Waveshare ESP32-C6-LCD-1.47** ⚠️ | ESP32-C6 (RISC-V) | JD9853 320×172 | AXS5106L touch | — | — | — | SPI |
 | **DIY ESP32-S3 (N16R8)** | ESP32-S3 (Xtensa LX7) | ST7789 320×172 | 6× Tactile buttons | CC1101 (+ NRF24) | PN532 (I2C) | TX + RX | SPI |
@@ -78,10 +79,12 @@ Multi-button remote layouts that batch saved `.sub` files. Map Up/Down/Left/Righ
 #### WiFi
 Full WiFi pentest toolkit.
 - **Scanner** — SSID, BSSID, channel, RSSI, auth mode
+- **WiFi Live Scan** — passive monitor-mode view of beacon/probe-response AP announcements; records up to 64 APs in RAM with BSSID, SSID, RSSI, channel, security and vendor details. It does not save a scan file and can disconnect an active WiFi station connection while taking over the radio.
 - **Connect** — auto-detect WPA/WPA2/WPA3, password input or saved password lookup (`/ext/wifi/<ssid>.txt`)
-- **Deauther** — SSID-mode (single AP) or Channel-mode (all on channel)
-- **Smart Deauth** — targeted, station-aware deauthentication
+- **Deauther** — scanner, SSID-mode (single AP) or Channel-mode (all on channel)
+- **Smart Deauth** — scans APs and observed stations, offers a selected target view and a monitor view with RSSI/PMF information
 - **Sniffer** — capture packets to PCAP (saved to `/ext/wifi/`)
+- **Deauth All** — scans APs on start, then cycles through that AP list sending deauthentication/disassociation traffic. Optional periodic rescans use a saved 10–60 second interval. The implementation does not enumerate associated client stations; use only on networks you own or are authorized to test.
 - **Handshake capture** — record EAPOL 4-way handshakes, optionally with deauth trigger
 - **AirSnitch** — auto-bruteforce target with password list
 - **Beacon Spam** — Funny SSIDs / Rickroll / Random / Custom
@@ -112,6 +115,7 @@ Pair cheap headless ESP32 boards (**buddies**) to the T-Embed (**master**) over 
 #### Bluetooth
 - **BLE Spam** — Apple Continuity (Pair/Action/NotYourDevice), Google FastPair (455+ models), Microsoft SwiftPair, Samsung Buds & Watch, Xiaomi QuickConnect
 - **BLE Walk** — passive scanner with GATT service/characteristic inspection
+- **Wardriving** — passive BLE advertisement scanner, available from Bluetooth → Wardriving (this is BLE, not WiFi scanning). Lists address, name, RSSI, manufacturer ID and advertisement count; exports a WiGLE-formatted CSV to `/ext/apps_data/wlan/`. It has no GPS integration: exported rows currently contain a fixed timestamp and zero coordinates, so they are not geotagged tracks.
 - **BLE Clone** *(dev)* — replicate active BLE advertisements
 - **FindMy** — emulate Apple AirTag, Samsung SmartTag, Tile beacons (clone or generate keypairs)
 - **HID** *(see below)* — keyboard/mouse/media remote over BLE
@@ -162,6 +166,9 @@ HID payload runner for Ducky-script (`.txt`) files from `/ext/badusb/`.
 - Mouse movement, scroll, button emulation; per-character typing delay
 - **Transport:** USB OTG (TinyUSB) on T-Embed, BLE on Waveshare
 
+#### U2F (USB FIDO)
+USB HID FIDO U2F authenticator for configured ESP32-S3 profiles. Supports U2F registration and authentication with on-device user confirmation and a persistent signature counter; it does not implement CTAP2/WebAuthn passkeys. Certificate provisioning, USB ownership constraints and recovery notes are in [the U2F guide](applications/main/u2f/README.md).
+
 ### 🛠 System / Tools
 
 #### Lock Menu / System Toggles
@@ -172,6 +179,9 @@ The desktop lock menu doubles as the central system control panel (board-depende
 - **WiFi** — toggle WiFi on/off (mutually exclusive with Bluetooth; reconnects to the last network automatically)
 - **Web-Filesystem** — start the SD-card web file server *(see WiFi above)*
 - **Mesh Clients** — buddy discovery & control *(see Mesh / Buddy above)*
+
+#### GPIO
+The Apps → GPIO menu includes **USB-UART Bridge**, a serial pass-through between USB CDC and the board-mapped UART. It is supported on the ESP32-S3 T-Embed external-UART profile (including the `esp32s3_generic` alias) and Paradoxt. The bridge currently uses TX/RX only with 8-N-1 framing; RTS/DTR flow control and DE/RE direction control are not implemented. Board wiring, USB handoff and pin-sharing details are in the [GPIO guide](applications/main/gpio/README.md).
 
 #### Archive
 SD-card file browser with tabs per media type: Favorites, Sub-GHz, NFC, LF-RFID, Infrared, iButton, Bad USB, U2F, Apps, Internal, Browser. Pin/unpin favorites; copy, paste, rename, delete, create folder.
@@ -199,6 +209,7 @@ Classic snake game.
 
 ### ⚙ Settings & General
 Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notification, power, storage, system info, factory reset. Animated dolphin desktop on idle. File-pack manifest at `/ext/Manifest` (qFlipper-style asset list — its presence suppresses the "No DB" boot animation).
+- **Desktop** — configure the desktop PIN, automatic lock timeout and USB-session auto-lock behavior; assign favorite apps and Dummy Mode actions to button shortcuts.
 - **Update Firmware** — wireless OTA firmware + SD-card update *(see [Firmware Update](#firmware-update) above)*
 - **Interface** — customize the main menu and its layout
 - **Spoofing** — change the device name and the shell/terminal color
@@ -209,6 +220,7 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 |---|---|
 | `/ext/Manifest` | Desktop (presence check) |
 | `/ext/dolphin/` + `manifest.txt` | Idle animations |
+| `/ext/asset_packs/<pack>/` | Custom desktop animation packs selected in Settings → Interface → Graphics → Asset Pack. The pack manifest may be in the pack root or its `Anims/` subfolder. |
 | `/ext/apps_assets/nfc/plugins/` | NFC protocol plugins (.fal) |
 | `/ext/apps_data/nfc/plugins/` | NFC card-parser plugins (.fal) |
 | `/ext/apps_data/js_app/plugins/` | JS module bindings (.fal) |
@@ -220,6 +232,8 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/subghz/assets/` | SubGHz keystores + `dangerous_settings` |
 | `/ext/u2f/assets/` | U2F cert + key |
 | `/ext/wifi/<ssid>.txt` | Saved WiFi passwords |
+| `/ext/wifi/deauth_all.cfg` | Deauth All scan settings |
+| `/ext/apps_data/wlan/ble_*.csv` | BLE Wardriving CSV exports (no GPS coordinates) |
 | `/ext/wifi/buddy_<name>_<ssid>.pcap` | Mesh/Buddy handshake captures |
 | `/ext/wifi/evil_portal/login_template/` | Custom captive-portal templates (no verify) |
 | `/ext/wifi/evil_portal/router_template/` | Custom captive-portal templates (with WLAN verify) |
