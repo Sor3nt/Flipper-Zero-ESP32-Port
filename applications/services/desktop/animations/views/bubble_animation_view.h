@@ -87,3 +87,9 @@ void bubble_animation_freeze(BubbleAnimationView* view);
  * @view        bubble animation view instance
  */
 void bubble_animation_unfreeze(BubbleAnimationView* view);
+
+/** Stop or resume frame updates while the desktop animation is not allowed to run. */
+void bubble_animation_set_paused(BubbleAnimationView* view, bool paused);
+
+/** Hold the current frame while a replacement animation is loaded. */
+void bubble_animation_hold_frame(BubbleAnimationView* view);

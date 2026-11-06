@@ -2,6 +2,7 @@
 #include "../elements.h"
 #include <assets_icons.h>
 #include <furi.h>
+#include <boards/board.h>
 
 struct TextInput {
     View* view;
@@ -496,6 +497,23 @@ static void text_input_handle_ok(TextInput* text_input, TextInputModel* model, I
 static bool text_input_view_input_callback(InputEvent* event, void* context) {
     TextInput* text_input = context;
     furi_assert(text_input);
+
+#if defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD
+    /* The handlers are laid out for the T-Embed encoder: Up/Down step along
+     * the keys (wrapping rows), Left/Right change row. On a D-pad Up/Down
+     * change row and Left/Right step along it. */
+    static const InputKey dpad_keys[InputKeyMAX] = {
+        [InputKeyUp] = InputKeyLeft,
+        [InputKeyDown] = InputKeyRight,
+        [InputKeyRight] = InputKeyDown,
+        [InputKeyLeft] = InputKeyUp,
+        [InputKeyOk] = InputKeyOk,
+        [InputKeyBack] = InputKeyBack,
+    };
+    InputEvent dpad_event = *event;
+    if(dpad_event.key < InputKeyMAX) dpad_event.key = dpad_keys[dpad_event.key];
+    event = &dpad_event;
+#endif
 
     bool consumed = false;
 

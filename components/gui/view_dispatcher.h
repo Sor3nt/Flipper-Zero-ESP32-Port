@@ -85,6 +85,11 @@ FURI_DEPRECATED void view_dispatcher_enable_queue(ViewDispatcher* view_dispatche
  */
 void view_dispatcher_send_custom_event(ViewDispatcher* view_dispatcher, uint32_t event);
 
+/** Queue a custom event without waiting. Returns false if the queue is full. */
+bool view_dispatcher_send_custom_event_nonblocking(
+    ViewDispatcher* view_dispatcher,
+    uint32_t event);
+
 /** Set custom event handler
  *
  * Called on Custom Event, if it is not consumed by view

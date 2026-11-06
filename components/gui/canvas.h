@@ -270,6 +270,15 @@ void canvas_draw_icon_animation(
     int32_t y,
     IconAnimation* icon_animation);
 
+/** Draw an icon animation scaled to a percentage of its original size. */
+void canvas_draw_icon_animation_ex(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    int32_t width_scale,
+    int32_t height_scale,
+    IconAnimation* icon_animation);
+
 /** Draw icon at position defined by x,y.
  *
  * @param      canvas  Canvas instance

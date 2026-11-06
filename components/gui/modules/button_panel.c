@@ -5,6 +5,7 @@
 #include <input.h>
 
 #include <furi.h>
+#include <boards/board.h>
 // #include <furi_hal_resources.h> // ESP32: not available
 #include <stdint.h>
 
@@ -397,6 +398,18 @@ static bool button_panel_view_input_callback(InputEvent* event, void* context) {
             consumed = true;
             button_panel_process_down(button_panel);
             break;
+#if defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD
+        /* Real D-pad: the view_port already rotates the arrows to the
+         * vertical layout, so they map 1:1 as on Flipper. */
+        case InputKeyLeft:
+            consumed = true;
+            button_panel_process_left(button_panel);
+            break;
+        case InputKeyRight:
+            consumed = true;
+            button_panel_process_right(button_panel);
+            break;
+#else
         case InputKeyLeft:
             /* Swapped with Right: rotary encoder CW (clockwise) feels like
              * "forward / next button" to users; the orientation mapping
@@ -408,6 +421,7 @@ static bool button_panel_view_input_callback(InputEvent* event, void* context) {
             consumed = true;
             button_panel_process_left(button_panel);
             break;
+#endif
         default:
             break;
         }

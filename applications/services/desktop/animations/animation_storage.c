@@ -1,10 +1,13 @@
 
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <flipper_format/flipper_format.h>
 #include <furi.h>
 #include <core/dangerous_defines.h>
 #include <storage/storage.h>
 #include <gui/icon_i.h>
+#include <momentum_settings.h>
 
 #include "animation_manager.h"
 #include "animation_storage.h"
@@ -12,19 +15,63 @@
 #include <assets_dolphin_blocking.h>
 
 #define ANIMATION_META_FILE     "meta.txt"
-#define ANIMATION_DIR           EXT_PATH("dolphin")
-#define ANIMATION_MANIFEST_FILE ANIMATION_DIR "/manifest.txt"
+#define BASE_ANIMATION_DIR      EXT_PATH("dolphin")
+#define ANIMATION_DIR_MAX       64
+#define ANIMATION_MANIFEST_MAX  80
 #define TAG                     "AnimationStorage"
+
+static char animation_dir[ANIMATION_DIR_MAX];
+static char animation_manifest_file[ANIMATION_MANIFEST_MAX];
 
 static void animation_storage_free_bubbles(BubbleAnimation* animation);
 static void animation_storage_free_frames(BubbleAnimation* animation);
 static void animation_storage_free_animation(BubbleAnimation** storage_animation);
 static BubbleAnimation* animation_storage_load_animation(const char* name);
 
+static bool animation_storage_manifest_at(Storage* storage, const char* dir) {
+    FuriString* path = furi_string_alloc_printf("%s/manifest.txt", dir);
+    FileInfo info;
+    bool exists = storage_common_stat(storage, furi_string_get_cstr(path), &info) == FSE_OK;
+    furi_string_free(path);
+    return exists;
+}
+
+static void animation_storage_select_manifest(void) {
+    FuriString* path = furi_string_alloc();
+    char pack[ASSET_PACKS_NAME_LEN];
+    momentum_settings_get_asset_pack(pack, sizeof(pack));
+    bool use_asset_pack = pack[0] != '\0';
+
+    if(use_asset_pack) {
+        Storage* storage = furi_record_open(RECORD_STORAGE);
+        furi_string_printf(path, "%s/%s/Anims", ASSET_PACKS_PATH, pack);
+        if(!animation_storage_manifest_at(storage, furi_string_get_cstr(path))) {
+            furi_string_printf(path, "%s/%s", ASSET_PACKS_PATH, pack);
+            if(!animation_storage_manifest_at(storage, furi_string_get_cstr(path))) {
+                FURI_LOG_W(TAG, "Asset pack '%s' has no manifest; using default animations", pack);
+                use_asset_pack = false;
+            }
+        }
+        furi_record_close(RECORD_STORAGE);
+    }
+
+    if(!use_asset_pack) {
+        furi_string_set(path, BASE_ANIMATION_DIR);
+    }
+    snprintf(animation_dir, sizeof(animation_dir), "%s", furi_string_get_cstr(path));
+    snprintf(
+        animation_manifest_file,
+        sizeof(animation_manifest_file),
+        "%s/manifest.txt",
+        animation_dir);
+    furi_string_free(path);
+}
+
 static bool animation_storage_load_single_manifest_info(
     StorageAnimationManifestInfo* manifest_info,
     const char* name) {
     furi_assert(manifest_info);
+    animation_storage_select_manifest();
 
     bool result = false;
     Storage* storage = furi_record_open(RECORD_STORAGE);
@@ -36,7 +83,7 @@ static bool animation_storage_load_single_manifest_info(
     do {
         uint32_t u32value;
         if(FSE_OK != storage_sd_status(storage)) break;
-        if(!flipper_format_file_open_existing(file, ANIMATION_MANIFEST_FILE)) break;
+        if(!flipper_format_file_open_existing(file, animation_manifest_file)) break;
 
         if(!flipper_format_read_header(file, read_string, &u32value)) break;
         if(furi_string_cmp_str(read_string, "Flipper Animation Manifest")) break;
@@ -82,6 +129,7 @@ void animation_storage_fill_animation_list(StorageAnimationList_t* animation_lis
     furi_assert(!StorageAnimationList_size(*animation_list));
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
+    animation_storage_select_manifest();
     FlipperFormat* file = flipper_format_file_alloc(storage);
     /* Forbid skipping fields */
     flipper_format_set_strict_mode(file, true);
@@ -93,7 +141,7 @@ void animation_storage_fill_animation_list(StorageAnimationList_t* animation_lis
         StorageAnimation* storage_animation = NULL;
 
         if(FSE_OK != storage_sd_status(storage)) break;
-        if(!flipper_format_file_open_existing(file, ANIMATION_MANIFEST_FILE)) break;
+        if(!flipper_format_file_open_existing(file, animation_manifest_file)) break;
         if(!flipper_format_read_header(file, read_string, &u32value)) break;
         if(furi_string_cmp_str(read_string, "Flipper Animation Manifest")) break;
         do {
@@ -248,7 +296,11 @@ static bool animation_storage_cast_align(FuriString* align_str, Align* align) {
 static void animation_storage_free_frames(BubbleAnimation* animation) {
     furi_assert(animation);
 
-    const Icon* icon = &animation->icon_animation;
+    Icon* icon = (Icon*)&animation->icon_animation;
+    /* Idempotent: frames may never have been allocated, or may already have
+     * been released by a failed animation_storage_load_frames(). */
+    if(!icon->frames) return;
+
     for(int i = 0; i < icon->frame_count; ++i) {
         if(icon->frames[i]) {
             free((void*)icon->frames[i]);
@@ -256,6 +308,7 @@ static void animation_storage_free_frames(BubbleAnimation* animation) {
     }
 
     free((void*)icon->frames);
+    icon->frames = NULL;
 }
 
 static bool animation_storage_load_frames(
@@ -293,7 +346,7 @@ static bool animation_storage_load_frames(
 
     for(int i = 0; i < icon->frame_count; ++i) {
         frames_ok = false;
-        furi_string_printf(filename, ANIMATION_DIR "/%s/frame_%d.bm", name, i);
+        furi_string_printf(filename, "%s/%s/frame_%d.bm", animation_dir, name, i);
 
         if(storage_common_stat(storage, furi_string_get_cstr(filename), &file_info) != FSE_OK)
             break;
@@ -431,6 +484,7 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
     uint32_t width = 0;
     uint32_t* u32array = NULL;
     Storage* storage = furi_record_open(RECORD_STORAGE);
+    animation_storage_select_manifest();
     FlipperFormat* ff = flipper_format_file_alloc(storage);
     /* Forbid skipping fields */
     flipper_format_set_strict_mode(ff, true);
@@ -444,7 +498,7 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
 
         if(FSE_OK != storage_sd_status(storage)) break;
 
-        furi_string_printf(str, ANIMATION_DIR "/%s/" ANIMATION_META_FILE, name);
+        furi_string_printf(str, "%s/%s/" ANIMATION_META_FILE, animation_dir, name);
         if(!flipper_format_file_open_existing(ff, furi_string_get_cstr(str))) break;
         if(!flipper_format_read_header(ff, str, &u32value)) break;
         if(furi_string_cmp_str(str, "Flipper Animation")) break;
@@ -478,6 +532,10 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
         if(!flipper_format_read_uint32(ff, "Active cycles", &u32value, 1)) break; //-V779
         animation->active_cycles = u32value;
         if(!flipper_format_read_uint32(ff, "Frame rate", &u32value, 1)) break;
+        /* Keep the file's frame rate as is: Anim Speed is applied to the frame period in
+         * bubble_animation_view.c (milliseconds, exact percentage), not here (whole fps
+         * could not represent e.g. 2 fps x 125%). CLAMP is (x, upper, lower). */
+        u32value = CLAMP(u32value, UINT8_MAX, 1);
         FURI_CONST_ASSIGN(animation->icon_animation.frame_rate, u32value);
         if(!flipper_format_read_uint32(ff, "Duration", &u32value, 1)) break;
         animation->duration = u32value;
@@ -495,6 +553,11 @@ static BubbleAnimation* animation_storage_load_animation(const char* name) {
     }
 
     if(!success) { //-V547
+        /* Frames are loaded before the remaining meta.txt fields are parsed;
+         * release them too, or every failed load of a broken animation leaks
+         * all of its frame buffers. */
+        animation_storage_free_bubbles(animation);
+        animation_storage_free_frames(animation);
         if(animation->frame_order) {
             free((void*)animation->frame_order);
         }

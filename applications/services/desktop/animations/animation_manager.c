@@ -6,6 +6,7 @@
 #include <power/power_service/power.h>
 #include <storage/storage.h>
 #include <assets_icons.h>
+#include <momentum_settings.h>
 
 #include "views/bubble_animation_view.h"
 #include "animation_storage.h"
@@ -42,7 +43,13 @@ struct AnimationManager {
     void* context;
     FuriString* freezed_animation_name;
     int32_t freezed_animation_time_left;
+    int32_t paused_idle_time_left;
+    uint32_t idle_animation_expire_at;
     ViewStack* view_stack;
+    uint32_t pause_reasons;
+    bool reload_pending;
+    bool rotation_due;
+    bool idle_animation_timer_armed;
 
     bool dummy_mode            : 1;
     bool blocking_shown_url    : 1;
@@ -61,6 +68,47 @@ static bool animation_manager_check_blocking(AnimationManager* animation_manager
 static bool animation_manager_is_valid_idle_animation(
     const StorageAnimationManifestInfo* info,
     const DolphinStats* stats);
+
+static uint32_t animation_manager_idle_period_ms(const BubbleAnimation* animation) {
+    const int32_t cycle_anims = momentum_settings_get_cycle_anims();
+    int32_t duration = cycle_anims == MOMENTUM_CYCLE_ANIMS_META ?
+                           (int32_t)animation->duration :
+                           cycle_anims;
+    return duration > 0 ? (uint32_t)duration * 1000 : 0;
+}
+
+static void animation_manager_start_idle_timer(
+    AnimationManager* animation_manager,
+    const BubbleAnimation* animation) {
+    uint32_t period = animation_manager_idle_period_ms(animation);
+    if(!period) {
+        animation_manager->paused_idle_time_left = 0;
+        animation_manager->rotation_due = false;
+        animation_manager->idle_animation_timer_armed = false;
+        furi_timer_stop(animation_manager->idle_animation_timer);
+        return;
+    }
+
+    if(animation_manager->pause_reasons) {
+        animation_manager->paused_idle_time_left = period;
+        animation_manager->idle_animation_timer_armed = false;
+        furi_timer_stop(animation_manager->idle_animation_timer);
+    } else {
+        animation_manager->paused_idle_time_left = 0;
+        animation_manager->rotation_due = false;
+        animation_manager->idle_animation_expire_at = furi_get_tick() + period;
+        animation_manager->idle_animation_timer_armed = true;
+        if(furi_timer_start(animation_manager->idle_animation_timer, period) != FuriStatusOk) {
+            animation_manager->idle_animation_timer_armed = false;
+            FURI_LOG_E(TAG, "Failed to start idle animation timer");
+        }
+    }
+}
+
+static void animation_manager_set_animation_paused(AnimationManager* animation_manager) {
+    bubble_animation_set_paused(
+        animation_manager->animation_view, animation_manager->pause_reasons != 0);
+}
 
 void animation_manager_set_context(AnimationManager* animation_manager, void* context) {
     furi_assert(animation_manager);
@@ -175,7 +223,11 @@ void animation_manager_check_blocking_process(AnimationManager* animation_manage
 void animation_manager_new_idle_process(AnimationManager* animation_manager) {
     furi_assert(animation_manager);
 
-    if(animation_manager->state == AnimationManagerStateIdle) {
+    if(!animation_manager->pause_reasons &&
+       animation_manager->state == AnimationManagerStateIdle &&
+       (animation_manager->rotation_due ||
+        (animation_manager->idle_animation_timer_armed &&
+         (int32_t)(furi_get_tick() - animation_manager->idle_animation_expire_at) >= 0))) {
         animation_manager_start_new_idle(animation_manager);
     }
 }
@@ -201,12 +253,110 @@ bool animation_manager_interact_process(AnimationManager* animation_manager) {
 static void animation_manager_start_new_idle(AnimationManager* animation_manager) {
     furi_assert(animation_manager);
 
+    const uint32_t pause_reasons_without_loader =
+        animation_manager->pause_reasons & ~(uint32_t)AnimationManagerPauseReasonLoaderMenu;
+    if(pause_reasons_without_loader && animation_manager->current_animation) {
+        if(animation_manager->state == AnimationManagerStateBlocked) {
+            animation_manager->state = AnimationManagerStateIdle;
+        }
+        animation_manager->reload_pending = true;
+        return;
+    }
+
+    animation_manager->reload_pending = false;
+    animation_manager->rotation_due = false;
+    animation_manager->idle_animation_timer_armed = false;
+    furi_timer_stop(animation_manager->idle_animation_timer);
+    /* SD reads share the SPI bus with the LCD. Keep the existing frame static
+     * until all frames of its replacement have been loaded. */
+    bubble_animation_hold_frame(animation_manager->animation_view);
     StorageAnimation* new_animation = animation_manager_select_idle_animation(animation_manager);
     animation_manager_replace_current_animation(animation_manager, new_animation);
     const BubbleAnimation* bubble_animation =
         animation_storage_get_bubble_animation(animation_manager->current_animation);
     animation_manager->state = AnimationManagerStateIdle;
-    furi_timer_start(animation_manager->idle_animation_timer, bubble_animation->duration * 1000);
+    animation_manager_start_idle_timer(animation_manager, bubble_animation);
+    animation_manager_set_animation_paused(animation_manager);
+}
+
+void animation_manager_reload_idle_animation(AnimationManager* animation_manager) {
+    furi_assert(animation_manager);
+
+    if(animation_manager->pause_reasons ==
+           (uint32_t)AnimationManagerPauseReasonLoaderMenu &&
+       animation_manager->state == AnimationManagerStateIdle) {
+        animation_manager_start_new_idle(animation_manager);
+    } else if(animation_manager->pause_reasons) {
+        animation_manager->reload_pending = true;
+    } else if(animation_manager->state == AnimationManagerStateIdle) {
+        animation_manager_start_new_idle(animation_manager);
+    } else if(
+        (animation_manager->state == AnimationManagerStateBlocked) ||
+        (animation_manager->state == AnimationManagerStateFreezedIdle) ||
+        (animation_manager->state == AnimationManagerStateFreezedBlocked)) {
+        animation_manager->reload_pending = true;
+    }
+}
+
+void animation_manager_set_pause_reason(
+    AnimationManager* animation_manager,
+    AnimationManagerPauseReason reason,
+    bool paused) {
+    furi_assert(animation_manager);
+    const uint32_t reason_mask = (uint32_t)reason;
+    furi_assert(reason_mask && !(reason_mask & (reason_mask - 1U)));
+
+    const uint32_t previous_reasons = animation_manager->pause_reasons;
+    if(paused) {
+        animation_manager->pause_reasons |= reason_mask;
+    } else {
+        animation_manager->pause_reasons &= ~reason_mask;
+    }
+    if(previous_reasons == animation_manager->pause_reasons) return;
+
+    if(previous_reasons == 0) {
+        bubble_animation_set_paused(animation_manager->animation_view, true);
+        animation_manager->paused_idle_time_left = 0;
+        animation_manager->rotation_due = false;
+        if(animation_manager->state == AnimationManagerStateIdle) {
+            if(animation_manager->idle_animation_timer_armed) {
+                const int32_t remaining = (int32_t)(
+                    animation_manager->idle_animation_expire_at - furi_get_tick());
+                if(remaining > 0) {
+                    animation_manager->paused_idle_time_left = remaining;
+                } else {
+                    animation_manager->rotation_due = true;
+                }
+                furi_timer_stop(animation_manager->idle_animation_timer);
+                animation_manager->idle_animation_timer_armed = false;
+            } else if(animation_manager->paused_idle_time_left == 0) {
+                const BubbleAnimation* current = animation_manager->current_animation ?
+                    animation_storage_get_bubble_animation(animation_manager->current_animation) :
+                    NULL;
+                if(current && animation_manager_idle_period_ms(current) > 0) {
+                    animation_manager->rotation_due = true;
+                }
+            }
+        }
+    } else if(animation_manager->pause_reasons == 0) {
+        if(animation_manager->state == AnimationManagerStateIdle &&
+           (animation_manager->reload_pending || animation_manager->rotation_due)) {
+            animation_manager_start_new_idle(animation_manager);
+        } else if(
+            animation_manager->state == AnimationManagerStateIdle &&
+            animation_manager->paused_idle_time_left > 0) {
+            const uint32_t remaining = (uint32_t)animation_manager->paused_idle_time_left;
+            animation_manager->idle_animation_expire_at = furi_get_tick() + remaining;
+            animation_manager->idle_animation_timer_armed = true;
+            if(furi_timer_start(animation_manager->idle_animation_timer, remaining) !=
+               FuriStatusOk) {
+                animation_manager->idle_animation_timer_armed = false;
+                FURI_LOG_E(TAG, "Failed to resume idle animation timer");
+            }
+            animation_manager->paused_idle_time_left = 0;
+        }
+        animation_manager_set_animation_paused(animation_manager);
+    }
 }
 
 static bool animation_manager_check_blocking(AnimationManager* animation_manager) {
@@ -260,9 +410,13 @@ static bool animation_manager_check_blocking(AnimationManager* animation_manager
 
     if(blocking_animation) {
         furi_timer_stop(animation_manager->idle_animation_timer);
+        animation_manager->idle_animation_timer_armed = false;
+        animation_manager->paused_idle_time_left = 0;
+        bubble_animation_hold_frame(animation_manager->animation_view);
         animation_manager_replace_current_animation(animation_manager, blocking_animation);
         /* no timer starting because this is blocking animation */
         animation_manager->state = AnimationManagerStateBlocked;
+        animation_manager_set_animation_paused(animation_manager);
     }
 
     furi_record_close(RECORD_STORAGE);
@@ -288,7 +442,9 @@ static void animation_manager_replace_current_animation(
 }
 
 AnimationManager* animation_manager_alloc(void) {
-    AnimationManager* animation_manager = malloc(sizeof(AnimationManager));
+    AnimationManager* animation_manager = calloc(1, sizeof(AnimationManager));
+    animation_manager->state = AnimationManagerStateIdle;
+    animation_manager->pause_reasons = AnimationManagerPauseReasonHomeInactive;
     animation_manager->animation_view = bubble_animation_view_alloc();
     animation_manager->view_stack = view_stack_alloc();
     View* animation_view = bubble_animation_get_view(animation_manager->animation_view);
@@ -297,6 +453,7 @@ AnimationManager* animation_manager_alloc(void) {
 
     animation_manager->idle_animation_timer =
         furi_timer_alloc(animation_manager_timer_callback, FuriTimerTypeOnce, animation_manager);
+    bubble_animation_set_paused(animation_manager->animation_view, true);
     bubble_animation_view_set_interact_callback(
         animation_manager->animation_view, animation_manager_interact_callback, animation_manager);
 
@@ -366,11 +523,13 @@ static bool animation_manager_is_valid_idle_animation(
 
         result = (sd_status == FSE_NOT_READY);
     }
-    if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
-        result = false;
-    }
-    if((stats->level < info->min_level) || (stats->level > info->max_level)) {
-        result = false;
+    if(!momentum_settings_get_bool(MomentumSettingsBoolUnlockAnims)) {
+        if((stats->butthurt < info->min_butthurt) || (stats->butthurt > info->max_butthurt)) {
+            result = false;
+        }
+        if((stats->level < info->min_level) || (stats->level > info->max_level)) {
+            result = false;
+        }
     }
 
     return result;
@@ -405,6 +564,18 @@ static StorageAnimation*
             /* remove and increase iterator */
             StorageAnimationList_remove(animation_list, it);
         }
+    }
+
+    if(whole_weight == 0) {
+        FURI_LOG_W(TAG, "No weighted idle animations available; using built-in animation");
+        for
+            M_EACH(item, animation_list, StorageAnimationList_t) {
+                animation_storage_free_storage_animation(item);
+            }
+        StorageAnimationList_clear(animation_list);
+        StorageAnimation* fallback = animation_storage_find_animation(HARDCODED_ANIMATION_NAME);
+        furi_assert(fallback);
+        return fallback;
     }
 
     uint32_t lucky_number = furi_hal_random_get() % whole_weight;
@@ -459,12 +630,17 @@ void animation_manager_unload_and_stall_animation(AnimationManager* animation_ma
     } else if(animation_manager->state == AnimationManagerStateIdle) { //-V547
         animation_manager->state = AnimationManagerStateFreezedIdle;
 
-        animation_manager->freezed_animation_time_left =
-            furi_timer_get_expire_time(animation_manager->idle_animation_timer) - furi_get_tick();
-        if(animation_manager->freezed_animation_time_left < 0) {
-            animation_manager->freezed_animation_time_left = 0;
+        if(animation_manager->idle_animation_timer_armed) {
+            const int32_t remaining =
+                (int32_t)(animation_manager->idle_animation_expire_at - furi_get_tick());
+            animation_manager->paused_idle_time_left = remaining > 0 ? remaining : 0;
+            if(remaining <= 0) animation_manager->rotation_due = true;
         }
+        animation_manager->freezed_animation_time_left =
+            animation_manager->paused_idle_time_left;
         furi_timer_stop(animation_manager->idle_animation_timer);
+        animation_manager->idle_animation_timer_armed = false;
+        animation_manager->paused_idle_time_left = 0;
     } else {
         furi_crash();
     }
@@ -484,6 +660,12 @@ void animation_manager_unload_and_stall_animation(AnimationManager* animation_ma
 }
 
 void animation_manager_load_and_continue_animation(AnimationManager* animation_manager) {
+    animation_manager_load_and_continue_animation_ex(animation_manager, false);
+}
+
+void animation_manager_load_and_continue_animation_ex(
+    AnimationManager* animation_manager,
+    bool fresh) {
     furi_assert(animation_manager);
     furi_assert(!animation_manager->current_animation);
     furi_assert(furi_string_size(animation_manager->freezed_animation_name));
@@ -500,9 +682,10 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
         animation_manager_replace_current_animation(animation_manager, restore_animation);
         animation_manager->state = AnimationManagerStateBlocked;
     } else if(animation_manager->state == AnimationManagerStateFreezedIdle) { //-V547
+        fresh = fresh || animation_manager->reload_pending || animation_manager->rotation_due;
         /* check if we missed some system notifications, and set current_animation */
         bool blocked = animation_manager_check_blocking(animation_manager);
-        if(!blocked) {
+        if(!blocked && !fresh) {
             /* if no blocking - try restore last one idle */
             StorageAnimation* restore_animation = animation_storage_find_animation(
                 furi_string_get_cstr(animation_manager->freezed_animation_name));
@@ -518,15 +701,24 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
                         animation_manager, restore_animation);
                     animation_manager->state = AnimationManagerStateIdle;
 
-                    if(animation_manager->freezed_animation_time_left) {
-                        furi_timer_start(
-                            animation_manager->idle_animation_timer,
-                            animation_manager->freezed_animation_time_left);
+                    if(animation_manager->freezed_animation_time_left &&
+                       animation_manager->pause_reasons) {
+                        animation_manager->paused_idle_time_left =
+                            animation_manager->freezed_animation_time_left;
+                    } else if(animation_manager->freezed_animation_time_left) {
+                        const uint32_t remaining =
+                            (uint32_t)animation_manager->freezed_animation_time_left;
+                        animation_manager->idle_animation_expire_at = furi_get_tick() + remaining;
+                        animation_manager->idle_animation_timer_armed = true;
+                        if(furi_timer_start(animation_manager->idle_animation_timer, remaining) !=
+                           FuriStatusOk) {
+                            animation_manager->idle_animation_timer_armed = false;
+                            FURI_LOG_E(TAG, "Failed to restore idle animation timer");
+                        }
                     } else {
                         const BubbleAnimation* animation = animation_storage_get_bubble_animation(
                             animation_manager->current_animation);
-                        furi_timer_start(
-                            animation_manager->idle_animation_timer, animation->duration * 1000);
+                        animation_manager_start_idle_timer(animation_manager, animation);
                     }
                 }
             } else {
@@ -551,6 +743,7 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
         animation_storage_get_meta(animation_manager->current_animation)->name);
 
     bubble_animation_unfreeze(animation_manager->animation_view);
+    animation_manager->freezed_animation_time_left = 0;
     furi_string_reset(animation_manager->freezed_animation_name);
     furi_assert(animation_manager->current_animation);
 }

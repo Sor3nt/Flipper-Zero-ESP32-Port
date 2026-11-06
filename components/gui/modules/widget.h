@@ -127,6 +127,22 @@ void widget_add_text_scroll_element(
     uint8_t height,
     const char* text);
 
+/** Add a marquee header element: a title that scrolls if it does not fit,
+ * plus a fixed right-aligned text. Call widget_redraw() periodically (e.g.
+ * from a scene tick) to animate it. */
+void widget_add_marquee_header_element(
+    Widget* widget,
+    uint8_t x,
+    uint8_t y,
+    uint8_t right_x,
+    Font title_font,
+    const char* title,
+    Font right_font,
+    const char* right_text);
+
+/** Request a redraw of the widget (for animated elements). */
+void widget_redraw(Widget* widget);
+
 /** Add Button Element
  *
  * @param      widget       Widget instance

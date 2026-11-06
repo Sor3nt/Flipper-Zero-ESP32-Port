@@ -22,6 +22,17 @@ typedef enum {
     ViewPortOrientationMAX, /**< Special value, don't use it */
 } ViewPortOrientation;
 
+/** Status bar icon identity, used to let the user hide single icons. */
+typedef enum {
+    ViewPortStatusBarIconNone,
+    ViewPortStatusBarIconSdCard,
+    ViewPortStatusBarIconBluetooth,
+    ViewPortStatusBarIconBleBeacon,
+    ViewPortStatusBarIconWifi,
+    ViewPortStatusBarIconRpc,
+    ViewPortStatusBarIconCount,
+} ViewPortStatusBarIcon;
+
 /** ViewPort Draw callback
  * @warning    called from GUI thread
  */
@@ -67,6 +78,10 @@ uint8_t view_port_get_width(const ViewPort* view_port);
  */
 void view_port_set_height(ViewPort* view_port, uint8_t height);
 uint8_t view_port_get_height(const ViewPort* view_port);
+
+/** Tag a status bar view port so the user can hide it. */
+void view_port_set_statusbar_icon(ViewPort* view_port, ViewPortStatusBarIcon icon);
+ViewPortStatusBarIcon view_port_get_statusbar_icon(const ViewPort* view_port);
 
 /** Enable or disable view_port rendering.
  *

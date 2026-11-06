@@ -12,6 +12,7 @@
 
 #define BATTERY_VIEW_COUNT 5
 #define CLOCK_ENABLE_COUNT 2
+#define STATUS_BAR_BACKGROUND_COUNT 2
 
 typedef struct {
     ViewDispatcher* view_dispatcher;
@@ -30,6 +31,8 @@ static const uint32_t battery_view_value[BATTERY_VIEW_COUNT] = {
 
 static const char* const clock_enable_text[CLOCK_ENABLE_COUNT] = {"OFF", "ON"};
 static const uint32_t clock_enable_value[CLOCK_ENABLE_COUNT] = {0, 1};
+
+static const char* const status_bar_background_text[STATUS_BAR_BACKGROUND_COUNT] = {"OFF", "ON"};
 
 static void battery_view_changed(VariableItem* item) {
     uint8_t index = variable_item_get_current_value_index(item);
@@ -59,10 +62,29 @@ static void clock_enable_changed(VariableItem* item) {
     furi_record_close(RECORD_DESKTOP);
 }
 
+static void status_bar_background_changed(VariableItem* item) {
+    const uint8_t value = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, status_bar_background_text[value]);
+
+    Desktop* desktop = furi_record_open(RECORD_DESKTOP);
+    DesktopSettings* settings = malloc(sizeof(DesktopSettings));
+    desktop_api_get_settings(desktop, settings);
+    settings->display_status_bar_background = value;
+    desktop_api_set_settings(desktop, settings);
+    free(settings);
+    furi_record_close(RECORD_DESKTOP);
+}
+
 static const char* const menu_style_text[MenuStyleCount] = {
     "List",
-    "DSi",
     "Wii",
+    "DSi",
+    "PS4",
+    "Vertical",
+    "C64",
+    "Compact",
+    "MNTM",
+    "CoverFlow",
 };
 
 static void menu_style_changed(VariableItem* item) {
@@ -134,6 +156,16 @@ static InterfaceSettingsApp* interface_settings_alloc(void) {
         value_index_uint32(settings->display_clock, clock_enable_value, CLOCK_ENABLE_COUNT);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, clock_enable_text[value_index]);
+
+    item = variable_item_list_add(
+        app->variable_item_list,
+        "Bar Background",
+        STATUS_BAR_BACKGROUND_COUNT,
+        status_bar_background_changed,
+        app);
+    value_index = settings->display_status_bar_background ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, status_bar_background_text[value_index]);
     free(settings);
 
     Gui* gui = furi_record_open(RECORD_GUI);

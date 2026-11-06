@@ -52,6 +52,16 @@ WidgetElement* widget_element_string_create(
     Font font,
     const char* text);
 
+/** Create marquee header element (scrolling title + fixed right text) */
+WidgetElement* widget_element_marquee_header_create(
+    uint8_t x,
+    uint8_t y,
+    uint8_t right_x,
+    Font title_font,
+    const char* title,
+    Font right_font,
+    const char* right_text);
+
 /** Create text box element */
 WidgetElement* widget_element_text_box_create(
     uint8_t x,

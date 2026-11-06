@@ -1,7 +1,13 @@
 #include "gui_i.h"
+#include "momentum_settings.h"
 #include <assets_icons.h>
 
 #define TAG "GuiSrv"
+
+static bool gui_status_bar_view_port_is_shown(ViewPort* view_port) {
+    return view_port_is_enabled(view_port) &&
+           momentum_settings_statusbar_icon_visible(view_port_get_statusbar_icon(view_port));
+}
 
 ViewPort* gui_view_port_find_enabled(ViewPortArray_t array) {
     // Iterating backward
@@ -9,7 +15,7 @@ ViewPort* gui_view_port_find_enabled(ViewPortArray_t array) {
     ViewPortArray_it_last(it, array);
     while(!ViewPortArray_end_p(it)) {
         ViewPort* view_port = *ViewPortArray_ref(it);
-        if(view_port_is_enabled(view_port)) {
+        if(gui_status_bar_view_port_is_shown(view_port)) {
             return view_port;
         }
         ViewPortArray_previous(it);
@@ -82,25 +88,26 @@ static void gui_redraw_status_bar(Gui* gui, bool need_attention) {
     canvas_frame_set(
         gui->canvas, GUI_STATUS_BAR_X, GUI_STATUS_BAR_Y, GUI_DISPLAY_WIDTH, GUI_STATUS_BAR_HEIGHT);
 
-    /* for support black theme - paint white area and
-     * draw icon with transparent white color
-     */
-    canvas_set_color(gui->canvas, ColorWhite);
-    canvas_draw_box(gui->canvas, 1, 1, 9, 7);
-    canvas_draw_box(gui->canvas, 7, 3, 58, 6);
-    canvas_draw_box(gui->canvas, 61, 1, 32, 7);
-    canvas_draw_box(gui->canvas, 89, 3, 38, 6);
-    canvas_set_color(gui->canvas, ColorBlack);
-    canvas_set_bitmap_mode(gui->canvas, 1);
-    canvas_draw_icon(gui->canvas, 0, 0, &I_Background_128x11);
-    canvas_set_bitmap_mode(gui->canvas, 0);
+    if(gui->status_bar_background) {
+        canvas_set_color(gui->canvas, ColorWhite);
+        canvas_draw_box(gui->canvas, 1, 1, 9, 7);
+        canvas_draw_box(gui->canvas, 7, 3, 58, 6);
+        canvas_draw_box(gui->canvas, 61, 1, 32, 7);
+        canvas_draw_box(gui->canvas, 89, 3, 38, 6);
+        canvas_set_color(gui->canvas, ColorBlack);
+        canvas_set_bitmap_mode(gui->canvas, 1);
+        canvas_draw_icon(gui->canvas, 0, 0, &I_Background_128x11);
+        canvas_set_bitmap_mode(gui->canvas, 0);
+    } else {
+        canvas_set_color(gui->canvas, ColorBlack);
+    }
 
     // Right side
     uint8_t x = GUI_DISPLAY_WIDTH - 1;
     ViewPortArray_it(it, gui->layers[GuiLayerStatusBarRight]);
     while(!ViewPortArray_end_p(it) && right_used < GUI_STATUS_BAR_WIDTH) {
         ViewPort* view_port = *ViewPortArray_ref(it);
-        if(view_port_is_enabled(view_port)) {
+        if(gui_status_bar_view_port_is_shown(view_port)) {
             width = view_port_get_width(view_port);
             if(!width) width = 8;
             // Recalculate next position
@@ -154,7 +161,7 @@ static void gui_redraw_status_bar(Gui* gui, bool need_attention) {
     ViewPortArray_it(it, gui->layers[GuiLayerStatusBarLeft]);
     while(!ViewPortArray_end_p(it) && (right_used + left_used) < GUI_STATUS_BAR_WIDTH) {
         ViewPort* view_port = *ViewPortArray_ref(it);
-        if(view_port_is_enabled(view_port)) {
+        if(gui_status_bar_view_port_is_shown(view_port)) {
             width = view_port_get_width(view_port);
             if(!width) width = 8;
             // Prepare work area background
@@ -256,7 +263,9 @@ static void gui_redraw(Gui* gui) {
             bool need_attention =
                 (gui_view_port_find_enabled(gui->layers[GuiLayerWindow]) != 0 ||
                  gui_view_port_find_enabled(gui->layers[GuiLayerFullscreen]) != 0);
-            gui_redraw_status_bar(gui, need_attention);
+            if(momentum_settings_get_bool(MomentumSettingsBoolLockscreenStatusbar)) {
+                gui_redraw_status_bar(gui, need_attention);
+            }
         } else {
             if(!gui_redraw_fs(gui)) {
                 if(!gui_redraw_window(gui)) {
@@ -486,6 +495,17 @@ size_t gui_get_framebuffer_size(const Gui* gui) {
     return canvas_get_buffer_size(gui->canvas);
 }
 
+void gui_set_status_bar_background(Gui* gui, bool enabled) {
+    furi_check(gui);
+
+    gui_lock(gui);
+    const bool changed = gui->status_bar_background != enabled;
+    gui->status_bar_background = enabled;
+    gui_unlock(gui);
+
+    if(changed) gui_update(gui);
+}
+
 void gui_set_lockdown(Gui* gui, bool lockdown) {
     furi_check(gui);
 
@@ -558,6 +578,7 @@ void gui_direct_draw_release(Gui* gui) {
 
 Gui* gui_alloc(void) {
     Gui* gui = calloc(1, sizeof(Gui));
+    gui->status_bar_background = true;
     // Thread ID
     gui->thread_id = furi_thread_get_current_id();
     // Allocate mutex

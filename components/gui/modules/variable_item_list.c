@@ -3,6 +3,7 @@
 #include "../canvas.h"
 #include <furi.h>
 #include <assets_icons.h>
+#include <boards/board.h>
 #include <m-array.h>
 #include <stdint.h>
 
@@ -440,12 +441,16 @@ void variable_item_list_process_ok(VariableItemList* variable_item_list) {
                 model->locked_message_visible = true;
                 furi_timer_start(
                     variable_item_list->locked_timer, furi_kernel_get_tick_frequency() * 3);
+#if !(defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD)
+            /* Encoder only: a D-pad edits values with Left/Right, so Ok
+             * always calls the enter callback as on Flipper. */
             } else if(model->editing) {
                 // Second Ok press: exit editing mode
                 model->editing = false;
             } else if(item->values_count > 1) {
                 // Item has values to edit: enter editing mode
                 model->editing = true;
+#endif
             } else if(variable_item_list->callback) {
                 // Item has no values (it's a pure action): call enter callback
                 variable_item_list->callback(variable_item_list->context, model->position);

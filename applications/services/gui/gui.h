@@ -100,6 +100,9 @@ void gui_remove_framebuffer_callback(Gui* gui, GuiCanvasCommitCallback callback,
  */
 size_t gui_get_framebuffer_size(const Gui* gui);
 
+/** Show or hide the status bar background graphic. */
+void gui_set_status_bar_background(Gui* gui, bool enabled);
+
 /** Set lockdown mode
  *
  * When lockdown mode is enabled, only GuiLayerDesktop is shown.

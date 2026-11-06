@@ -13,6 +13,7 @@ struct ViewPort {
     FuriMutex* mutex;
     bool is_enabled;
     ViewPortOrientation orientation;
+    ViewPortStatusBarIcon statusbar_icon;
 
     uint8_t width;
     uint8_t height;

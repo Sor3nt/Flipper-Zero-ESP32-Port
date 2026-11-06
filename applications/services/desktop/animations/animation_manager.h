@@ -7,6 +7,13 @@
 
 typedef struct AnimationManager AnimationManager;
 
+typedef enum {
+    AnimationManagerPauseReasonApp = 1U << 0,
+    AnimationManagerPauseReasonHomeInactive = 1U << 1,
+    AnimationManagerPauseReasonLoaderMenu = 1U << 2,
+    AnimationManagerPauseReasonPowerIdle = 1U << 3,
+} AnimationManagerPauseReason;
+
 typedef struct {
     uint8_t x;
     uint8_t y;
@@ -95,6 +102,17 @@ void animation_manager_set_new_idle_callback(
  */
 void animation_manager_new_idle_process(AnimationManager* animation_manager);
 
+/** Apply an idle animation from the latest graphics settings immediately.
+ * Blocking animations remain active; a reload is deferred until they finish.
+ */
+void animation_manager_reload_idle_animation(AnimationManager* animation_manager);
+
+/** Add or remove one reason that prevents desktop animation timers from running. */
+void animation_manager_set_pause_reason(
+    AnimationManager* animation_manager,
+    AnimationManagerPauseReason reason,
+    bool paused);
+
 /**
  * Set callback for Animation Manager for deferred calls
  * for animation_manager_check_blocking_process().
@@ -157,6 +175,16 @@ void animation_manager_unload_and_stall_animation(AnimationManager* animation_ma
  * @animation_manager   instance
  */
 void animation_manager_load_and_continue_animation(AnimationManager* animation_manager);
+
+/**
+ * Like animation_manager_load_and_continue_animation(), but when @p fresh is true an idle
+ * animation is NOT restored: a new one is picked right away (Graphics settings changed while
+ * the app ran, so the old animation must not be shown first). Blocking animations are still
+ * restored.
+ */
+void animation_manager_load_and_continue_animation_ex(
+    AnimationManager* animation_manager,
+    bool fresh);
 
 /**
  * Enable or disable dummy mode backgrounds of animation manager.

@@ -177,6 +177,28 @@ void widget_add_text_scroll_element(
     widget_add_element(widget, text_scroll_element);
 }
 
+void widget_add_marquee_header_element(
+    Widget* widget,
+    uint8_t x,
+    uint8_t y,
+    uint8_t right_x,
+    Font title_font,
+    const char* title,
+    Font right_font,
+    const char* right_text) {
+    furi_check(widget);
+    WidgetElement* marquee_element = widget_element_marquee_header_create(
+        x, y, right_x, title_font, title, right_font, right_text);
+    widget_add_element(widget, marquee_element);
+}
+
+void widget_redraw(Widget* widget) {
+    furi_check(widget);
+    /* Elements that animate off the system tick (marquee) are redrawn by
+     * forcing a view-model commit. */
+    with_view_model(widget->view, GuiWidgetModel * model, { UNUSED(model); }, true);
+}
+
 void widget_add_button_element(
     Widget* widget,
     GuiButtonType button_type,

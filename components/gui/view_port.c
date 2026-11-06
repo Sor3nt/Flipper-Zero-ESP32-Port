@@ -98,6 +98,7 @@ ViewPort* view_port_alloc(void) {
     if(!view_port) return NULL;
     view_port->orientation = ViewPortOrientationHorizontal;
     view_port->is_enabled = true;
+    view_port->statusbar_icon = ViewPortStatusBarIconNone;
     view_port->mutex = furi_mutex_alloc(FuriMutexTypeRecursive);
     if(!view_port->mutex) {
         free(view_port);
@@ -166,6 +167,22 @@ bool view_port_is_enabled(const ViewPort* view_port) {
     bool is_enabled = view_port->is_enabled;
     furi_check(furi_mutex_release(view_port->mutex) == FuriStatusOk);
     return is_enabled;
+}
+
+void view_port_set_statusbar_icon(ViewPort* view_port, ViewPortStatusBarIcon icon) {
+    furi_check(view_port);
+    furi_check(icon < ViewPortStatusBarIconCount);
+    furi_check(furi_mutex_acquire(view_port->mutex, FuriWaitForever) == FuriStatusOk);
+    view_port->statusbar_icon = icon;
+    furi_check(furi_mutex_release(view_port->mutex) == FuriStatusOk);
+}
+
+ViewPortStatusBarIcon view_port_get_statusbar_icon(const ViewPort* view_port) {
+    furi_check(view_port);
+    furi_check(furi_mutex_acquire(view_port->mutex, FuriWaitForever) == FuriStatusOk);
+    ViewPortStatusBarIcon icon = view_port->statusbar_icon;
+    furi_check(furi_mutex_release(view_port->mutex) == FuriStatusOk);
+    return icon;
 }
 
 void view_port_draw_callback_set(ViewPort* view_port, ViewPortDrawCallback callback, void* context) {

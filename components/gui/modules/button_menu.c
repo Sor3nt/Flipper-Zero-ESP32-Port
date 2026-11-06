@@ -6,6 +6,7 @@
 
 #include <furi.h>
 #include <assets_icons.h>
+#include <boards/board.h>
 
 #include <stdint.h>
 #include <m-array.h>
@@ -324,8 +325,28 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
          * a plain rotation paged by BUTTONS_PER_SCREEN, which felt like
          * skipping items. Swap so plain rotation steps single items
          * (Left/Right → up/down) and held-rotation pages (Up/Down → left/right).
-         * Direction also flipped so CW = "forward / next item". */
+         * Direction also flipped so CW = "forward / next item".
+         * A real D-pad (BOARD_INPUT_DPAD) uses the stock Flipper mapping:
+         * the view_port already rotates the arrows to the vertical layout. */
         switch(event->key) {
+#if defined(BOARD_INPUT_DPAD) && BOARD_INPUT_DPAD
+        case InputKeyUp:
+            consumed = true;
+            button_menu_process_up(button_menu);
+            break;
+        case InputKeyDown:
+            consumed = true;
+            button_menu_process_down(button_menu);
+            break;
+        case InputKeyLeft:
+            consumed = true;
+            button_menu_process_left(button_menu);
+            break;
+        case InputKeyRight:
+            consumed = true;
+            button_menu_process_right(button_menu);
+            break;
+#else
         case InputKeyUp:
             consumed = true;
             button_menu_process_left(button_menu);
@@ -342,6 +363,7 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
             consumed = true;
             button_menu_process_down(button_menu);
             break;
+#endif
         default:
             break;
         }

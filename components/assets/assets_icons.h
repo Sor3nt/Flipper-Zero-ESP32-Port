@@ -280,3 +280,4 @@ extern const Icon A_settings_button;
 extern const Icon I_menu;
 extern const Icon I_playback;
 extern const Icon I_settings;
+extern const Icon I_Lockscreen;

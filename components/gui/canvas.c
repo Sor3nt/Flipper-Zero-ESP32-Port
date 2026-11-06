@@ -266,27 +266,46 @@ void canvas_draw_bitmap(
     canvas_draw_u8g2_bitmap(&canvas->fb, x, y, width, height, bitmap_data, IconRotation0);
 }
 
-void canvas_draw_icon_animation(
+static void canvas_draw_icon_animation_scaled(
     Canvas* canvas,
     int32_t x,
     int32_t y,
+    int32_t width_scale,
+    int32_t height_scale,
     IconAnimation* icon_animation) {
     furi_check(canvas);
     furi_check(icon_animation);
+    furi_check(width_scale > 0 && height_scale > 0);
+    furi_check(width_scale <= 100 && height_scale <= 100);
 
     x += canvas->offset_x;
     y += canvas->offset_y;
     uint8_t* icon_data = NULL;
     compress_icon_decode(
         canvas->compress_icon, icon_animation_get_data(icon_animation), &icon_data);
+    const int32_t width = (icon_animation_get_width(icon_animation) * width_scale) / 100;
+    const int32_t height = (icon_animation_get_height(icon_animation) * height_scale) / 100;
     canvas_draw_u8g2_bitmap(
-        &canvas->fb,
-        x,
-        y,
-        icon_animation_get_width(icon_animation),
-        icon_animation_get_height(icon_animation),
-        icon_data,
-        IconRotation0);
+        &canvas->fb, x, y, width, height, icon_data, IconRotation0);
+}
+
+void canvas_draw_icon_animation(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    IconAnimation* icon_animation) {
+    canvas_draw_icon_animation_scaled(canvas, x, y, 100, 100, icon_animation);
+}
+
+void canvas_draw_icon_animation_ex(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    int32_t width_scale,
+    int32_t height_scale,
+    IconAnimation* icon_animation) {
+    canvas_draw_icon_animation_scaled(
+        canvas, x, y, width_scale, height_scale, icon_animation);
 }
 
 static void canvas_draw_u8g2_bitmap_int(

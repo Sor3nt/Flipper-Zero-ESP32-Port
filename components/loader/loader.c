@@ -414,6 +414,7 @@ static LoaderMessageLoaderStatusResult loader_do_start_by_name(
 
     if(name == NULL) return status;
 
+    bool before_load_sent = false;
     do {
         if(loader_do_is_locked(loader)) {
             status.value = LoaderStatusErrorAppStarted;
@@ -432,6 +433,7 @@ static LoaderMessageLoaderStatusResult loader_do_start_by_name(
         LoaderEvent event;
         event.type = LoaderEventTypeApplicationBeforeLoad;
         furi_pubsub_publish(loader->pubsub, &event);
+        before_load_sent = true;
 
         const FlipperInternalApplication* app =
             loader_find_application_by_name(name);
@@ -455,6 +457,19 @@ static LoaderMessageLoaderStatusResult loader_do_start_by_name(
         }
         FURI_LOG_E(TAG, "Application \"%s\" not found", name);
     } while(false);
+
+    /* BeforeLoad was announced but nothing started (unknown app, FAP preload/map failure):
+     * close the announcement, or every subscriber keeps believing an app runs - the desktop
+     * kept its animation frozen and ignored animation reloads (asset pack / anim speed),
+     * the power service kept auto power-off disarmed. Same as the stock loader. */
+    if(before_load_sent && status.value != LoaderStatusOk) {
+        LoaderEvent failed_event;
+        failed_event.type = LoaderEventTypeApplicationLoadFailed;
+        furi_pubsub_publish(loader->pubsub, &failed_event);
+        LoaderEvent empty_event;
+        empty_event.type = LoaderEventTypeNoMoreAppsInQueue;
+        furi_pubsub_publish(loader->pubsub, &empty_event);
+    }
 
     return status;
 }
