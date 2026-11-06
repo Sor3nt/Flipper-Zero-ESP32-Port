@@ -499,6 +499,12 @@ void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin) {
 }
 
 void infrared_enable_otg(InfraredApp* infrared, bool enable) {
+#if !INFRARED_HAS_5V_SETTINGS
+    /* ESP32-S3: 5V is owned by the GPIO app; Infrared never switches it. */
+    UNUSED(enable);
+    infrared->app_state.is_otg_enabled = false;
+    return;
+#endif
     Power* power = furi_record_open(RECORD_POWER);
 
     power_enable_otg(power, enable);
@@ -519,6 +525,21 @@ static void infrared_load_settings(InfraredApp* infrared) {
         FURI_LOG_D(TAG, "Failed to load settings, using defaults");
         infrared_save_settings(infrared);
     }
+
+    if(furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX) {
+        /* External TX pin board: the HAL owns the choice (saved by Infrared
+         * Settings, default Internal). An older value in this file was never
+         * effective here and must not switch the output on its own. */
+        infrared->app_state.tx_pin = furi_hal_infrared_get_tx_output();
+        return;
+    }
+
+#if !INFRARED_HAS_5V_SETTINGS
+    /* ESP32-S3 without an external TX pin: GPIO Settings is not offered, so an older saved
+     * choice (A7 / Detect) must not apply; only the internal LED exists here anyway. */
+    infrared->app_state.tx_pin = FuriHalInfraredTxPinInternal;
+    return;
+#endif
 
     infrared_set_tx_pin(infrared, settings.tx_pin);
     if(settings.tx_pin < FuriHalInfraredTxPinMax) {
@@ -633,7 +654,11 @@ int32_t infrared_app(void* p) {
 
     view_dispatcher_run(infrared->view_dispatcher);
 
-    infrared_set_tx_pin(infrared, FuriHalInfraredTxPinInternal);
+    /* On external TX pin boards the selection stays as the user set it, so
+     * CLI / JS / plugins transmit where the user expects after the app exits. */
+    if(furi_hal_infrared_get_ext_tx_pin() == UINT16_MAX) {
+        infrared_set_tx_pin(infrared, FuriHalInfraredTxPinInternal);
+    }
     infrared_enable_otg(infrared, false);
     infrared_free(infrared);
 

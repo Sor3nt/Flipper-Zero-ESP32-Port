@@ -44,11 +44,22 @@ int32_t infrared_test_app(void* arg) {
 
     FURI_LOG_I(TAG, "Starting test signal on PA7");
 
+    if(!furi_hal_infrared_claim_tx()) {
+        FURI_LOG_E(TAG, "Infrared is busy");
+        return 1;
+    }
+
+    /* Restore the user's selection afterwards instead of forcing Internal. */
+    const FuriHalInfraredTxPin previous_output = furi_hal_infrared_get_tx_output();
     furi_hal_infrared_set_tx_output(FuriHalInfraredTxPinExtPA7);
     furi_hal_infrared_async_tx_set_data_isr_callback(infrared_test_app_tx_data_callback, &app);
-    furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY);
-    furi_hal_infrared_async_tx_wait_termination();
-    furi_hal_infrared_set_tx_output(FuriHalInfraredTxPinInternal);
+    if(furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY)) {
+        furi_hal_infrared_async_tx_wait_termination();
+    } else {
+        furi_hal_infrared_release_claim();
+    }
+    furi_hal_infrared_async_tx_reset_callbacks();
+    furi_hal_infrared_set_tx_output(previous_output);
 
     FURI_LOG_I(TAG, "Test signal end");
     FURI_LOG_I(

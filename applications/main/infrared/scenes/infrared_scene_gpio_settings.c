@@ -31,10 +31,54 @@ static void infrared_scene_gpio_settings_otg_change_callback(VariableItem* item)
         infrared_custom_event_pack(InfraredCustomEventTypeGpioOtgChanged, index));
 }
 
+/* Boards with an external IR TX pin: "TX Pin: Internal / GPIOn". The pin is
+ * taken only while a signal is being sent and released right after. */
+static char infrared_scene_ext_pin_text[12];
+
+static bool infrared_scene_gpio_settings_has_ext_pin(void) {
+    return furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX;
+}
+
+static void infrared_scene_gpio_settings_ext_pin_change_callback(VariableItem* item) {
+    InfraredApp* infrared = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(
+        item, index ? infrared_scene_ext_pin_text : "Internal");
+    view_dispatcher_send_custom_event(
+        infrared->view_dispatcher,
+        infrared_custom_event_pack(InfraredCustomEventTypeGpioTxPinChanged, index));
+}
+
+static void infrared_scene_gpio_settings_init_ext(InfraredApp* infrared) {
+    snprintf(
+        infrared_scene_ext_pin_text,
+        sizeof(infrared_scene_ext_pin_text),
+        "GPIO%u",
+        furi_hal_infrared_get_ext_tx_pin());
+
+    VariableItem* item = variable_item_list_add(
+        infrared->var_item_list,
+        "TX Pin",
+        2,
+        infrared_scene_gpio_settings_ext_pin_change_callback,
+        infrared);
+    const uint8_t value_index =
+        furi_hal_infrared_get_tx_output() == FuriHalInfraredTxPinExtPA7 ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(
+        item, value_index ? infrared_scene_ext_pin_text : "Internal");
+}
+
 static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
     VariableItemList* var_item_list = infrared->var_item_list;
     VariableItem* item;
     uint8_t value_index;
+
+    if(infrared_scene_gpio_settings_has_ext_pin()) {
+        infrared_scene_gpio_settings_init_ext(infrared);
+        return;
+    }
 
     item = variable_item_list_add(
         var_item_list,
@@ -81,7 +125,15 @@ bool infrared_scene_gpio_settings_on_event(void* context, SceneManagerEvent even
         const uint16_t custom_event_type = infrared_custom_event_get_type(event.event);
         const uint16_t custom_event_value = infrared_custom_event_get_value(event.event);
 
-        if(custom_event_type == InfraredCustomEventTypeGpioTxPinChanged) {
+        if(custom_event_type == InfraredCustomEventTypeGpioTxPinChanged &&
+           infrared_scene_gpio_settings_has_ext_pin()) {
+            /* Saved at once (also for CLI / JS / plugins and after reboot). */
+            const FuriHalInfraredTxPin tx_pin = custom_event_value ?
+                                                    FuriHalInfraredTxPinExtPA7 :
+                                                    FuriHalInfraredTxPinInternal;
+            furi_hal_infrared_save_tx_output(tx_pin);
+            infrared->app_state.tx_pin = tx_pin;
+        } else if(custom_event_type == InfraredCustomEventTypeGpioTxPinChanged) {
             infrared_set_tx_pin(infrared, custom_event_value);
             variable_item_list_reset(infrared->var_item_list);
             infrared_scene_gpio_settings_init(infrared);

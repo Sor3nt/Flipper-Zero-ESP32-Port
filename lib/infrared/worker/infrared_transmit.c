@@ -44,16 +44,26 @@ void infrared_send_raw_ext(
     float duty_cycle) {
     furi_check(timings);
 
+    /* Claim first: the module state below belongs to the transmission in
+     * flight, if there is one, and must not be touched while it runs. */
+    if(!furi_hal_infrared_claim_tx()) {
+        FURI_LOG_W("InfraredTx", "Infrared is busy, raw signal not sent");
+        return;
+    }
+
     infrared_tx_raw_start_from_mark = start_from_mark;
     infrared_tx_raw_timings_index = 0;
     infrared_tx_raw_timings_number = timings_cnt;
     infrared_tx_raw_add_silence = start_from_mark;
     furi_hal_infrared_async_tx_set_data_isr_callback(
         infrared_get_raw_data_callback, (void*)timings);
-    furi_hal_infrared_async_tx_start(frequency, duty_cycle);
-    furi_hal_infrared_async_tx_wait_termination();
-
-    furi_check(!furi_hal_infrared_is_busy());
+    if(furi_hal_infrared_async_tx_start(frequency, duty_cycle)) {
+        furi_hal_infrared_async_tx_wait_termination();
+    } else {
+        furi_hal_infrared_release_claim();
+    }
+    /* `timings` belongs to the caller: do not leave a pointer to it behind. */
+    furi_hal_infrared_async_tx_reset_callbacks();
 }
 
 void infrared_send_raw(const uint32_t timings[], uint32_t timings_cnt, bool start_from_mark) {
@@ -99,6 +109,12 @@ void infrared_send(const InfraredMessage* message, int times) {
     furi_check(times);
     furi_check(infrared_is_protocol_valid(message->protocol));
 
+    /* Claim first, see infrared_send_raw_ext(). */
+    if(!furi_hal_infrared_claim_tx()) {
+        FURI_LOG_W("InfraredTx", "Infrared is busy, message not sent");
+        return;
+    }
+
     InfraredEncoderHandler* handler = infrared_alloc_encoder();
     infrared_reset_encoder(handler, message);
     infrared_tx_number_of_transmissions =
@@ -108,10 +124,13 @@ void infrared_send(const InfraredMessage* message, int times) {
     float duty_cycle = infrared_get_protocol_duty_cycle(message->protocol);
 
     furi_hal_infrared_async_tx_set_data_isr_callback(infrared_get_data_callback, handler);
-    furi_hal_infrared_async_tx_start(frequency, duty_cycle);
-    furi_hal_infrared_async_tx_wait_termination();
+    if(furi_hal_infrared_async_tx_start(frequency, duty_cycle)) {
+        furi_hal_infrared_async_tx_wait_termination();
+    } else {
+        furi_hal_infrared_release_claim();
+    }
+    /* The encoder is freed below: do not leave a pointer to it behind. */
+    furi_hal_infrared_async_tx_reset_callbacks();
 
     infrared_free_encoder(handler);
-
-    furi_check(!furi_hal_infrared_is_busy());
 }

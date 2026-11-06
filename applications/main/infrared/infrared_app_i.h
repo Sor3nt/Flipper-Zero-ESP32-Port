@@ -5,6 +5,17 @@
 #pragma once
 
 #include <furi_hal_infrared.h>
+#include <sdkconfig.h>
+
+/* 5V (VBUS / OTG) switch. On ESP32-S3 boards it lives only in the GPIO app: Infrared neither
+ * shows "GPIO Settings" with "5V on GPIO" nor switches OTG on or off (so leaving Infrared never
+ * turns off a 5V the user set in GPIO). Non-S3 boards have no GPIO app and keep the switch in
+ * Infrared -> GPIO Settings. */
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#define INFRARED_HAS_5V_SETTINGS 0
+#else
+#define INFRARED_HAS_5V_SETTINGS 1
+#endif
 
 #include <gui/gui.h>
 #include <gui/view.h>

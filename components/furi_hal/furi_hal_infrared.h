@@ -110,6 +110,39 @@ void furi_hal_infrared_async_tx_set_data_isr_callback(
     FuriHalInfraredTxGetDataISRCallback callback,
     void* context);
 
+/** Claim the infrared peripheral for one transmission, atomically.
+ *
+ * Use it before furi_hal_infrared_async_tx_set_data_isr_callback() and
+ * furi_hal_infrared_async_tx_start(): between "is it busy?" and "start" nobody
+ * else can take the peripheral (CLI, JS, another app), so there is no window in
+ * which a second starter could reset the device. Clears every TX callback.
+ *
+ * The claim belongs to the calling TASK: setting the callbacks, starting and
+ * releasing the claim must all happen in that task. Another task (even one that
+ * does not claim) can neither start on it nor replace its callbacks. Stopping /
+ * waiting for the transmission may be done from any task.
+ *
+ * Every successful claim ends in exactly one of
+ *   - furi_hal_infrared_release_claim(), if the transmission is never started,
+ *   - furi_hal_infrared_async_tx_stop() / _abort() / _wait_termination() after a
+ *     start that returned true.
+ *
+ * @return false if the peripheral is busy (transmitting, receiving, claimed).
+ */
+bool furi_hal_infrared_claim_tx(void);
+
+/** Give back a claim taken with furi_hal_infrared_claim_tx() that was never started. */
+void furi_hal_infrared_release_claim(void);
+
+/** Callback for a transmission that was cut short by a hardware error.
+ *  Called once, from the TX task (not an ISR), before the transmission is
+ *  reported finished. Valid for one transmission only; set it after the claim,
+ *  before start. */
+typedef void (*FuriHalInfraredTxErrorCallback)(void* context);
+void furi_hal_infrared_async_tx_set_error_callback(
+    FuriHalInfraredTxErrorCallback callback,
+    void* context);
+
 /** Start IR asynchronous transmission.
  *
  * It can be stopped by 2 reasons:
@@ -121,10 +154,27 @@ void furi_hal_infrared_async_tx_set_data_isr_callback(
  * furi_hal_infrared_async_tx_wait_termination()) has to be called to wait end of
  * transmission and free resources.
  *
+ * Return value:
+ *  - false: the peripheral was busy (not claimed by the caller, in use by
+ *    someone else). Nothing was started and nothing may be stopped or waited
+ *    for: that would wait on the OTHER user's transmission.
+ *  - true: the request was accepted and stop()/wait_termination() is due. It
+ *    does not mean the signal is on the air: a request that could not be served
+ *    (external pin owned by another function, board without IR, RMT setup
+ *    failure) ends at once, and furi_hal_infrared_get_last_tx_error() tells why
+ *    (FuriHalInfraredTxErrorNone if it is really transmitting).
+ *
  * @param[in]  freq        frequency for PWM
  * @param[in]  duty_cycle  duty cycle for PWM
  */
-void furi_hal_infrared_async_tx_start(uint32_t freq, float duty_cycle);
+bool furi_hal_infrared_async_tx_start(uint32_t freq, float duty_cycle);
+
+/** Same as furi_hal_infrared_async_tx_start(), but without a carrier: a mark
+ *  (level = true) drives the output pin high for exactly its duration, a space
+ *  drives it low. Use it for plain pulse trains; the pin selection, the leases
+ *  of shared pins and the error reporting are the same as for a carrier
+ *  transmission. Return value: see furi_hal_infrared_async_tx_start(). */
+bool furi_hal_infrared_async_tx_start_plain(void);
 
 /** Stop IR asynchronous transmission and free resources.
  *
@@ -132,6 +182,32 @@ void furi_hal_infrared_async_tx_start(uint32_t freq, float duty_cycle);
  * (FuriHalInfraredTxGetDataStateDone or FuriHalInfraredTxGetDataStateLastDone).
  */
 void furi_hal_infrared_async_tx_stop(void);
+
+/** Stop IR asynchronous transmission at once and free resources.
+ *
+ * Unlike furi_hal_infrared_async_tx_stop() it does not wait for the end of the
+ * package: the signal on the air is cut within about 20 ms. For callers whose
+ * packages are long (continuous carrier / pulse trains), where a stop request
+ * must not block for the length of a package. A message cut like this is
+ * incomplete; never use it for protocol frames you want delivered.
+ */
+void furi_hal_infrared_async_tx_abort(void);
+
+/** Forget the TX callbacks, but only while the peripheral is idle.
+ *
+ * The callbacks stay registered after a transmission. When they point into code
+ * or data that is about to go away (an app that exits, an unloaded FAP), call
+ * this after the final stop()/wait_termination(): a later user that does not
+ * claim the peripheral would otherwise get a call into freed memory.
+ * If the peripheral already belongs to someone else, their callbacks are left
+ * alone.
+ * @return true if the callbacks were cleared. */
+bool furi_hal_infrared_async_tx_reset_callbacks(void);
+
+/** True if the board has an infrared transmitter / receiver at all. On a board
+ *  without IR a transmission request ends at once with
+ *  FuriHalInfraredTxErrorNoHardware. */
+bool furi_hal_infrared_is_available(void);
 
 /** Wait for end of IR asynchronous transmission and free resources.
  *
@@ -157,9 +233,39 @@ FuriHalInfraredTxPin furi_hal_infrared_detect_tx_output(void);
 
 /** Set which pin will be used to transmit infrared signals.
  *
+ * On boards with an external IR TX pin (BOARD_PIN_IR_TX_EXT: Paradoxt GPIO4,
+ * T-Embed GPIO43) FuriHalInfraredTxPinExtPA7 selects that pin; elsewhere the
+ * call is ignored. Takes effect at the next transmission, never mid-way.
+ *
  * @param[in]   tx_pin  pin to be used for signal transmission.
  */
 void furi_hal_infrared_set_tx_output(FuriHalInfraredTxPin tx_pin);
+
+/** Currently selected TX output (FuriHalInfraredTxPinInternal on boards
+ *  without an external TX pin). */
+FuriHalInfraredTxPin furi_hal_infrared_get_tx_output(void);
+
+/** True if the board can transmit on tx_pin. */
+bool furi_hal_infrared_is_tx_output_supported(FuriHalInfraredTxPin tx_pin);
+
+/** GPIO number of the external TX pin, or UINT16_MAX if there is none. */
+uint16_t furi_hal_infrared_get_ext_tx_pin(void);
+
+/** Store tx_pin as the boot-time default (NVS) and select it, so CLI, JS and
+ *  plugins use the user's choice even before the Infrared app is opened.
+ *  No-op on boards without an external TX pin. */
+void furi_hal_infrared_save_tx_output(FuriHalInfraredTxPin tx_pin);
+
+typedef enum {
+    FuriHalInfraredTxErrorNone,
+    FuriHalInfraredTxErrorExtPinBusy, /* external pin owned by another function */
+    FuriHalInfraredTxErrorHardware, /* RMT channel could not be set up, or failed while sending */
+    FuriHalInfraredTxErrorNoHardware, /* the board has no infrared transmitter */
+} FuriHalInfraredTxError;
+
+/** Why the last transmission did not start (FuriHalInfraredTxErrorNone if it
+ *  did). A refused transmission ends at once: wait_termination() still works. */
+FuriHalInfraredTxError furi_hal_infrared_get_last_tx_error(void);
 
 #ifdef __cplusplus
 }

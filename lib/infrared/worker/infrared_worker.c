@@ -16,13 +16,15 @@
 #define INFRARED_WORKER_EXIT                0x08
 #define INFRARED_WORKER_TX_FILL_BUFFER      0x10
 #define INFRARED_WORKER_TX_MESSAGE_SENT     0x20
+#define INFRARED_WORKER_TX_FAILED           0x40
 
 #define INFRARED_WORKER_ALL_RX_EVENTS                                    \
     (INFRARED_WORKER_RX_RECEIVED | INFRARED_WORKER_RX_TIMEOUT_RECEIVED | \
      INFRARED_WORKER_OVERRUN | INFRARED_WORKER_EXIT)
 
 #define INFRARED_WORKER_ALL_TX_EVENTS \
-    (INFRARED_WORKER_TX_FILL_BUFFER | INFRARED_WORKER_TX_MESSAGE_SENT | INFRARED_WORKER_EXIT)
+    (INFRARED_WORKER_TX_FILL_BUFFER | INFRARED_WORKER_TX_MESSAGE_SENT | \
+     INFRARED_WORKER_TX_FAILED | INFRARED_WORKER_EXIT)
 
 #define INFRARED_WORKER_ALL_EVENTS (INFRARED_WORKER_ALL_RX_EVENTS | INFRARED_WORKER_ALL_TX_EVENTS)
 
@@ -72,6 +74,10 @@ struct InfraredWorker {
             uint32_t tx_raw_cnt;
             bool need_reinitialization;
             bool steady_signal_sent;
+            /* The HAL peripheral is claimed (and the callbacks registered) but the
+             * transmission has not started yet. Set and cleared only by the worker
+             * thread: the claim belongs to the task that holds it. */
+            bool hal_claimed;
         } tx;
         struct {
             InfraredWorkerReceivedSignalCallback received_signal_callback;
@@ -91,6 +97,7 @@ static int32_t infrared_worker_tx_thread(void* context);
 static FuriHalInfraredTxGetDataState
     infrared_worker_furi_hal_data_isr_callback(void* context, uint32_t* duration, bool* level);
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context);
+static void infrared_worker_furi_hal_error_callback(void* context);
 
 static void infrared_worker_rx_timeout_callback(void* context) {
     InfraredWorker* instance = context;
@@ -330,6 +337,26 @@ void infrared_worker_rx_enable_signal_decoding(InfraredWorker* instance, bool en
     instance->decode_enable = enable;
 }
 
+/* Claim the peripheral and register the callbacks. The claim is atomic: if
+ * another user (CLI, JS, a FAP) is transmitting, this fails instead of
+ * replacing its callbacks or resetting the device. A claim clears all TX
+ * callbacks, so they are registered again after every claim. Called from the
+ * worker thread, which then also starts the transmission. */
+static bool infrared_worker_tx_hal_claim(InfraredWorker* instance) {
+    if(!furi_hal_infrared_claim_tx()) return false;
+    furi_hal_infrared_async_tx_set_data_isr_callback(
+        infrared_worker_furi_hal_data_isr_callback, instance);
+    furi_hal_infrared_async_tx_set_signal_sent_isr_callback(
+        infrared_worker_furi_hal_message_sent_isr_callback, instance);
+    furi_hal_infrared_async_tx_set_error_callback(
+        infrared_worker_furi_hal_error_callback, instance);
+    /* A failure flag of an earlier transmission (it may arrive while the worker waits for
+     * that transmission to end) must not abort the one that starts now. This is the
+     * worker thread, so the flag being cleared is its own. */
+    furi_thread_flags_clear(INFRARED_WORKER_TX_FAILED);
+    return true;
+}
+
 void infrared_worker_tx_start(InfraredWorker* instance) {
     furi_check(instance);
     furi_check(instance->state == InfraredWorkerStateIdle);
@@ -342,13 +369,17 @@ void infrared_worker_tx_start(InfraredWorker* instance) {
 
     instance->tx.steady_signal_sent = false;
     instance->tx.need_reinitialization = false;
-    furi_hal_infrared_async_tx_set_data_isr_callback(
-        infrared_worker_furi_hal_data_isr_callback, instance);
-    furi_hal_infrared_async_tx_set_signal_sent_isr_callback(
-        infrared_worker_furi_hal_message_sent_isr_callback, instance);
+    instance->tx.hal_claimed = false;
 
     instance->state = InfraredWorkerStateStartTx;
     furi_thread_start(instance->thread);
+}
+
+/* The HAL transmission died on a hardware error: no further callback will come, so
+ * the worker must be told or it would wait for them for ever. */
+static void infrared_worker_furi_hal_error_callback(void* context) {
+    InfraredWorker* instance = context;
+    furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_TX_FAILED);
 }
 
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context) {
@@ -491,6 +522,16 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
 
     bool exit_pending = false;
 
+    /* Claim here, not in infrared_worker_tx_start(): the claim belongs to this task,
+     * which starts the transmission as well. */
+    instance->tx.hal_claimed = infrared_worker_tx_hal_claim(instance);
+    if(!instance->tx.hal_claimed) {
+        /* The peripheral is in use by someone else: nothing to send and nothing
+         * of the HAL may be touched. infrared_worker_tx_stop() still joins us. */
+        FURI_LOG_W("InfraredWorker", "Infrared is busy, transmission skipped");
+        return 0;
+    }
+
     bool running = infrared_get_new_signal(instance);
     furi_assert(running);
 
@@ -500,7 +541,23 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
             --repeats_left; /* The first message does not result in TX_MESSAGE_SENT event for some reason */
             instance->tx.need_reinitialization = false;
             const bool new_data_available = infrared_worker_tx_fill_buffer(instance);
-            furi_hal_infrared_async_tx_start(instance->tx.frequency, instance->tx.duty_cycle);
+            if(!furi_hal_infrared_async_tx_start(instance->tx.frequency, instance->tx.duty_cycle)) {
+                /* Cannot happen with our own claim held; never wait for a
+                 * transmission that was not started. The claim is released below. */
+                running = false;
+                break;
+            }
+            /* Started (or refused, which is still a transmission to reap): the claim
+             * is consumed by it. */
+            instance->tx.hal_claimed = false;
+            if(furi_hal_infrared_get_last_tx_error() != FuriHalInfraredTxErrorNone) {
+                /* Refused (pin owned by another function, no hardware, RMT
+                 * failure): nothing is on the air and no callback will ever come,
+                 * so waiting for them would never end. The refused transmission
+                 * is finished by the stop below. */
+                instance->state = InfraredWorkerStateStopTx;
+                break;
+            }
 
             if(!new_data_available) {
                 instance->state = InfraredWorkerStateStopTx;
@@ -523,6 +580,14 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
             if(events & INFRARED_WORKER_EXIT) {
                 running = false;
                 break;
+            }
+
+            /* The peripheral is free between two transmissions: take it again
+             * before anyone else does. */
+            instance->tx.hal_claimed = infrared_worker_tx_hal_claim(instance);
+            if(!instance->tx.hal_claimed) {
+                FURI_LOG_W("InfraredWorker", "Infrared was taken over, transmission ends");
+                running = false;
             }
 
             break;
@@ -557,11 +622,27 @@ static int32_t infrared_worker_tx_thread(void* thread_context) {
                 instance->state = InfraredWorkerStateStopTx;
             }
 
+            if(events & INFRARED_WORKER_TX_FAILED) {
+                /* The HAL transmission is already over (hardware error): no callback
+                 * will ever come again, so finish it and leave. Without this, a worker
+                 * with min_repeat > 1 would wait for MESSAGE_SENT events for ever and
+                 * infrared_worker_tx_stop() would hang in furi_thread_join(). */
+                FURI_LOG_E("InfraredWorker", "Infrared transmission failed");
+                instance->state = InfraredWorkerStateStopTx;
+            }
+
             break;
         default:
             furi_crash();
             break;
         }
+    }
+
+    /* A claim that never became a transmission (no signal to send, a start that was
+     * refused) must not be left behind: it would keep the peripheral busy for good. */
+    if(instance->tx.hal_claimed) {
+        furi_hal_infrared_release_claim();
+        instance->tx.hal_claimed = false;
     }
 
     return 0;
@@ -593,8 +674,11 @@ void infrared_worker_tx_stop(InfraredWorker* instance) {
 
     furi_thread_flags_set(furi_thread_get_id(instance->thread), INFRARED_WORKER_EXIT);
     furi_thread_join(instance->thread);
-    furi_hal_infrared_async_tx_set_data_isr_callback(NULL, NULL);
-    furi_hal_infrared_async_tx_set_signal_sent_isr_callback(NULL, NULL);
+    /* Drop the callbacks that point into this worker, but only while the
+     * peripheral is idle: it may already belong to someone else by now, and
+     * their callbacks are not ours to touch. */
+    furi_hal_infrared_async_tx_reset_callbacks();
+    instance->tx.hal_claimed = false;
 
     instance->signal.timings_cnt = 0;
     furi_check(furi_stream_buffer_reset(instance->stream) == FuriStatusOk);
