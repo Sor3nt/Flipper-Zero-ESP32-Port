@@ -2,6 +2,7 @@
 #include "u2f_data.h"
 #include <furi.h>
 #include <furi_hal.h>
+#include <string.h>
 
 static bool u2f_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -23,6 +24,8 @@ static void u2f_app_tick_event_callback(void* context) {
 
 U2fApp* u2f_app_alloc(void) {
     U2fApp* app = malloc(sizeof(U2fApp));
+    furi_check(app);
+    memset(app, 0, sizeof(U2fApp));
 
     app->gui = furi_record_open(RECORD_GUI);
     app->notifications = furi_record_open(RECORD_NOTIFICATION);

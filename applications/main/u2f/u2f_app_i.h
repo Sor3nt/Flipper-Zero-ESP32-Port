@@ -29,6 +29,7 @@ typedef enum {
     U2fCustomEventDataError,
 
     U2fCustomEventRegister,
+    U2fCustomEventRegisterSuccess,
     U2fCustomEventAuth,
     U2fCustomEventAuthSuccess,
     U2fCustomEventWink,

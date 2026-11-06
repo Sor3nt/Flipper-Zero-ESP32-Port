@@ -4,3 +4,4 @@
 nvs,      data, nvs,     ,        0x6000,
 phy_init, data, phy,     ,        0x1000,
 factory,  app,  factory, ,        0x600000,
+u2fkeys,  data, nvs,     ,        0x4000,

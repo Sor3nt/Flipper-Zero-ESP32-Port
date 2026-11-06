@@ -8,6 +8,7 @@ extern "C" {
 
 typedef enum {
     U2fNotifyRegister,
+    U2fNotifyRegisterSuccess,
     U2fNotifyAuth,
     U2fNotifyAuthSuccess,
     U2fNotifyWink,
@@ -29,6 +30,10 @@ void u2f_free(U2fData* instance);
 void u2f_set_event_callback(U2fData* instance, U2fEvtCallback callback, void* context);
 
 void u2f_confirm_user_present(U2fData* instance);
+
+void u2f_cancel_user_presence(U2fData* instance);
+
+void u2f_shutdown(U2fData* instance);
 
 uint16_t u2f_msg_parse(U2fData* instance, uint8_t* buf, uint16_t len);
 
