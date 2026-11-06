@@ -605,6 +605,14 @@ const NotificationSequence sequence_lcd_contrast_update = {
     NULL,
 };
 
+const NotificationSequence sequence_wifi_scan = {
+    &message_blink_set_color_blue,
+    &message_blink_start_10,
+    &message_delay_50,
+    &message_blink_stop,
+    NULL,
+};
+
 const NotificationSequence sequence_empty = {
     NULL,
 };

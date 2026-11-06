@@ -13,6 +13,11 @@
 #include <driver/i2c.h>
 #include <esp_log.h>
 #include <string.h>
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+#include <esp_rom_sys.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 
 static const char* TAG = "BQ25896";
 
@@ -241,12 +246,18 @@ bool furi_hal_bq25896_is_otg_enabled(void) {
     return (reg03 & 0x20) != 0;
 }
 
-bool furi_hal_bq25896_is_vbus_present(void) {
-    if(!bq25896_present) return false;
+bool furi_hal_bq25896_try_vbus_present(bool* present) {
+    if(!present || !bq25896_present) return false;
     uint8_t reg0b = 0;
     if(!bq25896_read_reg(REG0B, &reg0b)) return false;
     /* VBUS_STAT (bits 7:5): 000 = No Input, anything else = powered from VBUS */
-    return ((reg0b >> 5) & 0x07) != 0;
+    *present = ((reg0b >> 5) & 0x07) != 0;
+    return true;
+}
+
+bool furi_hal_bq25896_is_vbus_present(void) {
+    bool present = false;
+    return furi_hal_bq25896_try_vbus_present(&present) && present;
 }
 
 void furi_hal_bq25896_poweroff(void) {
@@ -261,3 +272,117 @@ void furi_hal_bq25896_poweroff(void) {
     reg09 |= 0x20; /* BATFET_DIS */
     bq25896_write_reg(REG09, reg09);
 }
+
+#if defined(BOARD_HAS_BQ25896_SHIP_MODE) && BOARD_HAS_BQ25896_SHIP_MODE
+/* Ship-mode power-off and sleep preparation, ported unchanged in behaviour
+ * from the Paradoxt firmware where they were tested on hardware. */
+
+#define REG02_ADC_CONT      0xC0U /* CONV_START | CONV_RATE */
+#define REG03_CHG_CONFIG    0x10U
+#define REG03_OTG_CONFIG    0x20U
+#define REG09_BATFET_DIS    (1U << 5)
+#define REG09_BATFET_DLY    (1U << 3)
+#define REG09_BATFET_RST_EN (1U << 2)
+
+bool furi_hal_bq25896_get_vbus_present(bool* present) {
+    if(!present || !bq25896_present) return false;
+    uint8_t reg11 = 0;
+    for(uint8_t attempt = 0; attempt < 3; attempt++) {
+        if(bq25896_read_reg(REG11, &reg11)) {
+            /* VBUS_GD comes from input-source qualification, valid even with
+             * the ADC off. */
+            *present = (reg11 & 0x80U) != 0;
+            return true;
+        }
+        vTaskDelay(1);
+    }
+    ESP_LOGE(TAG, "VBUS detection failed: charger status read error");
+    return false;
+}
+
+bool furi_hal_bq25896_prepare_for_sleep(void) {
+    if(!bq25896_present) return false;
+    for(uint8_t attempt = 0; attempt < 3; attempt++) {
+        uint8_t r00 = 0, r02 = 0, r03 = 0, r07 = 0;
+        if(bq25896_read_reg(REG00, &r00) && bq25896_read_reg(REG02, &r02) &&
+           bq25896_read_reg(REG03, &r03) && bq25896_read_reg(REG07, &r07)) {
+            r00 &= (uint8_t)~0x80U; /* EN_HIZ=0: input never high-Z */
+            r02 &= (uint8_t)~REG02_ADC_CONT; /* continuous ADC off while asleep */
+            r03 &= (uint8_t)~REG03_OTG_CONFIG; /* no boost while asleep */
+            r03 |= REG03_CHG_CONFIG; /* keep charging autonomously */
+            r07 &= (uint8_t)~0x30U; /* watchdog off: expiry would reset ICHG */
+            if(bq25896_write_reg(REG03, r03) && bq25896_write_reg(REG00, r00) &&
+               bq25896_write_reg(REG07, r07) && bq25896_write_reg(REG02, r02)) {
+                uint8_t c00 = 0, c02 = 0, c03 = 0, c07 = 0;
+                if(bq25896_read_reg(REG00, &c00) && bq25896_read_reg(REG02, &c02) &&
+                   bq25896_read_reg(REG03, &c03) && bq25896_read_reg(REG07, &c07) &&
+                   (c00 & 0x80U) == 0 && (c02 & 0x40U) == 0 && (c03 & 0x30U) == 0x10U &&
+                   (c07 & 0x30U) == 0) {
+                    ESP_LOGI(TAG, "Sleep prep verified: EN_HIZ=0 CHG=1 OTG=0 WDT=off ADC=off");
+                    return true;
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    ESP_LOGW(TAG, "Sleep prep verification failed after 3 attempts");
+    return false;
+}
+
+bool furi_hal_bq25896_ship_mode(void) {
+    if(!bq25896_present) return false;
+
+    uint8_t reg0b = 0, reg11 = 0, reg09 = 0, reg03 = 0, reg07 = 0;
+    if(!bq25896_read_reg(REG0B, &reg0b) || !bq25896_read_reg(REG11, &reg11) ||
+       !bq25896_read_reg(REG09, &reg09) || !bq25896_read_reg(REG03, &reg03)) {
+        ESP_LOGE(TAG, "BATFET shutdown: failed to read charger state");
+        return false;
+    }
+    if((reg11 & 0x80U) != 0) {
+        ESP_LOGW(
+            TAG,
+            "BATFET shutdown refused: VBUS_GD=1 (VBUS_STAT=%u)",
+            (unsigned)((reg0b >> 5) & 0x07U));
+        return false;
+    }
+
+    /* Charger / boost must not drive SYS while BATFET opens. */
+    const uint8_t reg03_off = (uint8_t)(reg03 & (uint8_t)~(REG03_CHG_CONFIG | REG03_OTG_CONFIG));
+    if(!bq25896_write_reg(REG03, reg03_off)) {
+        ESP_LOGE(TAG, "BATFET shutdown: failed to disable charger/OTG");
+        return false;
+    }
+    if(!bq25896_read_reg(REG07, &reg07) ||
+       !bq25896_write_reg(REG07, (uint8_t)(reg07 & (uint8_t)~0x30U))) {
+        ESP_LOGE(TAG, "BATFET shutdown: failed to disable watchdog");
+        bq25896_write_reg(REG03, reg03);
+        return false;
+    }
+
+    /* REG09 is the last transaction: BATFET opens immediately, /QON auto
+     * reset off. */
+    const uint8_t reg09_off =
+        (uint8_t)((reg09 & (uint8_t)~(REG09_BATFET_DLY | REG09_BATFET_RST_EN)) | REG09_BATFET_DIS);
+    ESP_LOGI(TAG, "BATFET shutdown: REG09 <= 0x%02X", reg09_off);
+    for(uint8_t attempt = 0; attempt < 3; attempt++) {
+        if(bq25896_write_reg(REG09, reg09_off)) {
+            /* From here on: no logging, no other peripheral access. Bounded
+             * wait (150 ms < 300 ms interrupt WDT) for SYS to collapse. */
+            const UBaseType_t irq = portSET_INTERRUPT_MASK_FROM_ISR();
+            esp_rom_delay_us(150000);
+            portCLEAR_INTERRUPT_MASK_FROM_ISR(irq);
+
+            /* Still alive: BATFET did not cut SYS (e.g. VBUS appeared). Undo,
+             * so the battery stays connected and charging resumes. */
+            bq25896_write_reg(REG09, (uint8_t)(reg09 & (uint8_t)~REG09_BATFET_DIS));
+            bq25896_write_reg(REG03, reg03);
+            ESP_LOGE(TAG, "BATFET shutdown: system still alive after BATFET_DIS; reverted");
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    ESP_LOGE(TAG, "BATFET shutdown: REG09 write failed");
+    bq25896_write_reg(REG03, reg03);
+    return false;
+}
+#endif

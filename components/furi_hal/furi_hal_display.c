@@ -7,6 +7,7 @@
 
 #include "furi_hal_display.h"
 #include "furi_hal_light.h"
+#include "furi_hal_power.h"
 #include "furi_hal_resources.h"
 #include "furi_hal_spi_bus.h"
 #include "boards/board.h"
@@ -392,6 +393,7 @@ void furi_hal_display_sleep(void) {
     esp_lcd_panel_disp_sleep(panel_handle, true);
     furi_hal_spi_bus_unlock();
     panel_is_asleep = true;
+    furi_hal_power_publish_idle_state(true);
 }
 
 void furi_hal_display_wakeup(void) {
@@ -402,6 +404,7 @@ void furi_hal_display_wakeup(void) {
     esp_lcd_panel_disp_on_off(panel_handle, true);
     furi_hal_spi_bus_unlock();
     panel_is_asleep = false;
+    furi_hal_power_publish_idle_state(false);
 }
 
 bool furi_hal_display_is_asleep(void) {

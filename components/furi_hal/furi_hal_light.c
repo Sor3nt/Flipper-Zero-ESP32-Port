@@ -22,6 +22,10 @@
 
 #ifdef BOARD_PIN_WS2812_DATA
 #include <led_strip.h>
+#include <esp_rom_gpio.h>
+#include <soc/gpio_sig_map.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #endif
 
 #define BACKLIGHT_LEDC_TIMER    LEDC_TIMER_0
@@ -39,6 +43,28 @@ static led_strip_handle_t led_strip = NULL;
  * each channel and push the combined RGB to all WS2812 pixels on every
  * change. */
 static uint8_t led_r = 0, led_g = 0, led_b = 0;
+/* Serializes every WS2812 access: the notification effect timer, the input
+ * thread, the settings app and FAPs all write the ring. While suspended (screen
+ * off) or shut down (power-off) the hardware is left dark and only the cache
+ * above follows the writers. */
+static SemaphoreHandle_t light_mutex = NULL;
+static StaticSemaphore_t light_mutex_buffer;
+static uint8_t ws2812_suspended = 0; /* FuriHalLightSuspend bits */
+static bool ws2812_shutdown = false;
+static FuriHalLightSuspendCallback ws2812_suspend_callback = NULL;
+static void* ws2812_suspend_context = NULL;
+
+static void furi_hal_light_lock(void) {
+    if(light_mutex) xSemaphoreTake(light_mutex, portMAX_DELAY);
+}
+
+static void furi_hal_light_unlock(void) {
+    if(light_mutex) xSemaphoreGive(light_mutex);
+}
+
+static bool furi_hal_light_ws2812_writable(void) {
+    return led_strip && !ws2812_suspended && !ws2812_shutdown;
+}
 #endif
 
 static uint32_t furi_hal_light_backlight_duty_from_value(uint8_t value) {
@@ -51,8 +77,9 @@ static uint32_t furi_hal_light_backlight_duty_from_value(uint8_t value) {
 }
 
 #ifdef BOARD_PIN_WS2812_DATA
+/* Caller holds light_mutex. */
 static void furi_hal_light_ws2812_push(void) {
-    if(!led_strip) return;
+    if(!furi_hal_light_ws2812_writable()) return;
     for(uint16_t i = 0; i < BOARD_WS2812_LED_COUNT; i++) {
         led_strip_set_pixel(led_strip, i, led_r, led_g, led_b);
     }
@@ -125,6 +152,7 @@ void furi_hal_light_init(void) {
 }
     
 #ifdef BOARD_PIN_WS2812_DATA
+    if(!light_mutex) light_mutex = xSemaphoreCreateMutexStatic(&light_mutex_buffer);
     furi_hal_light_ws2812_init();
 #endif
 }
@@ -142,7 +170,11 @@ void furi_hal_light_set(Light light, uint8_t value) {
     if(light & LightRed)   { led_r = value; rgb_changed = true; }
     if(light & LightGreen) { led_g = value; rgb_changed = true; }
     if(light & LightBlue)  { led_b = value; rgb_changed = true; }
-    if(rgb_changed) furi_hal_light_ws2812_push();
+    if(rgb_changed) {
+        furi_hal_light_lock();
+        furi_hal_light_ws2812_push();
+        furi_hal_light_unlock();
+    }
 #endif
 }
 
@@ -166,22 +198,93 @@ void furi_hal_light_sequence(const char* sequence) {
 
 #ifdef BOARD_PIN_WS2812_DATA
 void furi_hal_light_set_rgb_all(uint8_t r, uint8_t g, uint8_t b) {
+    furi_hal_light_lock();
     led_r = r; led_g = g; led_b = b;
-    if(!led_strip) return;
-    for(uint16_t i = 0; i < BOARD_WS2812_LED_COUNT; i++) {
-        led_strip_set_pixel(led_strip, i, r, g, b);
-    }
-    led_strip_refresh(led_strip);
+    furi_hal_light_ws2812_push();
+    furi_hal_light_unlock();
 }
 
 void furi_hal_light_set_pixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
-    if(!led_strip || idx >= BOARD_WS2812_LED_COUNT) return;
-    led_strip_set_pixel(led_strip, idx, r, g, b);
+    if(idx >= BOARD_WS2812_LED_COUNT) return;
+    furi_hal_light_lock();
+    if(furi_hal_light_ws2812_writable()) led_strip_set_pixel(led_strip, idx, r, g, b);
+    furi_hal_light_unlock();
 }
 
 void furi_hal_light_refresh(void) {
-    if(!led_strip) return;
-    led_strip_refresh(led_strip);
+    furi_hal_light_lock();
+    if(furi_hal_light_ws2812_writable()) led_strip_refresh(led_strip);
+    furi_hal_light_unlock();
+}
+
+void furi_hal_light_set_ws2812_suspended(FuriHalLightSuspend reason, bool suspended) {
+    FuriHalLightSuspendCallback callback = NULL;
+    void* context = NULL;
+    bool now_dark = false;
+
+    furi_hal_light_lock();
+    const uint8_t before = ws2812_suspended;
+    if(suspended) {
+        ws2812_suspended |= (uint8_t)reason;
+    } else {
+        ws2812_suspended &= (uint8_t)~reason;
+    }
+    if(!ws2812_shutdown) {
+        if(before == 0 && ws2812_suspended != 0) {
+            /* First reason: black frame, then every writer is blocked. */
+            if(led_strip) led_strip_clear(led_strip);
+            callback = ws2812_suspend_callback;
+            context = ws2812_suspend_context;
+            now_dark = true;
+        } else if(before != 0 && ws2812_suspended == 0) {
+            callback = ws2812_suspend_callback;
+            context = ws2812_suspend_context;
+            if(!callback) furi_hal_light_ws2812_push();
+        }
+    }
+    furi_hal_light_unlock();
+
+    if(callback) callback(context, now_dark);
+}
+
+bool furi_hal_light_is_ws2812_suspended(void) {
+    furi_hal_light_lock();
+    const bool dark = ws2812_suspended != 0 || ws2812_shutdown;
+    furi_hal_light_unlock();
+    return dark;
+}
+
+void furi_hal_light_set_ws2812_suspend_callback(FuriHalLightSuspendCallback callback, void* context) {
+    furi_hal_light_lock();
+    ws2812_suspend_callback = callback;
+    ws2812_suspend_context = context;
+    furi_hal_light_unlock();
+}
+
+bool furi_hal_light_shutdown_ws2812(void) {
+    furi_hal_light_lock();
+    bool sent = true;
+    if(led_strip && !ws2812_shutdown) {
+        /* Synchronous: led_strip_refresh waits for rmt_tx_wait_all_done, so
+         * the black frame is fully clocked out before we take the pad away. */
+        sent = led_strip_clear(led_strip) == ESP_OK;
+    }
+    if(!ws2812_shutdown) {
+        /* Detach the data pin from the RMT peripheral and drive it LOW as a
+         * plain GPIO, so its level no longer depends on RMT idle state and is
+         * well defined when the deep-sleep pin table latches it. Done under
+         * light_mutex with ws2812_shutdown set, so no writer can re-attach RMT
+         * or relight the ring afterwards (every WS2812 call takes this lock and
+         * bails on ws2812_shutdown). */
+        const gpio_num_t pin = (gpio_num_t)BOARD_PIN_WS2812_DATA;
+        gpio_set_level(pin, 0);
+        esp_rom_gpio_connect_out_signal(pin, SIG_GPIO_OUT_IDX, false, false);
+        gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+        gpio_set_pull_mode(pin, GPIO_FLOATING);
+    }
+    ws2812_shutdown = true;
+    furi_hal_light_unlock();
+    return sent;
 }
 
 uint16_t furi_hal_light_pixel_count(void) {
@@ -196,4 +299,18 @@ void furi_hal_light_set_pixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
 }
 void furi_hal_light_refresh(void) {}
 uint16_t furi_hal_light_pixel_count(void) { return 0; }
+void furi_hal_light_set_ws2812_suspended(FuriHalLightSuspend reason, bool suspended) {
+    (void)reason;
+    (void)suspended;
+}
+bool furi_hal_light_is_ws2812_suspended(void) {
+    return false;
+}
+void furi_hal_light_set_ws2812_suspend_callback(FuriHalLightSuspendCallback callback, void* context) {
+    (void)callback;
+    (void)context;
+}
+bool furi_hal_light_shutdown_ws2812(void) {
+    return true;
+}
 #endif

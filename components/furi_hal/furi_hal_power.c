@@ -24,10 +24,14 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 
 #include <furi.h>
 
 #include "furi_hal_resources.h"
+#include "furi_hal_light.h"
+#include "furi_hal_power_sleep.h"
+#include <driver/rtc_io.h>
 
 #define TAG "FuriHalPower"
 
@@ -44,6 +48,15 @@ static esp_pm_lock_handle_t furi_hal_power_freq_lock = NULL;
  * peripheral/RMT locks, the WiFi/BT drivers' own locks). */
 static esp_pm_lock_handle_t furi_hal_power_no_ls_lock = NULL;
 static bool furi_hal_power_ls_allowed = false;
+/* What the idle logic asked for, and how many sessions veto it. The gate is
+ * open only when requested and not inhibited. Both are changed under
+ * furi_hal_power_ls_mutex, together with the lock transition they cause. */
+static bool furi_hal_power_ls_requested = false;
+static uint16_t furi_hal_power_ls_inhibit = 0;
+static SemaphoreHandle_t furi_hal_power_ls_mutex = NULL;
+static StaticSemaphore_t furi_hal_power_ls_mutex_buffer;
+/* Auto Light Sleep: pads parked + WS2812 dark before the gate opens. */
+static bool furi_hal_power_ls_safe_mode = false;
 
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
 /* Optional light-sleep instrumentation. Enable CONFIG_PM_LIGHT_SLEEP_CALLBACKS
@@ -122,6 +135,9 @@ static FuriHalPowerState furi_hal_power = {
     .last_supply_voltage = 0.0f,
     .last_battery_voltage = FURI_HAL_POWER_FULL_BATTERY_VOLTAGE_V,
 };
+
+static FuriPubSub* furi_hal_power_idle_pubsub;
+static volatile bool furi_hal_power_idle;
 
 static const FuriHalPowerCurvePoint furi_hal_power_curve[] = {
     {3.27f, 0},
@@ -323,7 +339,12 @@ static float furi_hal_power_get_estimated_battery_voltage(void) {
 }
 
 void furi_hal_power_init(void) {
+    /* Normally already done by the early constructor; idempotent. */
+    furi_hal_power_sleep_release_holds();
     furi_hal_power_ensure_initialized();
+    if(!furi_hal_power_idle_pubsub) {
+        furi_hal_power_idle_pubsub = furi_pubsub_alloc();
+    }
 
 #if CONFIG_PM_ENABLE
     /* Dynamic frequency scaling: let the CPU idle at 80 MHz and ramp to 160 MHz
@@ -335,6 +356,8 @@ void furi_hal_power_init(void) {
      * DFS 80-160 MHz plus automatic light sleep, the latter gated by the
      * NO_LIGHT_SLEEP lock below. min_freq is 80 (not 40) so APB stays
      * PLL-sourced and the LEDC backlight PWM and I2C timing don't shift. */
+    furi_hal_power_ls_mutex = xSemaphoreCreateMutexStatic(&furi_hal_power_ls_mutex_buffer);
+
     esp_pm_config_t pm_config = {
         .max_freq_mhz = 160,
         .min_freq_mhz = 80,
@@ -403,6 +426,22 @@ void furi_hal_power_init(void) {
     }
 }
 
+FuriPubSub* furi_hal_power_get_idle_pubsub(void) {
+    return furi_hal_power_idle_pubsub;
+}
+
+void furi_hal_power_publish_idle_state(bool idle) {
+    if(__atomic_exchange_n(&furi_hal_power_idle, idle, __ATOMIC_ACQ_REL) == idle) return;
+    if(furi_hal_power_idle_pubsub) {
+        const FuriHalPowerIdleEvent event = {.idle = idle};
+        furi_pubsub_publish(furi_hal_power_idle_pubsub, (void*)&event);
+    }
+}
+
+bool furi_hal_power_is_idle(void) {
+    return __atomic_load_n(&furi_hal_power_idle, __ATOMIC_ACQUIRE);
+}
+
 bool furi_hal_power_gauge_is_ok(void) {
     if(furi_hal_bq27220_is_present()) return true;
     if(!furi_hal_power.adc_handle) return true;
@@ -424,18 +463,16 @@ uint16_t furi_hal_power_insomnia_level(void) {
 void furi_hal_power_insomnia_enter(void) {
     FURI_CRITICAL_ENTER();
     furi_check(furi_hal_power.insomnia < UINT8_MAX);
-    const bool first = (furi_hal_power.insomnia == 0);
     furi_hal_power.insomnia++;
     FURI_CRITICAL_EXIT();
     /* Acquire outside the critical section (a frequency switch busy-waits for
-     * PLL relock). Callers pair enter/exit within the same scope, so the 0->1
-     * transition owns exactly one lock reference. */
+     * PLL relock). The PM lock is itself reference counted, so every enter
+     * takes one reference and every exit drops one: two cores entering and
+     * leaving concurrently can never release before acquiring. */
 #if CONFIG_PM_ENABLE
-    if(first && furi_hal_power_freq_lock) {
+    if(furi_hal_power_freq_lock) {
         esp_pm_lock_acquire(furi_hal_power_freq_lock);
     }
-#else
-    (void)first;
 #endif
 }
 
@@ -443,14 +480,11 @@ void furi_hal_power_insomnia_exit(void) {
     FURI_CRITICAL_ENTER();
     furi_check(furi_hal_power.insomnia > 0);
     furi_hal_power.insomnia--;
-    const bool last = (furi_hal_power.insomnia == 0);
     FURI_CRITICAL_EXIT();
 #if CONFIG_PM_ENABLE
-    if(last && furi_hal_power_freq_lock) {
+    if(furi_hal_power_freq_lock) {
         esp_pm_lock_release(furi_hal_power_freq_lock);
     }
-#else
-    (void)last;
 #endif
 }
 
@@ -458,22 +492,148 @@ bool furi_hal_power_sleep_available(void) {
     return furi_hal_power.insomnia == 0;
 }
 
+/* VBUS state cached by the power service tick: -1 unknown, 0 absent,
+ * 1 present. Lets the 4 ms input loop and the notification service check USB
+ * without I2C traffic. A failed charger read stays "unknown" instead of
+ * "absent": the cache lives for a full tick, and "absent" would open the
+ * light-sleep gate with USB attached. */
+static volatile int8_t furi_hal_power_vbus_cache = -1;
+
+void furi_hal_power_refresh_usb_state(void) {
+    int8_t state = -1;
+    if(furi_hal_bq25896_is_present()) {
+        bool present = false;
+        if(furi_hal_bq25896_try_vbus_present(&present)) state = present ? 1 : 0;
+    } else if(furi_hal_power.adc_ready) {
+        furi_hal_power_refresh_sample();
+        if(furi_hal_power.last_sample_ok) state = furi_hal_power_is_usb_present() ? 1 : 0;
+    }
+    furi_hal_power_vbus_cache = state;
+}
+
+bool furi_hal_power_is_usb_connected(void) {
+    return furi_hal_power_vbus_cache == 1;
+}
+
 bool furi_hal_power_is_running_on_battery(void) {
     /* Only an explicit VBUS sense is trusted. Without a charger IC we can't
-     * tell USB from battery, so assume wired and never light-sleep. */
-    return furi_hal_bq25896_is_present() && !furi_hal_bq25896_is_vbus_present();
+     * tell USB from battery, so assume wired and never light-sleep. The cached
+     * state (refreshed by the power service tick, once a second) is used on
+     * purpose: the input loop asks every 4 ms while the screen is off, and a
+     * charger register read per poll kept the I2C bus and the CPU busy. Unknown
+     * (-1, before the first refresh or without a sensor) counts as not on
+     * battery, so the light-sleep gate stays closed. */
+    return furi_hal_bq25896_is_present() && furi_hal_power_vbus_cache == 0;
+}
+
+#if CONFIG_PM_ENABLE
+/* Caller holds furi_hal_power_ls_mutex. */
+static void furi_hal_power_ls_update_gate_locked(void) {
+    const bool allow = furi_hal_power_ls_requested && furi_hal_power_ls_inhibit == 0;
+    if(allow == furi_hal_power_ls_allowed) return;
+    if(allow && furi_hal_power_ls_safe_mode) {
+        /* Pads first, then a dark LED ring, then the gate. */
+        furi_hal_power_sleep_apply_light_sleep_pins();
+        furi_hal_light_set_ws2812_suspended(FuriHalLightSuspendLightSleep, true);
+    }
+    const esp_err_t err = allow ? esp_pm_lock_release(furi_hal_power_no_ls_lock) :
+                                  esp_pm_lock_acquire(furi_hal_power_no_ls_lock);
+    if(err == ESP_OK) {
+        furi_hal_power_ls_allowed = allow;
+    } else {
+        ESP_LOGE(TAG, "Light-sleep gate update failed: %s", esp_err_to_name(err));
+    }
+    if(!furi_hal_power_ls_allowed) {
+        /* Awake again (or the gate failed to open): LEDs back. No-op when the
+         * light-sleep reason was never set. */
+        furi_hal_light_set_ws2812_suspended(FuriHalLightSuspendLightSleep, false);
+    }
+}
+#endif
+
+void furi_hal_power_set_light_sleep_safe_mode(bool enable) {
+#if CONFIG_PM_ENABLE
+    if(!furi_hal_power_ls_mutex) return;
+    xSemaphoreTake(furi_hal_power_ls_mutex, portMAX_DELAY);
+    if(enable != furi_hal_power_ls_safe_mode) {
+        furi_hal_power_ls_safe_mode = enable;
+        if(enable) {
+            if(furi_hal_power_ls_allowed) {
+                furi_hal_power_sleep_apply_light_sleep_pins();
+                furi_hal_light_set_ws2812_suspended(FuriHalLightSuspendLightSleep, true);
+            }
+        } else {
+            furi_hal_power_sleep_reset_light_sleep_pins();
+            furi_hal_light_set_ws2812_suspended(FuriHalLightSuspendLightSleep, false);
+        }
+        ESP_LOGI(TAG, "Auto Light Sleep %s", enable ? "enabled" : "disabled");
+    }
+    xSemaphoreGive(furi_hal_power_ls_mutex);
+#else
+    (void)enable;
+#endif
+}
+
+bool furi_hal_power_is_light_sleep_safe_mode(void) {
+#if CONFIG_PM_ENABLE
+    return furi_hal_power_ls_safe_mode;
+#else
+    return false;
+#endif
+}
+
+bool furi_hal_power_is_light_sleep_active(void) {
+#if CONFIG_PM_ENABLE
+    return furi_hal_power_ls_allowed;
+#else
+    return false;
+#endif
 }
 
 void furi_hal_power_allow_light_sleep(bool allow) {
 #if CONFIG_PM_ENABLE
-    if(!furi_hal_power_no_ls_lock || allow == furi_hal_power_ls_allowed) return;
-    furi_hal_power_ls_allowed = allow;
-    if(allow)
-        esp_pm_lock_release(furi_hal_power_no_ls_lock);
-    else
-        esp_pm_lock_acquire(furi_hal_power_no_ls_lock);
+    if(!furi_hal_power_no_ls_lock || !furi_hal_power_ls_mutex) return;
+    /* Called every input poll (4 ms): skip the mutex when nothing changes. The
+     * request is only written below, under the mutex, so this read is either
+     * current or from just before a concurrent change, and that caller's own
+     * request then wins like it always did (last writer). The gate itself is
+     * re-evaluated by every inhibit enter/exit, so a skipped call never leaves
+     * it stale. */
+    if(__atomic_load_n(&furi_hal_power_ls_requested, __ATOMIC_ACQUIRE) == allow) return;
+    xSemaphoreTake(furi_hal_power_ls_mutex, portMAX_DELAY);
+    __atomic_store_n(&furi_hal_power_ls_requested, allow, __ATOMIC_RELEASE);
+    furi_hal_power_ls_update_gate_locked();
+    xSemaphoreGive(furi_hal_power_ls_mutex);
 #else
     (void)allow;
+#endif
+}
+
+void furi_hal_power_light_sleep_inhibit_enter(void) {
+#if CONFIG_PM_ENABLE
+    if(!furi_hal_power_ls_mutex) return;
+    xSemaphoreTake(furi_hal_power_ls_mutex, portMAX_DELAY);
+    furi_check(furi_hal_power_ls_inhibit < UINT16_MAX);
+    furi_hal_power_ls_inhibit++;
+    if(furi_hal_power_no_ls_lock) furi_hal_power_ls_update_gate_locked();
+    xSemaphoreGive(furi_hal_power_ls_mutex);
+#endif
+}
+
+void furi_hal_power_light_sleep_inhibit_exit(void) {
+#if CONFIG_PM_ENABLE
+    if(!furi_hal_power_ls_mutex) return;
+    xSemaphoreTake(furi_hal_power_ls_mutex, portMAX_DELAY);
+    /* An enter issued before furi_hal_power_init() was not counted: ignore
+     * its exit instead of underflowing. */
+    if(furi_hal_power_ls_inhibit == 0) {
+        xSemaphoreGive(furi_hal_power_ls_mutex);
+        ESP_LOGW(TAG, "Light-sleep inhibit exit without enter");
+        return;
+    }
+    furi_hal_power_ls_inhibit--;
+    if(furi_hal_power_no_ls_lock) furi_hal_power_ls_update_gate_locked();
+    xSemaphoreGive(furi_hal_power_ls_mutex);
 #endif
 }
 
@@ -536,14 +696,44 @@ bool furi_hal_power_is_charging_done(void) {
 }
 
 /* Shared teardown before either deep sleep or a real power-off: wait for the
- * button to be released (so we don't immediately re-wake), then kill the
- * display and peripheral power rail. */
-static void furi_hal_power_prepare_shutdown(void) {
+ * wake button to be released (so we don't immediately re-wake), then blank the
+ * LED ring, kill the display and the peripheral power rail. Returns false only
+ * when the BQ25896 /QON button is still held (Paradoxt), in which case the
+ * charger would wake straight away and the caller restarts instead. */
+static bool furi_hal_power_prepare_shutdown(void) {
     /* Wait for button release to avoid immediate wakeup */
     while(gpio_get_level((gpio_num_t)BOARD_PIN_BUTTON_BOOT) == 0) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+    bool qon_released = true;
+#ifdef BOARD_PIN_BQ25896_QON
+    /* /QON (Back) is a charger wake input: wait up to 5 s for its release. */
+    for(uint32_t waited_ms = 0;; waited_ms += 10) {
+        const int qon_level = gpio_get_level((gpio_num_t)BOARD_PIN_BQ25896_QON);
+#if defined(BOARD_PIN_BQ25896_QON_ACTIVE_HIGH) && BOARD_PIN_BQ25896_QON_ACTIVE_HIGH
+        const bool qon_held = qon_level != 0;
+#else
+        const bool qon_held = qon_level == 0;
+#endif
+        if(!qon_held) break;
+        if(waited_ms >= 5000) {
+            ESP_LOGE(TAG, "BQ25896 /QON still held; not shutting down");
+            qon_released = false;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+#endif
     vTaskDelay(pdMS_TO_TICKS(200)); /* debounce */
+    if(!qon_released) return false;
+
+    /* WS2812: final black frame, then no writer can relight the ring. Give
+     * the frame and its reset latch (>280 us) time to finish before the data
+     * pin is taken over and latched low by the deep-sleep pin table. */
+    if(!furi_hal_light_shutdown_ws2812()) {
+        ESP_LOGW(TAG, "WS2812 black frame not confirmed");
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
 
 #ifdef BOARD_PIN_LCD_BL
     furi_hal_display_set_backlight(0);
@@ -554,53 +744,64 @@ static void furi_hal_power_prepare_shutdown(void) {
 #ifdef BOARD_PIN_PWR_EN
     gpio_set_level((gpio_num_t)BOARD_PIN_PWR_EN, 0);
 #endif
+    return true;
 }
 
 /* Enter ESP32 deep sleep, waking on the BOOT/encoder button. The RTC domain
- * stays powered (~µA draw); this is not a true power cut. Does not return. */
+ * stays powered (~µA draw); this is not a true power cut. Does not return.
+ *
+ * Every connected pad is first driven / pulled to a defined idle state and
+ * latched (furi_hal_power_sleep.c), so nothing floats while asleep. Holding
+ * digital pads requires esp_deep_sleep_start() to run on an internal-RAM
+ * stack (the power-service stack lives in PSRAM), so the final call is made
+ * from a dedicated task with an internal stack. */
 static void furi_hal_power_enter_deep_sleep(void) {
-    /* Deliberately NO gpio_hold_en() / gpio_deep_sleep_hold_en() here. Holding
-     * digital IOs across deep sleep makes esp_deep_sleep_start() run
-     * esp_sleep_isolate_digital_gpio(), which assert-fails with "the stack of the
-     * task calling esp_deep_sleep_start must be in internal ram" — and the
-     * power-service FuriThread stack lives in PSRAM (SPIRAM_ALLOW_STACK_EXTERNAL
-     * + SPIRAM_MALLOC_ALWAYSINTERNAL=1024 pushes the 4 KB stack external). That
-     * assert panicked (reset_reason=4) and rebooted on every power-off. Without
-     * the hold, the isolation step is skipped and deep sleep starts cleanly. */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
-    /* Wake on the BOOT/encoder button (GPIO0, active low). Its external
-     * boot-strapping pull-up keeps it HIGH across deep sleep, so it does not
-     * re-wake immediately — unlike the side key (GPIO6), which floats LOW and
-     * rebooted the device instantly (regression from the multi-boot PR). */
+    /* Wake on the BOOT/encoder button (active low). Its external pull-up keeps
+     * it HIGH across deep sleep; the RTC pull-up below backs that up. The wake
+     * pin itself is never latched. */
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
+    if(rtc_gpio_is_valid_gpio((gpio_num_t)BOARD_PIN_BUTTON_BOOT)) {
+        rtc_gpio_init((gpio_num_t)BOARD_PIN_BUTTON_BOOT);
+        rtc_gpio_set_direction((gpio_num_t)BOARD_PIN_BUTTON_BOOT, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pulldown_dis((gpio_num_t)BOARD_PIN_BUTTON_BOOT);
+        rtc_gpio_pullup_en((gpio_num_t)BOARD_PIN_BUTTON_BOOT);
+    }
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_BUTTON_BOOT, 0);
 #else
     esp_deep_sleep_enable_gpio_wakeup(BIT(BOARD_PIN_BUTTON_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
 #endif
-    /* Clear the deep-sleep GPIO auto-hold bit. It lives in the RTC domain
-     * (RTC_CNTL_DIG_ISO_REG) and SURVIVES resets/panics, so a firmware that once
-     * called gpio_deep_sleep_hold_en() leaves it set for every later boot. While
-     * it is set, esp_deep_sleep_start() runs esp_sleep_isolate_digital_gpio(),
-     * which assert-fails because our power-service stack is in PSRAM -> panic ->
-     * reboot. Only a full power-cycle would clear it otherwise, which is exactly
-     * why the reboot persisted across re-flashes. Disabling it unconditionally
-     * makes power-off deterministic regardless of what ran before.
-     *
-     * Guarded by the exact same SOC caps that gate the function's definition in
-     * esp-idf (esp_driver_gpio/src/gpio.c): it only exists for chips with global
-     * (non-single-IO) deep-sleep hold, i.e. the ESP32-S3. On the ESP32-C6
-     * (SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP=1) the symbol is absent and the
-     * whole auto-hold problem never applied, so skipping it keeps the C6 build
-     * linking. */
+    /* Clear a stale deep-sleep auto-hold bit left in the RTC domain by an
+     * earlier firmware; the hold is re-armed below only when needed, from an
+     * internal-stack task. Exists on the S3 only (global digital hold). */
 #if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP && !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     gpio_deep_sleep_hold_dis();
 #endif
-    esp_deep_sleep_start();
+
+#if defined(BOARD_HAS_PARADOXT_POWER_SEQUENCE) && BOARD_HAS_PARADOXT_POWER_SEQUENCE
+    /* Charger keeps charging autonomously while the MCU sleeps on USB. Must
+     * run before the I2C pads are latched. */
+    if(furi_hal_bq25896_is_present() && !furi_hal_bq25896_prepare_for_sleep()) {
+        ESP_LOGW(TAG, "BQ25896 sleep preparation not verified");
+    }
+#endif
+
+    furi_hal_power_sleep_audit_pins();
+    const bool digital_hold = furi_hal_power_sleep_isolate_pins();
+#if SOC_PM_SUPPORT_RTC_PERIPH_PD
+    /* RTC IO pulls and latched levels stay powered while asleep. */
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+#endif
+    furi_hal_power_sleep_start_deep_sleep(digital_hold);
 }
 
 /* Deep-sleep power-off (default mode). */
 void furi_hal_power_shutdown(void) {
-    furi_hal_power_prepare_shutdown();
+    if(!furi_hal_power_prepare_shutdown()) {
+        /* Display may already be torn down: restart cleanly instead. */
+        esp_restart();
+    }
     furi_hal_power_enter_deep_sleep();
 }
 
@@ -610,7 +811,9 @@ void furi_hal_power_shutdown(void) {
  * charger keeps SYS powered, so we fall back to deep sleep. If there is no
  * charger at all (or the write fails) we also fall back to deep sleep. */
 void furi_hal_power_off(void) {
-    furi_hal_power_prepare_shutdown();
+    if(!furi_hal_power_prepare_shutdown()) {
+        esp_restart();
+    }
 
     if(furi_hal_bq25896_is_present() && !furi_hal_bq25896_is_vbus_present()) {
         furi_hal_bq25896_poweroff();
@@ -622,17 +825,55 @@ void furi_hal_power_off(void) {
     furi_hal_power_enter_deep_sleep();
 }
 
+#if defined(BOARD_HAS_PARADOXT_POWER_SEQUENCE) && BOARD_HAS_PARADOXT_POWER_SEQUENCE
+bool furi_hal_power_off_ship_mode(void) {
+    bool vbus_present = false;
+    if(!furi_hal_bq25896_is_present() || !furi_hal_bq25896_get_vbus_present(&vbus_present)) {
+        ESP_LOGE(TAG, "Power-off aborted: BQ25896 state unknown");
+        return false;
+    }
+    if(!vbus_present) {
+        /* Battery: cut it. The charger removes SYS at once, so nothing is torn
+         * down first; returns only if the cut was not confirmed. */
+        return furi_hal_bq25896_ship_mode();
+    }
+    /* USB keeps SYS powered: deep sleep, wake on OK (BOOT). */
+    ESP_LOGI(TAG, "USB present: deep sleep with BOOT wake instead of ship mode");
+    if(!furi_hal_power_prepare_shutdown()) {
+        esp_restart();
+    }
+    furi_hal_power_enter_deep_sleep();
+    return true;
+}
+#endif
+
 FURI_NORETURN void furi_hal_power_reset(void) {
     esp_restart();
     __builtin_unreachable();
 }
 
 bool furi_hal_power_enable_otg(void) {
+    /* OTG 5 V = the BQ25896 charger's boost output on VBUS (REG03 OTG_CONFIG). Drive it only when a
+     * charger is present AND no external VBUS is already feeding the pin: the boost must not fight a
+     * host/charger that is already supplying VBUS (when USB is plugged, VBUS already carries 5 V from
+     * the host, so an external 5 V module is powered either way). On a board without a charger this
+     * stays a pure flag so the Sub-GHz radio loaders' retry loop still terminates (they poll
+     * furi_hal_power_is_otg_enabled() after each call). */
+    if(furi_hal_bq25896_is_present()) {
+        if(furi_hal_bq25896_is_vbus_present()) {
+            ESP_LOGW(TAG, "OTG requested while VBUS present; host supplies 5 V, boost left off");
+        } else {
+            furi_hal_bq25896_enable_otg();
+        }
+    }
     furi_hal_power.otg_enabled = true;
     return true;
 }
 
 void furi_hal_power_disable_otg(void) {
+    if(furi_hal_bq25896_is_present()) {
+        furi_hal_bq25896_disable_otg();
+    }
     furi_hal_power.otg_enabled = false;
 }
 

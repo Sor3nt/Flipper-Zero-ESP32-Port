@@ -108,6 +108,15 @@ void notification_internal_message_block(
     NotificationApp* app,
     const NotificationSequence* sequence);
 
+/**
+ * @brief Auto Off LED USB (owned by the power settings): while on USB and the
+ * screen is off, keep the WS2812 ring dark; it comes back with the screen.
+ *
+ * @param app notification record content
+ * @param enabled feature on/off
+ */
+void notification_set_usb_led_auto_off(NotificationApp* app, bool enabled);
+
 #ifdef __cplusplus
 }
 #endif

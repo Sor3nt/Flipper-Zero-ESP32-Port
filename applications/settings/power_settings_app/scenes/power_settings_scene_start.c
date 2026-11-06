@@ -1,5 +1,6 @@
 #include "../power_settings_app.h"
 #include <lib/toolbox/value_index.h>
+#include <furi_hal_light.h>
 
 enum PowerSettingsSubmenuIndex {
     PowerSettingsSubmenuIndexBatteryInfo,
@@ -26,6 +27,9 @@ const char* const off_mode_text[OFF_MODE_COUNT] = {"Deep Sleep", "Power Off"};
 
 const uint32_t off_mode_value[OFF_MODE_COUNT] = {PowerOffModeDeepSleep, PowerOffModePowerOff};
 
+#define ON_OFF_COUNT 2
+static const char* const power_settings_on_off_text[ON_OFF_COUNT] = {"OFF", "ON"};
+
 // change variable_item_list visible text and charge_supress_percent_settings when user change item in variable_item_list
 static void power_settings_scene_start_charge_supress_percent_changed(VariableItem* item) {
     PowerSettingsApp* app = variable_item_get_context(item);
@@ -51,6 +55,24 @@ static void power_settings_scene_start_off_mode_changed(VariableItem* item) {
 
     variable_item_set_current_value_text(item, off_mode_text[index]);
     app->settings.off_mode = off_mode_value[index];
+}
+
+#if CONFIG_PM_ENABLE
+static void power_settings_scene_start_auto_light_sleep_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, power_settings_on_off_text[index]);
+    app->settings.auto_light_sleep = index;
+}
+#endif
+
+static void power_settings_scene_start_led_usb_auto_off_changed(VariableItem* item) {
+    PowerSettingsApp* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, power_settings_on_off_text[index]);
+    app->settings.led_usb_auto_off = index;
 }
 
 static void power_settings_scene_start_submenu_callback(void* context, uint32_t index) {
@@ -109,6 +131,31 @@ void power_settings_scene_start_on_enter(void* context) {
     value_index = value_index_uint32(app->settings.off_mode, off_mode_value, OFF_MODE_COUNT);
     variable_item_set_current_value_index(item, value_index);
     variable_item_set_current_value_text(item, off_mode_text[value_index]);
+
+    /* Appended after the existing items so their list indices stay the same. */
+#if CONFIG_PM_ENABLE
+    item = variable_item_list_add(
+        variable_item_list,
+        "Auto Light Sleep",
+        ON_OFF_COUNT,
+        power_settings_scene_start_auto_light_sleep_changed,
+        app);
+    value_index = app->settings.auto_light_sleep ? 1 : 0;
+    variable_item_set_current_value_index(item, value_index);
+    variable_item_set_current_value_text(item, power_settings_on_off_text[value_index]);
+#endif
+
+    if(furi_hal_light_pixel_count() > 0) {
+        item = variable_item_list_add(
+            variable_item_list,
+            "Auto Off LED USB",
+            ON_OFF_COUNT,
+            power_settings_scene_start_led_usb_auto_off_changed,
+            app);
+        value_index = app->settings.led_usb_auto_off ? 1 : 0;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, power_settings_on_off_text[value_index]);
+    }
 
     variable_item_list_set_selected_item(
         variable_item_list,

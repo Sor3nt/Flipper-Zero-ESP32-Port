@@ -96,6 +96,9 @@ extern const NotificationSequence sequence_display_backlight_enforce_auto;
 
 // Charging
 extern const NotificationSequence sequence_charging;
+/* WiFi/radio scan cue. The new firmware has no tone messages, so this is a
+ * short blue blink instead of the old short beep. */
+extern const NotificationSequence sequence_wifi_scan;
 extern const NotificationSequence sequence_charged;
 extern const NotificationSequence sequence_not_charging;
 

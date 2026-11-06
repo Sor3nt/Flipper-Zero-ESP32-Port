@@ -3,6 +3,7 @@
 
 #include <furi.h>
 #include <furi_hal.h>
+#include <boards/board.h>
 
 #include <update_util/update_operation.h>
 #include <notification/notification_messages.h>
@@ -363,6 +364,17 @@ void power_trigger_ui_update(Power* power) {
 }
 
 static void power_handle_shutdown(Power* power) {
+#if defined(BOARD_HAS_PARADOXT_POWER_SEQUENCE) && BOARD_HAS_PARADOXT_POWER_SEQUENCE
+    if(power->settings.off_mode == PowerOffModePowerOff) {
+        /* Paradoxt: battery -> BQ25896 ship mode (BATFET off), USB -> deep
+         * sleep. If the charger refuses or cannot be read, nothing has been
+         * torn down yet: stay on instead of halting. */
+        if(!furi_hal_power_off_ship_mode()) {
+            FURI_LOG_E(TAG, "Power off refused by the charger; staying on");
+        }
+        return;
+    }
+#endif
     if(power->settings.off_mode == PowerOffModePowerOff) {
         /* Real power-off (charger ship mode on battery, deep-sleep fallback on USB) */
         furi_hal_power_off();
@@ -493,6 +505,10 @@ static void power_auto_poweroff_arm(Power* power) {
             power->input_events_subscription = furi_pubsub_subscribe(
                 power->input_events_pubsub, power_auto_poweroff_callback, power);
         }
+        if(power->input_wake_events_subscription == NULL) {
+            power->input_wake_events_subscription = furi_pubsub_subscribe(
+                power->input_wake_events_pubsub, power_auto_poweroff_callback, power);
+        }
         power_start_auto_poweroff_timer(power);
     }
 }
@@ -503,6 +519,11 @@ static void power_auto_poweroff_disarm(Power* power) {
     if(power->input_events_subscription) {
         furi_pubsub_unsubscribe(power->input_events_pubsub, power->input_events_subscription);
         power->input_events_subscription = NULL;
+    }
+    if(power->input_wake_events_subscription) {
+        furi_pubsub_unsubscribe(
+            power->input_wake_events_pubsub, power->input_wake_events_subscription);
+        power->input_wake_events_subscription = NULL;
     }
 }
 
@@ -525,6 +546,14 @@ static void power_loader_callback(const void* message, void* context) {
 
 // apply power settings
 static void power_settings_apply(Power* power) {
+    /* Always valid from the first apply: light sleep, the input service and the
+     * notification service all read this cached VBUS state. */
+    furi_hal_power_refresh_usb_state();
+    furi_hal_power_set_light_sleep_safe_mode(power->settings.auto_light_sleep != 0);
+    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_set_usb_led_auto_off(notification, power->settings.led_usb_auto_off != 0);
+    furi_record_close(RECORD_NOTIFICATION);
+
     //apply auto_poweroff settings
     if(power->settings.auto_poweroff_delay_ms && !power->app_running) {
         power_auto_poweroff_arm(power);
@@ -628,6 +657,10 @@ static void power_tick_callback(void* context) {
     furi_assert(context);
     Power* power = context;
 
+    /* Cached VBUS for the light-sleep gate / Auto Off LED USB (no I2C in the
+     * 4 ms input loop or the notification service). Unconditional: the gate
+     * reads it in every mode, and a stale "unknown" would block light sleep. */
+    furi_hal_power_refresh_usb_state();
     // Update data from gauge and charger
     const bool need_refresh = power_update_info(power);
     // Check low battery level
@@ -690,6 +723,8 @@ static void power_init_settings(Power* power) {
 
 static Power* power_alloc(void) {
     Power* power = malloc(sizeof(Power));
+    power->input_events_subscription = NULL;
+    power->input_wake_events_subscription = NULL;
     // Pubsub
     power->event_pubsub = furi_pubsub_alloc();
     // State initialization
@@ -707,6 +742,7 @@ static Power* power_alloc(void) {
     Loader* loader = furi_record_open(RECORD_LOADER);
     furi_pubsub_subscribe(loader_get_pubsub(loader), power_loader_callback, power);
     power->input_events_pubsub = furi_record_open(RECORD_INPUT_EVENTS);
+    power->input_wake_events_pubsub = furi_record_open(RECORD_INPUT_WAKE_EVENTS);
     //define autopoweroff timer and they callback
     power->auto_poweroff_timer =
         furi_timer_alloc(power_auto_poweroff_timer_callback, FuriTimerTypeOnce, power);

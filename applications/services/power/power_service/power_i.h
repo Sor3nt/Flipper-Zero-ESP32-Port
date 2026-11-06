@@ -42,6 +42,8 @@ struct Power {
     bool app_running;
     FuriPubSub* input_events_pubsub;
     FuriPubSubSubscription* input_events_subscription;
+    FuriPubSub* input_wake_events_pubsub;
+    FuriPubSubSubscription* input_wake_events_subscription;
     bool charge_is_supressed;
 };
 

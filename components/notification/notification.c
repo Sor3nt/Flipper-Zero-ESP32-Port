@@ -6,6 +6,7 @@
 #include <furi.h>
 #include <furi_hal_display.h>
 #include <furi_hal_light.h>
+#include <furi_hal_power.h>
 #include <furi_hal_rtc.h>
 #include <furi_hal_speaker.h>
 #include <esp_random.h>
@@ -27,7 +28,10 @@ typedef enum {
     NotificationLayerMessage,
     InternalLayerMessage,
     SaveSettingsMessage,
+    LedCheckMessage, /* no sequence: re-evaluate the WS2812 suspend state */
 } NotificationAppMessageType;
+
+#define LED_USB_CHECK_MS 5000U
 
 typedef struct {
     const NotificationSequence* sequence;
@@ -549,6 +553,9 @@ static void render_wipe(NotificationApp* app) {
 static void notification_led_effect_tick(void* context) {
     furi_assert(context);
     NotificationApp* app = context;
+    /* Ring kept dark: frames would be dropped anyway. The notification
+     * thread stops this timer (see notification_led_post_process). */
+    if(furi_hal_light_is_ws2812_suspended()) return;
     led_effect_phase++;
     switch(app->settings.led_effect) {
         case LedEffectBreathing: render_breathing(app); break;
@@ -567,12 +574,15 @@ static void notification_led_effect_tick(void* context) {
  * Also (re)starts the idle-off timer. */
 void notification_apply_led_color(NotificationApp* app) {
     if(!app) return;
-    /* About to re-light the ring — clear the idle-off marker. */
-    app->led_idle_off = false;
     /* Always stop the effect timer; we'll restart for animated effects. */
     if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
         furi_timer_stop(app->led_effect_timer);
     }
+    /* Ring kept dark (Auto Off LED USB / Auto Light Sleep): nothing to show
+     * now. The suspend callback re-applies the colour once it may light. */
+    if(furi_hal_light_is_ws2812_suspended()) return;
+    /* About to re-light the ring — clear the idle-off marker. */
+    app->led_idle_off = false;
 
     LedEffect eff = (LedEffect)app->settings.led_effect;
     uint8_t r, g, b;
@@ -721,6 +731,70 @@ void notification_apply_ui_color(NotificationApp* app) {
     }
 }
 
+static void notification_post_led_check(NotificationApp* app) {
+    NotificationAppMessage message = {
+        .sequence = NULL,
+        .type = LedCheckMessage,
+        .back_event = NULL,
+    };
+    /* Never block (may run in the timer daemon or under a HAL lock). A full
+     * queue is fine: the flag below is handled after whatever is queued. */
+    furi_message_queue_put(app->queue, &message, 0);
+}
+
+static void notification_led_usb_check_timer_cb(void* context) {
+    notification_post_led_check(context);
+}
+
+static void notification_led_suspend_callback(void* context, bool suspended) {
+    UNUSED(suspended);
+    NotificationApp* app = context;
+    __atomic_store_n(&app->led_suspend_changed, true, __ATOMIC_RELEASE);
+    notification_post_led_check(app);
+}
+
+void notification_set_usb_led_auto_off(NotificationApp* app, bool enabled) {
+    furi_check(app);
+    __atomic_store_n(&app->led_usb_auto_off, enabled, __ATOMIC_RELEASE);
+    notification_post_led_check(app);
+}
+
+/* Notification thread only. Runs after every queued message. */
+static void notification_led_post_process(NotificationApp* app) {
+    if(furi_hal_light_pixel_count() == 0) return;
+
+    /* Auto Off LED USB: dark while on USB with the screen off. The USB state
+     * is the cached VBUS from the power service: no I2C traffic here. */
+    const bool monitor = __atomic_load_n(&app->led_usb_auto_off, __ATOMIC_ACQUIRE) &&
+                         furi_hal_display_is_asleep();
+    furi_hal_light_set_ws2812_suspended(
+        FuriHalLightSuspendUsbScreenOff, monitor && furi_hal_power_is_usb_connected());
+    /* Light sleep only happens on battery: with Auto Light Sleep the ring is
+     * dark for that reason and, when USB appears, the gate closes and the
+     * suspend callback brings us back. No periodic re-check (wake-up) then. */
+    const bool woken_by_gate =
+        furi_hal_power_is_light_sleep_safe_mode() && furi_hal_power_is_light_sleep_active();
+    if(monitor && !woken_by_gate) {
+        if(!furi_timer_is_running(app->led_usb_check_timer)) {
+            furi_timer_start(app->led_usb_check_timer, furi_ms_to_ticks(LED_USB_CHECK_MS));
+        }
+    } else if(furi_timer_is_running(app->led_usb_check_timer)) {
+        furi_timer_stop(app->led_usb_check_timer);
+    }
+
+    if(__atomic_exchange_n(&app->led_suspend_changed, false, __ATOMIC_ACQ_REL)) {
+        if(furi_hal_light_is_ws2812_suspended()) {
+            /* Dark: stop the effect timer so it no longer wakes the CPU. */
+            if(furi_timer_is_running(app->led_effect_timer)) {
+                furi_timer_stop(app->led_effect_timer);
+            }
+        } else if(!app->led_idle_off) {
+            /* May light again: restore colour / restart the effect. */
+            notification_apply_led_color(app);
+        }
+    }
+}
+
 static NotificationApp* notification_app_alloc(void) {
     NotificationApp* app = malloc(sizeof(NotificationApp));
 
@@ -733,6 +807,10 @@ static NotificationApp* notification_app_alloc(void) {
         furi_timer_alloc(notification_led_effect_tick, FuriTimerTypePeriodic, app);
     app->ui_spectrum_timer =
         furi_timer_alloc(notification_ui_spectrum_tick, FuriTimerTypePeriodic, app);
+    app->led_usb_check_timer =
+        furi_timer_alloc(notification_led_usb_check_timer_cb, FuriTimerTypePeriodic, app);
+    app->led_usb_auto_off = false;
+    app->led_suspend_changed = false;
 
     app->settings.display_brightness = 1.0f;
     app->settings.display_off_delay_ms = 30000;
@@ -766,8 +844,12 @@ static NotificationApp* notification_app_alloc(void) {
     app->display.index = LayerInternal;
     app->display_led_lock = false;
 
+    furi_hal_light_set_ws2812_suspend_callback(notification_led_suspend_callback, app);
+
     app->event_record = furi_record_open(RECORD_INPUT_EVENTS);
     furi_pubsub_subscribe(app->event_record, input_event_callback, app);
+    app->wake_event_record = furi_record_open(RECORD_INPUT_WAKE_EVENTS);
+    furi_pubsub_subscribe(app->wake_event_record, input_event_callback, app);
     notification_message(app, &sequence_display_backlight_on);
 
     if(app->settings.night_shift != 1.0f) {
@@ -819,7 +901,10 @@ int32_t notification_srv(void* p) {
         case SaveSettingsMessage:
             notification_save_settings(app);
             break;
+        case LedCheckMessage:
+            break;
         }
+        notification_led_post_process(app);
 
         if(message.back_event != NULL) {
             furi_event_flag_set(message.back_event, NOTIFICATION_EVENT_COMPLETE);

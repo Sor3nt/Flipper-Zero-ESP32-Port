@@ -98,12 +98,20 @@ typedef struct {
 struct NotificationApp {
     FuriMessageQueue* queue;
     FuriPubSub* event_record;
+    FuriPubSub* wake_event_record;
     FuriTimer* display_timer;
     FuriTimer* night_shift_timer;
     FuriTimer* night_shift_demo_timer;
     FuriTimer* led_off_timer;
     FuriTimer* led_effect_timer;
     FuriTimer* ui_spectrum_timer;
+    /* Auto Off LED USB (Settings > Power): 5 s USB re-check while the screen
+     * is off, so plugging / unplugging USB is noticed without input. */
+    FuriTimer* led_usb_check_timer;
+    bool led_usb_auto_off;
+    /* Set by the WS2812 suspend callback (any thread); handled on the
+     * notification thread: stop the effect when dark, re-apply when lit. */
+    bool led_suspend_changed;
 
     NotificationDisplayLayer display;
     bool display_led_lock;

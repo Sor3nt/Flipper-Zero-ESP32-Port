@@ -4,6 +4,7 @@
  */
 
 #include "furi_hal_display.h"
+#include "furi_hal_power.h"
 #include "boards/board.h"
 
 #include <string.h>
@@ -129,6 +130,7 @@ void furi_hal_display_sleep(void) {
     const uint8_t command = 0xAE; /* display off */
     sh1106_commands(&command, 1);
     panel_is_asleep = true;
+    furi_hal_power_publish_idle_state(true);
 }
 
 void furi_hal_display_wakeup(void) {
@@ -136,6 +138,7 @@ void furi_hal_display_wakeup(void) {
     const uint8_t command = 0xAF; /* display on */
     sh1106_commands(&command, 1);
     panel_is_asleep = false;
+    furi_hal_power_publish_idle_state(false);
 }
 
 bool furi_hal_display_is_asleep(void) {
