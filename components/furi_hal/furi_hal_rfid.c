@@ -15,8 +15,10 @@
 
 #include "furi_hal_rfid.h"
 #include "furi_hal_shared_pins.h"
+#include "furi_hal_uart_shared.h"
 #include <furi.h>
 #include <esp_log.h>
+#include <stdatomic.h>
 
 #include BOARD_INCLUDE
 
@@ -40,8 +42,19 @@
 /* ---- State ---- */
 static FuriHalRfidReadCaptureCallback s_capture_cb = NULL;
 static void* s_capture_ctx = NULL;
-static volatile bool s_reading = false;
+typedef enum {
+    RfidReaderStateIdle,
+    RfidReaderStateStarting,
+    RfidReaderStateRunning,
+    RfidReaderStateStopping,
+} RfidReaderState;
+
+static atomic_int s_reader_state = ATOMIC_VAR_INIT(RfidReaderStateIdle);
 static FuriThread* s_reader_thread = NULL;
+
+static bool rfid_reader_is_running(void) {
+    return atomic_load_explicit(&s_reader_state, memory_order_acquire) == RfidReaderStateRunning;
+}
 
 /* ---- Helpers ---- */
 
@@ -136,7 +149,7 @@ static void em4100_feed_manchester(
     bool current_level = true; /* start high (header bit 1 → HIGH first) */
     uint32_t accum_us = 0;
 
-    for(size_t i = 0; i < bit_count && s_reading; i++) {
+    for(size_t i = 0; i < bit_count && rfid_reader_is_running(); i++) {
         /* Each bit has two half-bit phases */
         bool first_half = (frame_bits[i] == 1); /* 1→HIGH first, 0→LOW first */
         bool second_half = !first_half;
@@ -161,17 +174,56 @@ static void em4100_feed_manchester(
     }
 
     /* Flush remaining */
-    if(accum_us > 0 && s_reading) {
+    if(accum_us > 0 && rfid_reader_is_running()) {
         cb(current_level, accum_us, ctx);
     }
 }
 
 /* ---- Reader thread ---- */
 
-static int32_t rfid_reader_thread(void* arg) {
-    UNUSED(arg);
-    ESP_LOGI(TAG, "RFID reader thread started (UART%d, RX=%d TX=%d)",
-             BOARD_RFID_UART_NUM, BOARD_PIN_RFID_RX, BOARD_PIN_RFID_TX);
+typedef enum {
+    RfidSessionDone,
+    RfidSessionYielded,
+    RfidSessionRetry,
+    RfidSessionFailed,
+} RfidSessionResult;
+
+static RfidSessionResult rfid_reader_run_session(void) {
+    bool shared_pins_acquired = false;
+    bool shared_pins_saved = false;
+    bool shared_uart_acquired = false;
+    bool installed = false;
+    bool yielded = false;
+    bool retry = false;
+    esp_err_t uart_err = ESP_OK;
+
+    if(!rfid_reader_is_running()) return RfidSessionDone;
+
+    if(furi_hal_uart_shared_acquire_background(100) !=
+       FuriHalUartSharedAcquireAcquired) {
+        return rfid_reader_is_running() ? RfidSessionRetry : RfidSessionDone;
+    }
+    shared_uart_acquired = true;
+
+    if(!furi_hal_shared_pins_acquire(&s_reader_thread)) {
+        FURI_LOG_W(TAG, "RFID shared pins are busy; retrying after releasing UART");
+        retry = true;
+        goto release;
+    }
+    shared_pins_acquired = true;
+    if(!rfid_reader_is_running()) goto release;
+    if(uart_is_driver_installed(BOARD_RFID_UART_NUM)) {
+        FURI_LOG_E(TAG, "RFID UART driver is already installed");
+        goto failed;
+    }
+
+#if defined(BOARD_EXTERNAL_UART_SAVE_RESTORE_SHARED_PINS)
+    if(!furi_hal_shared_pins_save(&s_reader_thread)) {
+        FURI_LOG_E(TAG, "Could not preserve shared RFID pin state");
+        goto failed;
+    }
+    shared_pins_saved = true;
+#endif
 
     uart_config_t uart_cfg = {
         .baud_rate = RDM_BAUD,
@@ -182,23 +234,37 @@ static int32_t rfid_reader_thread(void* arg) {
         .source_clk = UART_SCLK_DEFAULT,
     };
     /* Install before touching configuration. Never reconfigure/delete an owner. */
-    bool installed = false;
-    if(!furi_hal_shared_pins_acquire(&s_reader_thread)) goto busy;
-    if(uart_is_driver_installed(BOARD_RFID_UART_NUM)) goto release;
-    if(uart_driver_install(BOARD_RFID_UART_NUM, RDM_BUF_SIZE, 0, 0, NULL, 0) != ESP_OK)
-        goto release;
+    uart_err = uart_driver_install(BOARD_RFID_UART_NUM, RDM_BUF_SIZE, 0, 0, NULL, 0);
+    if(uart_err != ESP_OK) {
+        FURI_LOG_E(TAG, "RFID UART driver install failed: %s", esp_err_to_name(uart_err));
+        goto failed;
+    }
     installed = true;
-    if(uart_param_config(BOARD_RFID_UART_NUM, &uart_cfg) != ESP_OK ||
-       uart_set_pin(BOARD_RFID_UART_NUM, BOARD_PIN_RFID_TX, BOARD_PIN_RFID_RX, -1, -1) != ESP_OK)
+    uart_err = uart_param_config(BOARD_RFID_UART_NUM, &uart_cfg);
+    if(uart_err == ESP_OK) {
+        uart_err = uart_set_pin(
+            BOARD_RFID_UART_NUM, BOARD_PIN_RFID_TX, BOARD_PIN_RFID_RX, -1, -1);
+    }
+    if(uart_err != ESP_OK) {
+        FURI_LOG_E(TAG, "RFID UART setup failed: %s", esp_err_to_name(uart_err));
         goto release;
+    }
 
     uint8_t byte_buf[RDM_PKT_SIZE];
     size_t pkt_pos = 0;
 
-    while(s_reading) {
+    while(rfid_reader_is_running()) {
+        if(furi_hal_uart_shared_preemption_requested()) {
+            yielded = true;
+            break;
+        }
         uint8_t c;
-        int len = uart_read_bytes(BOARD_RFID_UART_NUM, &c, 1, pdMS_TO_TICKS(50));
-        if(len <= 0) continue;
+        const int len = uart_read_bytes(BOARD_RFID_UART_NUM, &c, 1, pdMS_TO_TICKS(50));
+        if(len < 0) {
+            FURI_LOG_E(TAG, "RFID UART read failed");
+            goto release;
+        }
+        if(len == 0) continue;
 
         if(c == RDM_START) {
             byte_buf[0] = c;
@@ -230,16 +296,92 @@ static int32_t rfid_reader_thread(void* arg) {
         em4100_build_frame(card_data, frame_bits, &bit_count);
 
         /* Feed the frame multiple times (real cards repeat continuously) */
-        for(int rep = 0; rep < 8 && s_reading; rep++) {
+        for(int rep = 0; rep < 8 && rfid_reader_is_running(); rep++) {
             em4100_feed_manchester(frame_bits, bit_count, s_capture_cb, s_capture_ctx);
         }
     }
 
 release:
-    if(installed) uart_driver_delete(BOARD_RFID_UART_NUM);
-    furi_hal_shared_pins_release(&s_reader_thread);
-busy:
-    /* Keep s_reading set until stop joins/frees this thread, even after failure. */
+    if(installed) {
+        uart_err = uart_driver_delete(BOARD_RFID_UART_NUM);
+        if(uart_err != ESP_OK && uart_is_driver_installed(BOARD_RFID_UART_NUM)) {
+            FURI_LOG_E(
+                TAG,
+                "RFID UART driver removal failed; retaining shared leases: %s",
+                esp_err_to_name(uart_err));
+            return RfidSessionFailed;
+        }
+        if(uart_err != ESP_OK) FURI_LOG_W(TAG, "RFID UART driver was already removed");
+    }
+    if(shared_pins_saved) {
+        furi_hal_shared_pins_restore(&s_reader_thread);
+        if(furi_hal_shared_pins_is_saved(&s_reader_thread)) {
+            FURI_LOG_E(TAG, "RFID UART pin restore failed; retaining shared leases");
+            return RfidSessionFailed;
+        }
+        shared_pins_saved = false;
+    }
+    if(shared_uart_acquired) {
+        if(!furi_hal_uart_shared_release()) {
+            FURI_LOG_E(TAG, "Failed to release shared RFID UART; retaining pin lease");
+            return RfidSessionFailed;
+        }
+        shared_uart_acquired = false;
+    }
+    if(shared_pins_acquired) {
+        furi_hal_shared_pins_release(&s_reader_thread);
+        shared_pins_acquired = false;
+    }
+
+    if(yielded) return RfidSessionYielded;
+    if(retry) return RfidSessionRetry;
+    return RfidSessionDone;
+
+failed:
+    if(installed) {
+        uart_err = uart_driver_delete(BOARD_RFID_UART_NUM);
+        if(uart_err != ESP_OK && uart_is_driver_installed(BOARD_RFID_UART_NUM)) {
+            FURI_LOG_E(TAG, "RFID UART setup cleanup failed; retaining shared leases");
+            return RfidSessionFailed;
+        }
+        installed = false;
+    }
+    if(shared_pins_saved) {
+        furi_hal_shared_pins_restore(&s_reader_thread);
+        if(furi_hal_shared_pins_is_saved(&s_reader_thread)) {
+            FURI_LOG_E(TAG, "RFID UART pin restore failed; retaining shared leases");
+            return RfidSessionFailed;
+        }
+        shared_pins_saved = false;
+    }
+    if(shared_uart_acquired && !furi_hal_uart_shared_release()) {
+        FURI_LOG_E(TAG, "RFID UART setup could not release shared UART");
+        return RfidSessionFailed;
+    }
+    if(shared_pins_acquired) furi_hal_shared_pins_release(&s_reader_thread);
+    return RfidSessionFailed;
+}
+
+static int32_t rfid_reader_thread(void* arg) {
+    UNUSED(arg);
+    while(atomic_load_explicit(&s_reader_state, memory_order_acquire) ==
+          RfidReaderStateStarting) {
+        furi_delay_ms(1);
+    }
+    if(!rfid_reader_is_running()) return 0;
+
+    ESP_LOGI(TAG, "RFID reader thread started (UART%d, RX=%d TX=%d)",
+             BOARD_RFID_UART_NUM, BOARD_PIN_RFID_RX, BOARD_PIN_RFID_TX);
+    while(rfid_reader_is_running()) {
+        const RfidSessionResult result = rfid_reader_run_session();
+        if(result == RfidSessionYielded || result == RfidSessionRetry) {
+            furi_delay_ms(10);
+            continue;
+        }
+        break;
+    }
+
+    /* Keep the state non-idle until stop joins/frees this thread, even after failure. */
     ESP_LOGI(TAG, "RFID UART session ended (busy/setup error or stop)");
     ESP_LOGI(TAG, "RFID reader thread stopped");
     return 0;
@@ -278,23 +420,52 @@ void furi_hal_rfid_tim_read_stop(void) {
 void furi_hal_rfid_tim_read_capture_start(
     FuriHalRfidReadCaptureCallback callback,
     void* context) {
-    if(s_reading) return;
+    int expected = RfidReaderStateIdle;
+    if(!atomic_compare_exchange_strong_explicit(
+           &s_reader_state,
+           &expected,
+           RfidReaderStateStarting,
+           memory_order_acq_rel,
+           memory_order_acquire)) {
+        return;
+    }
 
     s_capture_cb = callback;
     s_capture_ctx = context;
-    s_reading = true;
 
     s_reader_thread = furi_thread_alloc();
+    if(!s_reader_thread) {
+        FURI_LOG_E(TAG, "RFID reader thread allocation failed");
+        s_capture_cb = NULL;
+        s_capture_ctx = NULL;
+        atomic_store_explicit(&s_reader_state, RfidReaderStateIdle, memory_order_release);
+        return;
+    }
     furi_thread_set_name(s_reader_thread, "RfidRdm");
     furi_thread_set_stack_size(s_reader_thread, 4096);
     furi_thread_set_callback(s_reader_thread, rfid_reader_thread);
     furi_thread_start(s_reader_thread);
+    atomic_store_explicit(&s_reader_state, RfidReaderStateRunning, memory_order_release);
 }
 
 void furi_hal_rfid_tim_read_capture_stop(void) {
-    if(!s_reading) return;
-
-    s_reading = false;
+    int expected;
+    while(true) {
+        expected = atomic_load_explicit(&s_reader_state, memory_order_acquire);
+        if(expected == RfidReaderStateIdle) return;
+        if(expected == RfidReaderStateStarting || expected == RfidReaderStateStopping) {
+            furi_delay_ms(1);
+            continue;
+        }
+        if(atomic_compare_exchange_weak_explicit(
+               &s_reader_state,
+               &expected,
+               RfidReaderStateStopping,
+               memory_order_acq_rel,
+               memory_order_acquire)) {
+            break;
+        }
+    }
     if(s_reader_thread) {
         furi_thread_join(s_reader_thread);
         furi_thread_free(s_reader_thread);
@@ -302,6 +473,7 @@ void furi_hal_rfid_tim_read_capture_stop(void) {
     }
     s_capture_cb = NULL;
     s_capture_ctx = NULL;
+    atomic_store_explicit(&s_reader_state, RfidReaderStateIdle, memory_order_release);
 }
 
 void furi_hal_rfid_tim_emulate_dma_start(
