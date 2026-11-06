@@ -58,6 +58,9 @@ bool bt_profile_restore_default(Bt* bt);
  */
 void bt_disconnect(Bt* bt);
 
+/** Recalculate Bluetooth and BLE Beacon status-bar visibility. */
+void bt_statusbar_refresh(void);
+
 /** Set callback for Bluetooth status change notification
  *
  * @param bt        Bt instance

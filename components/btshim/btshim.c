@@ -12,6 +12,7 @@
 #include <furi_hal_bt.h>
 #include <gui/elements.h>
 #include <assets_icons.h>
+#include <momentum_settings.h>
 #include <notification/notification_messages.h>
 #include <ble_profile/extra_profiles/hid_profile.h>
 #include <ble_profile/extra_profiles/serial_profile.h>
@@ -52,13 +53,16 @@ static void bt_draw_statusbar_callback(Canvas* canvas, void* context) {
 
     Bt* bt = context;
     uint8_t draw_offset = 0;
-    if(bt->beacon_active) {
+    if(bt->beacon_active &&
+       momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBleBeacon)) {
         canvas_draw_icon(canvas, 0, 0, &I_BLE_beacon_7x8);
         draw_offset += icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
     }
-    if(bt->status == BtStatusAdvertising) {
+    if(bt->status == BtStatusAdvertising &&
+       momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBluetooth)) {
         canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Idle_5x8);
-    } else if(bt->status == BtStatusConnected) {
+    } else if(bt->status == BtStatusConnected &&
+              momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBluetooth)) {
         canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Connected_16x8);
     }
 }
@@ -430,12 +434,15 @@ static void bt_on_key_storage_change_callback(uint8_t* addr, uint16_t size, void
 
 static void bt_statusbar_update(Bt* bt) {
     uint8_t active_icon_width = 0;
-    if(bt->beacon_active) {
+    if(bt->beacon_active &&
+       momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBleBeacon)) {
         active_icon_width = icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
     }
-    if(bt->status == BtStatusAdvertising) {
+    if(bt->status == BtStatusAdvertising &&
+       momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBluetooth)) {
         active_icon_width += icon_get_width(&I_Bluetooth_Idle_5x8);
-    } else if(bt->status == BtStatusConnected) {
+    } else if(bt->status == BtStatusConnected &&
+              momentum_settings_statusbar_icon_visible(ViewPortStatusBarIconBluetooth)) {
         active_icon_width += icon_get_width(&I_Bluetooth_Connected_16x8);
     }
 
@@ -445,6 +452,15 @@ static void bt_statusbar_update(Bt* bt) {
     } else {
         view_port_enabled_set(bt->statusbar_view_port, false);
     }
+}
+
+void bt_statusbar_refresh(void) {
+    if(!furi_record_exists(RECORD_BT)) return;
+    Bt* bt = furi_record_open(RECORD_BT);
+    BtMessage message = {.type = BtMessageTypeUpdateStatus};
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+    furi_record_close(RECORD_BT);
 }
 
 /* ---- Profile management ---- */
