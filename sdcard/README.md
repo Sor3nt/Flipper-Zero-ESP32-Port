@@ -1,6 +1,8 @@
 # SD card contents
 
-This directory is the repository's copy of files that belong at the root of a device SD card. Copy the contents of `sdcard/` to the card root; do not copy the directory itself as a nested `sdcard/` folder.
+> **Important:** Keep the original SD card ZIP unchanged. Retain its existing files, replace only the old U2F pair in `/u2f/assets/` with the updated pair here, and add the newly supported FAPs from this directory at their matching `/apps/...` paths.
+
+This directory is a partial overlay of SD card files to add or replace; it is not a complete replacement for the original SD card ZIP. Leave all other files from the original card as they are.
 
 ## Included files
 
@@ -21,10 +23,5 @@ If the SD card already has `cert.der` and `cert_key.u2f` under `/u2f/assets/`, r
 ## FAP binaries from feature PRs
 
 The `.fap` files under `apps/` are prebuilt artifacts for external apps added or ported by firmware PRs. Their corresponding source and manifests are kept under `applications_user/` when available. A PR that adds FAP support may provide or generate the matching `.fap` artifact; include that file here as well as the firmware/source changes. The external app will not be available from the SD-card app launcher without its `.fap` at the listed card path. When updating an app from a PR, use the binary built from that same change and leave unrelated FAP files untouched.
-
-The two BW16 packages in `apps/GPIO/` are included as ready-to-copy FAP artifacts:
-
-- `bw16_r4tkn.fap` — UART version for the T-Embed external-UART profile and a compatible BW16 controller. See [`applications_user/bw16_r4tkn/README.md`](../applications_user/bw16_r4tkn/README.md).
-- `bw16_r4tkn_i2c.fap` — I2C version for T-Embed Plus and the matching BW16 I2C controller. See [`applications_user/bw16_r4tkn_i2c/README.md`](../applications_user/bw16_r4tkn_i2c/README.md).
 
 Other ported FAP source and board requirements are summarized in [`docs/ported-faps.md`](../docs/ported-faps.md). U2F provisioning details are in [`applications/main/u2f/README.md`](../applications/main/u2f/README.md).
