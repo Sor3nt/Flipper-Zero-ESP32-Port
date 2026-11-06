@@ -304,6 +304,13 @@ bool totp_scene_add_new_token_handle_event(
     SceneState* scene_state = plugin_state->current_scene_state;
 
     if(event->input.type == InputTypePress) {
+        if(totp_input_is_dpad() &&
+           (event->input.key == InputKeyLeft || event->input.key == InputKeyRight)) {
+            if(control_is_editable_select(scene_state)) {
+                change_selected_value(scene_state, event->input.key == InputKeyRight ? 1 : -1);
+            }
+            return true;
+        }
         switch(event->input.key) {
         case InputKeyUp:
             if(scene_state->editing) {
@@ -339,7 +346,7 @@ bool totp_scene_add_new_token_handle_event(
                 scene_state->editing = false;
                 break;
             }
-            if(control_is_editable_select(scene_state)) {
+            if(!totp_input_is_dpad() && control_is_editable_select(scene_state)) {
                 // OK on a select enters edit mode: rotate to change, OK to confirm
                 scene_state->editing = true;
                 break;

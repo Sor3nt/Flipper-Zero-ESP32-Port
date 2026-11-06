@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <furi_hal_board_info.h>
 
 #define GRID_W 20
 #define GRID_H 10
@@ -408,6 +409,10 @@ int32_t t_embed_snake_app(void* context) {
         timer,
         furi_kernel_get_tick_frequency() / 20);
 
+    /* Paradoxt: real D-pad, arrows steer absolutely (one Press = one turn). Other boards keep
+     * the relative wheel steering (Up/Left = turn left, Down/Right = turn right). */
+    const bool dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+
     while(!game->exit_requested) {
         SnakeEvent event;
 
@@ -432,7 +437,25 @@ int32_t t_embed_snake_app(void* context) {
                 snake_step(game);
             }
         } else if(event.type == SnakeEventInput) {
-            if(event.input.type == InputTypeShort) {
+            const bool dpad_arrow = dpad && event.input.key <= InputKeyLeft;
+            if(dpad_arrow) {
+                if(event.input.type == InputTypePress && !game->game_over &&
+                   !game->turn_locked) {
+                    static const SnakeDirection dpad_direction[] = {
+                        [InputKeyUp] = SnakeDirUp,
+                        [InputKeyDown] = SnakeDirDown,
+                        [InputKeyRight] = SnakeDirRight,
+                        [InputKeyLeft] = SnakeDirLeft,
+                    };
+                    const SnakeDirection wanted = dpad_direction[event.input.key];
+                    /* No reversal into the body, no-op on the current direction. */
+                    if(wanted != game->direction &&
+                       wanted != (SnakeDirection)((game->direction + 2) % 4)) {
+                        game->direction = wanted;
+                        game->turn_locked = true;
+                    }
+                }
+            } else if(event.input.type == InputTypeShort) {
                 if(event.input.key == InputKeyUp ||
                    event.input.key == InputKeyLeft) {
                     if(!game->game_over &&

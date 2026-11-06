@@ -15,6 +15,7 @@
 #include "ui.h"
 
 #include "blackjack_icons.h"
+#include <furi_hal_board_info.h>
 
 #define DEALER_MAX 17
 
@@ -25,6 +26,33 @@
  */
 static bool blackjack_settings_adjust_mode = false;
 static bool blackjack_settings_loaded = false;
+
+/* Paradoxt: real D-pad, stock Blackjack controls (arrows mean what they show, Back leaves
+ * Settings or quits). Every other board keeps the wheel controls below. */
+static bool blackjack_dpad = false;
+
+static bool blackjack_dpad_press(GameState* game_state, InputKey key, bool* processing) {
+    switch(key) {
+    case InputKeyUp:
+        game_state->selectDirection = DirectionUp;
+        return true;
+    case InputKeyDown:
+        game_state->selectDirection = DirectionDown;
+        return true;
+    case InputKeyBack:
+        if(game_state->state == GameStateSettings) {
+            game_state->state = GameStateStart;
+        } else {
+            *processing = false;
+        }
+        return true;
+    case InputKeyOk:
+        /* Settings values change with Left/Right: OK has nothing to toggle there. */
+        return game_state->state == GameStateSettings;
+    default:
+        return false; /* Left/Right: same as every board */
+    }
+}
 
 void start_round(GameState *game_state);
 
@@ -485,6 +513,7 @@ void stayAction(void *state){
 }
 
 int32_t blackjack_app(void *p) {
+    blackjack_dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
     UNUSED(p);
 
     int32_t return_code = 0;
@@ -539,6 +568,8 @@ int32_t blackjack_app(void *p) {
             if (event.type == EventTypeKey) {
 
                 if (event.input.type == InputTypePress) {
+                    if(!(blackjack_dpad &&
+                         blackjack_dpad_press(game_state, event.input.key, &processing)))
                     switch (event.input.key) {
                         case InputKeyUp:
                             if(game_state->state == GameStateSettings &&

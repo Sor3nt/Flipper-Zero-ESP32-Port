@@ -2,6 +2,13 @@
 
 #include <inttypes.h>
 #include <gui/gui.h>
+#include <furi_hal_board_info.h>
+
+/* Paradoxt D-pad: Left/Right change the selected value directly, as on a stock Flipper.
+ * The OK -> edit -> turn -> OK flow is for the encoder (and the other boards). */
+static inline bool totp_input_is_dpad(void) {
+    return furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+}
 
 #define UI_CONTROL_VSCROLL_WIDTH (3)
 

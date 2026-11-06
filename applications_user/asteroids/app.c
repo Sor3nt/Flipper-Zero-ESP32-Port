@@ -10,6 +10,7 @@
 #include <gui/view_dispatcher.h>
 #include <gui/scene_manager.h>
 #include <math.h>
+#include <furi_hal_board_info.h>
 
 #ifndef PI
 #define PI 3.14159265358979f
@@ -136,6 +137,7 @@ typedef struct AsteroidsApp {
                                       Each array item contains the time
                                       in milliseconds the key was pressed. */
     bool fire;                 /* Short press detected: fire a bullet. */
+    bool dpad;                 /* Paradoxt D-pad: stock controls (Up thrust, Down brake). */
 } AsteroidsApp;
 
 /* ============================== Prototypes ================================ */
@@ -299,7 +301,8 @@ void render_callback(Canvas *const canvas, void *ctx) {
 
     /* Draw ship, asteroids, bullets. */
     draw_poly(canvas,&ShipPoly,app->ship.x,app->ship.y,app->ship.rot);
-    if (key_pressed_time(app,InputKeyOk) > SHIP_ACCELERATION_KEYPRESS_TIME)
+    if (key_pressed_time(app,InputKeyOk) > SHIP_ACCELERATION_KEYPRESS_TIME ||
+        (app->dpad && app->pressed[InputKeyUp]))
         draw_poly(canvas,&ShipFirePoly,app->ship.x,app->ship.y,app->ship.rot);
 
     for (int j = 0; j < app->bullets_num; j++)
@@ -591,7 +594,8 @@ void game_tick(void *ctx) {
     /* Handle key presses. */
     if (app->pressed[InputKeyLeft]) app->ship.rot -= 0.35f;
     if (app->pressed[InputKeyRight]) app->ship.rot += 0.35f;
-    if (key_pressed_time(app,InputKeyOk) > SHIP_ACCELERATION_KEYPRESS_TIME) {
+    if (key_pressed_time(app,InputKeyOk) > SHIP_ACCELERATION_KEYPRESS_TIME ||
+        (app->dpad && app->pressed[InputKeyUp])) {
         app->ship.vx -= 0.5f * asteroids_sin(app->ship.rot);
         app->ship.vy += 0.5f * asteroids_cos(app->ship.rot);
     } else if (app->pressed[InputKeyDown]) {
@@ -645,6 +649,7 @@ void input_callback(InputEvent* input_event, void* ctx)
  * This is called in the entry point to create the application state. */
 AsteroidsApp* asteroids_app_alloc() {
     AsteroidsApp *app = malloc(sizeof(AsteroidsApp));
+    app->dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
 
     app->gui = furi_record_open(RECORD_GUI);
     app->view_port = view_port_alloc();
@@ -690,12 +695,13 @@ void asteroids_update_keypress_state(AsteroidsApp *app, InputEvent input) {
          * The T-Embed wheel reports quick Up/Down events, not held
          * Left/Right presses. Rotate immediately for every wheel step.
          */
-        if(input.key == InputKeyUp) {
+        if(!app->dpad && input.key == InputKeyUp) {
             app->ship.rot -= 0.35f;
             return;
         }
 
-        if(input.key == InputKeyDown) {
+        /* Paradoxt D-pad: Up/Down are recorded below (thrust / brake). */
+        if(!app->dpad && input.key == InputKeyDown) {
             app->ship.rot += 0.35f;
             return;
         }

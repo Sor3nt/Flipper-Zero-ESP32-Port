@@ -7,6 +7,7 @@
 #include <notification/notification.h>
 #include <notification/notification_messages.h>
 #include <storage/storage.h>
+#include <furi_hal_board_info.h>
 
 typedef struct {
     //    +-----x
@@ -523,6 +524,10 @@ int32_t snake_20_app(void* p) {
 
     dolphin_deed(DolphinDeedPluginGameStart);
 
+    /* Paradoxt: real D-pad, so arrows steer absolutely like the stock Flipper Snake.
+     * Other boards keep the relative wheel steering below. */
+    const bool dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+
     SnakeEvent event;
     for(bool processing = true; processing;) {
         FuriStatus event_status = furi_message_queue_get(event_queue, &event, 100);
@@ -533,6 +538,18 @@ int32_t snake_20_app(void* p) {
             if(event.type == EventTypeKey) {
                 // press events
                 if(event.input.type == InputTypePress) {
+                    if(dpad && event.input.key <= InputKeyLeft &&
+                       snake_state->state != GameStatePause &&
+                       snake_state->state != GameStateGameOver) {
+                        static const Direction dpad_direction[] = {
+                            [InputKeyUp] = DirectionUp,
+                            [InputKeyDown] = DirectionDown,
+                            [InputKeyRight] = DirectionRight,
+                            [InputKeyLeft] = DirectionLeft,
+                        };
+                        /* A reversal is ignored by snake_game_get_turn_snake(). */
+                        snake_state->nextMovement = dpad_direction[event.input.key];
+                    } else
                     switch(event.input.key) {
                     case InputKeyUp:
                         /*

@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <furi_hal_board_info.h>
 
 /* wheel + screen stuff */
 #define N_POCKETS      38
@@ -404,6 +405,9 @@ int32_t roulette_app(void* p) {
     gui_add_view_port(gui, vp, GuiLayerFullscreen);
     NotificationApp* nf = furi_record_open(RECORD_NOTIFICATION);
 
+    /* Paradoxt: real D-pad. Other boards keep turn = Up/Down, click = OK. */
+    const int dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+
     Ev ev;
     int running = 1;
     while(running) {
@@ -430,8 +434,26 @@ int32_t roulette_app(void* p) {
             int ok = (k == InputKeyOk && ty == InputTypeShort);
             int ok_long = (k == InputKeyOk && ty == InputTypeLong);
             int back = (k == InputKeyBack && ty == InputTypeShort);
+            // Paradoxt D-pad: Left/Right change the selected bet type / amount directly.
+            int left = dpad && k == InputKeyLeft && ty == InputTypeShort;
+            int right = dpad && k == InputKeyRight && ty == InputTypeShort;
 
             if(g->state == S_BET) {
+                if(g->nav_mode != NAV_BROWSE || g->nav_row == NAV_TYPE || g->nav_row == NAV_AMOUNT) {
+                    int row_type = g->nav_mode == NAV_EDIT_TYPE ||
+                                   (g->nav_mode == NAV_BROWSE && g->nav_row == NAV_TYPE);
+                    if(left || right) {
+                        if(row_type) {
+                            g->bet_type = (g->bet_type + (right ? 1 : B_N - 1)) % B_N;
+                        } else {
+                            if(right) g->bet *= 2;
+                            else g->bet /= 2;
+                            fix_bet(g);
+                        }
+                        notification_message(nf, &snd_click);
+                        goto done;
+                    }
+                }
                 if(g->nav_mode == NAV_BROWSE) {
                     if(up) { g->nav_row = (g->nav_row + NAV_N - 1) % NAV_N; notification_message(nf, &snd_click); }
                     else if(down) { g->nav_row = (g->nav_row + 1) % NAV_N; notification_message(nf, &snd_click); }

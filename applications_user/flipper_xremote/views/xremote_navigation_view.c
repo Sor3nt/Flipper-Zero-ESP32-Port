@@ -71,6 +71,15 @@ static void xremote_navigation_view_process(XRemoteView* view, InputEvent* event
             XRemoteAppContext* app_ctx = xremote_view_get_app_context(view);
             model->context = app_ctx;
 
+            const int dpad_index = xremote_view_dpad_index(event);
+            if(dpad_index != XREMOTE_DPAD_OFF) {
+                /* Paradoxt D-pad: the key itself sends its command. */
+                if(dpad_index >= 0 && dpad_index < 6) {
+                    xremote_view_model_select(model, (uint8_t)dpad_index);
+                    xremote_view_press_button(
+                        view, xremote_view_get_button_by_name(view, commands[dpad_index]));
+                }
+            } else
             /* T-Embed rotary: turn = change selected button; center click = send. */
             if(event->type == InputTypePress &&
                (event->key == InputKeyUp || event->key == InputKeyLeft)) {

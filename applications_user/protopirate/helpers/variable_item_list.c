@@ -7,6 +7,7 @@
 #include <furi.h>
 #include <m-array.h>
 #include <stdint.h>
+#include <furi_hal_board_info.h>
 
 #ifdef PROTOPIRATE_CONFIG_PLUGIN_BUILD
 #include "pp_config_icons.h"
@@ -255,6 +256,14 @@ void variable_item_list_set_selected_item(VariableItemList* variable_item_list, 
         true);
 }*/
 
+/* Paradoxt D-pad edits values with Left/Right and OK opens the item, as on a stock Flipper.
+ * The click-to-edit / turn-to-change mode below is for the encoder (and the other boards). */
+static bool protopirate_vil_dpad(void) {
+    static int8_t dpad = -1;
+    if(dpad < 0) dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+    return dpad;
+}
+
 static bool variable_item_list_input_callback(InputEvent* event, void* context) {
     VariableItemList* variable_item_list = context;
     furi_assert(variable_item_list);
@@ -275,7 +284,8 @@ static bool variable_item_list_input_callback(InputEvent* event, void* context) 
         }
         return true;
     }
-    if(event->key == InputKeyOk && event->type == InputTypeShort && editable) {
+    if(event->key == InputKeyOk && event->type == InputTypeShort && editable &&
+       !protopirate_vil_dpad()) {
         with_view_model(variable_item_list->view, VariableItemListModel * model,
             { model->editing = !model->editing; }, true);
         return true;

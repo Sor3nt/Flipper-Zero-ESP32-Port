@@ -31,6 +31,7 @@
 #include <notification/notification_messages.h>
 #include <furi.h>
 #include <string.h>
+#include <furi_hal_board_info.h>
 
 #define TAG "PPEmulatePlugin"
 
@@ -77,6 +78,9 @@ typedef struct {
 } EmulateResolvedPreset;
 
 static EmulateContext* emulate_context = NULL;
+/* Paradoxt D-pad: each key transmits its own button while held (stock ProtoPirate). Every other
+ * board keeps the rotary flow: turn selects, click transmits. Set in plugin_on_enter(). */
+static bool emulate_dpad = false;
 static const ProtoPirateEmulateHostApi* g_host_api = NULL;
 
 static bool emulate_hitag2_key_nonzero(const uint8_t key[6]) {
@@ -1002,7 +1006,12 @@ static void emulate_draw_callback(Canvas* canvas, void* model) {
     canvas_draw_box(canvas, 0, 53, 128, 11);
     canvas_set_color(canvas, ColorBlack);
     canvas_set_font(canvas, FontSecondary);
-    snprintf(info_str, sizeof(info_str), "< %s >  Click: TX", rotary_names[ctx->rotary_button]);
+    if(emulate_dpad) {
+        snprintf(info_str, sizeof(info_str), "Hold arrow/OK: TX (%s)", rotary_names[ctx->rotary_button]);
+    } else {
+        snprintf(
+            info_str, sizeof(info_str), "< %s >  Click: TX", rotary_names[ctx->rotary_button]);
+    }
     canvas_draw_str(canvas, 2, 62, info_str);
 
 }
@@ -1013,8 +1022,8 @@ static bool emulate_input_callback(InputEvent* event, void* context) {
 
     if(!ctx) return false;
 
-    if(event->key == InputKeyUp || event->key == InputKeyDown ||
-       event->key == InputKeyLeft || event->key == InputKeyRight) {
+    if(!emulate_dpad && (event->key == InputKeyUp || event->key == InputKeyDown ||
+                         event->key == InputKeyLeft || event->key == InputKeyRight)) {
         if(!ctx->is_transmitting &&
            (event->type == InputTypeShort || event->type == InputTypeRepeat)) {
             if(event->key == InputKeyLeft) ctx->rotary_button = 3;
@@ -1031,7 +1040,38 @@ static bool emulate_input_callback(InputEvent* event, void* context) {
         }
         return true;
     }
-    if(event->key != InputKeyOk) return false;
+    if(emulate_dpad) {
+        /* Key -> rotary slot (Up, OK, Down, Left, Right). */
+        uint8_t slot;
+        switch(event->key) {
+        case InputKeyUp:
+            slot = 0;
+            break;
+        case InputKeyOk:
+            slot = 1;
+            break;
+        case InputKeyDown:
+            slot = 2;
+            break;
+        case InputKeyLeft:
+            slot = 3;
+            break;
+        case InputKeyRight:
+            slot = 4;
+            break;
+        default:
+            return false;
+        }
+        if(event->type == InputTypePress) {
+            /* One transmission at a time: a second key pressed meanwhile is ignored. */
+            if(ctx->is_transmitting) return true;
+            ctx->rotary_button = slot;
+        } else if(event->type != InputTypeRelease) {
+            return true;
+        }
+    } else if(event->key != InputKeyOk) {
+        return false;
+    }
     if(event->type == InputTypePress) {
         static const InputKey rotary_keys[] = {
             InputKeyUp, InputKeyOk, InputKeyDown, InputKeyLeft, InputKeyRight};
@@ -1090,6 +1130,7 @@ static bool
 static void plugin_on_enter(void* context) {
     ProtoPirateApp* app = context;
     furi_check(g_host_api);
+    emulate_dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
 
     if(!g_host_api->ensure_view_about || !g_host_api->ensure_view_about(app)) {
         notification_message(app->notifications, &sequence_error);

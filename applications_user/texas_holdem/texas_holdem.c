@@ -255,9 +255,17 @@ int32_t texas_holdem_app(void* p) {
             continue;
         }
 
-        if(event.type != InputTypePress && event.type != InputTypeShort) {
+        /* One action per click: every board sends Press AND Short for one click, so handling
+         * both ran each command twice (OK opened the menu and picked "Check" at once, Back
+         * closed the menu and quit). Act on Short only; arrows also auto-repeat. */
+        const bool is_arrow = event.key == InputKeyLeft || event.key == InputKeyRight ||
+                              event.key == InputKeyUp || event.key == InputKeyDown;
+        if(event.type != InputTypeShort && !(is_arrow && event.type == InputTypeRepeat)) {
             continue;
         }
+        /* Up/Down pick the action too: the T-Embed wheel only sends Up/Down. */
+        if(event.key == InputKeyUp) event.key = InputKeyLeft;
+        if(event.key == InputKeyDown) event.key = InputKeyRight;
 
         if(event.key == InputKeyBack) {
             if(app->show_menu) {

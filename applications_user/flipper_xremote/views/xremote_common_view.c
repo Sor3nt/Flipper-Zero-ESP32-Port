@@ -8,6 +8,7 @@
 
 #include "xremote_common_view.h"
 #include "../xremote_app.h"
+#include <furi_hal_board_info.h>
 
 typedef struct {
     int index;
@@ -465,4 +466,35 @@ void xremote_canvas_draw_frame(
 
     canvas_draw_str(canvas, x + 3, y + 11, text);
     canvas_set_color(canvas, ColorBlack);
+}
+
+int xremote_view_dpad_index(const InputEvent* event) {
+    static int8_t dpad = -1;
+    if(dpad < 0) dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+    if(!dpad) return XREMOTE_DPAD_OFF;
+
+    const bool arrow = event->key == InputKeyUp || event->key == InputKeyDown ||
+                       event->key == InputKeyLeft || event->key == InputKeyRight;
+    /* Back only reaches the view when it is not the exit gesture (see the input callbacks). */
+    const bool send = event->type == InputTypeShort ||
+                      (arrow && event->type == InputTypeRepeat) ||
+                      (event->key == InputKeyBack && event->type == InputTypeLong);
+    if(!send) return XREMOTE_DPAD_IGNORE;
+
+    switch(event->key) {
+    case InputKeyOk:
+        return 0;
+    case InputKeyUp:
+        return 1;
+    case InputKeyDown:
+        return 2;
+    case InputKeyLeft:
+        return 3;
+    case InputKeyRight:
+        return 4;
+    case InputKeyBack:
+        return 5;
+    default:
+        return XREMOTE_DPAD_IGNORE;
+    }
 }

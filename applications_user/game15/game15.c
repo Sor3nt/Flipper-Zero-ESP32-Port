@@ -5,6 +5,7 @@
 #include <storage/storage.h>
 
 #include "sandbox.h"
+#include <furi_hal_board_info.h>
 
 #define FPS 20
 #define CELL_WIDTH 10
@@ -51,6 +52,10 @@ static uint8_t popup_menu_selected_item;
  * Back short toggles the wheel between vertical and horizontal movement.
  */
 static bool horizontal_mode;
+
+/* Paradoxt: real D-pad. Every arrow means what it shows, so the wheel-only OK toggle is not
+ * used; OK acts on Short (one click = one action) and OK Long opens the menu. */
+static bool dpad;
 
 static const char* popup_menu_strings[] = {
     "Continue",
@@ -412,6 +417,19 @@ static void render_callback(Canvas* const canvas) {
 }
 
 static void game_event_handler(GameEvent const event) {
+    if(event.type == EventTypeKey && dpad && event.input.key == InputKeyOk) {
+        if(event.input.type == InputTypeShort) {
+            if(game_state.scene == ScenePopup) {
+                key_stack_push(DirectionNone);
+            } else if(game_state.scene != ScenePlay) {
+                game_init();
+            }
+        } else if(event.input.type == InputTypeLong && game_state.scene == ScenePlay) {
+            game_state.scene = ScenePopup;
+            key_stack_init();
+        }
+        return;
+    }
     if(event.type == EventTypeKey) {
         if(event.input.type == InputTypePress) {
             switch(event.input.key) {
@@ -477,6 +495,8 @@ static void game_event_handler(GameEvent const event) {
     }
 }
 static void game_alloc() {
+    dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+    horizontal_mode = false;
     srand((unsigned int)furi_get_tick());
     key_stack_init();
     notification = furi_record_open(RECORD_NOTIFICATION);

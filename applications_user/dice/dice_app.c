@@ -2,6 +2,7 @@
 #include <input/input.h>
 #include <gui/gui.h>
 #include "constants.h"
+#include <furi_hal_board_info.h>
 
 const Icon* draw_dice_frame;
 
@@ -308,6 +309,9 @@ int32_t dice_dnd_app(void* p) {
     State* state = malloc(sizeof(State));
     init(state);
 
+    /* Paradoxt: real D-pad. Other boards keep the wheel mapping (Up/Down = dice type). */
+    const bool dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+
     state->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
 
     // Set callbacks
@@ -339,7 +343,30 @@ int32_t dice_dnd_app(void* p) {
                      * T-Embed wheel sends Up/Down.
                      * Use it as Flipper Left/Right so it changes dice type.
                      */
-                    if(isDiceButtonsVisible(state->app_state)) {
+                    if(dpad && isDiceButtonsVisible(state->app_state)) {
+                        /* Paradoxt D-pad, stock Dice controls: Left/Right = dice type,
+                         * Up/Down = number of dice. */
+                        if(event.input.key == InputKeyRight) {
+                            if(state->dice_index < DICE_TYPES - 1) {
+                                state->dice_index += 1;
+                                state->app_state = SwipeLeftState;
+                            }
+                        } else if(event.input.key == InputKeyLeft) {
+                            if(state->dice_index > 0) {
+                                state->dice_index -= 1;
+                                state->app_state = SwipeRightState;
+                            }
+                        } else if(
+                            event.input.key == InputKeyUp &&
+                            !isDiceSettingsDisabled(state->app_state, state->dice_index)) {
+                            if(state->dice_count < MAX_DICE_COUNT) state->dice_count += 1;
+                        } else if(
+                            event.input.key == InputKeyDown &&
+                            !isDiceSettingsDisabled(state->app_state, state->dice_index)) {
+                            if(state->dice_count > 1) state->dice_count -= 1;
+                        }
+                        if(isOneDice(state->dice_index)) state->dice_count = 1;
+                    } else if(isDiceButtonsVisible(state->app_state)) {
                         if(event.input.key == InputKeyUp ||
                            event.input.key == InputKeyRight) {
                             if(state->dice_index < DICE_TYPES - 1) {

@@ -3,6 +3,7 @@
 #include <input/input.h>
 #include <stdlib.h>
 #include <dolphin/dolphin.h>
+#include <furi_hal_board_info.h>
 
 #define BORDER_OFFSET 1
 #define MARGIN_OFFSET 3
@@ -389,6 +390,9 @@ int32_t tetris_game_app(void* context) {
 
     TetrisEvent event;
 
+    /* Paradoxt: real D-pad, stock Flipper controls. Other boards keep the wheel mapping. */
+    const bool dpad = furi_hal_board_get_input_layout() == FuriHalBoardInputLayoutDpad;
+
     Piece* newPiece = malloc(sizeof(Piece));
 
     dolphin_deed(DolphinDeedPluginGameStart);
@@ -425,18 +429,25 @@ int32_t tetris_game_app(void* context) {
                     case InputKeyUp:
                         break;
                     case InputKeyDown:
+                        // Paradoxt D-pad: Down drops the piece one row (stock Flipper).
+                        if(dpad && tetris_state->gameState == GameStatePlaying) {
+                            for(int i = 0; i < 4; i++) {
+                                newPiece->p[i].y += 1;
+                            }
+                            wasDownMove = true;
+                        }
                         break;
                     case InputKeyRight:
-                        // T-Embed wheel direction is reversed for this app.
+                        // T-Embed wheel direction is reversed for this app; the Paradoxt
+                        // D-pad keeps the stock Flipper direction.
                         for(int i = 0; i < 4; i++) {
-                            newPiece->p[i].x -= 1;
+                            newPiece->p[i].x += dpad ? 1 : -1;
                         }
                         break;
 
                     case InputKeyLeft:
-                        // T-Embed wheel direction is reversed for this app.
                         for(int i = 0; i < 4; i++) {
-                            newPiece->p[i].x += 1;
+                            newPiece->p[i].x += dpad ? -1 : 1;
                         }
                         break;
 

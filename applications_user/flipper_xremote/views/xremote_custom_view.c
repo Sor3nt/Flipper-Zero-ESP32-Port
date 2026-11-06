@@ -88,6 +88,24 @@ static void xremote_custom_view_draw_callback(Canvas* canvas, void* context) {
     xremote_canvas_draw_exit_footer(canvas, orientation, exit_str);
 }
 
+/* Paradoxt D-pad: custom command for key index 0=OK, 1=Up, 2=Down, 3=Left, 4=Right. */
+static FuriString* xremote_custom_view_dpad_command(XRemoteAppButtons* buttons, int index) {
+    switch(index) {
+    case 0:
+        return buttons->custom_ok;
+    case 1:
+        return buttons->custom_up;
+    case 2:
+        return buttons->custom_down;
+    case 3:
+        return buttons->custom_left;
+    case 4:
+        return buttons->custom_right;
+    default:
+        return NULL;
+    }
+}
+
 static void xremote_custom_view_process(XRemoteView* view, InputEvent* event) {
     with_view_model(
         xremote_view_get_view(view),
@@ -97,6 +115,16 @@ static void xremote_custom_view_process(XRemoteView* view, InputEvent* event) {
             if(buttons && buttons->app_ctx) {
                 model->context = buttons;
 
+                const int dpad_index = xremote_view_dpad_index(event);
+                if(dpad_index != XREMOTE_DPAD_OFF) {
+                    /* Paradoxt D-pad: the key itself sends its custom command. */
+                    FuriString* custom = xremote_custom_view_dpad_command(buttons, dpad_index);
+                    if(custom) {
+                        xremote_view_model_select(model, (uint8_t)dpad_index);
+                        xremote_view_press_button(
+                            view, xremote_view_get_button_by_name(view, furi_string_get_cstr(custom)));
+                    }
+                } else
                 /* T-Embed rotary: turn selects; center click sends the selected custom command. */
                 if(event->type == InputTypePress &&
                (event->key == InputKeyUp || event->key == InputKeyLeft)) {

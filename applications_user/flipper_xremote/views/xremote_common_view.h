@@ -191,6 +191,14 @@ bool xremote_view_send_ir_msg_by_name(XRemoteView* rview, const char* name);
 void xremote_view_model_context_set(XRemoteView* rview, void* model_ctx);
 void xremote_view_model_select(XRemoteViewModel* model, uint8_t selection);
 void xremote_view_model_move_selection(XRemoteViewModel* model, int direction, uint8_t count);
+
+/* Paradoxt D-pad: every key sends the command drawn at its own position (stock XRemote:
+ * 0=OK, 1=Up, 2=Down, 3=Left, 4=Right, 5=Back). Returns that index for an event that should
+ * send (one click = one send; arrows also repeat while held), XREMOTE_DPAD_IGNORE for any other
+ * event on the D-pad board, and XREMOTE_DPAD_OFF on every other board (rotary selection). */
+#define XREMOTE_DPAD_OFF    (-1)
+#define XREMOTE_DPAD_IGNORE (-2)
+int xremote_view_dpad_index(const InputEvent* event);
 void xremote_view_clear_context(XRemoteView* rview);
 
 void xremote_view_set_app_context(XRemoteView* rview, void* app_ctx);
