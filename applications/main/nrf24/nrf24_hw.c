@@ -68,7 +68,30 @@ void nrf24_hw_init(void) {
 }
 
 void nrf24_hw_deinit(void) {
+    /* Park CE low (standby) while it is still a driven output. */
     furi_hal_gpio_write(&nrf24_ce, false);
+
+#if defined(BOARD_EXTERNAL_UART_SAVE_RESTORE_SHARED_PINS) && \
+    BOARD_EXTERNAL_UART_SAVE_RESTORE_SHARED_PINS
+    /* T-Embed ONLY (the only board that defines this macro): here the NRF24 CSN/CE pads (GPIO44/43)
+     * double as the UART1 RX/TX lines, so when an NRF24 session ends CSN must NOT be left bound to
+     * the SPI CS signal as a push-pull output - a later UART user of that shared pad would be fought
+     * by it. Remove the SPI device (frees the pad from the CS signal) and re-drive CSN as input +
+     * pull-up: the NRF24 stays deselected (CSN high, so it cannot answer CC1101 / SD traffic on the
+     * shared bus) without driving the pad. The device is re-added lazily by furi_hal_spi_acquire()
+     * on the next session. Done under the global SPI bus lock (T-Embed is always a shared bus) so the
+     * device is never pulled from under an in-flight LCD / SD / CC1101 transaction; the recursive
+     * lock makes a nested call safe.
+     * Boards with a dedicated NRF24-only CSN pin keep the original teardown below (CE only): there the
+     * registered SPI device already holds CSN driven HIGH between sessions, a stronger deselect, and
+     * nothing else contends for the pad - so there is nothing to harden against. */
+    furi_hal_spi_bus_lock();
+    furi_hal_spi_bus_handle_deinit(&furi_hal_spi_bus_handle_nrf24);
+    furi_hal_spi_bus_unlock();
+    furi_hal_gpio_init(&gpio_nrf24_cs, GpioModeInput, GpioPullUp, GpioSpeedLow);
+#endif
+
+    /* CE back to high impedance (on T-Embed, GPIO43: the UART save/restore owns it from here). */
     furi_hal_gpio_init_simple(&nrf24_ce, GpioModeAnalog);
 }
 
