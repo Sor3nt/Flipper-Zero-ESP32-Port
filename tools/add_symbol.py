@@ -33,9 +33,19 @@ def elf_gnu_hash(s: str) -> int:
     return h
 
 
+# Global variables outside the I_* / message_* / sequence_* naming convention are named
+# with a leading "&" on the command line (e.g. "&furi_hal_i2c_handle_external").
+FORCE_ADDRESS_OF: set[str] = set()
+
+
 def needs_address_of(name: str) -> bool:
     """Return True if the symbol is a global variable (needs & prefix)."""
-    return name.startswith("I_") or name.startswith("message_") or name.startswith("sequence_")
+    return (
+        name in FORCE_ADDRESS_OF
+        or name.startswith("I_")
+        or name.startswith("message_")
+        or name.startswith("sequence_")
+    )
 
 
 def format_entry(name: str, h: int) -> str:
@@ -85,6 +95,15 @@ def main():
     if not names:
         parser.print_help()
         sys.exit(1)
+
+    # "&name" marks a data symbol: its table entry takes the address of the variable.
+    cleaned = []
+    for n in names:
+        if n.startswith("&"):
+            n = n[1:]
+            FORCE_ADDRESS_OF.add(n)
+        cleaned.append(n)
+    names = cleaned
 
     # Read current file
     with open(API_FILE, "r", encoding="utf-8") as f:

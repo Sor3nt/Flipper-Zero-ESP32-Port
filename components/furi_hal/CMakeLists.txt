@@ -4,10 +4,23 @@
 #   waveshare_c6_1.47       - Waveshare ESP32-C6-LCD-1.47 (touch input + IMU)
 #   lilygo_t_embed_cc1101   - LilyGo T-Embed CC1101 (ESP32-S3, encoder input, CC1101/NFC/IR)
 #   DIY                     - Custom ESP32-S3 build, push-button input, pins set in Pinout.txt
+#   paradoxt                - Paradoxt (ESP32-S3, 6-button D-pad, CC1101/NRF24/NFC/IR, BQ25896)
 if(NOT DEFINED FLIPPER_BOARD)
     set(FLIPPER_BOARD "waveshare_c6_1.9" CACHE STRING "Target board for Flipper ESP32 port")
 endif()
 message(STATUS "Flipper board: ${FLIPPER_BOARD}")
+
+# Only these boards are set up and checked for dual-core (their
+# sdkconfig.defaults.<board> turn it on). Any other board must stay
+# single-core: catch a shared/stale sdkconfig leaking dual-core into it.
+set(FURI_SMP_BOARDS "lilygo_t_embed_cc1101" "paradoxt")
+if(NOT CMAKE_BUILD_EARLY_EXPANSION AND DEFINED CONFIG_FREERTOS_UNICORE
+   AND NOT CONFIG_FREERTOS_UNICORE AND NOT FLIPPER_BOARD IN_LIST FURI_SMP_BOARDS)
+    message(FATAL_ERROR
+        "Board '${FLIPPER_BOARD}' must be built single-core (CONFIG_FREERTOS_UNICORE=y). "
+        "This sdkconfig was probably generated for another board: build with "
+        "-DSDKCONFIG=<build_dir>/sdkconfig.")
+endif()
 
 # DIY board: generate board_DIY.h from Pinout.txt
 if(FLIPPER_BOARD STREQUAL "DIY")
@@ -25,10 +38,14 @@ endif()
 set(FURI_HAL_SRCS
     "furi_hal.c"
     "furi_hal_bw16_i2c.c"
+    "furi_hal_i2c.c"
+    "furi_hal_board_info.c"
     "furi_hal_cortex.c"
     "furi_hal_memory.c"
     "furi_hal_rtc.c"
     "furi_hal_power.c"
+    "furi_hal_power_sleep.c"
+    "furi_hal_reboot_combo.c"
     "furi_hal_debug.c"
     "furi_hal_interrupt.c"
     "furi_hal_bt.c"
@@ -54,6 +71,7 @@ set(FURI_HAL_SRCS
     "furi_hal_infrared.c"
     "furi_hal_rfid.c"
     "furi_hal_shared_pins.c"
+    "furi_hal_uart_shared.c"
     "furi_hal_bw16_guard.c"
     "furi_hal_bq27220.c"
     "furi_hal_bq25896.c"
@@ -71,12 +89,20 @@ endif()
 set(FURI_HAL_REQUIRES
     furi toolbox input driver esp_lcd fatfs sdmmc datetime
     ble_hid ble_serial ble_profile furi_ble flipper_protobuf
-    esp_adc esp_driver_rmt esp_driver_i2s nvs_flash
+    esp_adc esp_driver_rmt esp_driver_i2s nvs_flash mbedtls efuse esp_hw_support
     app_update esp_partition esp_app_format
 )
 
 # HID backend: TinyUSB on SoCs with USB-OTG, stub elsewhere.
-if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32s2")
+if(IDF_TARGET STREQUAL "esp32s3")
+    list(APPEND FURI_HAL_SRCS
+        "furi_hal_usb_hid_tinyusb.c"
+        "furi_hal_usb_tinyusb_composite.c"
+        "furi_hal_usb_msc.c"
+        "furi_hal_usb_u2f.c"
+    )
+    list(APPEND FURI_HAL_REQUIRES espressif__esp_tinyusb)
+elseif(IDF_TARGET STREQUAL "esp32s2")
     list(APPEND FURI_HAL_SRCS
         "furi_hal_usb_hid_tinyusb.c"
         "furi_hal_usb_tinyusb_composite.c"

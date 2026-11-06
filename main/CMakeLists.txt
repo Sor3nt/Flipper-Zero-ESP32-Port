@@ -12,6 +12,13 @@ endif()
 
 set(ENV{FLIPPER_BOARD} "${FLIPPER_BOARD}")
 
+# The app registry and FAP targets below are generated from this config. Make a
+# config edit alone trigger CMake reconfiguration so a newly enabled app is
+# visible without requiring a manual clean/configure step.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${ESP32_DIR}/fam_config.py"
+    "${ESP32_DIR}/applications/settings/desktop_settings/application.fam")
+
 execute_process(
     COMMAND
         ${Python3_EXECUTABLE}

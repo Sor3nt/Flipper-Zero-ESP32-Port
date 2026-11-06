@@ -14,6 +14,7 @@ idf_component_register(
         "$ENV{IDF_PATH}/components/wpa_supplicant/src"
     REQUIRES
         furi
+        furi_hal
         toolbox
         storage
         btshim
@@ -24,4 +25,5 @@ idf_component_register(
         lwip
         mbedtls
         wpa_supplicant
+        notification
 )

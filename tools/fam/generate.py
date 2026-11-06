@@ -329,7 +329,18 @@ def gather_sources(base_dir: Path, patterns: Iterable[str], allow_lib_dir: bool 
     unique = sorted({path for path in resolved if path.is_file() and path not in excluded})
     if allow_lib_dir:
         return unique
-    return [path for path in unique if "/lib/" not in str(path)]
+    # Private libs build in their own target. Compare path components (relative to the app
+    # dir) instead of the "/lib/" substring: str() uses backslashes on Windows, which let
+    # lib/ sources leak into the app target and get compiled twice without the lib's
+    # private include dirs (same fix as the previous firmware's generate.py).
+    def in_lib_dir(path: Path) -> bool:
+        try:
+            parts = path.relative_to(base_dir).parent.parts
+        except ValueError:
+            parts = path.parent.parts
+        return "lib" in parts
+
+    return [path for path in unique if not in_lib_dir(path)]
 
 
 def cmake_quote(path: Path | str) -> str:
