@@ -12,11 +12,12 @@
 #include <lwip/tcpip.h>
 #include <string.h>
 #include <furi.h>
+#include <esp_attr.h>
 
 #define TAG "WlanNetscan"
 #define WLAN_NETSCAN_MAX_HOSTS 64
 
-static WlanNetscanHost s_hosts[WLAN_NETSCAN_MAX_HOSTS];
+static EXT_RAM_BSS_ATTR WlanNetscanHost s_hosts[WLAN_NETSCAN_MAX_HOSTS];
 static uint8_t s_host_count = 0;
 static uint32_t s_base_host = 0;
 static uint32_t s_own_ip = 0;

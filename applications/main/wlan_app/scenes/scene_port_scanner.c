@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
+#include <esp_attr.h>
 
 #define PS_TAG "WlanPortscan"
 
@@ -36,7 +37,7 @@ static bool s_thread_running = false;
 static volatile bool s_scanning = false;
 static volatile bool s_scan_complete = false;
 static volatile uint8_t s_progress = 0;
-static WlanPortscanEntry s_open_ports[WLAN_PORTSCAN_MAX_OPEN];
+static EXT_RAM_BSS_ATTR WlanPortscanEntry s_open_ports[WLAN_PORTSCAN_MAX_OPEN];
 static volatile uint8_t s_open_count = 0;
 
 static const char* port_service_name(uint16_t port) {
@@ -287,13 +288,21 @@ static void portscan_start_scan(WlanApp* app, uint32_t ip) {
 
     view_dispatcher_switch_to_view(app->view_dispatcher, WlanAppViewPortscan);
 
-    /* Furi and pthreads use separate TLS slots; keep pthread TLS intact. */
+    // FuriThread-TLS-Reset (analog wifi_app: pthread_getspecific würde
+    // sonst auf garbage-Pointer dereferencen). Save + restore: leaving the
+    // GUI thread's TLS[0] NULL crashes furi_event_loop_run's cleanup on app
+    // exit (furi_thread_get_current() returns NULL -> furi_check in
+    // furi_thread_set_signal_callback).
+    void* saved_tls = pvTaskGetThreadLocalStoragePointer(NULL, 0);
+    vTaskSetThreadLocalStoragePointer(NULL, 0, NULL);
+
     s_scanning = true;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 4096);
     int rc = pthread_create(&s_scan_thread, &attr, portscan_thread, app);
     pthread_attr_destroy(&attr);
+    vTaskSetThreadLocalStoragePointer(NULL, 0, saved_tls);
     if(rc == 0) {
         s_thread_running = true;
     } else {

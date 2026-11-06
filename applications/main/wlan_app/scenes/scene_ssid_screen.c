@@ -30,14 +30,12 @@ void wlan_app_scene_ssid_screen_on_enter(void* context) {
         return;
     }
 
-    // Header: SSID links, RSSI rechts, beide Baseline y=10.
-    widget_add_string_element(
-        app->widget, 2, 10, AlignLeft, AlignBottom, FontPrimary, ap->ssid);
-
+    // Header: SSID links, RSSI rechts, beide Baseline y=10. Ein zu langer SSID
+    // laeuft als Lauftext (Redraw im Tick), statt in den RSSI-Text zu ragen.
     char rssi_buf[16];
     snprintf(rssi_buf, sizeof(rssi_buf), "%d dBm", ap->rssi);
-    widget_add_string_element(
-        app->widget, 126, 10, AlignRight, AlignBottom, FontSecondary, rssi_buf);
+    widget_add_marquee_header_element(
+        app->widget, 2, 10, 126, FontPrimary, ap->ssid, FontSecondary, rssi_buf);
 
     // Trennlinie unter dem Header.
     widget_add_line_element(app->widget, 0, 13, 127, 13);
@@ -72,7 +70,10 @@ bool wlan_app_scene_ssid_screen_on_event(void* context, SceneManagerEvent event)
     WlanApp* app = context;
     bool consumed = false;
 
-    if(event.type == SceneManagerEventTypeCustom) {
+    if(event.type == SceneManagerEventTypeTick) {
+        // Animiert den Lauftext im Header.
+        widget_redraw(app->widget);
+    } else if(event.type == SceneManagerEventTypeCustom) {
         if(app->ap_selected_index >= app->ap_count) return false;
         WlanApRecord* ap = &app->ap_records[app->ap_selected_index];
 

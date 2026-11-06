@@ -20,7 +20,7 @@ static void webfs_menu_submenu_cb(void* context, uint32_t index) {
 void wlan_app_scene_webfs_menu_on_enter(void* context) {
     WlanApp* app = context;
     submenu_reset(app->submenu);
-    submenu_set_header_centered(app->submenu, "Web-Filesystem");
+    submenu_set_header(app->submenu, "Web-Filesystem");
     submenu_add_item(
         app->submenu, "Select Wifi", WebFsMenuSelectWifi, webfs_menu_submenu_cb, app);
     submenu_add_item(

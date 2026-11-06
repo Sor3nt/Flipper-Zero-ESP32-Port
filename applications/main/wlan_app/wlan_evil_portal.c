@@ -129,6 +129,11 @@ static void evil_ap_event_handler(void* arg, esp_event_base_t event_base, int32_
 static TaskHandle_t s_dns_task = NULL;
 static httpd_handle_t s_http = NULL;
 static esp_netif_t* s_ap_netif = NULL;
+// True ONLY when this module created the WIFI_AP_DEF netif itself (it did not
+// exist yet). If wlan_hal (the main WiFi app) or another feature already owns
+// it, we reuse that handle and must NEVER destroy it — doing so leaves their
+// cached esp_netif_t* dangling and crashes the next WiFi start.
+static bool s_ap_netif_created_here = false;
 static int s_dns_socket = -1;
 
 static uint32_t s_cred_count = 0;
@@ -1035,6 +1040,23 @@ bool wlan_hal_evil_portal_karma_get_current(char* out, size_t out_size) {
     return true;
 }
 
+// Destroy s_ap_netif on a FAILED start only. On success it is intentionally
+// kept alive across stop/start cycles (the `if(!s_ap_netif)` guard below
+// reuses it next time), but on failure it must go — otherwise the
+// "WIFI_AP_DEF" esp_netif key stays registered forever and the next AP
+// start, in this module (on retry) or in a different one (e.g. wlan_webfs),
+// crashes with "esp_netif_new_api: ... duplicate key" (wifi_default.c:374).
+static void evil_portal_destroy_ap_netif_on_fail(void) {
+    // Only tear down a netif WE created fresh on this failed start. A shared
+    // WIFI_AP_DEF owned by wlan_hal (or persisted from an earlier start) must
+    // survive — it is reused via esp_netif_get_handle_from_ifkey() next time.
+    if(s_ap_netif && s_ap_netif_created_here) {
+        esp_netif_destroy_default_wifi(s_ap_netif);
+        s_ap_netif = NULL;
+        s_ap_netif_created_here = false;
+    }
+}
+
 typedef struct {
     const WlanHalEvilPortalConfig* cfg;
     bool result;
@@ -1060,12 +1082,26 @@ static void evil_portal_start_worker(void* arg) {
     }
 
     if(!s_ap_netif) {
-        ESP_LOGI(TAG, "[worker] creating default AP netif");
-        s_ap_netif = esp_netif_create_default_wifi_ap();
+        // Reuse an already-registered WIFI_AP_DEF (owned by wlan_hal or a
+        // previous start) instead of creating a duplicate — a second
+        // esp_netif_create_default_wifi_ap() for the same key asserts in
+        // wifi_default.c:374 ("duplicate key") and reboots the device.
+        s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if(!s_ap_netif) {
+            ESP_LOGI(TAG, "[worker] creating default AP netif");
+            s_ap_netif = esp_netif_create_default_wifi_ap();
+            s_ap_netif_created_here = true;
+        } else {
+            ESP_LOGI(TAG, "[worker] reusing existing WIFI_AP_DEF netif");
+        }
         if(!s_ap_netif) {
             ESP_LOGE(TAG, "  AP netif alloc FAILED");
             return;
         }
+    }
+    // (Re)apply Evil-Portal AP IP config every start — a shared netif may
+    // carry a different gateway (e.g. wlan_hal's default 192.168.4.1).
+    {
         // Set AP gateway/netmask to 172.0.0.1/24 (matches Bruce default)
         esp_netif_dhcps_stop(s_ap_netif);
         esp_netif_ip_info_t ip_info = {0};
@@ -1088,6 +1124,7 @@ static void evil_portal_start_worker(void* arg) {
     esp_err_t err = esp_wifi_init(&wcfg);
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  wifi_init: %s", esp_err_to_name(err));
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
@@ -1106,6 +1143,7 @@ static void evil_portal_start_worker(void* arg) {
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  set_mode: %s", esp_err_to_name(err));
         esp_wifi_deinit();
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
 
@@ -1114,6 +1152,7 @@ static void evil_portal_start_worker(void* arg) {
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  set_config: %s", esp_err_to_name(err));
         esp_wifi_deinit();
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
 
@@ -1129,6 +1168,7 @@ static void evil_portal_start_worker(void* arg) {
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "  wifi_start: %s", esp_err_to_name(err));
         esp_wifi_deinit();
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
 
@@ -1195,6 +1235,7 @@ static void evil_portal_start_worker(void* arg) {
     if(!start_http()) {
         esp_wifi_stop();
         esp_wifi_deinit();
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
 
@@ -1211,6 +1252,7 @@ static void evil_portal_start_worker(void* arg) {
         stop_http();
         esp_wifi_stop();
         esp_wifi_deinit();
+        evil_portal_destroy_ap_netif_on_fail();
         return;
     }
 

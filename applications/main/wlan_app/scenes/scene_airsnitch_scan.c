@@ -52,7 +52,7 @@ void wlan_app_scene_airsnitch_scan_on_enter(void* context) {
     }
 
     submenu_reset(app->submenu);
-    submenu_set_header_centered(app->submenu, "AirSnitch: Target");
+    submenu_set_header(app->submenu, "AirSnitch: Target");
 
     for(uint16_t i = 0; i < app->ap_count; ++i) {
         WlanApRecord* r = &app->ap_records[i];

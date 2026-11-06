@@ -20,7 +20,7 @@ void wlan_app_scene_airsnitch_result_on_enter(void* context) {
     char header[32];
     snprintf(
         header, sizeof(header), "AirSnitch: %u peers", (unsigned)app->airsnitch_peer_count);
-    submenu_set_header_centered(app->submenu, header);
+    submenu_set_header(app->submenu, header);
 
     if(app->airsnitch_peer_count == 0) {
         submenu_add_item(app->submenu, "No peers reachable", 0, airsnitch_result_cb, app);
