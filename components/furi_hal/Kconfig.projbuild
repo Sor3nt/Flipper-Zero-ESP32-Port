@@ -41,10 +41,12 @@ menu "Forced reboot combo"
         depends on IDF_TARGET_ESP32S3 && !FREERTOS_UNICORE && ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
         default n
         help
-            Holding the board's two reboot buttons for 5 s arms a reset that
-            fires once both are released (never while GPIO0/BOOT is held).
-            The check runs from an ISR-dispatched esp_timer on CPU1, so it
-            still works when CPU0 is stuck. The board header names the pins
+            Holding both configured reboot buttons continuously for 5 s
+            triggers a software reset immediately, while they are still held.
+            A pair already held when the input service starts is ignored until
+            both are released to prevent a reset loop. The check runs from an
+            ISR-dispatched esp_timer on CPU1, so it still works when CPU0 is
+            stuck. The board header names the pins
             (BOARD_REBOOT_COMBO_PIN_A/B). Enabled per board in
             sdkconfig.defaults.<board>.
 endmenu

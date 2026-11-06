@@ -77,8 +77,12 @@ void furi_hal_reboot_combo_init(void) {
     if(reboot_combo_timer) return;
 
     reboot_combo_count = 0;
+    /* Ignore a combo that is already fully held when the service starts,
+     * which can happen across a reset and would otherwise cause a reboot loop.
+     * A single button held at startup must not disable the combo: once the
+     * second button is pressed, the normal 5 s hold timer should run. */
     reboot_combo_state =
-        (reboot_combo_pin_low(BOARD_REBOOT_COMBO_PIN_A) ||
+        (reboot_combo_pin_low(BOARD_REBOOT_COMBO_PIN_A) &&
          reboot_combo_pin_low(BOARD_REBOOT_COMBO_PIN_B)) ?
             RebootComboWaitBootRelease :
             RebootComboIdle;
