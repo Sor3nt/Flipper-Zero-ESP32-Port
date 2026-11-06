@@ -117,9 +117,16 @@ bool tagtinker_ir_transmit(const uint8_t* data, size_t len, uint16_t repeats_raw
             .last_done = false,
         };
 
+        /* Claim first: another user (CLI, JS, an IR app) may be transmitting. */
+        if(!furi_hal_infrared_claim_tx()) return false;
         furi_hal_infrared_async_tx_set_data_isr_callback(pp4_tx_cb, &pp4_tx_state);
-        furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY);
-        furi_hal_infrared_async_tx_wait_termination();
+        if(furi_hal_infrared_async_tx_start(CARRIER_FREQ_HZ, CARRIER_DUTY)) {
+            furi_hal_infrared_async_tx_wait_termination();
+        } else {
+            furi_hal_infrared_release_claim();
+        }
+        /* The callback lives in this FAP: do not leave it registered. */
+        furi_hal_infrared_async_tx_reset_callbacks();
 
         if(rep < repeats) {
             if(delay > 0) {
