@@ -157,8 +157,11 @@ void furi_hal_light_init(void) {
 #endif
 }
 
+static uint8_t s_backlight_value = 255; /* last LightBacklight value; read by furi_hal_light_get_backlight */
+
 void furi_hal_light_set(Light light, uint8_t value) {
     if(light & LightBacklight) {
+        s_backlight_value = value;
         ledc_set_duty(
             BACKLIGHT_LEDC_SPEED,
             BACKLIGHT_LEDC_CHANNEL,
@@ -176,6 +179,10 @@ void furi_hal_light_set(Light light, uint8_t value) {
         furi_hal_light_unlock();
     }
 #endif
+}
+
+uint8_t furi_hal_light_get_backlight(void) {
+    return s_backlight_value;
 }
 
 void furi_hal_light_blink_start(Light light, uint8_t brightness, uint16_t on_time, uint16_t period) {

@@ -24,6 +24,10 @@ void furi_hal_light_init(void);
  */
 void furi_hal_light_set(Light light, uint8_t value);
 
+/** Last backlight value set via furi_hal_light_set(LightBacklight, ...). 0 == off.
+ * Used by boards with tilt-to-wake (M5Stick S3) to gate a wake on a dark screen. */
+uint8_t furi_hal_light_get_backlight(void);
+
 /** Start hardware LED blinking mode
  *
  * @param      light  Light

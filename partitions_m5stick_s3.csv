@@ -1,0 +1,10 @@
+# Partition layout — M5Stack StickS3 (8 MB flash, PSRAM).
+# No SD card: an internal-flash "storage" data partition (FATFS/wear-levelling) backs
+# /ext (IR DBs, apps_assets). Subtype "fat" so esp_vfs_fat_spiflash_mount_rw_wl finds it.
+# Bootloader 0x0..0x8000, partition table @0x8000.
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x6000,
+phy_init,   data, phy,      0xf000,    0x1000,
+factory,    app,  factory,  0x10000,   0x380000,
+storage,    data, fat,      0x390000,  0x460000,
+coredump,   data, coredump, 0x7f0000,  0x10000,
