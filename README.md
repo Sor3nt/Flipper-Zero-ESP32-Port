@@ -26,7 +26,13 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 | **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320×172 | CST816S touch | — | — | — | SPI |
 | **Waveshare ESP32-C6-LCD-1.47** ⚠️ | ESP32-C6 (RISC-V) | JD9853 320×172 | AXS5106L touch | — | — | — | SPI |
 | **DIY ESP32-S3 (N16R8)** | ESP32-S3 (Xtensa LX7) | ST7789 320×172 | 6× Tactile buttons | CC1101 (+ NRF24) | PN532 (I2C) | TX + RX | SPI |
+| **ThorChimera** | ESP32-S3 (Xtensa LX7) | ST7789 320×170 | Rotary encoder + button | CC1101 + NRF24 | PN532 (I2C) | RMT TX + RX | SPI |
+| **ThorMini** | ESP32-S3 (Xtensa LX7) | SSD1306 / SH1106 OLED (I²C) | 6× buttons | CC1101 + NRF24 | PN532 (I2C) | TX + RX | SPI |
+| **M5Stack M5Stick S3** † | ESP32-S3-PICO (8 MB PSRAM) | ST7789 135×240 | 2 buttons + BMI270 tilt-to-wake | CC1101 + NRF24 † | PN532 (I2C) † | RMT TX + RX | SPI (+ LittleFS) |
+| **M5Stack Cardputer ADV** † | ESP32-S3FN8 (no PSRAM) | ST7789V2 240×135 | TCA8418 QWERTY keyboard | CC1101 + NRF24 † | PN532 (I2C) † | RMT TX + RX | SPI |
 
+
+> † **M5Stick S3 and Cardputer ADV are early bring-up** (added in #112). Display, input, IR and BLE work; the SubGHz / NFC / nRF24 subsystems are present in the board profile but not yet hardware-validated on these M5 devices.
 
 > ⚠️ **Waveshare ESP32-C6-LCD-1.47 — supported but barely usable.** The board builds, boots and the UI/touch work, but the ESP32-C6 has only **512 KB SRAM and no PSRAM**. RAM-heavy apps are effectively non-functional. In particular **WiFi**: a normal AP scan works, but **monitor mode / handshake capture fails** — by the time the app's buffers are allocated the WiFi driver can no longer allocate its DMA buffers (`esf_buf_setup_static: alloc eb fail` → `ESP_ERR_NO_MEM`), so no frames are received. Treat this board as usable only for lightweight apps until the WiFi app's memory footprint is reduced (it was designed for the PSRAM-equipped T-Embed).
 
@@ -69,6 +75,8 @@ External CC1101 receiver/transmitter for 433–868 MHz signals.
 - Transmit saved files; manual signal creation (frequency, modulation, protocol, key/serial/counter)
 - Brute force / sub-brute attack with manufacturer dictionary
 - Playlist for sequential transmit
+- **Jammer** — continuous carrier/noise jammer on a selected frequency
+- **External FAP launchers** — the Sub-GHz menu also shows **ProtoPirate** and **wM-Burst** entries when those FAPs are installed on the SD card
 - **More protocols** — added KeeLoq variants (ERREKA, PUJOL, AERF, SIMPLE_JCM), Agilize Key Pro and Holtek HT6P20B
 - **TPMS decoding** — tire-pressure sensors: Schrader GG4, Citroën, Ford, Renault, Toyota (PMV107J) and a generic decoder; dedicated info view with editable sensor data
 - **Limitation:** AES-encrypted manufacturer keystores (`keeloq_mfcodes`, `nice_flor_s`, `alutech_at_4n`) are not decryptable on this port — only the plain-text `keeloq_mfcodes_user` works for Keeloq decoding.
@@ -89,7 +97,7 @@ Full WiFi pentest toolkit.
 - **AirSnitch** — auto-bruteforce target with password list
 - **Beacon Spam** — Funny SSIDs / Rickroll / Random / Custom
 - **Network Scan / Port Scan** — host discovery + 19 common-port probe on the connected network
-- **Web Crawler** — domain-based web crawler
+- **MITM** — ARP-spoof man-in-the-middle on the connected LAN: live credential capture and HTML/JS code injection into a target's web traffic
 - **Evil Portal** — captive portal with credential harvesting
   - Built-in templates: Google login, Router firmware update
   - Custom templates from `/ext/wifi/evil_portal/login_template/*.html` and `/ext/wifi/evil_portal/router_template/*.html` (filename = template name in dropdown)
@@ -101,6 +109,7 @@ Full WiFi pentest toolkit.
 - **Web-Filesystem** — HTTP file server for the SD card; open it in a browser (device hotspot *or* your existing WiFi) to upload, download, rename and delete files, with drag & drop for whole folders
 - **SMB Browser** — browse and download from SMB2/3 network shares (Windows / macOS / NAS) straight to the SD card; guest or password login
 - **Android TV Remote** — control any Android / Google TV (Sony, NVIDIA Shield, Xiaomi Mi Box, Chromecast, …): scan → pair once with the on-screen PIN → on-screen remote (D-Pad, volume, media, power)
+- **AirPrint** — virtual AirPrint/IPP network printer; advertises over mDNS and saves incoming print jobs to the SD card
 - **Global toggle** — WiFi is now an on/off switch like Bluetooth (from the lock menu); the connection persists across apps and reconnects automatically after a reboot
 
 #### Mesh / Buddy *(ESP-NOW)*
@@ -115,15 +124,16 @@ Pair cheap headless ESP32 boards (**buddies**) to the T-Embed (**master**) over 
 #### Bluetooth
 - **BLE Spam** — Apple Continuity (Pair/Action/NotYourDevice), Google FastPair (455+ models), Microsoft SwiftPair, Samsung Buds & Watch, Xiaomi QuickConnect
 - **BLE Walk** — passive scanner with GATT service/characteristic inspection
-- **Wardriving** — passive BLE advertisement scanner, available from Bluetooth → Wardriving (this is BLE, not WiFi scanning). Lists address, name, RSSI, manufacturer ID and advertisement count; exports a WiGLE-formatted CSV to `/ext/apps_data/wlan/`. It has no GPS integration: exported rows currently contain a fixed timestamp and zero coordinates, so they are not geotagged tracks.
-- **BLE Clone** *(dev)* — replicate active BLE advertisements
+- **Auto Walk** — automated BLE walk with logging
+- **Tracker** — BLE tracker scanner with a "geiger" proximity view
+- **Airoha RACE** — detector for the Airoha RACE GATT service (CVE-2025-20700)
 - **FindMy** — emulate Apple AirTag, Samsung SmartTag, Tile beacons (clone or generate keypairs)
 - **HID** *(see below)* — keyboard/mouse/media remote over BLE
 - **Bad USB** — via USB or BLE
 
 #### NRF24 *(2.4 GHz, external nRF24L01)*
 - **Spectrum analyzer** — live 2.4 GHz channel activity
-- **Jammer** *(rewritten)* — one engine with switchable channel sources (Protocol / Manual / WiFi / Activity scan), strategies (CW / Flood / Turbo) and presets; configuration persists per source
+- **Jammer** *(rewritten)* — one engine with switchable channel sources (Protocol / WiFi / Activity scan), strategies (CW / Flood / Turbo / AFH) and presets; configuration persists per source
 - **MouseJacker** — inject keystrokes into vulnerable wireless mice/keyboards
 - Also available as a FAP (`nRF24_jammer`)
 
@@ -167,7 +177,7 @@ HID payload runner for Ducky-script (`.txt`) files from `/ext/badusb/`.
 - **Transport:** USB OTG (TinyUSB) on T-Embed, BLE on Waveshare
 
 #### U2F (USB FIDO)
-USB HID FIDO U2F authenticator for configured ESP32-S3 profiles. Supports U2F registration and authentication with on-device user confirmation and a persistent signature counter; it does not implement CTAP2/WebAuthn passkeys. Certificate provisioning, USB ownership constraints and recovery notes are in [the U2F guide](applications/main/u2f/README.md).
+USB HID FIDO U2F authenticator for configured ESP32-S3 profiles. Supports U2F registration and authentication with on-device user confirmation and a persistent signature counter; it does not implement CTAP2/WebAuthn passkeys. When no usable attestation certificate is present, the app offers a **Generate** button that creates a device-specific self-signed P-256 certificate/key on the device — no PC tooling or manual file copying required (you can still install your own pair). Certificate provisioning, USB ownership constraints and recovery notes are in [the U2F guide](applications/main/u2f/README.md).
 
 ### 🛠 System / Tools
 
@@ -180,11 +190,8 @@ The desktop lock menu doubles as the central system control panel (board-depende
 - **Web-Filesystem** — start the SD-card web file server *(see WiFi above)*
 - **Mesh Clients** — buddy discovery & control *(see Mesh / Buddy above)*
 
-#### GPIO
-The Apps → GPIO menu includes **USB-UART Bridge**, a serial pass-through between USB CDC and the board-mapped UART. It is supported on the ESP32-S3 T-Embed external-UART profile (including the `esp32s3_generic` alias) and Paradoxt. The bridge currently uses TX/RX only with 8-N-1 framing; RTS/DTR flow control and DE/RE direction control are not implemented. Board wiring, USB handoff and pin-sharing details are in the [GPIO guide](applications/main/gpio/README.md).
-
 #### Archive
-SD-card file browser with tabs per media type: Favorites, Sub-GHz, NFC, LF-RFID, Infrared, iButton, Bad USB, U2F, Apps, Internal, Browser. Pin/unpin favorites; copy, paste, rename, delete, create folder.
+SD-card file browser with tabs per media type: Favorites, Sub-GHz, Sub-GHz Remote, NFC, LF-RFID, Infrared, iButton, Bad USB, U2F, Apps, Internal, Browser. Pin/unpin favorites; copy, paste, rename, delete, create folder.
 
 #### JS Runner
 mJS-based JavaScript runtime for user scripts in `/ext/apps/Scripts/*.js`.
@@ -204,11 +211,14 @@ files from `/ext/apps_data/medien`.
 #### Doom
 Full DOOM port. Place `doom1.wad` at `/ext/apps_data/doom/doom1.wad`. Encoder turns; click fires (short) / walks forward (long). Side-button uses doors/switches (short) / opens menu (long).
 
+#### Wolf3D
+Wolfenstein 3D port (T-Embed only — same PSRAM, 320×N display and I2S requirements as Doom).
+
 #### Snake
 Classic snake game.
 
 ### ⚙ Settings & General
-Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notification, power, storage, system info, factory reset. Animated dolphin desktop on idle. File-pack manifest at `/ext/Manifest` (qFlipper-style asset list — its presence suppresses the "No DB" boot animation).
+Bluetooth, backlight, clock, dolphin/passport, notification, power, storage, system info, factory reset. Animated dolphin desktop on idle. File-pack manifest at `/ext/Manifest` (qFlipper-style asset list — its presence suppresses the "No DB" boot animation).
 - **Desktop** — configure the desktop PIN, automatic lock timeout and USB-session auto-lock behavior; assign favorite apps and Dummy Mode actions to button shortcuts.
 - **Update Firmware** — wireless OTA firmware + SD-card update *(see [Firmware Update](#firmware-update) above)*
 - **Interface** — customize the main menu and its layout
@@ -229,13 +239,11 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 | `/ext/apps_data/doom/doom1.wad` | Doom |
 | `/ext/badusb/` | Bad USB scripts + `assets/layouts/*.kl` |
 | `/ext/infrared/assets/` | Universal remote DBs (`tv.ir`, `ac.ir`, `audio.ir`, `projectors.ir`, `fans.ir`, `leds.ir`) |
-| `/ext/lfrfid/assets/iso3166.lfrfid` | LF-RFID country code lookup |
 | `/ext/nfc/assets/` | MIFARE & EMV dictionaries |
 | `/ext/subghz/assets/` | SubGHz keystores + `dangerous_settings` |
 | `/ext/u2f/assets/` | Updated U2F certificate/key pair; replace an older pair together (see [`sdcard/README.md`](sdcard/README.md)) |
 | `/ext/wifi/<ssid>.txt` | Saved WiFi passwords |
 | `/ext/wifi/deauth_all.cfg` | Deauth All scan settings |
-| `/ext/apps_data/wlan/ble_*.csv` | BLE Wardriving CSV exports (no GPS coordinates) |
 | `/ext/wifi/buddy_<name>_<ssid>.pcap` | Mesh/Buddy handshake captures |
 | `/ext/wifi/evil_portal/login_template/` | Custom captive-portal templates (no verify) |
 | `/ext/wifi/evil_portal/router_template/` | Custom captive-portal templates (with WLAN verify) |
@@ -276,7 +284,14 @@ The repository-side SD card files, including the FAP binaries required on the ca
 
 #DIY ESP32-S3
 ./build_diy.sh
+
+# Generic builder for the other boards: ./build.sh --board <name>
+# supported: t_embed, esp32s3, paradoxt, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47
+./build.sh --board paradoxt
 ```
+
+> The newer **ThorChimera, ThorMini, M5Stick S3 and Cardputer ADV** targets do not yet have a
+> dedicated shell script — build them through `winbuild.py` (`python winbuild.py build --board <name>`).
 
 ### Build & Flash (Windows)
 
@@ -305,7 +320,7 @@ python winbuild.py monitor --duration 30
 python winbuild.py all --port COM14
 ```
 
-Boards: `t_embed` (default), `esp32s3`, `waveshare_c6` (or `waveshare_c6_1.9`), `waveshare_c6_1.47`. Override defaults with `ESP_IDF_DIR` and `ESPPORT` env vars. `monitor --reset` only works on USB-UART bridges, not on the ESP32-S3 native USB-Serial/JTAG — use `flash` or `all` to capture boot logs.
+Boards: `t_embed` (default), `esp32s3`, `paradoxt`, `thorchimera`, `thormini`, `m5stick_s3`, `cardputer_adv`, `waveshare_c6` (or `waveshare_c6_1.9`), `waveshare_c6_1.47`. Override defaults with `ESP_IDF_DIR` and `ESPPORT` env vars. `monitor --reset` only works on USB-UART bridges, not on the ESP32-S3 native USB-Serial/JTAG — use `flash` or `all` to capture boot logs.
 
 ### Build a FAP
 
