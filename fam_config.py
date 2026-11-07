@@ -48,7 +48,8 @@ APPS = [
     "passport",
     "nfc",
     "infrared",
-    "gpio",
+    # "gpio" (USB-UART bridge, manual GPIO control, 5V/VBUS switch) removed:
+    # not useful on the T-Embed hardware. Re-add here to build the app again.
     # "lfrfid" (125 kHz RFID) disabled: no currently supported board has the
     # LF-RFID hardware. Re-add here to build the app again.
     "wlan",
@@ -121,12 +122,9 @@ _boards_without_nrf24 = {"waveshare_c6", "waveshare_c6_1.9", "waveshare_c6_1.47"
 if _board in _boards_without_ir:
     APPS = [a for a in APPS if a not in ("infrared", "js_infrared")]
 
-# GPIO app (USB-UART bridge, GPIO manual control, 5V/VBUS switch) is an ESP32-S3 app.
-# Non-S3 boards keep their 5V switch in Infrared -> GPIO Settings instead
+# GPIO app (USB-UART bridge, GPIO manual control, 5V/VBUS switch) is not built on
+# any board. Non-S3 boards keep their 5V switch in Infrared -> GPIO Settings
 # (see INFRARED_HAS_5V_SETTINGS in applications/main/infrared/infrared_app_i.h).
-_boards_not_esp32s3 = {"waveshare_c6", "waveshare_c6_1.9", "waveshare_c6_1.47"}
-if _board in _boards_not_esp32s3:
-    APPS = [a for a in APPS if a != "gpio"]
 
 if _board in _boards_without_subghz:
     APPS = [a for a in APPS if a not in ("subghz", "cli_subghz", "subghz_load_dangerous_settings", "js_subghz")]
