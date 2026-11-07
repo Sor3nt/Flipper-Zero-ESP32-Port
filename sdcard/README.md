@@ -1,10 +1,12 @@
 # SD card contents
 
-> **Important:** Keep the original SD card ZIP unchanged. Retain its existing files, replace the old U2F pair in `/u2f/assets/`, replace/add only the affected FAPs listed below, and add their required support files. Leave unrelated files unchanged.
+> **Important:** The repository's `sdcard/` folder now contains a complete starter SD card tree based on upstream, with the port-specific additions and adaptations listed below. The original SD card ZIP does not need to be edited in place. For a new card, copy the contents of `sdcard/` to the card root. For an existing card, preserve user files and replace or add only the paths needed for these updates.
 
-This directory is a partial overlay of SD card files to add or replace; it is not a complete replacement for the original SD card ZIP. Leave all other files from the original card as they are.
+The tree includes the complete upstream SD card contents; only selected support files and FAPs were added or adapted for this ESP32 port. The table below highlights those port-specific changes.
 
-## Included files
+`Manifest` and `files.txt` are the upstream snapshot indexes. They retain upstream hashes for the original files; entries for port-specific replacements such as `js_badusb.fal` and the U2F certificate/key pair can therefore differ from the indexed upstream versions.
+
+## Port-specific additions and adaptations
 
 | Repository path | Card path | Purpose |
 |---|---|---|

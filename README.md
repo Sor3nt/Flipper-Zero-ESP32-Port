@@ -242,12 +242,16 @@ Bluetooth, backlight, clock, dolphin/passport, expansion port, input, notificati
 
 ### SD card files included in this repository
 
-The [`sdcard/`](sdcard/) directory mirrors the root of an SD card and keeps files that developers may need to copy or package with the firmware. Copy the contents of this directory to the card root; do not create an extra `sdcard/` directory on the card.
+The [`sdcard/`](sdcard/) directory now contains a complete starter SD card tree based on upstream, plus the port-specific files and adaptations listed below. For a new card, copy its contents to the card root; do not create an extra `sdcard/` directory. For an existing card, preserve user files and copy or replace only the paths needed for the update. The original SD card ZIP does not need to be edited in place.
 
 | Repository path | SD card path | Contents |
 |---|---|---|
 | [`sdcard/apps/`](sdcard/apps/) | `/apps/` | Prebuilt FAP packages included with this project. FAP source, where available, is kept under `applications_user/`. |
+| [`sdcard/apps_assets/`](sdcard/apps_assets/) | `/apps_assets/` | Runtime assets for FMTX, ProtoPirate, and NFC plugins. |
+| [`sdcard/apps_data/`](sdcard/apps_data/) | `/apps_data/` | App data and plugins, including JavaScript modules, NFC parsers, and game data. |
 | [`sdcard/asset_packs/`](sdcard/asset_packs/) | `/asset_packs/` | 35 desktop animation packs from the supplied SD card; select them in Settings → Interface → Graphics → Asset Pack. |
+| [`sdcard/Manifest`](sdcard/Manifest) | `/Manifest` | File and directory manifest for the SD card snapshot. |
+| [`sdcard/files.txt`](sdcard/files.txt) | `/files.txt` | SHA-256 inventory for the upstream SD card snapshot. |
 | [`sdcard/u2f/assets/`](sdcard/u2f/assets/) | `/u2f/assets/` | Matching `cert.der` and `cert_key.u2f` files required by U2F. On first use, firmware imports and encrypts the certificate key; see the [U2F guide](applications/main/u2f/README.md). |
 
 A complete starter kit is in [sdcard.zip](https://github.com/Sor3nt/Flipper-Zero-ESP32-Port/releases/latest/download/sdcard.zip) — extract it onto a FAT32 SD.

