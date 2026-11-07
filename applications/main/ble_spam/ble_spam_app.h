@@ -55,7 +55,6 @@ typedef enum {
     BleSpamViewTrackerScan,
     BleSpamViewTrackerGeiger,
     BleSpamViewRaceDetector,
-    BleSpamViewWardriving,
 } BleSpamViewId;
 
 typedef struct {
@@ -98,7 +97,4 @@ typedef struct {
     // Airoha RACE Detector state (CVE-2025-20700)
     View* view_race_detector;
     volatile bool race_probe_abort;
-
-    // BLE Wardriving view
-    View* view_wardriving;
 } BleSpamApp;

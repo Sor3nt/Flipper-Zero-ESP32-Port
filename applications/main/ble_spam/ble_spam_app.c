@@ -7,7 +7,6 @@
 #include "views/tracker_list_view.h"
 #include "views/tracker_geiger_view.h"
 #include "views/race_detector_view.h"
-#include "views/ble_wardriving_view.h"
 #include <gui/modules/text_input.h>
 
 static bool ble_spam_custom_event_callback(void* context, uint32_t event) {
@@ -98,12 +97,6 @@ static BleSpamApp* ble_spam_app_alloc(void) {
         app->view_dispatcher, BleSpamViewRaceDetector, app->view_race_detector);
     app->race_probe_abort = false;
 
-    // BLE Wardriving view
-    app->view_wardriving = ble_wardriving_view_alloc();
-    view_set_context(app->view_wardriving, app->view_dispatcher);
-    view_dispatcher_add_view(
-        app->view_dispatcher, BleSpamViewWardriving, app->view_wardriving);
-
     // State
     app->attack_type = BleSpamAttackAppleDevice;
     app->running = false;
@@ -126,9 +119,7 @@ static void ble_spam_app_free(BleSpamApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerScan);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewTrackerGeiger);
     view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewRaceDetector);
-    view_dispatcher_remove_view(app->view_dispatcher, BleSpamViewWardriving);
 
-    wlan_ble_scan_deinit();
     submenu_free(app->submenu);
     ble_spam_view_free(app->view_running);
     ble_walk_scan_view_free(app->view_walk_scan);
@@ -137,7 +128,6 @@ static void ble_spam_app_free(BleSpamApp* app) {
     tracker_list_view_free(app->view_tracker_scan);
     tracker_geiger_view_free(app->view_tracker_geiger);
     race_detector_view_free(app->view_race_detector);
-    ble_wardriving_view_free(app->view_wardriving);
     text_input_free(app->text_input);
 
     scene_manager_free(app->scene_manager);

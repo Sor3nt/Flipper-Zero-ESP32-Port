@@ -3,7 +3,6 @@
 enum MainMenuIndex {
     MainMenuIndexBleSpam,
     MainMenuIndexBleWalk,
-    MainMenuIndexBleWardriving,
     MainMenuIndexBleAutoWalk,
     MainMenuIndexBleTracker,
     MainMenuIndexBleRaceDetector,
@@ -19,9 +18,6 @@ void ble_spam_scene_main_on_enter(void* context) {
 
     submenu_add_item(app->submenu, "Spam", MainMenuIndexBleSpam, main_menu_callback, app);
     submenu_add_item(app->submenu, "Walk", MainMenuIndexBleWalk, main_menu_callback, app);
-    // Kein GPS angebunden → ehrlich "BLE Scanner" statt "Wardriving".
-    submenu_add_item(
-        app->submenu, "BLE Scanner", MainMenuIndexBleWardriving, main_menu_callback, app);
     submenu_add_item(
         app->submenu, "Auto Walk", MainMenuIndexBleAutoWalk, main_menu_callback, app);
     submenu_add_item(
@@ -48,10 +44,6 @@ bool ble_spam_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainMenuIndexBleWalk:
             scene_manager_next_scene(app->scene_manager, BleSpamSceneWalkScan);
-            consumed = true;
-            break;
-        case MainMenuIndexBleWardriving:
-            scene_manager_next_scene(app->scene_manager, BleSpamSceneWardriving);
             consumed = true;
             break;
         case MainMenuIndexBleAutoWalk:
