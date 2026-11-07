@@ -29,3 +29,9 @@ releases/*.zip
 # Generated feature validation output
 /tests/wdgwars_map/render_previews/
 /build*.log
+
+# Root-level FAM registry, regenerated at every CMake configure into the build
+# dir (main/CMakeLists.txt). The checked-in copies carried foreign absolute
+# paths and are not used by the build. Root-anchored so build-dir and
+# main/generated paths are unaffected.
+/generated/

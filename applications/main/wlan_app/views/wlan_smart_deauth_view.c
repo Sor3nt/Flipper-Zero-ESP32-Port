@@ -198,6 +198,9 @@ static void draw_scan_mode(Canvas* canvas, SdViewModel* vm) {
         snprintf(info, sizeof(info), "%uc", ci->client_count);
         canvas_draw_str_aligned(canvas, 121, base, AlignRight, AlignBottom, info);
 
+        // PMF-geschützte Netze markieren: Deauth greift dort kaum (802.11w).
+        if(ci->pmf == SD_PMF_REQUIRED) canvas_draw_str(canvas, 90, base, "P");
+
         if(sel) canvas_set_color(canvas, ColorBlack);
     }
 
@@ -217,9 +220,15 @@ static void draw_attack_mode(Canvas* canvas, SdViewModel* vm) {
 
     canvas_set_font(canvas, FontSecondary);
 
-    // Baris 1: kanal (kiri) + status pill (kanan)
+    // Baris 1: kanal (kiri) + PMF-Marker (mitte) + status pill (kanan)
     snprintf(a, sizeof(a), "CH %u", vm->attack_channel);
     canvas_draw_str(canvas, 2, 22, a);
+    // 802.11w: bei PMF-Required ist Deauth praktisch wirkungslos → warnen.
+    // Angriff wird NICHT blockiert, nur markiert.
+    if(vm->attack_pmf == SD_PMF_REQUIRED)
+        canvas_draw_str(canvas, 30, 22, "PMF!");
+    else if(vm->attack_pmf == SD_PMF_CAPABLE)
+        canvas_draw_str(canvas, 30, 22, "pmf");
     draw_status_pill(canvas, run ? "LIVE" : "ARMED", run);
 
     // Baris 2: SSID (hero, scroll kalau panjang)
@@ -285,8 +294,13 @@ static void draw_monitor_mode(Canvas* canvas, SdViewModel* vm) {
         vm->monitor_bssid[5]);
     canvas_draw_str(canvas, 2, 30, mac);
 
-    // Baris 3 (y=39): kanal + RSSI
-    snprintf(a, sizeof(a), "Ch %u", vm->monitor_channel);
+    // Baris 3 (y=39): kanal (+ PMF-Marker) + RSSI
+    if(vm->attack_pmf == SD_PMF_REQUIRED)
+        snprintf(a, sizeof(a), "Ch %u PMF", vm->monitor_channel);
+    else if(vm->attack_pmf == SD_PMF_CAPABLE)
+        snprintf(a, sizeof(a), "Ch %u pmf", vm->monitor_channel);
+    else
+        snprintf(a, sizeof(a), "Ch %u", vm->monitor_channel);
     snprintf(b, sizeof(b), "RSSI %d", vm->monitor_rssi);
     draw_stat_row(canvas, 39, a, b);
 

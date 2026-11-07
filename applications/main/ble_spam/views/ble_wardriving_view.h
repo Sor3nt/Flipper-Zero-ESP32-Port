@@ -16,6 +16,7 @@ typedef struct {
     uint16_t       cursor;
     bool           detail_mode;
     bool           exit_pending;
+    bool           error; // true kalau bring-up scanner gagal → tampilkan pesan
     BleDeviceEntry detail;
     bool           detail_valid;
 } BleWardrivingModel;

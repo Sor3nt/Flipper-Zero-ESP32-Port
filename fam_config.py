@@ -87,10 +87,12 @@ APPS = [
 
 # Boards without NFC / IR hardware – exclude the corresponding apps
 _board = os.environ.get("FLIPPER_BOARD", "")
+# NOTE: furi_hal_usb_u2f.c is only built for esp32s3. "smoochie" was removed
+# here because it is not a real board in this tree (no board_smoochie.h, no
+# sdkconfig.defaults.smoochie) and therefore not an esp32s3 target.
 _boards_with_u2f = {
     "esp32s3_generic",
     "lilygo_t_embed_cc1101",
-    "smoochie",
     "paradoxt",
     "thormini",
 }

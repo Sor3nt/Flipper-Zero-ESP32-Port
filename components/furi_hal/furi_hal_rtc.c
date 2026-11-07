@@ -4,6 +4,9 @@
 #include <esp_log.h>
 #include <nvs.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <time.h>
 
 #define TAG "FuriHalRtc"
@@ -86,27 +89,76 @@ static bool furi_hal_rtc_persistent_state_load(void) {
     return true;
 }
 
-static bool furi_hal_rtc_persistent_state_save(void) {
-    nvs_handle_t nvs;
-    if(furi_hal_rtc_persistent_state_open(&nvs, NVS_READWRITE) != ESP_OK) return false;
+/* Argument für den NVS-Write-Helper-Task. Lebt auf dem Stack des Aufrufers
+ * (ggf. PSRAM); wird nur mit aktivem Flash-Cache gelesen/geschrieben. */
+typedef struct {
+    FuriHalRtcPersistentState state;
+    volatile bool result;
+    volatile bool done;
+} FuriHalRtcNvsWriteCtx;
 
-    const FuriHalRtcPersistentState state = {
-        .magic = FURI_HAL_RTC_NVS_STATE_MAGIC,
-        .flags = furi_hal_rtc.flags,
-        .pin_fails = furi_hal_rtc.pin_fails,
-        .pin_value = furi_hal_rtc.pin_value,
+/* Führt den eigentlichen NVS-Write aus — MUSS auf einem Task mit INTERNEM DRAM-
+ * Stack laufen. nvs_commit schaltet den Flash-Cache ab; der PSRAM-Stack der
+ * Aufrufer (desktop_srv-Service-Task, Settings-App) wäre dann nicht mehr
+ * erreichbar → DoubleException/TG1WDT. Mit Default lock_on_boot=true + gesetztem
+ * PIN passiert das schon im Boot-Pfad → Boot-Loop. Die zu schreibende Struct
+ * wird auf den internen Stack dieses Tasks kopiert, damit nvs_set_blob während
+ * des Cache-disable nur internes RAM berührt. Muster 1:1 aus
+ * components/toolbox/saved_struct.c (project_psram_stack_nvs_doubleexception). */
+static void furi_hal_rtc_nvs_write_task(void* p) {
+    FuriHalRtcNvsWriteCtx* ctx = p;
+
+    /* Lokale Kopie auf dem internen DRAM-Stack dieses Tasks (statt eines
+     * PSRAM-Zeigers auf ctx->state), damit nvs_set_blob den Blob auch während
+     * des Flash-Writes aus internem RAM lesen kann. */
+    const FuriHalRtcPersistentState state = ctx->state;
+
+    bool result = false;
+    nvs_handle_t nvs;
+    if(furi_hal_rtc_persistent_state_open(&nvs, NVS_READWRITE) == ESP_OK) {
+        esp_err_t err = nvs_set_blob(nvs, FURI_HAL_RTC_NVS_KEY_STATE, &state, sizeof(state));
+        if(err == ESP_OK) err = nvs_commit(nvs);
+        nvs_close(nvs);
+
+        if(err == ESP_OK) {
+            result = true;
+        } else {
+            ESP_LOGE(TAG, "Unable to persist RTC state in NVS: %s", esp_err_to_name(err));
+        }
+    }
+
+    ctx->result = result;
+    ctx->done = true;
+    vTaskDelete(NULL);
+}
+
+static bool furi_hal_rtc_persistent_state_save(void) {
+    /* Den NVS-Write auf einen Task mit internem DRAM-Stack auslagern — plain
+     * xTaskCreate liefert einen internen Stack (kein SPIRAM_ALLOW_STACK), anders
+     * als die PSRAM-gestackten Aufrufer-Tasks, die den nvs_commit sonst mit
+     * DoubleException killen würden. Siehe furi_hal_rtc_nvs_write_task. */
+    FuriHalRtcNvsWriteCtx ctx = {
+        .state =
+            {
+                .magic = FURI_HAL_RTC_NVS_STATE_MAGIC,
+                .flags = furi_hal_rtc.flags,
+                .pin_fails = furi_hal_rtc.pin_fails,
+                .pin_value = furi_hal_rtc.pin_value,
+            },
+        .result = false,
+        .done = false,
     };
 
-    esp_err_t err = nvs_set_blob(nvs, FURI_HAL_RTC_NVS_KEY_STATE, &state, sizeof(state));
-    if(err == ESP_OK) err = nvs_commit(nvs);
-    nvs_close(nvs);
-
-    if(err != ESP_OK) {
-        ESP_LOGE(TAG, "Unable to persist RTC state in NVS: %s", esp_err_to_name(err));
+    if(xTaskCreate(furi_hal_rtc_nvs_write_task, "rtc_nvs_wr", 3072, &ctx, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to spawn RTC NVS write task");
         return false;
     }
 
-    return true;
+    while(!ctx.done) {
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    return ctx.result;
 }
 
 static time_t furi_hal_rtc_now(void) {

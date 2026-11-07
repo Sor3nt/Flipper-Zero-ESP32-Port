@@ -52,6 +52,7 @@ static volatile uint32_t   s_attack_beacon_age_ms = 0;
 static volatile uint32_t   s_attack_last_beacon = 0;
 static SdClientEntry       s_attack_clients[SD_MAX_CH_CLIENTS];
 static volatile uint8_t    s_attack_client_count = 0;
+static volatile SdPmfState s_attack_pmf = SD_PMF_NONE;
 
 static volatile bool       s_monitor_running = false;
 static volatile uint8_t    s_monitor_channel = 0;
@@ -746,6 +747,7 @@ bool wlan_smart_deauth_select_channel(uint8_t idx) {
     memcpy(s_attack_bssid, ci.bssid, 6);
     strncpy(s_attack_ssid, ci.ssid, 32);
     s_attack_ssid[32] = 0;
+    s_attack_pmf = ci.pmf;   // ins Attack/Monitor-Modell durchreichen (nur markieren)
 
     uint8_t n = ci.client_slot_count;
     if(n > SD_MAX_CH_CLIENTS) n = SD_MAX_CH_CLIENTS;
@@ -808,6 +810,7 @@ void wlan_smart_deauth_get_view_model(SdViewModel* out) {
         dst->client_count = src->client_count;
         dst->rssi         = src->rssi;
         dst->has_ap       = src->has_ap;
+        dst->pmf          = src->pmf;
         memcpy(dst->ssid, src->ssid, sizeof(dst->ssid));
         if(src->has_ap) out->detected_map[dc++] = (uint8_t)i;  // daftar hanya AP terdeteksi
     }
@@ -827,6 +830,7 @@ void wlan_smart_deauth_get_view_model(SdViewModel* out) {
     out->attack_beacon_age_ms = s_attack_beacon_age_ms;
     out->attack_beacon_alive = (s_attack_beacon_age_ms < 5000);
     out->attack_running = s_attack_running;
+    out->attack_pmf = s_attack_pmf;
 
     out->monitor_channel = s_monitor_channel;
     strncpy(out->monitor_ssid, s_monitor_ssid, 32);

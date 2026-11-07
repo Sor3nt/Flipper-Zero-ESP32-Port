@@ -100,7 +100,15 @@ static void draw_list(Canvas* canvas, BleWardrivingModel* m) {
     canvas_set_font(canvas, FontSecondary);
 
     if(m->count == 0) {
-        draw_empty_box(canvas, m->running ? "Scanning BLE..." : "No devices");
+        // Bring-up-Fehler eindeutig melden statt endlos "Scanning BLE..." zu zeigen.
+        const char* msg;
+        if(m->error)
+            msg = "BLE init failed";
+        else if(m->running)
+            msg = "Scanning BLE...";
+        else
+            msg = "No devices";
+        draw_empty_box(canvas, msg);
         elements_button_left(canvas, "Rescan");
         elements_button_right(canvas, "Info");
         return;
@@ -272,7 +280,7 @@ static void draw_detail(Canvas* canvas, BleWardrivingModel* m) {
 static void draw_cb(Canvas* canvas, void* ctx) {
     BleWardrivingModel* m = ctx;
     canvas_clear(canvas);
-    draw_header(canvas, "BLE Wardriving");
+    draw_header(canvas, "BLE Scanner");
     if(m->exit_pending) {
         canvas_set_font(canvas, FontSecondary);
         canvas_draw_str_aligned(canvas, SCREEN_W / 2, 34,

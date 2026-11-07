@@ -1,5 +1,7 @@
 #include "../wlan_app.h"
 #include "../wlan_smart_deauth.h"
+#include <wlan_hal.h>
+#include <wlan_passwords.h>
 #include <gui/view.h>
 #include <esp_attr.h>
 #include <boards/board.h>
@@ -136,6 +138,21 @@ bool wlan_app_scene_smart_deauth_on_event(void* context, SceneManagerEvent event
 }
 
 void wlan_app_scene_smart_deauth_on_exit(void* context) {
-    UNUSED(context);
+    WlanApp* app = context;
+
+    // Reihenfolge: zuerst den Attack-/Scan-Worker stoppen & joinen (schaltet
+    // Promiscuous ab, gibt den Channel-Lock frei)…
     wlan_smart_deauth_stop();
+
+    // …dann den raw-TX-SoftAP abbauen (der Deauth-Pfad schaltet auf APSTA; sonst
+    // beaconnt ein verstecktes AP bis zum Reboot) und — falls vor dem Feature eine
+    // STA-Verbindung bestand — zum letzten Netz zurückverbinden (globales WiFi soll
+    // bestehen bleiben, vgl. scene_handshake).
+    wlan_hal_set_ap_mode(false);
+    if(app->connected) {
+        char pw[WLAN_APP_PASSWORD_MAX] = {0};
+        wlan_password_read(app->connected_ap.ssid, pw, sizeof(pw));
+        wlan_hal_connect(
+            app->connected_ap.ssid, pw, app->connected_ap.bssid, app->connected_ap.channel);
+    }
 }

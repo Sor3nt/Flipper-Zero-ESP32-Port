@@ -199,7 +199,10 @@ void wlan_hal_evil_portal_set_dns_upstream(uint32_t upstream_ip_be);
 // ============================================================================
 
 /** Direct raw TX — bypass queue. Untuk high-rate burst.
- *  Return true kalau frame masuk TX descriptor. */
+ *  Return true kalau frame masuk TX descriptor.
+ *  Ruft esp_wifi_80211_tx direkt im Caller-Thread auf (nicht über den
+ *  wlan-Worker). Nur aus einem echten xTaskCreate-Task aufrufen — aus einem
+ *  FuriThread wird der Aufruf geloggt und verworfen (false), statt zu crashen. */
 bool wlan_hal_raw_tx_direct(const uint8_t* data, uint16_t len);
 
 /** Channel lock — cegah set_channel selama attack.
@@ -208,8 +211,14 @@ void wlan_hal_channel_lock(void);
 void wlan_hal_channel_unlock(void);
 bool wlan_hal_channel_is_locked(void);
 
-/** Set promiscuous filter mask (MGMT only, DATA only, dll). */
+/** Set promiscuous filter mask (MGMT only, DATA only, dll).
+ *  Ruft esp_wifi_set_promiscuous_filter direkt im Caller-Thread auf. Nur aus
+ *  einem echten xTaskCreate-Task aufrufen — aus einem FuriThread wird der
+ *  Aufruf geloggt und verworfen (no-op), statt zu crashen. */
 void wlan_hal_set_promiscuous_filter(uint32_t filter_mask);
 
-/** Set max TX power (unit 0.25dBm, 80 = 20dBm). */
+/** Set max TX power (unit 0.25dBm, 80 = 20dBm).
+ *  Ruft esp_wifi_set_max_tx_power direkt im Caller-Thread auf. Nur aus einem
+ *  echten xTaskCreate-Task aufrufen — aus einem FuriThread wird der Aufruf
+ *  geloggt und verworfen (no-op), statt zu crashen. */
 void wlan_hal_set_max_tx_power(int8_t power);

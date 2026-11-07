@@ -1205,6 +1205,17 @@ bool wlan_hal_raw_tx_retry(const uint8_t* data, uint16_t len) {
 
 // Direct TX — bypass queue, cegah context switch overhead
 bool wlan_hal_raw_tx_direct(const uint8_t* data, uint16_t len) {
+    // Guard: anders als die meisten wlan_hal_*-APIs läuft dies NICHT über den
+    // wlan-Worker, sondern ruft esp_wifi_80211_tx direkt im Caller-Thread auf.
+    // esp_wifi_*-ioctls aus einem FuriThread crashen hart (LoadProhibited) —
+    // diese API darf nur aus einem echten xTaskCreate-Task kommen. Auf einem
+    // FuriThread liefert furi_thread_get_current() != NULL → sauber abbrechen
+    // statt crashen (z.B. versehentlicher Aufruf aus einem GUI-View-Callback).
+    if(furi_thread_get_current()) {
+        ESP_LOGE(
+            TAG, "raw_tx_direct: refused (FuriThread) — call only from an xTaskCreate task");
+        return false;
+    }
     if(!s_started || !data || len > 256) return false;
     if(!survey_active() && !s_ap_mode) wlan_hal_set_ap_mode(true);
 
@@ -1238,6 +1249,16 @@ bool wlan_hal_channel_is_locked(void) {
 
 // Promiscuous filter — MGMT only / DATA only
 void wlan_hal_set_promiscuous_filter(uint32_t filter_mask) {
+    // Guard: ruft esp_wifi_set_promiscuous_filter direkt im Caller-Thread auf
+    // (nicht über den wlan-Worker). esp_wifi_*-ioctls aus einem FuriThread
+    // crashen hart (LoadProhibited) — nur aus einem echten xTaskCreate-Task
+    // aufrufen. furi_thread_get_current() != NULL ⇒ FuriThread ⇒ abbrechen.
+    if(furi_thread_get_current()) {
+        ESP_LOGE(
+            TAG,
+            "set_promiscuous_filter: refused (FuriThread) — call only from an xTaskCreate task");
+        return;
+    }
     if(!s_started) return;
     wifi_promiscuous_filter_t filter = {.filter_mask = filter_mask};
     esp_wifi_set_promiscuous_filter(&filter);
@@ -1245,6 +1266,15 @@ void wlan_hal_set_promiscuous_filter(uint32_t filter_mask) {
 
 // Max TX power
 void wlan_hal_set_max_tx_power(int8_t power) {
+    // Guard: ruft esp_wifi_set_max_tx_power direkt im Caller-Thread auf (nicht
+    // über den wlan-Worker). esp_wifi_*-ioctls aus einem FuriThread crashen
+    // hart (LoadProhibited) — nur aus einem echten xTaskCreate-Task aufrufen.
+    // furi_thread_get_current() != NULL ⇒ FuriThread ⇒ abbrechen.
+    if(furi_thread_get_current()) {
+        ESP_LOGE(
+            TAG, "set_max_tx_power: refused (FuriThread) — call only from an xTaskCreate task");
+        return;
+    }
     if(!s_started) return;
     esp_wifi_set_max_tx_power(power);
 }

@@ -9,6 +9,10 @@
 void ble_spam_scene_wardriving_on_enter(void* context) {
     BleSpamApp* app = context;
 
+    // start() non-blocking: bring-up BT jalan di worker thread (tak freeze UI).
+    // Rückgabewert auswerten: false = Worker-Task konnte nicht erstellt werden.
+    bool started = wlan_ble_scan_start();
+
     with_view_model(
         app->view_wardriving, BleWardrivingModel* m,
         {
@@ -18,10 +22,9 @@ void ble_spam_scene_wardriving_on_enter(void* context) {
             m->detail_mode = false;
             m->exit_pending = false;
             m->detail_valid = false;
+            m->error = !started; // Tick aktualisiert zusätzlich aus wlan_ble_scan_failed()
         }, true);
 
-    // start() non-blocking: bring-up BT jalan di worker thread (tak freeze UI).
-    wlan_ble_scan_start();
     view_dispatcher_switch_to_view(app->view_dispatcher, BleSpamViewWardriving);
 }
 
@@ -63,6 +66,8 @@ bool ble_spam_scene_wardriving_on_event(void* context, SceneManagerEvent event) 
                 m->count = n;
                 m->total = wlan_ble_scan_get_count();
                 m->running = wlan_ble_scan_is_running();
+                // Bring-up-Fehler im Worker nachziehen (nur geloggt → hier sichtbar).
+                if(wlan_ble_scan_failed()) m->error = true;
 
                 if(n == 0) {
                     m->cursor = 0;

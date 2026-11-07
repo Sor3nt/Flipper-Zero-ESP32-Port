@@ -78,6 +78,10 @@ bool     wlan_ble_scan_is_running(void);
 /** true kalau task sudah benar-benar exit (safe untuk re-enter / free). */
 bool     wlan_ble_scan_is_stopped(void);
 
+/** true kalau bring-up BLE stack (atau pembuatan worker task) gagal.
+ *  UI pakai ini untuk menampilkan pesan error, bukan "Scanning..." yang menggantung. */
+bool     wlan_ble_scan_failed(void);
+
 /** Cleanup the selected BLE host. Panggil SEKALI saat app keluar total (di app_free).
  *  Blocking — tunggu worker exit (stop scan + teardown stack + restore btshim). */
 void     wlan_ble_scan_deinit(void);

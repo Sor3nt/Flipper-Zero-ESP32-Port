@@ -19,8 +19,9 @@ void ble_spam_scene_main_on_enter(void* context) {
 
     submenu_add_item(app->submenu, "Spam", MainMenuIndexBleSpam, main_menu_callback, app);
     submenu_add_item(app->submenu, "Walk", MainMenuIndexBleWalk, main_menu_callback, app);
+    // Kein GPS angebunden → ehrlich "BLE Scanner" statt "Wardriving".
     submenu_add_item(
-        app->submenu, "Wardriving", MainMenuIndexBleWardriving, main_menu_callback, app);
+        app->submenu, "BLE Scanner", MainMenuIndexBleWardriving, main_menu_callback, app);
     submenu_add_item(
         app->submenu, "Auto Walk", MainMenuIndexBleAutoWalk, main_menu_callback, app);
     submenu_add_item(

@@ -64,14 +64,16 @@ typedef struct {
 } SdChannelInfo;
 
 /* Versi ramping untuk view model — hanya field yang digambar di mode Scan
- * (tanpa clients[]/bssid/pmf/...). Menekan SdViewModel dari ~8KB → ~1.1KB. */
+ * (tanpa clients[]/bssid/...). Menekan SdViewModel dari ~8KB → ~1.1KB.
+ * pmf wird mitgeführt, damit die Liste PMF-geschützte Netze markieren kann. */
 typedef struct {
-    uint8_t channel;
-    uint8_t ap_count;
-    uint8_t client_count;
-    int8_t  rssi;
-    char    ssid[33];
-    bool    has_ap;
+    uint8_t    channel;
+    uint8_t    ap_count;
+    uint8_t    client_count;
+    int8_t     rssi;
+    char       ssid[33];
+    bool       has_ap;
+    SdPmfState pmf;
 } SdChannelView;
 
 typedef struct {
@@ -92,6 +94,7 @@ typedef struct {
     uint32_t attack_beacon_age_ms;
     bool     attack_beacon_alive;
     bool     attack_running;
+    SdPmfState attack_pmf;   // PMF-Status des gewählten Ziels (Attack + Monitor)
 
     uint8_t       monitor_channel;
     char          monitor_ssid[33];

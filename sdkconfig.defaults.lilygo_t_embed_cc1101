@@ -12,3 +12,13 @@ CONFIG_ESP_TIMER_SHOW_EXPERIMENTAL=y
 CONFIG_ESP_TIMER_ISR_AFFINITY_CPU1=y
 CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
 CONFIG_FURI_HAL_REBOOT_COMBO=y
+
+# OTA / Dual-App partition table for firmware self-update.
+# The build scripts generate a board-isolated <build_dir>/sdkconfig from
+# sdkconfig.defaults + this file; they do NOT load sdkconfig.defaults.esp32s3
+# (which also carries these lines). sdkconfig.defaults itself sets the
+# single-app table, so without the override here the T-Embed build would fall
+# back to single-app and OTA / self-update would break.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_16mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_16mb.csv"

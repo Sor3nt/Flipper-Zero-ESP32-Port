@@ -9,6 +9,8 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <storage/storage.h>
+#include <furi_hal_rtc.h>
+#include <datetime/datetime.h>
 
 // Proyek ini memakai Bluedroid (CONFIG_BT_BLUEDROID_ENABLED), bukan NimBLE.
 // Scanner ini bring-up stack-nya sendiri — scene wardriving tidak memanggil
@@ -27,6 +29,7 @@
 #include <esp_gap_ble_api.h>
 #endif
 #include <btshim.h>
+#include <wifi.h>
 #include <furi.h>
 
 #define TAG "BleScan"
@@ -40,6 +43,7 @@ static volatile bool         s_pause = false;
 static volatile bool         s_scan_active = false;    // controller lagi scanning
 static volatile bool         s_cmd_inflight = false;   // start/stop command pending
 static volatile bool         s_stop_requested = false;
+static volatile bool         s_bringup_failed = false; // true kalau stack bring-up gagal
 #if CONFIG_BT_NIMBLE_ENABLED
 static bool                  s_nimble_host_takeover = false;
 #endif
@@ -316,6 +320,16 @@ static void ble_gap_event_handler(esp_gap_ble_cb_event_t event,
 // BLUEDROID STACK BRING-UP / TEARDOWN (dijalankan di worker, bukan GUI thread)
 // ============================================================================
 static bool ble_stack_up(void) {
+    // BT & WiFi teilen sich Radio und internes DRAM. Ist WiFi global aktiv, würde
+    // der Bluedroid-Bringup ein OOM riskieren (vgl. BLE_INIT: Malloc failed). Analog
+    // zum Lock-Menü (desktop_scene_lock_menu.c: wifi_disable() vor bt_start_stack())
+    // deshalb zuerst WiFi global abschalten. ble_spam_hal/ble_walk_hal betreiben
+    // keinen eigenen WiFi-Umgang → dieser explizite wifi_disable() ist die
+    // Verbesserung für diesen Scanner.
+    Wifi* wifi = furi_record_open(RECORD_WIFI);
+    if(wifi_is_enabled(wifi)) wifi_disable(wifi);
+    furi_record_close(RECORD_WIFI);
+
     Bt* bt = furi_record_open(RECORD_BT);
     bt_stop_stack(bt);
     furi_record_close(RECORD_BT);
@@ -494,6 +508,7 @@ static void ble_scan_worker(void* arg) {
     if(!ble_stack_up()) {
         ESP_LOGE(TAG, "stack bring-up failed");
         ble_stack_down(); // kembalikan btshim walau gagal
+        s_bringup_failed = true; // sinyal ke UI: tampilkan error, bukan "Scanning..."
         s_running = false;
         s_scan_active = false;
         s_worker_alive = false;
@@ -546,6 +561,7 @@ bool wlan_ble_scan_start(void) {
     s_scan_active = false;
     s_cmd_inflight = false;
     s_running = false;
+    s_bringup_failed = false;
 #if CONFIG_BT_NIMBLE_ENABLED
     s_nimble_host_takeover = false;
 #endif
@@ -554,6 +570,7 @@ bool wlan_ble_scan_start(void) {
     if(xTaskCreatePinnedToCore(ble_scan_worker, "BleScan",
                                 4096, NULL, 8, NULL, FURI_CORE_ID_SECONDARY) != pdPASS) {
         s_worker_alive = false;
+        s_bringup_failed = true; // task gagal dibuat → UI harus tahu
         return false;
     }
 
@@ -573,6 +590,10 @@ bool wlan_ble_scan_is_stopped(void) {
 }
 
 bool wlan_ble_scan_is_running(void) { return s_running; }
+
+// true kalau bring-up stack (atau pembuatan task) gagal — UI pakai untuk
+// menampilkan pesan error alih-alih "Scanning..." yang menggantung.
+bool wlan_ble_scan_failed(void) { return s_bringup_failed; }
 
 void wlan_ble_scan_clear(void) {
     if(!s_mtx) return;
@@ -675,7 +696,6 @@ bool wlan_ble_scan_export_csv(const char* path, uint16_t* out_count) {
         return false;
     }
 
-    const char* date_str = "2026-10-04 10:30:00";
     const char* h1 =
         "WigleWifi-1.6,appRelease=1.0,model=FlipperZero,release=1.0,"
         "device=Flipper,display=Flipper,board=ESP32,brand=Flipper\n";
@@ -710,6 +730,16 @@ bool wlan_ble_scan_export_csv(const char* path, uint16_t* out_count) {
     char line[200];
     bool write_error = false;
 
+    // FirstSeen ehrlich pro Gerät: echte Wall-Clock statt einer Konstante.
+    // Basiszeit = jetzige RTC-Zeit; davon den Uptime-Offset (now - first_seen)
+    // abziehen → der reale Zeitpunkt des ersten Advertisements. Ist die RTC nicht
+    // gestellt, spiegelt der Wert ehrlich die (falsche) RTC wider, statt zu
+    // suggerieren, es sei ein exakter Zeitstempel.
+    DateTime rtc_now;
+    furi_hal_rtc_get_datetime(&rtc_now);
+    uint32_t now_epoch = datetime_datetime_to_timestamp(&rtc_now);
+    uint32_t uptime_now = now_ms();
+
     for(uint16_t i = 0; i < s_device_count && !write_error; i++) {
         if(!s_devices[i].valid) continue;
         BleDeviceEntry* d = &s_devices[i];
@@ -726,11 +756,23 @@ bool wlan_ble_scan_export_csv(const char* path, uint16_t* out_count) {
         char mfr_str[8] = {0};
         if(d->has_mfr_data) snprintf(mfr_str, sizeof(mfr_str), "%04X", d->company_id);
 
+        // first_seen_ms → Wall-Clock (UTC): now_epoch - (uptime_now - first_seen)/1000.
+        uint32_t age_ms = (uptime_now >= d->first_seen_ms) ? (uptime_now - d->first_seen_ms) : 0;
+        uint32_t fs_epoch = (now_epoch > age_ms / 1000) ? (now_epoch - age_ms / 1000) : now_epoch;
+        DateTime fs_dt;
+        datetime_timestamp_to_datetime(fs_epoch, &fs_dt);
+        char fs_str[32];
+        snprintf(fs_str, sizeof(fs_str), "%04u-%02u-%02u %02u:%02u:%02u",
+                 fs_dt.year, fs_dt.month, fs_dt.day, fs_dt.hour, fs_dt.minute, fs_dt.second);
+
+        // Kein GPS angebunden → Lat/Lon/Alt/Accuracy bleiben LEER (nicht 0.0).
+        // 0.0,0.0 ist "Null Island", eine echte Position vor Afrika und würde als
+        // gültiger Fix missverstanden; leere Felder heißen eindeutig "keine Position".
         int len = snprintf(line, sizeof(line),
-            "%02X:%02X:%02X:%02X:%02X:%02X,%s,[BLE],%s,0,%d,"
-            "0.0,0.0,0.0,0.0,0,%s,BLE\n",
+            "%02X:%02X:%02X:%02X:%02X:%02X,%s,[BLE],%s,0,%d"
+            ",,,,,0,%s,BLE\n",
             d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5],
-            name_escaped, date_str, d->rssi,
+            name_escaped, fs_str, d->rssi,
             mfr_str[0] ? mfr_str : "");
 
         if(len > 0) {
