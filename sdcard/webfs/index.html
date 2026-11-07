@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flipper32 Web-Filesystem</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --fg:#e6edf3; --muted:#8b98a5; --accent:#ff8a1e; --accent2:#3fb950;
+    --danger:#f85149;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+  header{
+    position:sticky; top:0; z-index:5;
+    background:var(--panel); border-bottom:1px solid var(--line);
+    padding:12px 14px; padding-top:calc(12px + env(safe-area-inset-top));
+  }
+  h1{margin:0; font-size:17px; display:flex; align-items:center; gap:8px}
+  h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  .wrap{max-width:820px; margin:0 auto; padding:14px}
+  .crumbs{
+    display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+    font-size:13px; color:var(--muted); margin-bottom:12px; word-break:break-all;
+  }
+  .crumbs a{color:var(--accent); text-decoration:none; cursor:pointer}
+  .crumbs span.sep{color:var(--line)}
+  .toolbar{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px}
+  button,.btn{
+    font:inherit; cursor:pointer; border:1px solid var(--line);
+    background:var(--panel2); color:var(--fg); padding:8px 12px; border-radius:9px;
+  }
+  button:active{transform:translateY(1px)}
+  .btn-accent{background:var(--accent); border-color:var(--accent); color:#1b1200; font-weight:600}
+  .list{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--panel)}
+  .row{
+    display:flex; align-items:center; gap:10px; padding:11px 12px;
+    border-top:1px solid var(--line);
+  }
+  .row:first-child{border-top:none}
+  .row .ico{width:22px; text-align:center; flex:none; font-size:17px}
+  .row .name{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .row .name.clickable{cursor:pointer; color:var(--fg)}
+  .row .size{color:var(--muted); font-size:12px; flex:none; margin-right:2px}
+  .row .acts{display:flex; gap:6px; flex:none}
+  .row .acts button{padding:6px 9px; font-size:13px}
+  .iconbtn{line-height:1}
+  .danger{color:var(--danger); border-color:var(--danger)}
+  .empty{padding:26px; text-align:center; color:var(--muted)}
+  .status{margin-top:12px; min-height:20px; font-size:13px; color:var(--muted)}
+  .status.err{color:var(--danger)}
+  .status.ok{color:var(--accent2)}
+  .bar{height:4px; background:var(--panel2); border-radius:3px; overflow:hidden; margin-top:8px; display:none}
+  .bar > i{display:block; height:100%; width:0; background:var(--accent); transition:width .12s}
+  input[type=file]{display:none}
+  dialog{
+    border:1px solid var(--line); background:var(--panel); color:var(--fg);
+    border-radius:12px; padding:16px; width:min(92vw,360px);
+  }
+  dialog::backdrop{background:rgba(0,0,0,.55)}
+  dialog h3{margin:0 0 10px; font-size:15px}
+  dialog input[type=text]{
+    width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--fg); font:inherit; margin-bottom:12px;
+  }
+  dialog .drow{display:flex; justify-content:flex-end; gap:8px}
+  #dropOverlay{
+    position:fixed; inset:0; z-index:50; display:none;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+    background:rgba(15,18,22,.86); color:var(--accent);
+    font-size:20px; font-weight:700; letter-spacing:.3px;
+    border:3px dashed var(--accent); outline-offset:-14px;
+  }
+  #dropOverlay.show{display:flex}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="padding:0">
+    <h1><span class="dot"></span> Flipper32 · Web-Filesystem</h1>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="crumbs" id="crumbs"></div>
+
+  <div class="toolbar">
+    <button class="btn-accent" onclick="filePicker.click()">⤴ Upload</button>
+    <button onclick="promptMkdir()">＋ New folder</button>
+    <button onclick="refresh()">⟳ Refresh</button>
+    <input type="file" id="filePicker" multiple onchange="onFilesPicked(this.files)">
+  </div>
+
+  <div class="bar" id="bar"><i id="barfill"></i></div>
+
+  <div class="list" id="list"></div>
+  <div class="status" id="status"></div>
+</div>
+
+<div id="dropOverlay">Drop files or folders here to upload</div>
+
+<dialog id="dlg">
+  <h3 id="dlgTitle"></h3>
+  <input type="text" id="dlgInput" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <div class="drow">
+    <button onclick="dlg.close()">Cancel</button>
+    <button class="btn-accent" id="dlgOk">OK</button>
+  </div>
+</dialog>
+
+<script>
+const ROOT = "/ext";
+let cwd = ROOT;
+
+const $ = id => document.getElementById(id);
+const list = $("list"), statusEl = $("status");
+const bar = $("bar"), barfill = $("barfill");
+const dlg = $("dlg");
+
+function setStatus(msg, cls){ statusEl.className = "status" + (cls ? " "+cls : ""); statusEl.textContent = msg || ""; }
+function fmtSize(n){
+  if(n < 1024) return n + " B";
+  if(n < 1024*1024) return (n/1024).toFixed(1) + " KB";
+  if(n < 1024*1024*1024) return (n/1024/1024).toFixed(1) + " MB";
+  return (n/1024/1024/1024).toFixed(2) + " GB";
+}
+function joinPath(dir, name){ return dir === "/" ? "/"+name : dir + "/" + name; }
+function parentOf(p){ const i = p.lastIndexOf("/"); return i <= 0 ? ROOT : p.substring(0,i); }
+
+function renderCrumbs(){
+  const c = $("crumbs");
+  c.innerHTML = "";
+  const parts = cwd.split("/").filter(Boolean); // ["ext","sub",...]
+  let acc = "";
+  parts.forEach((part, i) => {
+    acc += "/" + part;
+    const a = document.createElement("a");
+    a.textContent = (i === 0 ? "SD" : part);
+    const target = acc;
+    a.onclick = () => navigate(target);
+    c.appendChild(a);
+    if(i < parts.length - 1){
+      const s = document.createElement("span"); s.className="sep"; s.textContent=" / ";
+      c.appendChild(s);
+    }
+  });
+}
+
+async function refresh(){ await navigate(cwd); }
+
+async function navigate(path){
+  setStatus("Loading …");
+  try{
+    const r = await fetch("/api/list?path=" + encodeURIComponent(path));
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    cwd = data.path || path;
+    render(data.entries || []);
+    renderCrumbs();
+    setStatus("");
+  }catch(e){
+    setStatus("Load error: " + e.message, "err");
+  }
+}
+
+function render(entries){
+  entries.sort((a,b) => (b.dir?1:0)-(a.dir?1:0) || a.name.localeCompare(b.name));
+  list.innerHTML = "";
+
+  if(cwd !== ROOT){
+    const up = mkRow("↩", "..", null, false);
+    up.querySelector(".name").classList.add("clickable");
+    up.querySelector(".name").onclick = () => navigate(parentOf(cwd));
+    list.appendChild(up);
+  }
+
+  if(entries.length === 0 && cwd === ROOT){
+    // nothing
+  }
+  if(entries.length === 0){
+    const d = document.createElement("div"); d.className="empty"; d.textContent="Empty directory";
+    list.appendChild(d);
+    return;
+  }
+
+  for(const e of entries){
+    const full = joinPath(cwd, e.name);
+    const row = mkRow(e.dir ? "📁" : "📄", e.name, e.dir ? null : e.size, true);
+    const nameEl = row.querySelector(".name");
+    if(e.dir){
+      nameEl.classList.add("clickable");
+      nameEl.onclick = () => navigate(full);
+    }
+    const acts = row.querySelector(".acts");
+    if(!e.dir){
+      acts.appendChild(iconBtn("⬇", "Download", () => {
+        window.location = "/api/download?path=" + encodeURIComponent(full);
+      }));
+    }
+    acts.appendChild(iconBtn("✎", "Rename", () => promptRename(e.name)));
+    acts.appendChild(iconBtn("🗑", "Delete", () => doDelete(full, e.name), true));
+    list.appendChild(row);
+  }
+}
+
+function mkRow(icon, name, size, withActs){
+  const row = document.createElement("div"); row.className="row";
+  const ico = document.createElement("div"); ico.className="ico"; ico.textContent=icon;
+  const nm = document.createElement("div"); nm.className="name"; nm.textContent=name;
+  row.appendChild(ico); row.appendChild(nm);
+  if(size !== null && size !== undefined){
+    const sz = document.createElement("div"); sz.className="size"; sz.textContent=fmtSize(size);
+    row.appendChild(sz);
+  }
+  if(withActs){
+    const acts = document.createElement("div"); acts.className="acts";
+    row.appendChild(acts);
+  }
+  return row;
+}
+
+function iconBtn(label, title, fn, danger){
+  const b = document.createElement("button");
+  b.className = "iconbtn" + (danger ? " danger" : "");
+  b.textContent = label; b.title = title;
+  b.onclick = fn;
+  return b;
+}
+
+// ---- dialog helper (mkdir / rename) ----
+function askDialog(title, value, okLabel){
+  return new Promise(resolve => {
+    $("dlgTitle").textContent = title;
+    const inp = $("dlgInput");
+    inp.value = value || "";
+    $("dlgOk").textContent = okLabel || "OK";
+    const onOk = () => { cleanup(); resolve(inp.value.trim()); };
+    const onCancel = () => { cleanup(); resolve(null); };
+    function cleanup(){
+      $("dlgOk").removeEventListener("click", onOk);
+      dlg.removeEventListener("close", onCancel);
+    }
+    $("dlgOk").addEventListener("click", onOk);
+    dlg.addEventListener("close", onCancel);
+    dlg.showModal();
+    setTimeout(() => { inp.focus(); inp.select(); }, 50);
+  });
+}
+
+async function promptMkdir(){
+  const name = await askDialog("New folder", "", "Create");
+  if(!name) return;
+  await postAction("/api/mkdir?path=" + encodeURIComponent(joinPath(cwd, name)), "Folder created");
+}
+
+async function promptRename(oldName){
+  const name = await askDialog("Rename", oldName, "Rename");
+  if(!name || name === oldName) return;
+  const oldP = joinPath(cwd, oldName), newP = joinPath(cwd, name);
+  await postAction("/api/rename?old=" + encodeURIComponent(oldP) + "&new=" + encodeURIComponent(newP), "Renamed");
+}
+
+async function doDelete(full, name){
+  if(!confirm('Delete "' + name + '"?')) return;
+  await postAction("/api/delete?path=" + encodeURIComponent(full), "Deleted");
+}
+
+async function postAction(url, okMsg){
+  setStatus("…");
+  try{
+    const r = await fetch(url, { method:"POST" });
+    if(!r.ok) throw new Error(await r.text() || ("HTTP "+r.status));
+    setStatus(okMsg, "ok");
+    await refresh();
+  }catch(e){
+    setStatus("Error: " + e.message, "err");
+  }
+}
+
+// ---- upload (button + drag&drop) ----
+let busy = false;
+
+// PUT one file to an absolute remote path; updates the progress bar.
+function uploadPut(file, remotePath, label){
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload?path=" + encodeURIComponent(remotePath));
+    xhr.upload.onprogress = ev => {
+      if(ev.lengthComputable) barfill.style.width = (ev.loaded/ev.total*100).toFixed(0) + "%";
+      setStatus(label, "");
+    };
+    xhr.onload = () =>
+      (xhr.status >= 200 && xhr.status < 300)
+        ? resolve()
+        : reject(new Error(file.name + " (" + xhr.status + ")"));
+    xhr.onerror = () => reject(new Error("network: " + file.name));
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.send(file);
+  });
+}
+
+function mkdirSilent(path){
+  return fetch("/api/mkdir?path=" + encodeURIComponent(path), { method:"POST" });
+}
+
+async function onFilesPicked(files){
+  if(!files || !files.length || busy) return;
+  busy = true;
+  bar.style.display = "block";
+  try{
+    for(let i=0;i<files.length;i++){
+      await uploadPut(files[i], joinPath(cwd, files[i].name),
+        "Upload " + (i+1) + "/" + files.length + ": " + files[i].name);
+    }
+    setStatus("Uploaded " + files.length + " file(s)", "ok");
+  }catch(e){
+    setStatus("Upload error: " + e.message, "err");
+  }
+  bar.style.display = "none"; barfill.style.width = "0";
+  $("filePicker").value = "";
+  busy = false;
+  await refresh();
+}
+
+// ---- drag & drop (files and whole folders) ----
+// Walk a dropped FileSystemEntry: create dirs via /api/mkdir, upload files.
+async function walkEntry(entry, destDir, count){
+  if(entry.isFile){
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    count.done++;
+    await uploadPut(file, destDir + "/" + file.name, "Uploading: " + destDir + "/" + file.name);
+  }else if(entry.isDirectory){
+    const dir = destDir + "/" + entry.name;
+    await mkdirSilent(dir);
+    const reader = entry.createReader();
+    // readEntries yields in batches; loop until it returns none.
+    while(true){
+      const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      if(!batch.length) break;
+      for(const child of batch) await walkEntry(child, dir, count);
+    }
+  }
+}
+
+async function handleDrop(items){
+  if(busy) return;
+  // webkitGetAsEntry must be read synchronously before any await.
+  const entries = [];
+  for(const it of items){
+    const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
+    if(entry) entries.push(entry);
+  }
+  if(!entries.length) return;
+
+  busy = true;
+  bar.style.display = "block";
+  const count = { done:0 };
+  try{
+    for(const entry of entries) await walkEntry(entry, cwd, count);
+    setStatus("Uploaded " + count.done + " file(s)", "ok");
+  }catch(e){
+    setStatus("Drop error: " + e.message, "err");
+  }
+  bar.style.display = "none"; barfill.style.width = "0";
+  busy = false;
+  await refresh();
+}
+
+let dragDepth = 0;
+const overlay = $("dropOverlay");
+window.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; overlay.classList.add("show"); });
+window.addEventListener("dragover",  e => { e.preventDefault(); });
+window.addEventListener("dragleave", e => {
+  e.preventDefault();
+  if(--dragDepth <= 0){ dragDepth = 0; overlay.classList.remove("show"); }
+});
+window.addEventListener("drop", e => {
+  e.preventDefault();
+  dragDepth = 0; overlay.classList.remove("show");
+  if(e.dataTransfer && e.dataTransfer.items) handleDrop(e.dataTransfer.items);
+});
+
+navigate(ROOT);
+</script>
+</body>
+</html>
