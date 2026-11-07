@@ -7,37 +7,88 @@ pauses its bridge and releases the composite USB device before taking ownership;
 the bridge is restarted when U2F exits. Other composite owners, including active
 USB-Storage/MSC, are not preempted, so stop/eject them before opening U2F.
 
-## Provisioning the attestation certificate
+## Attestation certificate
 
-The Flipper factory attestation private key is not available on ESP32. The
-bundled factory-key file is therefore intentionally rejected. Generate a
-device-specific self-signed P-256 certificate and key file:
+The app needs an attestation certificate and its private key to answer U2F
+registration requests. The Flipper factory attestation private key is not
+available on ESP32, so the bundled factory-key file (certificate `Type 0`) is
+intentionally rejected and cannot be decrypted by this port.
 
-```sh
-bash tools/gen_u2f_cert.sh /path/to/sd-card/u2f/assets
-```
+### Generating a self-signed certificate on the device (default)
 
-The output directory must map to `/ext/u2f/assets/` on the device and contain:
+When the app opens and finds **no usable** attestation certificate, it shows a
+**"No U2F key installed"** screen with a **Generate** button instead of an
+error. Press OK to create a device-specific, self-signed P-256 (`secp256r1`)
+certificate and key directly on the device; the app then initializes and is
+ready to use. No PC-side tooling or file copying is required.
 
-- `cert.der`
-- `cert_key.u2f`
+The generated pair is stored at `/ext/u2f/assets/`:
 
-The firmware imports the plaintext key file on first start, authenticates and
-encrypts it with AES-GCM, and then rewrites `cert_key.u2f`. The storage key is
-derived from the chip's eFuse unique ID and MAC (HMAC-SHA256) and is also cached
-in the dedicated `u2fkeys` NVS partition. Because it can be recomputed, erasing or
-relocating `u2fkeys` or reflashing the device does not invalidate U2F data created
-by this firmware. Older installations that stored a random key keep using that key
-while it exists in `u2fkeys` (or in default NVS, which is migrated at boot). The boot
-log prints `U2F storage key source=... id=XXXXXXXX`; the id must stay the same
-across reboots. Remove the generated plaintext key from the computer
-after provisioning. The self-signed certificate supports the U2F attestation
-signature format, but relying parties that require a trusted attestation root
-may reject it.
+- `cert.der` — the self-signed X.509 certificate (DER)
+- `cert_key.u2f` — the matching private key
 
-If the app reports that the factory certificate key is unsupported, replace
-both files on the SD card at `/ext/u2f/assets/` with a matching generated pair.
-The bundled Type-0 Flipper key cannot be decrypted by this ESP32 port.
+The serial log shows `Generating self-signed U2F attestation certificate`. The
+generated key is written as a plaintext key file and then immediately
+authenticated and re-encrypted with AES-GCM (see the key-storage note below),
+exactly like an imported key.
+
+This self-signed certificate supports the U2F attestation signature format and
+works with the common relying parties (e.g. GitHub, Google, WebAuthn test
+pages). Relying parties that require a *trusted* attestation root may reject it;
+in that case supply your own certificate (next section).
+
+> Pressing **Generate** is an explicit action and replaces any leftover or
+> broken `cert.der`/`cert_key.u2f` (including a stale `cert_key.u2f.tmp`) in
+> `/ext/u2f/assets/` with a fresh pair. It is only offered when no usable
+> certificate is present, so a valid, working certificate is never affected. To
+> start over from a working authenticator, delete the attestation files (see the
+> recovery note under "Security and compatibility") and reopen the app.
+
+### Installing your own certificate (optional)
+
+To use a certificate you control instead of the auto-generated one, place a
+matching pair on the SD card **before** opening the app for the first time (or
+after deleting the auto-generated pair). The directory must map to
+`/ext/u2f/assets/` on the device and contain:
+
+- `cert.der` — your attestation certificate, DER-encoded, with a P-256
+  (`secp256r1`) public key, at most 2048 bytes
+- `cert_key.u2f` — the matching private key as a Flipper U2F certificate-key
+  file
+
+`cert_key.u2f` is a Flipper-format key file. Two forms are accepted:
+
+- **Plaintext (`Type 2`, recommended for import):**
+
+  ```
+  Filetype: Flipper U2F Certificate Key File
+  Version: 1
+  Type: 2
+  Data: <32 bytes of the raw P-256 private scalar, hex, space-separated>
+  ```
+
+  The firmware imports this on first start, verifies that the key matches the
+  public key in `cert.der`, encrypts it with AES-GCM, and rewrites
+  `cert_key.u2f` as the encrypted form (`Type 1`). Remove the plaintext copy
+  from your computer after provisioning.
+
+- **Encrypted (`Type 1`):** a key already encrypted by this firmware/device.
+  Only valid on the same device that produced it (the storage key is
+  device-derived; see below).
+
+The certificate's public key must correspond to the private key, otherwise the
+app refuses to start (`Attestation key/certificate validation failed`).
+
+### Certificate-key storage
+
+The storage key that encrypts `cert_key.u2f` is derived from the chip's eFuse
+unique ID and MAC (HMAC-SHA256) and is also cached in the dedicated `u2fkeys`
+NVS partition. Because it can be recomputed, erasing or relocating `u2fkeys` or
+reflashing the device does not invalidate U2F data created by this firmware.
+Older installations that stored a random key keep using that key while it exists
+in `u2fkeys` (or in default NVS, which is migrated at boot). The boot log prints
+`U2F storage key source=... id=XXXXXXXX`; the id must stay the same across
+reboots.
 
 ## Security and compatibility
 
@@ -66,10 +117,11 @@ The bundled Type-0 Flipper key cannot be decrypted by this ESP32 port.
   older *random* key was lost (full flash erase, changed partition layout), the
   log shows `U2F data authentication failed ... wrong storage key` and the files
   encrypted with it cannot be recovered. Remove `key.u2f`, `key.u2f.tmp`,
-  `cnt.u2f`, and `cnt.u2f.b`, restore the original plaintext `cert_key.u2f`,
-  regenerate the matching certificate/key pair if necessary, and provision and
-  enroll again. Removing only the data files is insufficient because the
-  certificate private key was encrypted with the lost key. After this one-time
+  `cnt.u2f`, and `cnt.u2f.b`, and also remove `cert.der` + `cert_key.u2f` so a
+  fresh self-signed pair is generated on the next start (or restore your own
+  plaintext `cert_key.u2f` + matching `cert.der`), then provision and enroll
+  again. Removing only the data files is insufficient because the certificate
+  private key was encrypted with the lost key. After this one-time
   re-provisioning the key is derived and cannot be lost this way again.
 - Randomness uses the ESP-IDF RNG API. It is used not only for first-time
   secrets but also for registration key-handle nonces and AES-GCM IVs during

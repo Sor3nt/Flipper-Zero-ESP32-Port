@@ -206,6 +206,8 @@ bool u2f_init(U2fData* U2F) {
     furi_assert(U2F);
 
     if(u2f_data_cert_check() == false) {
+        // No usable attestation certificate. The UI offers to generate a
+        // self-signed one (u2f_data_cert_generate) and then re-initializes.
         FURI_LOG_E(TAG, "Certificate load error");
         return false;
     }

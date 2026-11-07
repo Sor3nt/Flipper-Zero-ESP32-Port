@@ -59,5 +59,6 @@ struct U2fApp {
     U2fData* u2f_instance;
     GpioCustomEvent event_cur;
     bool u2f_ready;
+    bool pending_key_gen;
     U2fAppError error;
 };

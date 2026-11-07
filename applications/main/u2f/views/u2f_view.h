@@ -14,6 +14,7 @@ typedef enum {
     U2fMsgRegisterSuccess,
     U2fMsgUsbError,
     U2fMsgError,
+    U2fMsgGenerate,
 } U2fViewMsg;
 
 U2fView* u2f_view_alloc(void);

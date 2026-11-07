@@ -5,6 +5,9 @@
 #include <furi_hal_random.h>
 #include <flipper_format/flipper_format.h>
 #include <mbedtls/platform_util.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/ecp.h>
+#include <mbedtls/x509_crt.h>
 #include "u2f_crypto.h"
 
 #define TAG "U2f"
@@ -175,6 +178,160 @@ uint32_t u2f_data_cert_load(uint8_t* cert) {
     furi_record_close(RECORD_STORAGE);
 
     return len_cur;
+}
+
+bool u2f_data_cert_key_check(void) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+
+    const char* path = U2F_CERT_KEY_FILE;
+    FS_Error st = storage_common_stat(storage, U2F_CERT_KEY_FILE, NULL);
+    if(st == FSE_NOT_EXIST) {
+        if(storage_common_stat(storage, U2F_CERT_KEY_TEMP_FILE, NULL) == FSE_OK) {
+            path = U2F_CERT_KEY_TEMP_FILE;
+        } else {
+            furi_record_close(RECORD_STORAGE);
+            return false;
+        }
+    } else if(st != FSE_OK) {
+        furi_record_close(RECORD_STORAGE);
+        return false;
+    }
+
+    bool usable = false;
+    FuriString* filetype = furi_string_alloc();
+    FlipperFormat* ff = flipper_format_file_alloc(storage);
+    uint32_t version = 0;
+    uint32_t cert_type = 0xFFFFFFFF;
+    if(flipper_format_file_open_existing(ff, path) &&
+       flipper_format_read_header(ff, filetype, &version) &&
+       strcmp(furi_string_get_cstr(filetype), U2F_CERT_KEY_FILE_TYPE) == 0 &&
+       flipper_format_read_uint32(ff, "Type", &cert_type, 1)) {
+        usable = cert_type == U2F_CERT_USER || cert_type == U2F_CERT_USER_UNENCRYPTED;
+    }
+    flipper_format_free(ff);
+    furi_string_free(filetype);
+    furi_record_close(RECORD_STORAGE);
+    return usable;
+}
+
+static int u2f_data_rng_cb(void* ctx, unsigned char* buf, size_t len) {
+    UNUSED(ctx);
+    furi_hal_random_fill_buf(buf, (uint32_t)len);
+    return 0;
+}
+
+bool u2f_data_cert_generate(void) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+
+    // Explicit user action: replace any leftover/broken attestation material with
+    // a fresh self-signed pair. The caller only reaches this when no usable
+    // certificate is present, so clearing stale files here is the recovery path.
+    storage_common_remove(storage, U2F_CERT_FILE);
+    storage_common_remove(storage, U2F_CERT_KEY_FILE);
+    storage_common_remove(storage, U2F_CERT_KEY_TEMP_FILE);
+
+    FURI_LOG_I(TAG, "Generating self-signed U2F attestation certificate");
+
+    bool state = false;
+    mbedtls_pk_context key;
+    mbedtls_x509write_cert crt;
+    mbedtls_pk_init(&key);
+    mbedtls_x509write_crt_init(&crt);
+
+    uint8_t priv[U2F_DATA_KEY_SIZE] = {0};
+    uint8_t serial[16] = {0};
+    // mbedtls_x509write_crt_der() writes to the END of this buffer and returns
+    // the length; the DER then starts at der + U2F_CERT_MAX_SIZE - der_len.
+    uint8_t* der = malloc(U2F_CERT_MAX_SIZE);
+    if(!der) {
+        FURI_LOG_E(TAG, "Out of memory generating attestation certificate");
+    } else {
+        do {
+            const mbedtls_pk_info_t* info = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
+            if(!info || mbedtls_pk_setup(&key, info) != 0) break;
+            if(mbedtls_ecp_gen_key(
+                   MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key), u2f_data_rng_cb, NULL) != 0)
+                break;
+
+            size_t priv_len = 0;
+            if(mbedtls_ecp_write_key_ext(mbedtls_pk_ec(key), &priv_len, priv, sizeof(priv)) != 0 ||
+               priv_len != sizeof(priv))
+                break;
+
+            mbedtls_x509write_crt_set_subject_key(&crt, &key);
+            mbedtls_x509write_crt_set_issuer_key(&crt, &key); // self-signed
+            mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
+            mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
+            if(mbedtls_x509write_crt_set_subject_name(
+                   &crt, "CN=ESP32 U2F Token,O=flipper-esp32") != 0)
+                break;
+            if(mbedtls_x509write_crt_set_issuer_name(
+                   &crt, "CN=ESP32 U2F Token,O=flipper-esp32") != 0)
+                break;
+            furi_hal_random_fill_buf(serial, sizeof(serial));
+            serial[0] &= 0x7f; // keep the serial a positive DER integer
+            if(serial[0] == 0) serial[0] = 1;
+            if(mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) != 0) break;
+            if(mbedtls_x509write_crt_set_validity(&crt, "20240101000000", "20440101000000") != 0)
+                break;
+
+            int der_len =
+                mbedtls_x509write_crt_der(&crt, der, U2F_CERT_MAX_SIZE, u2f_data_rng_cb, NULL);
+            if(der_len <= 0) {
+                FURI_LOG_E(TAG, "Attestation certificate encoding failed: %d", der_len);
+                break;
+            }
+            uint8_t* der_start = der + U2F_CERT_MAX_SIZE - der_len;
+
+            storage_common_mkdir(storage, U2F_DATA_FOLDER);
+            storage_common_mkdir(storage, EXT_PATH("u2f/assets"));
+
+            File* file = storage_file_alloc(storage);
+            bool cert_written =
+                storage_file_open(file, U2F_CERT_FILE, FSAM_WRITE, FSOM_CREATE_ALWAYS) &&
+                storage_file_write(file, der_start, der_len) == (size_t)der_len &&
+                storage_file_sync(file);
+            storage_file_close(file);
+            storage_file_free(file);
+            if(!cert_written) {
+                FURI_LOG_E(TAG, "Unable to write attestation certificate");
+                storage_common_remove(storage, U2F_CERT_FILE);
+                break;
+            }
+
+            // Plaintext Type-2 key file; the firmware encrypts it on first load.
+            uint32_t cert_type = U2F_CERT_USER_UNENCRYPTED;
+            FlipperFormat* ff = flipper_format_file_alloc(storage);
+            bool key_written = false;
+            if(flipper_format_file_open_always(ff, U2F_CERT_KEY_FILE)) {
+                key_written =
+                    flipper_format_write_header_cstr(
+                        ff, U2F_CERT_KEY_FILE_TYPE, U2F_CERT_KEY_VERSION_PLAINTEXT) &&
+                    flipper_format_write_uint32(ff, "Type", &cert_type, 1) &&
+                    flipper_format_write_hex(ff, "Data", priv, sizeof(priv)) &&
+                    flipper_format_file_close(ff);
+            }
+            flipper_format_free(ff);
+            if(key_written) key_written = u2f_data_sync_file(storage, U2F_CERT_KEY_FILE);
+            if(!key_written) {
+                FURI_LOG_E(TAG, "Unable to write attestation certificate key");
+                storage_common_remove(storage, U2F_CERT_KEY_FILE);
+                storage_common_remove(storage, U2F_CERT_FILE);
+                break;
+            }
+            state = true;
+        } while(0);
+    }
+
+    if(der) {
+        mbedtls_platform_zeroize(der, U2F_CERT_MAX_SIZE);
+        free(der);
+    }
+    mbedtls_platform_zeroize(priv, sizeof(priv));
+    mbedtls_x509write_crt_free(&crt);
+    mbedtls_pk_free(&key);
+    furi_record_close(RECORD_STORAGE);
+    return state;
 }
 
 static bool u2f_data_cert_key_encrypt(uint8_t* cert_key) {
