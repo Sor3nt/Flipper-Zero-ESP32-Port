@@ -229,6 +229,8 @@ int32_t doom_app(void* p) {
     if(DOOM_SPLASH_W == w && DOOM_SPLASH_H == h) {
         furi_hal_spi_bus_lock();
         esp_lcd_panel_draw_bitmap(panel, 0, 0, w, h, doom_splash_rgb565);
+        /* Drain while the bus is still ours (espressif/esp-idf#17860). */
+        furi_hal_display_sync();
         furi_hal_spi_bus_unlock();
     }
 

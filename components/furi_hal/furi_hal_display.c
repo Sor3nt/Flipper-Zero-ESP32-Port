@@ -15,6 +15,7 @@
 #include <string.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <esp_system.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
@@ -24,6 +25,12 @@
 #include <freertos/semphr.h>
 
 static const char* TAG = "FuriHalDisplay";
+
+/* How long a redraw is willing to wait for the shared SPI bus. If another
+ * driver keeps it longer than this (a slow SD read, NFC acquisition) the frame
+ * is dropped and retried on the next call: better a skipped frame than a GUI
+ * that stops responding to buttons entirely. */
+#define DISPLAY_BUS_LOCK_TIMEOUT_MS 30
 
 /* Display dimensions from board config */
 #define LCD_H_RES BOARD_LCD_H_RES
@@ -74,8 +81,11 @@ static uint16_t bg_color;
 #define LCD_PARAM_BITS BOARD_LCD_PARAM_BITS
 
 /* Stripe-based rendering: render & DMA-send N lines at a time.
- * Reduces DMA buffer from full-frame (~100KB) to a small stripe (~5KB). */
-#define STRIPE_HEIGHT 8
+ * Reduces DMA buffer from full-frame (~110KB) to a small stripe. Larger stripes
+ * mean fewer CASET/RASET/RAMWR round trips per frame; 32 lines keeps the buffer
+ * at ~20KB of internal DMA RAM while cutting the transaction count from 20 to 5
+ * for the Flipper UI area. */
+#define STRIPE_HEIGHT 32
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
 static esp_lcd_panel_io_handle_t io_handle = NULL;
@@ -84,6 +94,26 @@ static uint16_t* rgb565_buf = NULL; // STRIPE_HEIGHT lines only
 static SemaphoreHandle_t lcd_flush_done = NULL;
 static uint8_t x_scale_lut[SCALED_WIDTH];
 static uint8_t y_scale_lut[SCALED_HEIGHT];
+
+/* Frame de-duplication: the GUI re-commits the same 1KB mono framebuffer for
+ * events that did not change a single pixel (status bar timers, view port
+ * bookkeeping, repeated redraw requests). Pushing 110KB over SPI for those is
+ * pure waste, so the previous buffer is kept and identical frames are dropped. */
+static uint8_t fb_shadow[FB_WIDTH * FB_HEIGHT / 8];
+static bool fb_shadow_valid = false;
+
+/* Margin strips only depend on the background colour (and the fixed geometry),
+ * not on the frame contents. Repainting them every frame used to cost ~40 tiny
+ * SPI transactions per frame; now it happens once per colour change. */
+static uint16_t margin_painted_color;
+static bool margin_painted = false;
+
+/* Lightweight frame timing, logged once per second, to keep the commit path
+ * measurable on real hardware without a scope. */
+static uint32_t dbg_frame_count;
+static uint32_t dbg_frame_us_sum;
+static uint32_t dbg_frame_us_max;
+static uint32_t dbg_logged_frames;
 
 static bool furi_hal_display_flush_done_callback(
     esp_lcd_panel_io_handle_t panel_io,
@@ -105,14 +135,12 @@ bool furi_hal_display_draw_rgb565(
     uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* pixels) {
     if(!panel_handle || !io_handle || !pixels || !width || !height ||
        (uint32_t)x + width > LCD_H_RES || (uint32_t)y + height > LCD_V_RES) return false;
-    furi_hal_spi_bus_lock();
+    if(!furi_hal_spi_bus_lock_timeout(DISPLAY_BUS_LOCK_TIMEOUT_MS)) return false;
     esp_err_t result = esp_lcd_panel_draw_bitmap(panel_handle, x, y, x + width, y + height, pixels);
-    /* IDF SPI tx_param drains all outstanding color transactions before issuing
-     * its polling command. ST7789 NOP makes buffer lifetime synchronous even
-     * when a flush semaphore notification was delayed or previously consumed. */
-    esp_err_t drained = esp_lcd_panel_io_tx_param(io_handle, 0x00, NULL, 0);
+    /* Keep the bus lock until the DMA queue is empty; see furi_hal_display_sync(). */
+    bool drained = furi_hal_display_sync();
     furi_hal_spi_bus_unlock();
-    return result == ESP_OK && drained == ESP_OK;
+    return result == ESP_OK && drained;
 }
 
 static void furi_hal_display_prepare_flush(void) {
@@ -127,6 +155,25 @@ static void furi_hal_display_wait_flush(void) {
     if(xSemaphoreTake(lcd_flush_done, pdMS_TO_TICKS(250)) != pdTRUE) {
         ESP_LOGW(TAG, "Timed out waiting for LCD flush");
     }
+}
+
+bool furi_hal_display_sync(void) {
+    if(!io_handle) return false;
+
+    /* ST7789 NOP: a parameter-only command with no payload. esp_lcd's SPI panel
+     * IO drains every in-flight colour transaction before issuing it, so when
+     * this returns the panel's DMA queue is empty and the SPI command register
+     * is idle again.
+     *
+     * The caller must already hold the shared SPI bus mutex (furi_hal_spi_bus_lock),
+     * otherwise another device can slip in between the drain and its own
+     * transaction. That is exactly the espressif/esp-idf#17860 window. */
+    esp_err_t err = esp_lcd_panel_io_tx_param(io_handle, 0x00, NULL, 0);
+    if(err != ESP_OK) {
+        ESP_LOGW(TAG, "LCD drain (NOP) failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
 }
 
 static void furi_hal_display_init_scale_lut(void) {
@@ -153,27 +200,6 @@ static void display_fill_color(uint16_t color) {
     free(line);
 }
 
-/* Paint a solid-color rectangle using rgb565_buf as scratch. Caller must hold
- * the SPI bus lock. Chunks vertically at STRIPE_HEIGHT to stay within the
- * buffer's capacity (STRIPE_HEIGHT rows × SCALED_WIDTH cols). Used by the
- * commit path to keep the LCD margins in sync with fg_color changes. */
-static void display_paint_rect(
-    size_t x, size_t y, size_t w, size_t h, uint16_t color) {
-    if(w == 0 || h == 0 || w > LCD_H_RES) return;
-
-    for(size_t y_off = 0; y_off < h; y_off += STRIPE_HEIGHT) {
-        size_t chunk_h = h - y_off;
-        if(chunk_h > STRIPE_HEIGHT) chunk_h = STRIPE_HEIGHT;
-
-        const size_t px_count = w * chunk_h;
-        for(size_t i = 0; i < px_count; i++) rgb565_buf[i] = color;
-
-        furi_hal_display_prepare_flush();
-        esp_lcd_panel_draw_bitmap(
-            panel_handle, x, y + y_off, x + w, y + y_off + chunk_h, rgb565_buf);
-        furi_hal_display_wait_flush();
-    }
-}
 
 void furi_hal_display_init(void) {
     ESP_LOGI(TAG, "Initializing display for %s", BOARD_NAME);
@@ -190,6 +216,9 @@ void furi_hal_display_init(void) {
         .sclk_io_num = gpio_lcd_clk.pin,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
+        /* Must cover the largest single transfer the panel driver queues:
+         * one stripe of SCALED_WIDTH pixels, or a full-width margin strip
+         * painted through the same scratch buffer. */
         .max_transfer_sz = LCD_H_RES * STRIPE_HEIGHT * sizeof(uint16_t),
     };
     esp_err_t spi_err = spi_bus_initialize(LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
@@ -281,6 +310,8 @@ void furi_hal_display_init(void) {
 
     fg_color = BOARD_LCD_FG_COLOR;
     bg_color = BOARD_LCD_BG_COLOR;
+    margin_painted = false;
+    fb_shadow_valid = false;
 
     furi_hal_display_init_scale_lut();
 
@@ -302,6 +333,38 @@ void furi_hal_display_init(void) {
              FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
 }
 
+/* Send one solid-color rectangle. The global bus lock is taken only for the
+ * actual SPI transaction and released while waiting for DMA, so other devices
+ * (SD, NFC, CC1101) can make progress between flushes. Returns false if the bus
+ * could not be taken in time (the caller aborts the frame rather than blocking
+ * the UI forever). */
+static bool display_paint_rect_unlocked(
+    size_t x, size_t y, size_t w, size_t h, uint16_t color) {
+    if(w == 0 || h == 0 || w > LCD_H_RES) return true;
+
+    for(size_t y_off = 0; y_off < h; y_off += STRIPE_HEIGHT) {
+        size_t chunk_h = h - y_off;
+        if(chunk_h > STRIPE_HEIGHT) chunk_h = STRIPE_HEIGHT;
+
+        const size_t px_count = w * chunk_h;
+        for(size_t i = 0; i < px_count; i++) rgb565_buf[i] = color;
+
+        if(!furi_hal_spi_bus_lock_timeout(DISPLAY_BUS_LOCK_TIMEOUT_MS)) return false;
+        furi_hal_display_prepare_flush();
+        esp_lcd_panel_draw_bitmap(
+            panel_handle, x, y + y_off, x + w, y + y_off + chunk_h, rgb565_buf);
+        /* Drain the panel's DMA queue while the shared-bus mutex is still held.
+         * esp_lcd releases the SPI bus as soon as it has queued the transfer,
+         * so unlocking earlier would let CC1101/nRF24/NFC start a command on a
+         * busy peripheral (espressif/esp-idf#17860). */
+        furi_hal_display_wait_flush();
+        furi_hal_display_sync();
+        furi_hal_spi_bus_unlock();
+    }
+
+    return true;
+}
+
 void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
     UNUSED(size);
     if(!panel_handle || !rgb565_buf || !data) return;
@@ -309,36 +372,55 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
     /*
      * Stripe-based rendering: render STRIPE_HEIGHT lines into the small DMA
      * buffer, send via SPI, then render the next stripe.
-     * Saves ~95KB of internal DMA-capable SRAM.
+     * Saves ~110KB of internal DMA-capable SRAM.
      *
      * u8g2 tile buffer layout:
      * 8 pages of 128 bytes each (128 columns × 8 pages = 1024 bytes)
      * Byte at [page * 128 + x]: bit n = pixel at (x, page*8 + n)
      * Bit 0 = top pixel in tile, bit 7 = bottom pixel in tile
-     */
-    furi_hal_spi_bus_lock();
-
-    /* Repaint the margin strips with the current fg_color every frame so the
-     * entire screen tracks UI Color changes. Without this the init-time fill
-     * persists and the margins keep showing the boot-time orange while the
-     * central framebuffer area updates.
      *
-     * Top/bottom strips span the full width; left/right strips (the always-on
-     * DISPLAY_SIDE_MARGIN inset, plus any extra from aspect-fit centering) span
-     * only the height of the scaled image so they don't overdraw the corners. */
-    if(MARGIN_Y > 0) {
-        display_paint_rect(0, 0, LCD_H_RES, MARGIN_Y, fg_color);
-        display_paint_rect(
-            0, MARGIN_Y + SCALED_HEIGHT,
-            LCD_H_RES, LCD_V_RES - MARGIN_Y - SCALED_HEIGHT, fg_color);
-    }
-    if(MARGIN_X > 0) {
-        display_paint_rect(0, MARGIN_Y, MARGIN_X, SCALED_HEIGHT, fg_color);
-        display_paint_rect(
-            MARGIN_X + SCALED_WIDTH, MARGIN_Y,
-            LCD_H_RES - MARGIN_X - SCALED_WIDTH, SCALED_HEIGHT, fg_color);
+     * The global SPI bus mutex is taken per stripe, not for the whole frame: a
+     * stripe is rendered into the scratch buffer first, then pushed with the
+     * mutex held until the panel's DMA queue drains. Holding it across the
+     * whole frame starved the SD card, NFC and sub-GHz drivers for hundreds of
+     * milliseconds and made the UI look frozen. The ESP-IDF SPI master only
+     * serialises transactions between devices *after* a transfer is queued; it
+     * does not keep the bus busy while the LCD DMA is in flight, so the Furi
+     * mutex must cover the drain as well (espressif/esp-idf#17860).
+     */
+    const int64_t commit_start_us = esp_timer_get_time();
+
+    /* Repaint the margin strips only when the background colour actually
+     * changed. They are static otherwise: the scaled UI never touches them. */
+    if(!margin_painted || margin_painted_color != fg_color) {
+        bool painted = true;
+        if(MARGIN_Y > 0) {
+            painted = display_paint_rect_unlocked(0, 0, LCD_H_RES, MARGIN_Y, fg_color);
+            painted = painted && display_paint_rect_unlocked(
+                0, MARGIN_Y + SCALED_HEIGHT,
+                LCD_H_RES, LCD_V_RES - MARGIN_Y - SCALED_HEIGHT, fg_color);
+        }
+        if(painted && MARGIN_X > 0) {
+            painted = display_paint_rect_unlocked(0, MARGIN_Y, MARGIN_X, SCALED_HEIGHT, fg_color);
+            painted = painted && display_paint_rect_unlocked(
+                MARGIN_X + SCALED_WIDTH, MARGIN_Y,
+                LCD_H_RES - MARGIN_X - SCALED_WIDTH, SCALED_HEIGHT, fg_color);
+        }
+        if(!painted) {
+            /* Bus busy: retry the margins on a later frame. */
+            return;
+        }
+        margin_painted_color = fg_color;
+        margin_painted = true;
     }
 
+    /* Nothing changed since the last commit: the panel already shows this
+     * exact frame, so skip the whole SPI transfer. */
+    if(fb_shadow_valid && memcmp(fb_shadow, data, sizeof(fb_shadow)) == 0) {
+        return;
+    }
+
+    bool frame_sent = true;
     for(size_t stripe_y = 0; stripe_y < SCALED_HEIGHT; stripe_y += STRIPE_HEIGHT) {
         size_t stripe_h = STRIPE_HEIGHT;
         if(stripe_y + stripe_h > SCALED_HEIGHT) {
@@ -346,31 +428,72 @@ void furi_hal_display_commit(const uint8_t* data, uint32_t size) {
         }
 
         /* Render stripe into buffer */
+        const uint16_t fg = fg_color;
+        const uint16_t bg = bg_color;
         for(size_t row = 0; row < stripe_h; row++) {
             const size_t sy = stripe_y + row;
             const uint8_t mono_y = y_scale_lut[sy];
             const size_t page = mono_y >> 3;
             const uint8_t bit_mask = 1U << (mono_y & 0x07);
+            const uint8_t* src = &data[page * FB_WIDTH];
             uint16_t* dst = &rgb565_buf[row * SCALED_WIDTH];
 
             for(size_t sx = 0; sx < SCALED_WIDTH; sx++) {
-                const uint8_t mono_x = x_scale_lut[sx];
-                const bool pixel_set = (data[page * FB_WIDTH + mono_x] & bit_mask) != 0;
-                dst[sx] = pixel_set ? bg_color : fg_color;
+                dst[sx] = (src[x_scale_lut[sx]] & bit_mask) ? bg : fg;
             }
         }
 
-        /* DMA send this stripe */
+        /* DMA send this stripe: lock only for the register/transfer setup,
+         * release while waiting for the DMA flush so the bus stays usable. */
+        if(!furi_hal_spi_bus_lock_timeout(DISPLAY_BUS_LOCK_TIMEOUT_MS)) {
+            /* Some other SPI user is hogging the bus for way too long. Drop
+             * the rest of this frame instead of freezing the GUI thread. */
+            ESP_LOGW(
+                TAG,
+                "commit: SPI bus busy >%dms, frame dropped",
+                DISPLAY_BUS_LOCK_TIMEOUT_MS);
+            frame_sent = false;
+            break;
+        }
         furi_hal_display_prepare_flush();
         esp_lcd_panel_draw_bitmap(
             panel_handle,
             MARGIN_X, MARGIN_Y + stripe_y,
             MARGIN_X + SCALED_WIDTH, MARGIN_Y + stripe_y + stripe_h,
             rgb565_buf);
+        /* The bus mutex is held until the panel's DMA queue is empty; see
+         * display_paint_rect_unlocked() for why (IDF #17860). */
         furi_hal_display_wait_flush();
+        furi_hal_display_sync();
+        furi_hal_spi_bus_unlock();
     }
 
-    furi_hal_spi_bus_unlock();
+    if(frame_sent) {
+        /* Only remember the frame once every stripe actually reached the
+         * panel, otherwise a dropped frame would be mistaken for "already
+         * displayed" and never redrawn. */
+        memcpy(fb_shadow, data, sizeof(fb_shadow));
+        fb_shadow_valid = true;
+    } else {
+        fb_shadow_valid = false;
+    }
+
+    const uint32_t frame_us = (uint32_t)(esp_timer_get_time() - commit_start_us);
+    dbg_frame_count++;
+    dbg_frame_us_sum += frame_us;
+    if(frame_us > dbg_frame_us_max) dbg_frame_us_max = frame_us;
+
+    /* Once per second (roughly: every 60 commits) report the average and worst
+     * commit time, so a slow frame is visible in the console log. */
+    if(dbg_frame_count - dbg_logged_frames >= 60) {
+        ESP_LOGI(
+            TAG,
+            "commit: avg=%lums max=%lums over %lu frames",
+            (unsigned long)(dbg_frame_us_sum / dbg_frame_count / 1000U),
+            (unsigned long)(dbg_frame_us_max / 1000U),
+            (unsigned long)dbg_frame_count);
+        dbg_logged_frames = dbg_frame_count;
+    }
 }
 
 void furi_hal_display_set_backlight(uint8_t brightness) {
@@ -424,6 +547,7 @@ esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void) {
 }
 
 void furi_hal_display_set_fg_color(uint16_t color) {
+    if(color != fg_color) margin_painted = false;
     fg_color = color;
 }
 

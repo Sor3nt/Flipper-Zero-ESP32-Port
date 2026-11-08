@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <driver/spi_master.h>
+#include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_rom_sys.h>
 
@@ -88,6 +89,23 @@ FuriHalSpiBusHandle furi_hal_spi_bus_handle_nrf24 = {
     .mode = 0,
 };
 
+#ifdef BOARD_PIN_NFC_CS
+/* ST25R3916 NFC front-end, CS-muxed onto the same shared SPI bus.
+ * SPI mode 1 (CPOL=0, CPHA=1), 4 MHz -- the chip's documented maximum is
+ * higher, but the shared bus with the LCD/SD/nRF24 keeps this conservative. */
+FuriHalSpiBusHandle furi_hal_spi_bus_handle_nfc = {
+    .bus = &furi_hal_spi_bus_subghz,
+    .miso = &gpio_ext_pa6,
+    .mosi = &gpio_ext_pa7,
+    .sck = &gpio_ext_pb3,
+    .cs = &gpio_nfc_cs,
+    .device = NULL,
+    .initialized = false,
+    .frequency_hz = 4 * 1000 * 1000,
+    .mode = 1,
+};
+#endif
+
 static bool furi_hal_spi_pin_valid(const GpioPin* pin) {
     return pin && pin->pin != FURI_HAL_SPI_PIN_UNMAPPED;
 }
@@ -160,6 +178,17 @@ static bool furi_hal_spi_bus_init_if_needed(FuriHalSpiBus* bus, const FuriHalSpi
         bus->mosi_pin = handle->mosi->pin;
         bus->miso_pin = furi_hal_spi_pin_valid(handle->miso) ? handle->miso->pin : FURI_HAL_SPI_PIN_UNMAPPED;
         bus->sck_pin = handle->sck->pin;
+        /* MISO is shared by every chip on the bus, and most of them tri-state
+         * it when their CS is high. ESP-IDF leaves the pin as a plain input
+         * with no pull, so a released MISO floats and usually reads 0. The
+         * SDSPI driver polls MISO (with a 40 ms cap) before every command to
+         * wait for the card to become ready; a floating low line made every
+         * single command burn the full 40 ms timeout, which turned each
+         * 512-byte sector read into ~80 ms. Pull the line up so an idle bus
+         * reads as 0xFF. */
+        if(bus->miso_pin != FURI_HAL_SPI_PIN_UNMAPPED) {
+            gpio_set_pull_mode((gpio_num_t)bus->miso_pin, GPIO_PULLUP_ONLY);
+        }
         ESP_LOGI(
             TAG,
             "Initialized HW SPI host=%d on MOSI=%u MISO=%u SCK=%u",
@@ -223,6 +252,19 @@ void furi_hal_spi_bus_handle_deinit(const FuriHalSpiBusHandle* handle) {
     if(mutable_handle->device) {
         spi_bus_remove_device((spi_device_handle_t)mutable_handle->device);
         mutable_handle->device = NULL;
+
+        /* spi_bus_remove_device() ends with gpio_reset_pin() on the CS line,
+         * which leaves it as a high-Z input behind the weak (~45k) internal
+         * pull-up. On a shared bus that is not a chip select: the other
+         * devices keep clocking SCK at 10-40 MHz, and the coupling can dip a
+         * weakly pulled line far enough for a slave to sample stray clock
+         * edges as a command. (The ST25R3916 latches a stray register write
+         * across MCU resets -- it has no reset line on this board.) Park CS as
+         * a plain output driving high until something re-adds the device. */
+        if(furi_hal_spi_pin_valid(handle->cs)) {
+            furi_hal_gpio_write(handle->cs, true);
+            furi_hal_gpio_init_simple(handle->cs, GpioModeOutputPushPull);
+        }
     }
     mutable_handle->initialized = false;
 }
@@ -235,13 +277,19 @@ void furi_hal_spi_acquire(const FuriHalSpiBusHandle* handle) {
     furi_check(bus);
 
     furi_hal_spi_bus_handle_init(handle);
-#if BOARD_CC1101_SPI_SHARED
-    /* On shared-bus boards, also lock the global SPI bus mutex
-     * to serialize with display DMA and SD card transactions */
-    if(!bus->bitbang) {
-        furi_hal_spi_bus_lock();
-    }
-#endif
+    /* Do NOT take the global furi SPI bus mutex here.
+     *
+     * Acquire/release bracket a driver's *ownership* of the bus, not a single
+     * transfer, and some owners keep it for a very long time: the NFC stack
+     * acquires in nfc_alloc() and only releases when the app exits. Taking the
+     * global lock for that whole span starved the display and the SD card, so
+     * opening the NFC app froze the UI for as long as it stayed open.
+     *
+     * Mutual exclusion between the devices on a shared bus is provided by the
+     * ESP-IDF SPI master, which serialises individual transactions (the LCD,
+     * SD, CC1101, nRF24 and ST25R3916 all go through it). The global furi lock
+     * therefore stays where it is actually useful: around the display and SD
+     * code that issue multi-transaction sequences of their own. */
     furi_check(furi_mutex_acquire(furi_hal_spi_get_mutex(bus), FuriWaitForever) == FuriStatusOk);
     furi_hal_power_insomnia_enter();
     bus->current_handle = handle;
@@ -255,12 +303,12 @@ void furi_hal_spi_release(const FuriHalSpiBusHandle* handle) {
     bus->current_handle = NULL;
     furi_hal_power_insomnia_exit();
     furi_check(furi_mutex_release(furi_hal_spi_get_mutex(bus)) == FuriStatusOk);
-#if BOARD_CC1101_SPI_SHARED
-    if(!bus->bitbang) {
-        furi_hal_spi_bus_unlock();
-    }
-#endif
 }
+
+/* Bound for the shared-bus lock when a caller does not pass a usable timeout.
+ * Long enough to sit out a display stripe / SD chunk, short enough that a
+ * wedged device cannot hang the firmware forever. */
+#define FURI_HAL_SPI_BUS_LOCK_TIMEOUT_MS 2000U
 
 bool furi_hal_spi_bus_trx(
     const FuriHalSpiBusHandle* handle,
@@ -268,18 +316,42 @@ bool furi_hal_spi_bus_trx(
     uint8_t* rx_buffer,
     size_t size,
     uint32_t timeout) {
-    UNUSED(timeout);
     furi_check(handle);
     furi_check(handle->bus);
     furi_check(handle->bus->current_handle == handle);
 
     if(size == 0) return true;
 
+    /* The ESP-IDF SPI master serialises transactions per device, but it does
+     * NOT keep other devices off the bus while an async LCD transfer is still
+     * in flight: esp_lcd queues its DMA chunks and releases the bus straight
+     * away (espressif/esp-idf#17860). Another device then reaches
+     * spi_hal_setup_trans() while the panel's command is still running, which
+     * trips `assert(spi_ll_get_running_cmd(hw) == 0)` and reboots the board.
+     *
+     * Holding the global Furi bus mutex for the whole transaction puts every
+     * user of the shared bus (CC1101, nRF24, ST25R3916, external/JS SPI) into
+     * the same critical section as the display and the SD card. Both of those
+     * keep the mutex until their transfers are fully drained, so no device can
+     * open a transaction on top of a running one. */
+    uint32_t lock_timeout = timeout;
+    if(lock_timeout == 0 || lock_timeout == FuriWaitForever) {
+        lock_timeout = FURI_HAL_SPI_BUS_LOCK_TIMEOUT_MS;
+    }
+    if(!furi_hal_spi_bus_lock_timeout(lock_timeout)) {
+        ESP_LOGW(TAG, "bus lock timeout after %lums", (unsigned long)lock_timeout);
+        furi_hal_spi_fill_stub_rx(rx_buffer, size);
+        return false;
+    }
+
+    bool success = true;
+
     if(handle->bus->bitbang) {
         if(!furi_hal_spi_pin_valid(handle->cs) || !furi_hal_spi_pin_valid(handle->sck) ||
            !furi_hal_spi_pin_valid(handle->mosi)) {
             furi_hal_spi_fill_stub_rx(rx_buffer, size);
-            return false;
+            success = false;
+            goto out;
         }
 
         furi_hal_gpio_write(handle->cs, false);
@@ -312,12 +384,12 @@ bool furi_hal_spi_bus_trx(
 
         furi_hal_gpio_write(handle->cs, true);
         furi_hal_spi_bitbang_delay();
-        return true;
+        goto out;
     }
 
     if(!handle->initialized || !handle->device) {
         furi_hal_spi_fill_stub_rx(rx_buffer, size);
-        return true;
+        goto out;
     }
 
     spi_transaction_t transaction = {
@@ -331,10 +403,13 @@ bool furi_hal_spi_bus_trx(
     if(err != ESP_OK) {
         ESP_LOGW(TAG, "spi_device_polling_transmit failed: %s", esp_err_to_name(err));
         furi_hal_spi_fill_stub_rx(rx_buffer, size);
-        return false;
+        success = false;
+        goto out;
     }
 
-    return true;
+out:
+    furi_hal_spi_bus_unlock();
+    return success;
 }
 
 bool furi_hal_spi_bus_tx(

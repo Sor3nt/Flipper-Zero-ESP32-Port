@@ -129,6 +129,9 @@ void DG_DrawFrame(void) {
             for(uint16_t x = copy_w; x < panel_w; x++) dst_row[x] = 0;
         }
         esp_lcd_panel_draw_bitmap(s_panel, 0, y0, panel_w, y0 + rows, s_rgb_stripe);
+        /* Drain before the next stripe reuses s_rgb_stripe and before the bus
+         * is released (espressif/esp-idf#17860). */
+        furi_hal_display_sync();
     }
     furi_hal_spi_bus_unlock();
 }

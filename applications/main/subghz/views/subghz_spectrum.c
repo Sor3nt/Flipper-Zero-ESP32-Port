@@ -340,6 +340,12 @@ static void subghz_spectrum_blit(SubGhzSpectrum* s) {
         int rows = (y0 + STRIPE_H > h) ? (h - y0) : STRIPE_H;
         memcpy(s->stripe, &s->fb[(size_t)y0 * w], (size_t)rows * w * sizeof(uint16_t));
         esp_lcd_panel_draw_bitmap(s->panel, 0, y0, w, y0 + rows, s->stripe);
+        /* Drain before the next memcpy reuses the stripe buffer, and before
+         * releasing the shared bus: esp_lcd returns as soon as the DMA is
+         * queued, so without this the buffer is overwritten mid-transfer and
+         * another device can start a command on a busy SPI peripheral
+         * (espressif/esp-idf#17860). */
+        furi_hal_display_sync();
     }
     furi_hal_spi_bus_unlock();
 }
