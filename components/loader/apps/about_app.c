@@ -1,5 +1,6 @@
 #include <furi.h>
 #include <gui.h>
+#include <furi_hal_board_info.h>
 #include <toolbox/fw_version.h>
 #include <view_dispatcher.h>
 #include <widget.h>
@@ -25,6 +26,9 @@ int32_t about_app(void* p) {
     app->view_dispatcher = view_dispatcher_alloc();
     app->widget = widget_alloc();
 
+    /* Same layout as the stock firmware: project name and author first, then
+     * the device this build runs on, then the firmware version. The device
+     * name comes from the board header, so every board shows its own name. */
     widget_add_string_multiline_element(
         app->widget,
         64,
@@ -32,17 +36,34 @@ int32_t about_app(void* p) {
         AlignCenter,
         AlignTop,
         FontPrimary,
-        "Flipper Zero\nESP32 Port");
+        FURI_ESP32_PROJECT_NAME);
 
     widget_add_string_multiline_element(
         app->widget,
         64,
-        36,
+        20,
         AlignCenter,
         AlignTop,
         FontSecondary,
-        "T-Embed CC1101\n"
-        "FW: " FURI_ESP32_VERSION_FULL);
+        FURI_ESP32_PROJECT_AUTHOR);
+
+    widget_add_string_multiline_element(
+        app->widget,
+        64,
+        38,
+        AlignCenter,
+        AlignTop,
+        FontSecondary,
+        furi_hal_board_get_name());
+
+    widget_add_string_multiline_element(
+        app->widget,
+        64,
+        49,
+        AlignCenter,
+        AlignTop,
+        FontSecondary,
+        "FW: " FURI_ESP32_VERSION);
 
     View* widget_view = widget_get_view(app->widget);
     view_set_previous_callback(widget_view, about_app_exit);

@@ -103,6 +103,15 @@ typedef enum {
  */
 FuriHalNfcError furi_hal_nfc_init(void);
 
+#ifdef BOARD_NFC_EARLY_PROBE
+/**
+ * @brief Bring-up diagnostic: probe the NFC front-end before anything else
+ *        initialises the shared SPI bus. Compiled in only for boards that
+ *        define BOARD_NFC_EARLY_PROBE.
+ */
+void furi_hal_nfc_early_probe(void);
+#endif
+
 /**
  * @brief Check whether the NFC HAL was properly initialised and is ready.
  *

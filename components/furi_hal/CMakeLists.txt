@@ -75,8 +75,28 @@ set(FURI_HAL_SRCS
     "furi_hal_bw16_guard.c"
     "furi_hal_bq27220.c"
     "furi_hal_bq25896.c"
+    "furi_hal_ina219.c"
     "fatfs_compat.c"
 )
+
+# NFC front-end selection. The stock PN532/I2C backend lives in furi_hal_nfc.c;
+# boards that use the ST25R3916 over SPI need the extra driver and technology
+# files listed below (and furi_hal_nfc.c compiles to a stub for them).
+set(FURI_HAL_ST25R3916_BOARDS fatalcore)
+if(FLIPPER_BOARD IN_LIST FURI_HAL_ST25R3916_BOARDS)
+    list(APPEND FURI_HAL_SRCS
+        "furi_hal_nfc_st25r3916.c"
+        "furi_hal_nfc_event.c"
+        "furi_hal_nfc_irq.c"
+        "furi_hal_nfc_timer.c"
+        "furi_hal_nfc_iso14443a.c"
+        "furi_hal_nfc_iso14443b.c"
+        "furi_hal_nfc_iso15693.c"
+        "furi_hal_nfc_felica.c"
+        "st25r3916.c"
+        "st25r3916_reg.c"
+    )
+endif()
 
 #OLED MOD
 if(FLIPPER_BOARD STREQUAL "thormini")

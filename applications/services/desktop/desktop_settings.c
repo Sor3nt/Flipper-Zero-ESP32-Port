@@ -115,6 +115,10 @@ void desktop_settings_load(DesktopSettings* settings) {
         FURI_LOG_W(TAG, "Failed to load file, using defaults");
         memset(settings, 0, sizeof(DesktopSettings));
         settings->display_status_bar_background = 1;
+        /* Fatal Core: show the charge percentage in the status bar by
+         * default, so the INA219 reading is visible without digging into
+         * Settings > Interface. */
+        settings->displayBatteryPercentage = DISPLAY_BATTERY_BAR_PERCENT;
         desktop_settings_save(settings);
     }
 }

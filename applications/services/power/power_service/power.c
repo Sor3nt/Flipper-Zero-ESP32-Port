@@ -75,7 +75,7 @@ static void power_draw_battery_callback(Canvas* canvas, void* context) {
             (power->displayBatteryPercentage == DISPLAY_BATTERY_BAR_PERCENT) &&
             (power->state != PowerStateCharging) && // Default bar display with percentage
             (power->info.voltage_battery_charge_limit >=
-             4.2)) { // not looking nice with low voltage indicator
+             4.19f)) { // 4.2 V quantises to the 4.192 V step on charge-capable boards
             canvas_set_font(canvas, FontBatteryPercent);
 
             // align charge display value with digits to draw
@@ -129,7 +129,7 @@ static void power_draw_battery_callback(Canvas* canvas, void* context) {
         }
 
         // TODO: Verify if it displays correctly with custom battery skins !!!
-        if(power->info.voltage_battery_charge_limit < 4.2) {
+        if(power->info.voltage_battery_charge_limit < 4.19f) {
             // Battery charging voltage is modified, indicate with cross pattern
             canvas_invert_color(canvas);
             uint8_t battery_bar_width = (power->info.charge + 4) / 5;

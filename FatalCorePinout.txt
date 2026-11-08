@@ -1,0 +1,67 @@
+# ============================================================
+#  FatalCorePinout.txt - "Fatal Core" (FATALCORE BTW) board
+#  Target: ESP32-S3-WROOM-1 N16R8 (16 MB flash, 8 MB octal PSRAM)
+#
+#  Reference only: board_fatalcore.h is hand-maintained, it is NOT
+#  generated from this file (unlike Pinout.txt / board_DIY.h).
+#
+#  Source of truth for the hardware: https://github.com/Teapot174/fatalcore
+#  (hardware/fatalcore_pinout.txt, hardware/fatalcore_BOM.txt). This file is
+#  kept in sync with that pinout.
+# ============================================================
+
+# --- Shared SPI bus (LCD + SD + CC1101 + NRF24 + ST25R3916) ---
+SPI_SCK=17
+SPI_MOSI=18
+SPI_MISO=8
+
+# --- Display (ST7789, 320x172) ---
+LCD_CS=7
+LCD_DC=15
+LCD_RST=16
+LCD_BL=6
+
+# --- microSD ---
+SD_CS=43
+
+# --- CC1101 (Sub-GHz) ---
+CC1101_CS=9
+CC1101_GDO0=42
+CC1101_GDO2=-1
+
+# --- NRF24L01 (E01-2G4M27SX) ---
+NRF24_CSN=13
+NRF24_CE=14
+
+# --- NFC: ST25R3916 over SPI ---
+NFC_CS=11
+NFC_IRQ=12
+NFC_RST=-1
+
+# --- I2C (INA219 @0x40 + Qwiic) ---
+I2C_SDA=47
+I2C_SCL=48
+
+# --- Infrared ---
+IR_TX=2
+IR_RX=1
+
+# --- iButton (1-Wire) ---
+IBUTTON=10
+
+# --- RGB LED (WS2812B, 1 pc) ---
+WS2812=44
+
+# --- Push buttons (pin to GND, internal pull-up, active low) ---
+BTN_OK=0          # OK/Select (also BOOT strapping)
+BTN_UP=41
+BTN_DOWN=40
+BTN_LEFT=39
+BTN_RIGHT=38
+BTN_BACK=21       # Escape/Power
+
+# --- Not connected / no GPIO ---
+# BATTERY_ADC  - none (INA219 over I2C)
+# PWR_EN       - hard power switch (MSK12C02)
+# SPEAKER      - no speaker on this board
+# ENCODER      - none

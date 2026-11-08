@@ -22,7 +22,7 @@
 
 #define TAG "FuriHalNfc"
 
-#if BOARD_HAS_NFC
+#if BOARD_HAS_NFC && !(defined(BOARD_NFC_USE_ST25R3916) && BOARD_NFC_USE_ST25R3916)
 
 #include <driver/i2c.h>
 #include <driver/gpio.h>
@@ -1879,7 +1879,7 @@ void furi_hal_nfc_pn532_mf_deauth(void) {
     pn532_mf_authed = false;
 }
 
-#else /* !BOARD_HAS_NFC */
+#elif !BOARD_HAS_NFC
 
 /* ── No NFC hardware: all functions return errors or no-ops ────────────── */
 
@@ -1954,5 +1954,14 @@ FuriHalNfcError furi_hal_nfc_pn532_mf_auth(uint8_t b, const uint8_t* k, uint8_t 
 }
 bool furi_hal_nfc_pn532_mf_is_authed(void) { return false; }
 void furi_hal_nfc_pn532_mf_deauth(void) {}
+
+#else /* NFC present, ST25R3916 backend */
+
+/*
+ * The ST25R3916 front-end is implemented in furi_hal_nfc_st25r3916.c (plus
+ * the tech files and the st25r3916 driver). This translation unit only needs
+ * to stay non-empty.
+ */
+typedef int furi_hal_nfc_pn532_backend_disabled_t;
 
 #endif /* BOARD_HAS_NFC */
