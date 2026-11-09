@@ -7,14 +7,12 @@
 #include <furi_hal_infrared.h>
 #include <sdkconfig.h>
 
-/* 5V (VBUS / OTG) switch. On ESP32-S3 boards it lives only in the GPIO app: Infrared neither
- * shows "GPIO Settings" with "5V on GPIO" nor switches OTG on or off (so leaving Infrared never
- * turns off a 5V the user set in GPIO). Non-S3 boards have no GPIO app and keep the switch in
- * Infrared -> GPIO Settings. */
-#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
-#define INFRARED_HAS_5V_SETTINGS 0
-#else
+/* The persistent VBUS 5 V setting is available from Infrared Settings. */
 #define INFRARED_HAS_5V_SETTINGS 1
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+#define INFRARED_IS_ESP32S3 1
+#else
+#define INFRARED_IS_ESP32S3 0
 #endif
 
 #include <gui/gui.h>
@@ -326,6 +324,9 @@ void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin);
  * @param[in] enable boolean value corresponding to OTG state (true = enable, false = disable)
  */
 void infrared_enable_otg(InfraredApp* infrared, bool enable);
+
+/** Set and persist the ESP32-S3 VBUS 5 V preference through the Power service. */
+void infrared_set_vbus_5v_enabled(InfraredApp* infrared, bool enable);
 
 /**
  * @brief Save current settings to a file.

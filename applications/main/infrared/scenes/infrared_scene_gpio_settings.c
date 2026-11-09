@@ -1,16 +1,19 @@
 #include "../infrared_app_i.h"
 
+#if !INFRARED_IS_ESP32S3
 static const char* infrared_scene_gpio_settings_pin_text[] = {
     "Flipper",
     "2 (A7)",
     "Detect",
 };
+#endif
 
 static const char* infrared_scene_gpio_settings_otg_text[] = {
     "OFF",
     "ON",
 };
 
+#if !INFRARED_IS_ESP32S3
 static void infrared_scene_gpio_settings_pin_change_callback(VariableItem* item) {
     InfraredApp* infrared = variable_item_get_context(item);
     const uint8_t index = variable_item_get_current_value_index(item);
@@ -20,6 +23,7 @@ static void infrared_scene_gpio_settings_pin_change_callback(VariableItem* item)
         infrared->view_dispatcher,
         infrared_custom_event_pack(InfraredCustomEventTypeGpioTxPinChanged, index));
 }
+#endif
 
 static void infrared_scene_gpio_settings_otg_change_callback(VariableItem* item) {
     InfraredApp* infrared = variable_item_get_context(item);
@@ -70,44 +74,61 @@ static void infrared_scene_gpio_settings_init_ext(InfraredApp* infrared) {
         item, value_index ? infrared_scene_ext_pin_text : "Internal");
 }
 
-static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
-    VariableItemList* var_item_list = infrared->var_item_list;
-    VariableItem* item;
-    uint8_t value_index;
+static void infrared_scene_gpio_settings_add_otg_item(
+    InfraredApp* infrared,
+    bool allow_auto) {
+    VariableItem* item = variable_item_list_add(
+        infrared->var_item_list,
+#if INFRARED_IS_ESP32S3
+        "VBUS 5V",
+#else
+        "5V on GPIO",
+#endif
+        COUNT_OF(infrared_scene_gpio_settings_otg_text),
+        infrared_scene_gpio_settings_otg_change_callback,
+        infrared);
 
+    if(allow_auto && infrared->app_state.tx_pin >= FuriHalInfraredTxPinMax) {
+        variable_item_set_values_count(item, 1);
+        variable_item_set_current_value_index(item, 0);
+        variable_item_set_current_value_text(item, "Auto");
+    } else {
+        const uint8_t value_index = infrared->app_state.is_otg_enabled;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(
+            item, infrared_scene_gpio_settings_otg_text[value_index]);
+    }
+}
+
+static void infrared_scene_gpio_settings_init(InfraredApp* infrared) {
+#if INFRARED_IS_ESP32S3
+    if(infrared_scene_gpio_settings_has_ext_pin()) {
+        infrared_scene_gpio_settings_init_ext(infrared);
+    } else {
+        /* The S3 uses only its internal IR LED; there is no signal-output choice. */
+        infrared->app_state.tx_pin = FuriHalInfraredTxPinInternal;
+    }
+    infrared_scene_gpio_settings_add_otg_item(infrared, false);
+#else
     if(infrared_scene_gpio_settings_has_ext_pin()) {
         infrared_scene_gpio_settings_init_ext(infrared);
         return;
     }
 
-    item = variable_item_list_add(
+    VariableItemList* var_item_list = infrared->var_item_list;
+    VariableItem* item = variable_item_list_add(
         var_item_list,
         "Signal Output",
         COUNT_OF(infrared_scene_gpio_settings_pin_text),
         infrared_scene_gpio_settings_pin_change_callback,
         infrared);
 
-    value_index = infrared->app_state.tx_pin;
+    const uint8_t value_index = infrared->app_state.tx_pin;
     variable_item_set_current_value_index(item, value_index);
-    variable_item_set_current_value_text(item, infrared_scene_gpio_settings_pin_text[value_index]);
-
-    item = variable_item_list_add(
-        var_item_list,
-        "5V on GPIO",
-        COUNT_OF(infrared_scene_gpio_settings_otg_text),
-        infrared_scene_gpio_settings_otg_change_callback,
-        infrared);
-
-    if(infrared->app_state.tx_pin < FuriHalInfraredTxPinMax) {
-        value_index = infrared->app_state.is_otg_enabled;
-        variable_item_set_current_value_index(item, value_index);
-        variable_item_set_current_value_text(
-            item, infrared_scene_gpio_settings_otg_text[value_index]);
-    } else {
-        variable_item_set_values_count(item, 1);
-        variable_item_set_current_value_index(item, 0);
-        variable_item_set_current_value_text(item, "Auto");
-    }
+    variable_item_set_current_value_text(
+        item, infrared_scene_gpio_settings_pin_text[value_index]);
+    infrared_scene_gpio_settings_add_otg_item(infrared, true);
+#endif
 }
 
 void infrared_scene_gpio_settings_on_enter(void* context) {
@@ -138,7 +159,7 @@ bool infrared_scene_gpio_settings_on_event(void* context, SceneManagerEvent even
             variable_item_list_reset(infrared->var_item_list);
             infrared_scene_gpio_settings_init(infrared);
         } else if(custom_event_type == InfraredCustomEventTypeGpioOtgChanged) {
-            infrared_enable_otg(infrared, custom_event_value);
+            infrared_set_vbus_5v_enabled(infrared, custom_event_value);
         }
 
         consumed = true;

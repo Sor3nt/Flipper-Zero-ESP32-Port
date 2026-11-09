@@ -1,5 +1,7 @@
 #include "power_i.h"
 
+#include <sdkconfig.h>
+
 void power_off(Power* power) {
     furi_check(power);
 
@@ -85,7 +87,37 @@ void power_enable_otg(Power* power, bool enable) {
     api_lock_wait_unlock_and_free(msg.lock);
 }
 
+void power_set_vbus_5v_enabled(Power* power, bool enable) {
+    furi_check(power);
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+    PowerMessage msg = {
+        .type = PowerMessageTypeSetVbus5V,
+        .bool_param = &enable,
+        .lock = api_lock_alloc_locked(),
+    };
+
+    furi_check(
+        furi_message_queue_put(power->message_queue, &msg, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(msg.lock);
+#else
+    power_enable_otg(power, enable);
+#endif
+}
+
 bool power_is_otg_enabled(Power* power) {
     furi_check(power);
-    return power->is_otg_requested;
+
+    bool enabled = false;
+    PowerMessage msg = {
+        .type = PowerMessageTypeIsOTGEnabled,
+        .bool_param = &enabled,
+        .lock = api_lock_alloc_locked(),
+    };
+
+    furi_check(
+        furi_message_queue_put(power->message_queue, &msg, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(msg.lock);
+
+    return enabled;
 }

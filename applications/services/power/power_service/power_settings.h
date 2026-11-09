@@ -19,6 +19,9 @@ typedef struct {
     /* 1: on USB, the WS2812 ring turns off while the screen is off and comes
      * back with the screen. 0 (default): unchanged. */
     uint8_t led_usb_auto_off;
+    /* 1: keep the board's VBUS 5 V output enabled until the user turns it off.
+     * Default is enabled on ESP32-S3 and disabled on other targets. */
+    uint8_t vbus_5v_enabled;
 } PowerSettings;
 
 #ifdef __cplusplus
