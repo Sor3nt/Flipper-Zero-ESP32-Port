@@ -179,6 +179,17 @@ static inline const uint8_t* df_sta(const uint8_t* p, bool to_ds, bool from_ds) 
     return NULL;
 }
 
+// Results are summarized by reported RX channel, so one BSSID could otherwise
+// occupy multiple rows if it is reported on more than one channel while hopping.
+// Keep one row per BSSID across the whole scan.
+static SdChannelInfo* sd_find_ap_by_bssid(const uint8_t* bssid) {
+    for(uint8_t i = 0; i < SD_CHANNEL_MAX; i++) {
+        SdChannelInfo* ci = &s_channels_live[i];
+        if(ci->has_ap && memcmp(ci->bssid, bssid, 6) == 0) return ci;
+    }
+    return NULL;
+}
+
 // ============================================================================
 // SNIFFER SCAN
 // ============================================================================
@@ -220,6 +231,14 @@ static void sd_sniffer_scan_cb(void* buf, wifi_promiscuous_pkt_type_t type) {
             ip += 2 + il;
         }
         SdPmfState pmf = sd_parse_pmf(ies, ies_len);
+
+        SdChannelInfo* existing = sd_find_ap_by_bssid(bssid);
+        if(existing && existing != ci) {
+            // One BSSID identifies one AP. Ignore an off-channel duplicate rather
+            // than creating a second selectable row for the same network device.
+            existing->beacon_count++;
+            return;
+        }
 
         if(!ci->has_ap) {
             ci->channel = ch;
