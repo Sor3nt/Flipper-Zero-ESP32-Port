@@ -120,11 +120,16 @@ static inline FuriEventLoopProcessStatus
     furi_event_loop_process_event(FuriEventLoop* instance, FuriEventLoopItem* item) {
     FuriEventLoopProcessStatus status;
 
+    /* Set current_item BEFORE unsubscribing: furi_event_loop_unsubscribe() only
+     * defers the item free (free_later) when it is the item being processed.
+     * With the Once flag it is called first, so assigning current_item
+     * afterwards let the unsubscribe free the item outright and every access
+     * below read freed memory (use-after-free). */
+    instance->current_item = item;
+
     if(item->event & FuriEventLoopEventFlagOnce) {
         furi_event_loop_unsubscribe(instance, item->object);
     }
-
-    instance->current_item = item;
 
     if(item->event & FuriEventLoopEventFlagEdge) {
         status = furi_event_loop_process_edge_event(item);

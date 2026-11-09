@@ -11,6 +11,11 @@
 
 #include <furi_hal_resources.h>
 
+/* Upper bound on the IRQ-acknowledge loop in furi_hal_nfc_get_irq(). A healthy
+ * chip needs one or two rounds; the cap only exists so a wedged chip cannot
+ * trap the worker in an infinite loop. */
+#define FURI_HAL_NFC_IRQ_CLEAR_MAX 16
+
 static void furi_hal_nfc_int_callback(void* context) {
     UNUSED(context);
     furi_hal_nfc_event_set(FuriHalNfcEventInternalTypeIrq);
@@ -19,8 +24,16 @@ static void furi_hal_nfc_int_callback(void* context) {
 uint32_t furi_hal_nfc_get_irq(const FuriHalSpiBusHandle* handle) {
     uint32_t irq = 0;
     /* The ST25R3916 releases its IRQ line only after every pending interrupt
-     * has been acknowledged, hence the loop. */
-    while(furi_hal_gpio_read(&gpio_nfc_irq)) {
+     * has been acknowledged, hence the loop.
+     *
+     * The loop is bounded: a wedged chip (this board has no reset line, and a
+     * previous run can leave the front-end with every register reading back
+     * 0x00) can hold the line asserted without ever clearing a latched bit.
+     * An unbounded loop here spins the highest-priority NFC worker inside a
+     * transaction and freezes the whole system, so give up after a few tries
+     * and let the caller's transaction fail and retry. */
+    for(uint32_t guard = 0; guard < FURI_HAL_NFC_IRQ_CLEAR_MAX; guard++) {
+        if(!furi_hal_gpio_read(&gpio_nfc_irq)) break;
         irq |= st25r3916_get_irq(handle);
     }
     return irq;

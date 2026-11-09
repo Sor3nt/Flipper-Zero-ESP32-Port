@@ -282,8 +282,14 @@ static FuriHalNfcError furi_hal_nfc_iso15693_listener_deinit(const FuriHalSpiBus
 }
 
 static FuriHalNfcEvent furi_hal_nfc_iso15693_wait_event(uint32_t timeout_ms) {
-    UNUSED(timeout_ms);
-    return 0;
+    /* The ISO15693 *listener* HAL is a stub in this port (see
+     * furi_hal_nfc_iso15693_listener_init), but nfc_worker_listener() still
+     * calls this on every iteration. Returning 0 immediately turned that loop
+     * into a tight, highest-priority spin that starved the whole system, and it
+     * also made furi_hal_nfc_abort() a no-op for this technology, so nfc_stop()
+     * could never join the worker. Block on the common wait instead: it honours
+     * the abort flag and never spins. */
+    return furi_hal_nfc_wait_event_common(timeout_ms);
 }
 
 static FuriHalNfcError furi_hal_nfc_iso15693_listener_tx(

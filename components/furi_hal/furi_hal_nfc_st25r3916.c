@@ -81,8 +81,16 @@ static FuriHalNfcError furi_hal_nfc_turn_on_osc(const FuriHalSpiBusHandle* handl
  * re-creates the ESP-IDF SPI device, because the display driver re-initialises
  * the shared host after the early probe and can leave our device handle in a
  * state where transactions go nowhere. */
-#define FURI_HAL_NFC_CHIP_ID_RETRIES 5
-#define FURI_HAL_NFC_OSC_SETTLE_MS   40
+#define FURI_HAL_NFC_CHIP_ID_RETRIES      5
+#define FURI_HAL_NFC_OSC_SETTLE_MS        40
+/* Cold-start tolerance for furi_hal_nfc_is_hal_ready(). On this board the chip
+ * is powered from the always-on 3.3 V rail and has no reset line, so on a cold
+ * boot it comes up together with the MCU and both its oscillator and its
+ * internal power-on reset need to settle. One retry was not always enough (the
+ * first boot after a flash could still fail until a manual reboot); a few
+ * attempts separated by a short delay let the app recover on its own. */
+#define FURI_HAL_NFC_READY_ATTEMPTS       4
+#define FURI_HAL_NFC_READY_RETRY_DELAY_MS 60
 
 /* Start the oscillator without relying on a readable MISO or on the GPIO IRQ
  * handler (which is not installed yet at this point). The write goes straight
@@ -694,49 +702,78 @@ void furi_hal_nfc_early_probe(void) {
 static FuriHalNfcError furi_hal_nfc_init_impl(void);
 
 FuriHalNfcError furi_hal_nfc_is_hal_ready(void) {
-    FuriHalNfcError error = FuriHalNfcErrorNone;
+    if(!furi_hal_nfc.mutex) {
+        furi_hal_nfc.mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    }
 
     /* The boot-time bring-up happens early, while the SD card, the display and
      * the radios are still settling on the shared SPI2 bus, and it can fail
      * without the front-end being broken (the chip keeps its state across MCU
      * resets and may be found asleep). The app thread is a much quieter moment
      * to try again, and the only way to recover without a reboot: there is no
-     * deinit/re-init path, because furi_hal_nfc_init() is a one-shot. */
-    if(!furi_hal_nfc.ready) {
-        if(!furi_hal_nfc.mutex) {
-            furi_hal_nfc.mutex = furi_mutex_alloc(FuriMutexTypeNormal);
-        }
-        FURI_LOG_I(TAG, "is_hal_ready: HAL not configured yet, retrying init");
-        error = furi_hal_nfc_init_impl();
-        furi_hal_nfc.ready = (error == FuriHalNfcErrorNone);
+     * deinit/re-init path, because furi_hal_nfc_init() is a one-shot.
+     *
+     * On a cold start the front-end and the MCU power up together and there is
+     * no reset line: the chip needs its oscillator and its internal power-on
+     * reset to settle, and a single retry is not always enough. Retry a few
+     * times, separated by a short delay, so the app recovers by itself instead
+     * of asking the user to power-cycle. */
+    const FuriHalSpiBusHandle* handle = &furi_hal_spi_bus_handle_nfc;
+    uint8_t chip_id = 0;
+    bool id_ok = false;
+    FuriHalNfcError error = FuriHalNfcErrorNone;
+
+    for(int attempt = 0; attempt < FURI_HAL_NFC_READY_ATTEMPTS; attempt++) {
         if(!furi_hal_nfc.ready) {
-            FURI_LOG_E(TAG, "is_hal_ready: retry failed, chip still not usable");
-            return error;
+            FURI_LOG_I(TAG, "is_hal_ready: HAL not configured yet, init attempt %d", attempt);
+            error = furi_hal_nfc_init_impl();
+            furi_hal_nfc.ready = (error == FuriHalNfcErrorNone);
+            if(!furi_hal_nfc.ready) {
+                /* Busy means another owner holds the front-end. Spinning would
+                 * only repeat the same failure, so report it to the caller. */
+                if(error == FuriHalNfcErrorBusy) {
+                    FURI_LOG_W(TAG, "is_hal_ready: front-end busy");
+                    return error;
+                }
+                FURI_LOG_W(TAG, "is_hal_ready: init attempt %d failed, retrying", attempt);
+                furi_delay_ms(FURI_HAL_NFC_READY_RETRY_DELAY_MS);
+                continue;
+            }
         }
+
+        chip_id = 0;
+        error = furi_hal_nfc_acquire();
+        if(error != FuriHalNfcErrorNone) return error;
+        id_ok = furi_hal_nfc_read_chip_id(handle, &chip_id);
+        furi_hal_nfc_release();
+
+        if(id_ok) break;
+
+        /* The front-end stopped answering after a working session, or the
+         * cheap liveness read cannot see it. This chip has no reset line here
+         * and a previous run can leave it wedged (every register reads back
+         * 0x00), so the way back without a reboot is a full re-init:
+         * SET_DEFAULT, a fresh SPI device and the oscillator wake. Downgrade
+         * readiness so the next loop cycle re-runs init. */
+        FURI_LOG_W(TAG, "is_hal_ready: chip not answering, re-initialising (attempt %d)", attempt);
+        furi_hal_nfc.ready = false;
+        furi_delay_ms(FURI_HAL_NFC_READY_RETRY_DELAY_MS);
     }
 
-    do {
-        error = furi_hal_nfc_acquire();
-        if(error != FuriHalNfcErrorNone) break;
+    FURI_LOG_I(
+        TAG,
+        "is_hal_ready: IC_IDENTITY=0x%02X (want mask 0x%02X = 0x%02X)",
+        chip_id,
+        ST25R3916_REG_IC_IDENTITY_ic_type_mask,
+        ST25R3916_REG_IC_IDENTITY_ic_type_st25r3916);
 
-        const FuriHalSpiBusHandle* handle = &furi_hal_spi_bus_handle_nfc;
-        uint8_t chip_id = 0;
-        bool id_ok = furi_hal_nfc_read_chip_id(handle, &chip_id);
-        FURI_LOG_I(
-            TAG,
-            "is_hal_ready: IC_IDENTITY=0x%02X (want mask 0x%02X = 0x%02X)",
-            chip_id,
-            ST25R3916_REG_IC_IDENTITY_ic_type_mask,
-            ST25R3916_REG_IC_IDENTITY_ic_type_st25r3916);
-        if(!id_ok) {
-            FURI_LOG_E(TAG, "Wrong chip id");
-            error = FuriHalNfcErrorCommunication;
-        }
+    if(!id_ok) {
+        furi_hal_nfc.ready = false;
+        FURI_LOG_E(TAG, "Wrong chip id");
+        return FuriHalNfcErrorCommunication;
+    }
 
-        furi_hal_nfc_release();
-    } while(false);
-
-    return error;
+    return FuriHalNfcErrorNone;
 }
 
 /* The actual bring-up. Split out of furi_hal_nfc_init() so that
@@ -746,7 +783,6 @@ static FuriHalNfcError furi_hal_nfc_init_impl(void) {
     FuriHalNfcError error = FuriHalNfcErrorNone;
 
     furi_hal_nfc_event_init();
-    furi_hal_nfc_event_start();
     /* The timers are needed by every poller transaction and live for the whole
      * session. Creating them here (instead of only in low_power_mode_stop())
      * means the first transaction cannot find them missing. */
@@ -755,8 +791,17 @@ static FuriHalNfcError furi_hal_nfc_init_impl(void) {
     do {
         error = furi_hal_nfc_acquire();
         if(error != FuriHalNfcErrorNone) {
-            furi_hal_nfc_low_power_mode_start();
+            /* Someone else owns the front-end (or a previous session has not
+             * released it yet). Do not touch the bus, the ISR, the timers or
+             * the event object, and do not fall through to
+             * furi_hal_nfc_release(): every path below assumes we hold the
+             * chip, and that release would trip
+             * furi_check(furi_hal_nfc_is_mine()). Just report Busy. */
+            break;
         }
+        /* Bind the event target only once we own the chip, so a failed acquire
+         * cannot leave events routed to this non-owner thread. */
+        furi_hal_nfc_event_start();
 
         const FuriHalSpiBusHandle* handle = &furi_hal_spi_bus_handle_nfc;
         /* The device is normally added by the early probe. Re-check it here as

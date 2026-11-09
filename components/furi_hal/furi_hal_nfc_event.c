@@ -12,8 +12,12 @@ void furi_hal_nfc_event_init(void) {
 FuriHalNfcError furi_hal_nfc_event_start(void) {
     furi_check(furi_hal_nfc_event);
 
-    furi_hal_nfc_event->thread = furi_thread_get_current_id();
+    /* Clear the flag word *before* publishing the new target thread: an abort
+     * (sent by nfc_stop()) or an IRQ arriving right after the assignment must
+     * not be wiped out by this clear, or the waiter would block until the next
+     * unrelated event and nfc_stop() would never be able to wake it. */
     furi_thread_flags_clear(FURI_HAL_NFC_EVENT_INTERNAL_ALL);
+    furi_hal_nfc_event->thread = furi_thread_get_current_id();
 
     return FuriHalNfcErrorNone;
 }
