@@ -23,7 +23,7 @@ static void subghz_txrx_radio_device_power_off(SubGhzTxRx* instance) {
 }
 
 SubGhzTxRx* subghz_txrx_alloc(void) {
-    SubGhzTxRx* instance = malloc(sizeof(SubGhzTxRx));
+    SubGhzTxRx* instance = calloc(1, sizeof(SubGhzTxRx));
     bool system_keystore_loaded = false;
     bool user_keystore_loaded = false;
 
@@ -143,6 +143,15 @@ uint8_t*
         0x12, //-30dBm
     };
 
+    if(!preset_data || preset_data_size < PRESET_POWER_OFFSET_FM) {
+        FURI_LOG_W(TAG, "Preset data too short for TX power adjustment");
+        return preset_data;
+    }
+
+    // Settings files can be edited or corrupted; keep the table index within
+    // the nine values exposed by the TX power menu.
+    if(tx_power > SUBGHZ_TX_POWER_MAX_INDEX) tx_power = 0;
+
     //Grab the AM and FM byte now, so we can do proper checks.
     uint8_t fm_byte = preset_data[preset_data_size - PRESET_POWER_OFFSET_FM];
     uint8_t am_byte = preset_data[preset_data_size - PRESET_POWER_OFFSET_AM];
@@ -241,9 +250,9 @@ static uint32_t subghz_txrx_rx(SubGhzTxRx* instance, uint32_t frequency) {
         instance->radio_device, (uint32_t)((int64_t)frequency + instance->frequency_offset));
     subghz_devices_flush_rx(instance->radio_device);
 
+    subghz_worker_start(instance->worker);
     subghz_devices_start_async_rx(
         instance->radio_device, subghz_worker_rx_callback, instance->worker);
-    subghz_worker_start(instance->worker);
     instance->txrx_state = SubGhzTxRxStateRx;
     return value;
 }
@@ -261,8 +270,8 @@ static void subghz_txrx_rx_end(SubGhzTxRx* instance) {
     furi_assert(instance->txrx_state == SubGhzTxRxStateRx);
 
     if(subghz_worker_is_running(instance->worker)) {
-        subghz_worker_stop(instance->worker);
         subghz_devices_stop_async_rx(instance->radio_device);
+        subghz_worker_stop(instance->worker);
     }
     subghz_devices_idle(instance->radio_device);
     instance->txrx_state = SubGhzTxRxStateIDLE;

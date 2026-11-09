@@ -32,7 +32,7 @@ struct SubGhzHistory {
 };
 
 SubGhzHistory* subghz_history_alloc(void) {
-    SubGhzHistory* instance = malloc(sizeof(SubGhzHistory));
+    SubGhzHistory* instance = calloc(1, sizeof(SubGhzHistory));
     instance->tmp_string = furi_string_alloc();
     instance->history = malloc(sizeof(SubGhzHistoryStruct));
     SubGhzHistoryItemArray_init(instance->history->data);

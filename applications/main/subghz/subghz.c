@@ -92,7 +92,7 @@ static void subghz_load_custom_presets(SubGhzSetting* setting) {
 */
 
 SubGhz* subghz_alloc(bool alloc_for_tx_only) {
-    SubGhz* subghz = malloc(sizeof(SubGhz));
+    SubGhz* subghz = calloc(1, sizeof(SubGhz));
 
     subghz->file_path = furi_string_alloc();
     subghz->file_path_tmp = furi_string_alloc();
@@ -190,17 +190,21 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
         // Frequency Analyzer
         // View knows too much
         subghz->subghz_frequency_analyzer = subghz_frequency_analyzer_alloc(subghz->txrx);
-        view_dispatcher_add_view(
-            subghz->view_dispatcher,
-            SubGhzViewIdFrequencyAnalyzer,
-            subghz_frequency_analyzer_get_view(subghz->subghz_frequency_analyzer));
+        if(subghz->subghz_frequency_analyzer) {
+            view_dispatcher_add_view(
+                subghz->view_dispatcher,
+                SubGhzViewIdFrequencyAnalyzer,
+                subghz_frequency_analyzer_get_view(subghz->subghz_frequency_analyzer));
+        }
 
         // RF Spectrum (swept-RSSI spectrum + waterfall)
         subghz->subghz_spectrum = subghz_spectrum_alloc();
-        view_dispatcher_add_view(
-            subghz->view_dispatcher,
-            SubGhzViewIdSpectrum,
-            subghz_spectrum_get_view(subghz->subghz_spectrum));
+        if(subghz->subghz_spectrum) {
+            view_dispatcher_add_view(
+                subghz->view_dispatcher,
+                SubGhzViewIdSpectrum,
+                subghz_spectrum_get_view(subghz->subghz_spectrum));
+        }
     }
     // Read RAW
     subghz->subghz_read_raw = subghz_read_raw_alloc(alloc_for_tx_only);
@@ -259,6 +263,7 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     subghz->last_settings = subghz_last_settings_alloc();
     //size_t preset_count = subghz_setting_get_preset_count(setting);
     subghz_last_settings_load(subghz->last_settings, 0);
+    subghz->tx_power = alloc_for_tx_only ? 0 : subghz->last_settings->tx_power;
 
     // Set LED and Amp GPIO control state
     furi_hal_subghz_set_ext_leds_and_amp(subghz->last_settings->leds_and_amp);
@@ -282,11 +287,9 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     if(!alloc_for_tx_only) {
         subghz->ignore_filter = subghz->last_settings->ignore_filter;
         subghz->filter = subghz->last_settings->filter;
-        subghz->tx_power = subghz->last_settings->tx_power;
     } else {
         subghz->filter = SubGhzProtocolFlag_Decodable;
         subghz->ignore_filter = 0x0;
-        subghz->tx_power = 0;
     }
 
     subghz_txrx_receiver_set_filter(subghz->txrx, subghz->filter);
@@ -359,12 +362,16 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         variable_item_list_free(subghz->variable_item_list);
 
         // Frequency Analyzer
-        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdFrequencyAnalyzer);
-        subghz_frequency_analyzer_free(subghz->subghz_frequency_analyzer);
+        if(subghz->subghz_frequency_analyzer) {
+            view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdFrequencyAnalyzer);
+            subghz_frequency_analyzer_free(subghz->subghz_frequency_analyzer);
+        }
 
         // RF Spectrum
-        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdSpectrum);
-        subghz_spectrum_free(subghz->subghz_spectrum);
+        if(subghz->subghz_spectrum) {
+            view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdSpectrum);
+            subghz_spectrum_free(subghz->subghz_spectrum);
+        }
     }
     if(!alloc_for_tx_only) {
         // SubBrute Bruteforcer

@@ -1,6 +1,7 @@
 #include "subghz_worker.h"
 
 #include <furi.h>
+#include <stdatomic.h>
 
 #define TAG "SubGhzWorker"
 
@@ -8,8 +9,8 @@ struct SubGhzWorker {
     FuriThread* thread;
     FuriStreamBuffer* stream;
 
-    volatile bool running;
-    volatile bool overrun;
+    atomic_bool running;
+    bool overrun; // accessed by the GPIO ISR only; reset before RX is enabled
 
     LevelDuration filter_level_duration;
     uint16_t filter_duration;
@@ -48,7 +49,7 @@ static int32_t subghz_worker_thread_callback(void* context) {
 
     LevelDuration level_duration;
 
-    while(instance->running) {
+    while(atomic_load_explicit(&instance->running, memory_order_relaxed)) {
         int ret = furi_stream_buffer_receive(
             instance->stream, &level_duration, sizeof(LevelDuration), 10);
         if(ret == sizeof(LevelDuration)) {
@@ -81,6 +82,9 @@ static int32_t subghz_worker_thread_callback(void* context) {
 
 SubGhzWorker* subghz_worker_alloc(void) {
     SubGhzWorker* instance = calloc(1, sizeof(SubGhzWorker));
+    if(!instance) return NULL;
+
+    atomic_init(&instance->running, false);
 
     instance->thread =
         furi_thread_alloc_ex("SubGhzWorker", 3072, subghz_worker_thread_callback, instance);
@@ -122,25 +126,28 @@ void subghz_worker_set_context(SubGhzWorker* instance, void* context) {
 
 void subghz_worker_start(SubGhzWorker* instance) {
     furi_check(instance);
-    furi_check(!instance->running);
+    furi_check(!atomic_load_explicit(&instance->running, memory_order_relaxed));
 
-    instance->running = true;
+    furi_stream_buffer_reset(instance->stream);
+    instance->overrun = false;
+    instance->filter_level_duration = level_duration_make(false, 0);
+    atomic_store_explicit(&instance->running, true, memory_order_relaxed);
 
     furi_thread_start(instance->thread);
 }
 
 void subghz_worker_stop(SubGhzWorker* instance) {
     furi_check(instance);
-    furi_check(instance->running);
+    furi_check(atomic_load_explicit(&instance->running, memory_order_relaxed));
 
-    instance->running = false;
+    atomic_store_explicit(&instance->running, false, memory_order_relaxed);
 
     furi_thread_join(instance->thread);
 }
 
 bool subghz_worker_is_running(SubGhzWorker* instance) {
     furi_check(instance);
-    return instance->running;
+    return atomic_load_explicit(&instance->running, memory_order_relaxed);
 }
 
 void subghz_worker_set_filter(SubGhzWorker* instance, uint16_t timeout) {

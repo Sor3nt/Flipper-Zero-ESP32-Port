@@ -30,6 +30,7 @@ struct SubGhzFrequencyAnalyzer {
     SubGhzFrequencyAnalyzerCallback callback;
     void* context;
     SubGhzTxRx* txrx;
+    FuriMutex* state_mutex; // protects fields shared with the scan worker
     bool locked;
     SubGHzFrequencyAnalyzerFeedbackLevel
         feedback_level; // 0 - no feedback, 1 - vibro only, 2 - vibro and sound
@@ -224,6 +225,7 @@ bool subghz_frequency_analyzer_input(InputEvent* event, void* context) {
 
     bool is_press_or_repeat = (event->type == InputTypePress) || (event->type == InputTypeRepeat);
     if(is_press_or_repeat && (event->key == InputKeyLeft || event->key == InputKeyRight)) {
+        if(!instance->worker) return true;
         // Trigger setup
         float trigger_level = subghz_frequency_analyzer_worker_get_trigger_level(instance->worker);
         if(event->key == InputKeyLeft) {
@@ -241,19 +243,23 @@ bool subghz_frequency_analyzer_input(InputEvent* event, void* context) {
         FURI_LOG_D(TAG, "trigger = %.1f", (double)trigger_level);
         need_redraw = true;
     } else if(event->type == InputTypePress && event->key == InputKeyUp) {
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
         if(instance->feedback_level == SubGHzFrequencyAnalyzerFeedbackLevelAll) {
             instance->feedback_level = SubGHzFrequencyAnalyzerFeedbackLevelMute;
         } else {
             instance->feedback_level--;
         }
+        furi_mutex_release(instance->state_mutex);
 
         need_redraw = true;
     } else if(is_press_or_repeat && event->key == InputKeyDown) {
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
         instance->show_frame = instance->max_index > 0;
         if(instance->show_frame) {
             instance->selected_index = (instance->selected_index + 1) % instance->max_index;
             need_redraw = true;
         }
+        furi_mutex_release(instance->state_mutex);
     } else if(
         (event->type == InputTypeShort || event->type == InputTypeLong) &&
         event->key == InputKeyOk) {
@@ -305,17 +311,24 @@ bool subghz_frequency_analyzer_input(InputEvent* event, void* context) {
     }
 
     if(need_redraw) {
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
+        const float rssi_last = instance->rssi_last;
+        const SubGHzFrequencyAnalyzerFeedbackLevel feedback_level = instance->feedback_level;
+        const uint8_t max_index = instance->max_index;
+        const bool show_frame = instance->show_frame;
+        const uint8_t selected_index = instance->selected_index;
+        furi_mutex_release(instance->state_mutex);
         with_view_model(
             instance->view,
             SubGhzFrequencyAnalyzerModel * model,
             {
-                model->rssi_last = instance->rssi_last;
+                model->rssi_last = rssi_last;
                 model->trigger =
                     subghz_frequency_analyzer_worker_get_trigger_level(instance->worker);
-                model->feedback_level = instance->feedback_level;
-                model->max_index = instance->max_index;
-                model->show_frame = instance->show_frame;
-                model->selected_index = instance->selected_index;
+                model->feedback_level = feedback_level;
+                model->max_index = max_index;
+                model->show_frame = show_frame;
+                model->selected_index = selected_index;
             },
             true);
     }
@@ -342,13 +355,20 @@ void subghz_frequency_analyzer_pair_callback(
     float rssi,
     bool signal) {
     SubGhzFrequencyAnalyzer* instance = (SubGhzFrequencyAnalyzer*)context;
-    if(float_is_equal(rssi, 0.f) && instance->locked) {
+    furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
+    const bool was_locked = instance->locked;
+    if(float_is_equal(rssi, 0.f) && was_locked) {
+        instance->locked = false;
+        instance->show_frame = true;
+    }
+    uint8_t max_index = instance->max_index;
+    furi_mutex_release(instance->state_mutex);
+
+    if(float_is_equal(rssi, 0.f) && was_locked) {
         if(instance->callback) {
             instance->callback(SubGhzCustomEventSceneAnalyzerUnlock, instance->context);
         }
         //update history
-        instance->show_frame = true;
-        uint8_t max_index = instance->max_index;
         with_view_model(
             instance->view,
             SubGhzFrequencyAnalyzerModel * model,
@@ -406,38 +426,50 @@ void subghz_frequency_analyzer_pair_callback(
                 }
             },
             false);
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
         instance->max_index = max_index;
-    } else if(!float_is_equal(rssi, 0.f) && !instance->locked) {
+        furi_mutex_release(instance->state_mutex);
+    } else if(!float_is_equal(rssi, 0.f) && !was_locked) {
         // There is some signal
         FURI_LOG_I(TAG, "rssi = %.2f, frequency = %ld Hz", (double)rssi, frequency);
         frequency = round_int(frequency, 3); // Round 299999990Hz to 300000000Hz
 
         // Triggered!
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
+        instance->locked = true;
         instance->rssi_last = rssi;
+        furi_mutex_release(instance->state_mutex);
         if(instance->callback) {
             instance->callback(SubGhzCustomEventSceneAnalyzerLock, instance->context);
         }
     }
 
     // Update values
+    furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
     if(rssi >= instance->rssi_last && frequency != 0) {
         instance->rssi_last = rssi;
     }
 
     instance->locked = !float_is_equal(rssi, 0.f);
+    const float rssi_last = instance->rssi_last;
+    const SubGHzFrequencyAnalyzerFeedbackLevel feedback_level = instance->feedback_level;
+    max_index = instance->max_index;
+    const bool show_frame = instance->show_frame;
+    const uint8_t selected_index = instance->selected_index;
+    furi_mutex_release(instance->state_mutex);
     with_view_model(
         instance->view,
         SubGhzFrequencyAnalyzerModel * model,
         {
             model->rssi = rssi;
-            model->rssi_last = instance->rssi_last;
+            model->rssi_last = rssi_last;
             model->frequency = frequency;
             model->signal = signal;
             model->trigger = subghz_frequency_analyzer_worker_get_trigger_level(instance->worker);
-            model->feedback_level = instance->feedback_level;
-            model->max_index = instance->max_index;
-            model->show_frame = instance->show_frame;
-            model->selected_index = instance->selected_index;
+            model->feedback_level = feedback_level;
+            model->max_index = max_index;
+            model->show_frame = show_frame;
+            model->selected_index = selected_index;
         },
         true);
 }
@@ -448,18 +480,20 @@ void subghz_frequency_analyzer_enter(void* context) {
 
     //Start worker
     instance->worker = subghz_frequency_analyzer_worker_alloc(instance->context);
+    if(instance->worker) {
+        subghz_frequency_analyzer_worker_set_pair_callback(
+            instance->worker,
+            (SubGhzFrequencyAnalyzerWorkerPairCallback)subghz_frequency_analyzer_pair_callback,
+            instance);
+    }
 
-    subghz_frequency_analyzer_worker_set_pair_callback(
-        instance->worker,
-        (SubGhzFrequencyAnalyzerWorkerPairCallback)subghz_frequency_analyzer_pair_callback,
-        instance);
-
-    subghz_frequency_analyzer_worker_start(instance->worker);
-
+    furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
     instance->rssi_last = 0;
+    instance->locked = false;
     instance->selected_index = 0;
     instance->max_index = 0;
     instance->show_frame = false;
+    furi_mutex_release(instance->state_mutex);
     //subghz_frequency_analyzer_worker_set_trigger_level(instance->worker, RSSI_MIN);
 
     with_view_model(
@@ -486,6 +520,16 @@ void subghz_frequency_analyzer_enter(void* context) {
                 (subghz_txrx_radio_device_get(instance->txrx) != SubGhzRadioDeviceTypeInternal);
         },
         true);
+
+    // Publish a fully initialized view model before the worker can call back.
+    if(instance->worker) {
+        subghz_frequency_analyzer_worker_start(instance->worker);
+    } else {
+        FURI_LOG_E(TAG, "Unable to allocate Frequency Analyzer worker");
+        if(instance->callback) {
+            instance->callback(SubGhzCustomEventViewFreqAnalStartError, instance->context);
+        }
+    }
 }
 
 void subghz_frequency_analyzer_exit(void* context) {
@@ -493,21 +537,34 @@ void subghz_frequency_analyzer_exit(void* context) {
     SubGhzFrequencyAnalyzer* instance = (SubGhzFrequencyAnalyzer*)context;
 
     // Stop worker
-    if(subghz_frequency_analyzer_worker_is_running(instance->worker)) {
-        subghz_frequency_analyzer_worker_stop(instance->worker);
+    if(instance->worker) {
+        if(subghz_frequency_analyzer_worker_is_running(instance->worker)) {
+            subghz_frequency_analyzer_worker_stop(instance->worker);
+        }
+        subghz_frequency_analyzer_worker_free(instance->worker);
+        instance->worker = NULL;
     }
-    subghz_frequency_analyzer_worker_free(instance->worker);
 
-    furi_record_close(RECORD_NOTIFICATION);
 }
 
 SubGhzFrequencyAnalyzer* subghz_frequency_analyzer_alloc(SubGhzTxRx* txrx) {
-    SubGhzFrequencyAnalyzer* instance = malloc(sizeof(SubGhzFrequencyAnalyzer));
+    SubGhzFrequencyAnalyzer* instance = calloc(1, sizeof(SubGhzFrequencyAnalyzer));
+    if(!instance) return NULL;
+    instance->state_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    if(!instance->state_mutex) {
+        free(instance);
+        return NULL;
+    }
 
     instance->feedback_level = SubGHzFrequencyAnalyzerFeedbackLevelMute;
 
     // View allocation and configuration
     instance->view = view_alloc();
+    if(!instance->view) {
+        furi_mutex_free(instance->state_mutex);
+        free(instance);
+        return NULL;
+    }
     view_allocate_model(
         instance->view, ViewModelTypeLocking, sizeof(SubGhzFrequencyAnalyzerModel));
     view_set_context(instance->view, instance);
@@ -522,9 +579,10 @@ SubGhzFrequencyAnalyzer* subghz_frequency_analyzer_alloc(SubGhzTxRx* txrx) {
 }
 
 void subghz_frequency_analyzer_free(SubGhzFrequencyAnalyzer* instance) {
-    furi_assert(instance);
+    if(!instance) return;
 
     view_free(instance->view);
+    furi_mutex_free(instance->state_mutex);
     free(instance);
 }
 
@@ -551,18 +609,30 @@ SubGHzFrequencyAnalyzerFeedbackLevel subghz_frequency_analyzer_feedback_level(
     bool update) {
     furi_assert(instance);
     if(update) {
-        instance->feedback_level = level;
+        SubGHzFrequencyAnalyzerFeedbackLevel requested = level;
+        if(requested < SubGHzFrequencyAnalyzerFeedbackLevelAll ||
+           requested > SubGHzFrequencyAnalyzerFeedbackLevelMute) {
+            requested = SubGHzFrequencyAnalyzerFeedbackLevelMute;
+        }
+        furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
+        instance->feedback_level = requested;
+        furi_mutex_release(instance->state_mutex);
         with_view_model(
             instance->view,
             SubGhzFrequencyAnalyzerModel * model,
-            { model->feedback_level = instance->feedback_level; },
+            { model->feedback_level = requested; },
             true);
     }
 
-    return instance->feedback_level;
+    furi_mutex_acquire(instance->state_mutex, FuriWaitForever);
+    SubGHzFrequencyAnalyzerFeedbackLevel feedback_level = instance->feedback_level;
+    furi_mutex_release(instance->state_mutex);
+    return feedback_level;
 }
 
 float subghz_frequency_analyzer_get_trigger_level(SubGhzFrequencyAnalyzer* instance) {
     furi_assert(instance);
-    return subghz_frequency_analyzer_worker_get_trigger_level(instance->worker);
+    return instance->worker ?
+               subghz_frequency_analyzer_worker_get_trigger_level(instance->worker) :
+               RSSI_MIN;
 }

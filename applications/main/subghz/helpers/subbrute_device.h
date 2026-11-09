@@ -53,7 +53,6 @@ typedef struct {
 
     /** @see @c SubGhz service for more info */
     SubGhzReceiver* receiver; /**< Receiver */
-    SubGhzProtocolDecoderBase* decoder_result; /**< Decoder result */
     SubGhzEnvironment* environment; /**< Environment */
     const SubGhzDevice* radio_device; /**< Radio device */
 

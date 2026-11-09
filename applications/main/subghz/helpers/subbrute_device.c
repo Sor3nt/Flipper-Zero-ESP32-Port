@@ -13,7 +13,6 @@ SubBruteDevice* subbrute_device_alloc(const SubGhzDevice* radio_device) {
 
     instance->protocol_info = NULL;
     instance->file_protocol_info = NULL;
-    instance->decoder_result = NULL;
     instance->receiver = NULL;
     instance->environment = subghz_environment_alloc();
     subghz_environment_set_protocol_registry(
@@ -28,13 +27,6 @@ SubBruteDevice* subbrute_device_alloc(const SubGhzDevice* radio_device) {
 
 void subbrute_device_free(SubBruteDevice* instance) {
     furi_assert(instance);
-
-    // I don't know how to free this
-    // instance->decoder_result = NULL;
-    if(instance->decoder_result != NULL) {
-        free(instance->decoder_result);
-        instance->decoder_result = NULL;
-    }
 
     if(instance->receiver != NULL) {
         subghz_receiver_free(instance->receiver);
@@ -155,7 +147,8 @@ SubBruteFileResult subbrute_device_attack_set(
     instance->receiver = subghz_receiver_alloc_init(instance->environment);
     subghz_receiver_set_filter(instance->receiver, SubGhzProtocolFlag_Decodable);
     // furi_hal_subghz_reset(); // TODO Is this necessary?
-
+    // Decoder bases belong to the receiver's slots, so this result is borrowed.
+    SubGhzProtocolDecoderBase* decoder_result = NULL;
     uint8_t protocol_check_result = SubBruteFileResultProtocolNotFound;
 #ifdef FURI_DEBUG
     uint8_t bits;
@@ -165,11 +158,10 @@ SubBruteFileResult subbrute_device_attack_set(
     SubBruteFileProtocol file;
 #endif
     if(type != SubBruteAttackLoadFile) {
-        instance->decoder_result = subghz_receiver_search_decoder_base_by_name(
+        decoder_result = subghz_receiver_search_decoder_base_by_name(
             instance->receiver, subbrute_protocol_file(instance->protocol_info->file));
 
-        if(!instance->decoder_result ||
-           instance->decoder_result->protocol->type == SubGhzProtocolTypeDynamic) {
+        if(!decoder_result || decoder_result->protocol->type == SubGhzProtocolTypeDynamic) {
             FURI_LOG_E(TAG, "Can't load SubGhzProtocolDecoderBase in phase non-file decoder set");
         } else {
             protocol_check_result = SubBruteFileResultOk;
@@ -244,6 +236,8 @@ uint8_t subbrute_device_load_from_file(SubBruteDevice* instance, const char* fil
     instance->receiver = subghz_receiver_alloc_init(instance->environment);
     subghz_receiver_set_filter(instance->receiver, SubGhzProtocolFlag_Decodable);
     // furi_hal_subghz_reset(); // TODO Is this necessary?
+    // This pointer is borrowed from the receiver and must not outlive it.
+    SubGhzProtocolDecoderBase* decoder_result = NULL;
 
     do {
         if(!flipper_format_file_open_existing(fff_data_file, file_path)) {
@@ -301,23 +295,23 @@ uint8_t subbrute_device_load_from_file(SubBruteDevice* instance, const char* fil
         FURI_LOG_D(TAG, "Protocol: %s", protocol_file);
 #endif
 
-        instance->decoder_result = subghz_receiver_search_decoder_base_by_name(
+        decoder_result = subghz_receiver_search_decoder_base_by_name(
             instance->receiver, furi_string_get_cstr(temp_str));
 
-        if((!instance->decoder_result) || (strcmp(protocol_file, "RAW") == 0) ||
+        if((!decoder_result) || (strcmp(protocol_file, "RAW") == 0) ||
            (strcmp(protocol_file, "Unknown") == 0)) {
             FURI_LOG_E(TAG, error_device_protocol_unsupported);
             result = SubBruteFileResultProtocolNotSupported;
             break;
         }
 
-        if(instance->decoder_result->protocol->type == SubGhzProtocolTypeDynamic) {
+        if(decoder_result->protocol->type == SubGhzProtocolTypeDynamic) {
             FURI_LOG_E(TAG, "Protocol is dynamic - not supported");
             result = SubBruteFileResultDynamicProtocolNotValid;
             break;
         }
 #ifdef FURI_DEBUG
-        FURI_LOG_D(TAG, "Decoder: %s", instance->decoder_result->protocol->name);
+        FURI_LOG_D(TAG, "Decoder: %s", decoder_result->protocol->name);
 #endif
 
         // Bit
@@ -378,7 +372,6 @@ uint8_t subbrute_device_load_from_file(SubBruteDevice* instance, const char* fil
 
     subghz_receiver_free(instance->receiver);
 
-    instance->decoder_result = NULL;
     instance->receiver = NULL;
 
     if(result == SubBruteFileResultOk) {
