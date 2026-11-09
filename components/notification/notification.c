@@ -40,6 +40,14 @@ typedef struct {
 } NotificationAppMessage;
 
 static bool lcd_backlight_is_on = false;
+static void notification_post_led_check(NotificationApp* app);
+static void notification_led_off_timer_rearm(NotificationApp* app);
+
+/* The board buzzer can disturb a WS2812 frame while it is sounding. Re-send
+ * the staged frame after the speaker stops to restore the visible effect. */
+static void notification_heal_ws2812(void) {
+    furi_hal_light_refresh();
+}
 
 static uint8_t notification_clamp_u8(float value) {
     if(value <= 0.0f) return 0;
@@ -248,6 +256,7 @@ static void notification_process_notification_message(
             if(furi_hal_speaker_is_mine()) {
                 furi_hal_speaker_stop();
                 furi_hal_speaker_release();
+                notification_heal_ws2812();
             }
             break;
         case NotificationMessageTypeDelay:
@@ -310,11 +319,9 @@ static void input_event_callback(const void* value, void* context) {
      * darkened it, re-light fully (resets phase + restarts the effect). If it's
      * still lit, only re-arm the idle-off timer — restarting here would reset a
      * running animation back to frame 0 on every encoder tick. */
-    if(app->led_idle_off) {
-        notification_apply_led_color(app);
-    } else if(app->led_off_timer && app->settings.led_off_delay_ms > 0) {
-        furi_timer_start(app->led_off_timer, furi_ms_to_ticks(app->settings.led_off_delay_ms));
-    }
+    /* Keep LED updates out of the input callback's execution context. */
+    __atomic_store_n(&app->led_rearm_pending, true, __ATOMIC_RELEASE);
+    notification_post_led_check(app);
 }
 
 static void notification_message_send(
@@ -553,8 +560,8 @@ static void render_wipe(NotificationApp* app) {
 static void notification_led_effect_tick(void* context) {
     furi_assert(context);
     NotificationApp* app = context;
-    /* Ring kept dark: frames would be dropped anyway. The notification
-     * thread stops this timer (see notification_led_post_process). */
+    /* Ring kept dark: frames would be dropped anyway. The effect task is
+     * stopped while the notification service handles a suspend transition. */
     if(furi_hal_light_is_ws2812_suspended()) return;
     led_effect_phase++;
     switch(app->settings.led_effect) {
@@ -569,20 +576,99 @@ static void notification_led_effect_tick(void* context) {
     }
 }
 
-/* Push the current settings to the WS2812 ring. Static effects (Solid/Off)
- * push once and stop the effect timer. Animated effects start the timer.
- * Also (re)starts the idle-off timer. */
+/* Animated effects use a task instead of the FreeRTOS timer daemon. The daemon
+ * runs at priority 1 and can be starved by the radio/display workers. */
+#define LED_EFFECT_FLAG_UPDATE (1UL << 0)
+#define LED_EFFECT_THREAD_STACK 3072
+
+static bool notification_led_effect_is_running(NotificationApp* app) {
+    return __atomic_load_n(&app->led_effect_period, __ATOMIC_ACQUIRE) != 0;
+}
+
+/* Stop only after any frame already in progress has finished. */
+static void notification_led_effect_stop(NotificationApp* app) {
+    if(!app->led_effect_thread) return;
+    __atomic_store_n(&app->led_effect_period, 0, __ATOMIC_RELEASE);
+    furi_check(furi_mutex_acquire(app->led_effect_mutex, FuriWaitForever) == FuriStatusOk);
+    furi_mutex_release(app->led_effect_mutex);
+    (void)furi_thread_flags_set(furi_thread_get_id(app->led_effect_thread), LED_EFFECT_FLAG_UPDATE);
+}
+
+static void notification_led_effect_start(NotificationApp* app, uint32_t period_ticks) {
+    if(!app->led_effect_thread) return;
+    if(period_ticks == 0) period_ticks = 1;
+    __atomic_store_n(&app->led_effect_period, period_ticks, __ATOMIC_RELEASE);
+    (void)furi_thread_flags_set(furi_thread_get_id(app->led_effect_thread), LED_EFFECT_FLAG_UPDATE);
+}
+
+static void notification_led_off_timer_rearm(NotificationApp* app) {
+    uint32_t delay = furi_ms_to_ticks(app->settings.led_off_delay_ms);
+    if(delay == 0) delay = 1;
+
+    __atomic_store_n(&app->led_off_deadline, furi_get_tick() + delay, __ATOMIC_RELEASE);
+    __atomic_store_n(&app->led_off_deadline_valid, true, __ATOMIC_RELEASE);
+    if(furi_timer_start(app->led_off_timer, delay) != FuriStatusOk) {
+        __atomic_store_n(&app->led_off_deadline_valid, false, __ATOMIC_RELEASE);
+    }
+}
+
+/* Keep a fixed frame cadence. If a frame is missed, skip it instead of
+ * rendering several frames back-to-back and visibly catching up. */
+static int32_t notification_led_effect_thread(void* context) {
+    NotificationApp* app = context;
+    bool scheduled = false;
+    uint32_t next_frame = 0;
+
+    for(;;) {
+        const uint32_t period = __atomic_load_n(&app->led_effect_period, __ATOMIC_ACQUIRE);
+        uint32_t timeout = FuriWaitForever;
+        if(period == 0) {
+            scheduled = false;
+        } else {
+            uint32_t now = furi_get_tick();
+            if(!scheduled) {
+                next_frame = now + period;
+                scheduled = true;
+            }
+            if((int32_t)(next_frame - now) <= 0) {
+                furi_check(
+                    furi_mutex_acquire(app->led_effect_mutex, FuriWaitForever) == FuriStatusOk);
+                if(notification_led_effect_is_running(app)) notification_led_effect_tick(app);
+                furi_mutex_release(app->led_effect_mutex);
+
+                next_frame += period;
+                now = furi_get_tick();
+                if((int32_t)(next_frame - now) <= 0) next_frame = now + period;
+            }
+            timeout = next_frame - now;
+        }
+
+        const uint32_t flags =
+            furi_thread_flags_wait(LED_EFFECT_FLAG_UPDATE, FuriFlagWaitAny, timeout);
+        if(!(flags & FuriFlagError)) scheduled = false;
+    }
+    return 0;
+}
+
+/* Serialize settings/input/power updates so a frame-zero render cannot
+ * interleave with the periodic effect frame. */
+static void notification_apply_led_color_locked(NotificationApp* app);
+
 void notification_apply_led_color(NotificationApp* app) {
     if(!app) return;
-    /* Always stop the effect timer; we'll restart for animated effects. */
-    if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-        furi_timer_stop(app->led_effect_timer);
-    }
+    furi_check(furi_mutex_acquire(app->led_apply_mutex, FuriWaitForever) == FuriStatusOk);
+    notification_apply_led_color_locked(app);
+    furi_mutex_release(app->led_apply_mutex);
+}
+
+static void notification_apply_led_color_locked(NotificationApp* app) {
+    /* Always stop the effect before changing the strip or resetting its phase. */
+    notification_led_effect_stop(app);
+
     /* Ring kept dark (Auto Off LED USB / Auto Light Sleep): nothing to show
      * now. The suspend callback re-applies the colour once it may light. */
     if(furi_hal_light_is_ws2812_suspended()) return;
-    /* About to re-light the ring — clear the idle-off marker. */
-    app->led_idle_off = false;
+    __atomic_store_n(&app->led_idle_off, false, __ATOMIC_RELEASE);
 
     LedEffect eff = (LedEffect)app->settings.led_effect;
     uint8_t r, g, b;
@@ -598,11 +684,11 @@ void notification_apply_led_color(NotificationApp* app) {
         case LedEffectSparkle:
         case LedEffectWipe:
             led_effect_phase = 0;
-            notification_led_effect_tick(app);          /* render frame 0 immediately */
-            if(app->led_effect_timer) {
+            notification_led_effect_tick(app); /* render frame 0 immediately */
+            {
                 uint32_t tick = app->settings.led_speed_tick_ms;
-                if(tick == 0) tick = LED_EFFECT_TICK_MS; /* sane fallback */
-                furi_timer_start(app->led_effect_timer, furi_ms_to_ticks(tick));
+                if(tick == 0) tick = LED_EFFECT_TICK_MS;
+                notification_led_effect_start(app, furi_ms_to_ticks(tick));
             }
             break;
         case LedEffectSolid:
@@ -612,27 +698,32 @@ void notification_apply_led_color(NotificationApp* app) {
             break;
     }
 
-    /* Re-arm idle-off timer */
+    /* Re-arm idle-off timer. */
     if(app->led_off_timer) {
         if(app->settings.led_off_delay_ms > 0) {
-            furi_timer_start(app->led_off_timer, furi_ms_to_ticks(app->settings.led_off_delay_ms));
-        } else if(furi_timer_is_running(app->led_off_timer)) {
-            furi_timer_stop(app->led_off_timer);
+            notification_led_off_timer_rearm(app);
+        } else {
+            __atomic_store_n(&app->led_off_deadline_valid, false, __ATOMIC_RELEASE);
+            if(furi_timer_is_running(app->led_off_timer)) furi_timer_stop(app->led_off_timer);
         }
     }
 }
 
-/* Idle-off timer callback: dark-out the WS2812 ring AND stop any running
- * effect. The next user input event re-applies color/effect via
- * notification_apply_led_color. */
+static bool notification_led_off_deadline_elapsed(NotificationApp* app) {
+    if(!__atomic_load_n(&app->led_off_deadline_valid, __ATOMIC_ACQUIRE)) return false;
+    const uint32_t deadline = __atomic_load_n(&app->led_off_deadline, __ATOMIC_ACQUIRE);
+    return (int32_t)(furi_get_tick() - deadline) >= 0;
+}
+
+/* Timer callbacks run on the shared FreeRTOS timer daemon. Defer WS2812 work
+ * to NotificationSrv so this callback never waits on a mutex or RMT transfer. */
 static void notification_led_off_timer_cb(void* context) {
     furi_assert(context);
     NotificationApp* app = context;
-    if(app->led_effect_timer && furi_timer_is_running(app->led_effect_timer)) {
-        furi_timer_stop(app->led_effect_timer);
+    if(notification_led_off_deadline_elapsed(app)) {
+        __atomic_store_n(&app->led_off_pending, true, __ATOMIC_RELEASE);
+        notification_post_led_check(app);
     }
-    furi_hal_light_set_rgb_all(0, 0, 0);
-    app->led_idle_off = true;
 }
 
 /* ─────────────────────────── UI color (LCD foreground) ─────────────────────
@@ -753,6 +844,32 @@ static void notification_led_suspend_callback(void* context, bool suspended) {
     notification_post_led_check(app);
 }
 
+static void notification_led_off_apply_pending(NotificationApp* app) {
+    if(!__atomic_exchange_n(&app->led_off_pending, false, __ATOMIC_ACQ_REL)) return;
+    if(!notification_led_off_deadline_elapsed(app)) return;
+
+    furi_check(furi_mutex_acquire(app->led_apply_mutex, FuriWaitForever) == FuriStatusOk);
+    if(notification_led_off_deadline_elapsed(app)) {
+        notification_led_effect_stop(app);
+        furi_hal_light_set_rgb_all(0, 0, 0);
+        __atomic_store_n(&app->led_off_deadline_valid, false, __ATOMIC_RELEASE);
+        __atomic_store_n(&app->led_idle_off, true, __ATOMIC_RELEASE);
+    }
+    furi_mutex_release(app->led_apply_mutex);
+}
+
+static void notification_led_rearm_after_input(NotificationApp* app) {
+    if(!__atomic_exchange_n(&app->led_rearm_pending, false, __ATOMIC_ACQ_REL)) return;
+
+    furi_check(furi_mutex_acquire(app->led_apply_mutex, FuriWaitForever) == FuriStatusOk);
+    if(__atomic_load_n(&app->led_idle_off, __ATOMIC_ACQUIRE)) {
+        notification_apply_led_color_locked(app);
+    } else if(app->led_off_timer && app->settings.led_off_delay_ms > 0) {
+        notification_led_off_timer_rearm(app);
+    }
+    furi_mutex_release(app->led_apply_mutex);
+}
+
 void notification_set_usb_led_auto_off(NotificationApp* app, bool enabled) {
     furi_check(app);
     __atomic_store_n(&app->led_usb_auto_off, enabled, __ATOMIC_RELEASE);
@@ -784,15 +901,16 @@ static void notification_led_post_process(NotificationApp* app) {
 
     if(__atomic_exchange_n(&app->led_suspend_changed, false, __ATOMIC_ACQ_REL)) {
         if(furi_hal_light_is_ws2812_suspended()) {
-            /* Dark: stop the effect timer so it no longer wakes the CPU. */
-            if(furi_timer_is_running(app->led_effect_timer)) {
-                furi_timer_stop(app->led_effect_timer);
-            }
-        } else if(!app->led_idle_off) {
+            /* Dark: park the effect task so it no longer wakes the CPU. */
+            notification_led_effect_stop(app);
+        } else if(!__atomic_load_n(&app->led_idle_off, __ATOMIC_ACQUIRE)) {
             /* May light again: restore colour / restart the effect. */
             notification_apply_led_color(app);
         }
     }
+
+    notification_led_off_apply_pending(app);
+    notification_led_rearm_after_input(app);
 }
 
 static NotificationApp* notification_app_alloc(void) {
@@ -803,14 +921,27 @@ static NotificationApp* notification_app_alloc(void) {
     app->night_shift_timer = furi_timer_alloc(night_shift_timer_callback, FuriTimerTypePeriodic, app);
     app->night_shift_demo_timer = furi_timer_alloc(night_shift_demo_timer_callback, FuriTimerTypeOnce, app);
     app->led_off_timer = furi_timer_alloc(notification_led_off_timer_cb, FuriTimerTypeOnce, app);
-    app->led_effect_timer =
-        furi_timer_alloc(notification_led_effect_tick, FuriTimerTypePeriodic, app);
+    app->led_effect_period = 0;
+    app->led_effect_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    app->led_apply_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    app->led_effect_thread = NULL;
+    if(furi_hal_light_pixel_count() > 0) {
+        app->led_effect_thread =
+            furi_thread_alloc_ex("LedEffect", LED_EFFECT_THREAD_STACK, notification_led_effect_thread, app);
+        furi_thread_set_priority(app->led_effect_thread, FuriThreadPriorityNormal);
+        furi_thread_start(app->led_effect_thread);
+    }
     app->ui_spectrum_timer =
         furi_timer_alloc(notification_ui_spectrum_tick, FuriTimerTypePeriodic, app);
     app->led_usb_check_timer =
         furi_timer_alloc(notification_led_usb_check_timer_cb, FuriTimerTypePeriodic, app);
     app->led_usb_auto_off = false;
     app->led_suspend_changed = false;
+    __atomic_store_n(&app->led_idle_off, false, __ATOMIC_RELEASE);
+    app->led_off_deadline = 0;
+    app->led_off_deadline_valid = false;
+    app->led_off_pending = false;
+    app->led_rearm_pending = false;
 
     app->settings.display_brightness = 1.0f;
     app->settings.display_off_delay_ms = 30000;
