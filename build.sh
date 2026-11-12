@@ -136,7 +136,7 @@ fi
 SDKCONFIG_OPT=("-DSDKCONFIG=${BUILD_DIR}/sdkconfig")
 
 # Set target (creates/updates sdkconfig)
-idf.py -B "${BUILD_DIR}" "${SDKCONFIG_OPT[@]}" "${BOARD_DEFAULTS_OPTS[@]}" set-target "${TARGET}"
+idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDKCONFIG_OPT[@]}" "${BOARD_DEFAULTS_OPTS[@]}" set-target "${TARGET}"
 
 # Construct command
 COMMANDS=("reconfigure" "build")
