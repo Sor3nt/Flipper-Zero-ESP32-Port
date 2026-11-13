@@ -293,6 +293,33 @@ void furi_hal_init(void) {
     /* Must run before the SD card and the display bring up SPI2. */
     furi_hal_nfc_early_probe();
 #endif
+#if defined(BOARD_EARLY_SD_INIT) && defined(BOARD_NFC_USE_ST25R3916)
+    /* Shared-SPI boards (Fatal Core): the ST25R3916 hangs off the same SPI2 bus
+     * as the SD card, the LCD and the radios, and has no dedicated reset line,
+     * so it boots in whatever state the previous run left it in. Bring the
+     * front-end up while the bus is still quiet -- before the SD card enters
+     * SPI mode and the LCD/radios start clocking. Doing it afterwards leaves
+     * the chip in the wedged "everything reads 0x00" state seen on this board.
+     * furi_hal_nfc_init() is one-shot, so the generic call below is skipped. */
+
+    /* Bring the shared bus up first (no radio traffic is sent): the bus init
+     * inside the NFC driver would otherwise install its idle pull-up on MISO
+     * and undo the pull-down requested below. */
+    furi_hal_spi_bus_handle_init(&furi_hal_spi_bus_handle_subghz);
+
+    /* Hold MISO low while the front-end is woken and probed, so the line has a
+     * defined level instead of floating while nothing drives it. The driver
+     * gives the chip up to 200 ms to answer and leaves as soon as it does. */
+    gpio_set_pull_mode((gpio_num_t)BOARD_PIN_SD_MISO, GPIO_PULLDOWN_ONLY);
+
+    furi_hal_nfc_init();
+
+    /* Release MISO once the front-end is up: let the line float instead of
+     * leaving our pull-down behind. The chip is probed and idle by now, and
+     * the rest of the bus (SD, LCD, radios) must not fight a forced level. */
+    gpio_set_pull_mode((gpio_num_t)BOARD_PIN_SD_MISO, GPIO_FLOATING);
+#define FURI_HAL_NFC_INITIALIZED 1
+#endif
 #if CONFIG_T_EMBED_PLUS_SD_RECOVERY || defined(BOARD_EARLY_SD_INIT)
     /* Adding the radio handle initializes SPI2 but sends no radio commands.
      * The SD card must enter SPI mode before either radio or LCD traffic.
@@ -308,7 +335,9 @@ void furi_hal_init(void) {
     furi_hal_light_init();
     furi_hal_display_init();
     furi_hal_speaker_init();
+#ifndef FURI_HAL_NFC_INITIALIZED
     furi_hal_nfc_init();
+#endif
     ESP_LOGI(TAG, "Init complete");
 
 #ifdef BOARD_HEARTBEAT_DEBUG
