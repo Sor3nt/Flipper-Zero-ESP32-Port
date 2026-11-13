@@ -53,15 +53,6 @@ static uint8_t ws2812_suspended = 0; /* FuriHalLightSuspend bits */
 static bool ws2812_shutdown = false;
 static FuriHalLightSuspendCallback ws2812_suspend_callback = NULL;
 static void* ws2812_suspend_context = NULL;
-/* DMA avoids a refill interrupt in the middle of each WS2812 frame. Keep a
- * complete frame in each RMT DMA half; the channel buffer is split in two. */
-static bool ws2812_use_dma = true;
-#define WS2812_RMT_SYMBOLS_PER_PIXEL 24U
-#define WS2812_RMT_SYMBOLS_PER_BLOCK 48U
-#define WS2812_DMA_MEM_BLOCK_SYMBOLS \
-    (2U * (((BOARD_WS2812_LED_COUNT * WS2812_RMT_SYMBOLS_PER_PIXEL + 1U + \
-             WS2812_RMT_SYMBOLS_PER_BLOCK - 1U) / WS2812_RMT_SYMBOLS_PER_BLOCK) * \
-           WS2812_RMT_SYMBOLS_PER_BLOCK))
 
 static void furi_hal_light_lock(void) {
     if(light_mutex) xSemaphoreTake(light_mutex, portMAX_DELAY);
@@ -73,16 +64,6 @@ static void furi_hal_light_unlock(void) {
 
 static bool furi_hal_light_ws2812_writable(void) {
     return led_strip && !ws2812_suspended && !ws2812_shutdown;
-}
-
-/* Caller holds light_mutex. */
-static esp_err_t furi_hal_light_ws2812_set_pixels(uint8_t r, uint8_t g, uint8_t b) {
-    if(!led_strip) return ESP_ERR_INVALID_STATE;
-    for(uint16_t i = 0; i < BOARD_WS2812_LED_COUNT; i++) {
-        const esp_err_t err = led_strip_set_pixel(led_strip, i, r, g, b);
-        if(err != ESP_OK) return err;
-    }
-    return ESP_OK;
 }
 #endif
 
@@ -96,50 +77,13 @@ static uint32_t furi_hal_light_backlight_duty_from_value(uint8_t value) {
 }
 
 #ifdef BOARD_PIN_WS2812_DATA
-static void furi_hal_light_ws2812_init(void);
-
-/* Caller holds light_mutex. Recover once from a failed transmission, falling
- * back to interrupt-fed RMT if DMA failed at runtime. */
-static bool furi_hal_light_ws2812_refresh(void) {
-    if(!led_strip) return false;
-
-    esp_err_t err = led_strip_refresh(led_strip);
-    if(err == ESP_OK) return true;
-
-    ESP_LOGW(TAG, "WS2812 refresh failed: %s; recreating RMT channel",
-        esp_err_to_name(err));
-    const esp_err_t del_err = led_strip_del(led_strip);
-    if(del_err != ESP_OK) {
-        ESP_LOGE(TAG, "WS2812 RMT channel recovery failed: %s", esp_err_to_name(del_err));
-        return false;
-    }
-
-    led_strip = NULL;
-    ws2812_use_dma = false;
-    furi_hal_light_ws2812_init();
-    if(!led_strip) return false;
-
-    const uint8_t r = ws2812_suspended ? 0 : led_r;
-    const uint8_t g = ws2812_suspended ? 0 : led_g;
-    const uint8_t b = ws2812_suspended ? 0 : led_b;
-    err = furi_hal_light_ws2812_set_pixels(r, g, b);
-    if(err == ESP_OK) err = led_strip_refresh(led_strip);
-    if(err != ESP_OK) {
-        ESP_LOGW(TAG, "WS2812 refresh retry failed: %s", esp_err_to_name(err));
-        return false;
-    }
-    return true;
-}
-
 /* Caller holds light_mutex. */
 static void furi_hal_light_ws2812_push(void) {
     if(!furi_hal_light_ws2812_writable()) return;
-    const esp_err_t err = furi_hal_light_ws2812_set_pixels(led_r, led_g, led_b);
-    if(err != ESP_OK) {
-        ESP_LOGW(TAG, "WS2812 pixel update failed: %s", esp_err_to_name(err));
-        return;
+    for(uint16_t i = 0; i < BOARD_WS2812_LED_COUNT; i++) {
+        led_strip_set_pixel(led_strip, i, led_r, led_g, led_b);
     }
-    (void)furi_hal_light_ws2812_refresh();
+    led_strip_refresh(led_strip);
 }
 
 static void furi_hal_light_ws2812_init(void) {
@@ -153,32 +97,20 @@ static void furi_hal_light_ws2812_init(void) {
     led_strip_rmt_config_t rmt_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = 10 * 1000 * 1000,  /* 10 MHz */
-        .mem_block_symbols = ws2812_use_dma ? WS2812_DMA_MEM_BLOCK_SYMBOLS : 0,
-        .flags = { .with_dma = ws2812_use_dma },
+        .mem_block_symbols = 0,             /* default */
+        .flags = { .with_dma = false },
     };
     esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip);
-    if(err != ESP_OK && ws2812_use_dma) {
-        ESP_LOGW(TAG, "WS2812 RMT DMA unavailable (%s); using interrupt-fed RMT",
-            esp_err_to_name(err));
-        ws2812_use_dma = false;
-        rmt_config.mem_block_symbols = 0;
-        rmt_config.flags.with_dma = false;
-        err = led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip);
-    }
     if(err != ESP_OK) {
         ESP_LOGE(TAG, "WS2812 RMT init failed: %s", esp_err_to_name(err));
         led_strip = NULL;
         return;
     }
-    err = led_strip_clear(led_strip);
-    if(err != ESP_OK) {
-        ESP_LOGW(TAG, "WS2812 initial clear failed: %s", esp_err_to_name(err));
-    }
+    led_strip_clear(led_strip);
     /* Strip starts dark; notification service will push the saved
      * settings.led_color once it's loaded the user's preferences. */
-    ESP_LOGI(TAG, "WS2812 ring (%d LEDs) on GPIO%d initialized (%s)",
-        BOARD_WS2812_LED_COUNT, BOARD_PIN_WS2812_DATA,
-        ws2812_use_dma ? "RMT DMA" : "RMT interrupt-fed");
+    ESP_LOGI(TAG, "WS2812 ring (%d LEDs) on GPIO%d initialized",
+        BOARD_WS2812_LED_COUNT, BOARD_PIN_WS2812_DATA);
 }
 #endif
 
@@ -204,14 +136,17 @@ void furi_hal_light_init(void) {
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
 
-    /* Configure LEDC channel on backlight pin */
+    /* Configure LEDC channel on backlight pin. Start dark: the panel shows
+     * whatever the previous run left in its GRAM (or random noise right after
+     * reset), so furi_hal_display_init() clears it to black first and only
+     * then lights the backlight. */
     ledc_channel_config_t channel_conf = {
         .speed_mode = BACKLIGHT_LEDC_SPEED,
         .channel = BACKLIGHT_LEDC_CHANNEL,
         .timer_sel = BACKLIGHT_LEDC_TIMER,
         .intr_type = LEDC_INTR_DISABLE,
         .gpio_num = gpio_lcd_bl.pin,
-        .duty = furi_hal_light_backlight_duty_from_value(255),
+        .duty = furi_hal_light_backlight_duty_from_value(0),
         .hpoint = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
@@ -238,15 +173,12 @@ void furi_hal_light_set(Light light, uint8_t value) {
     }
 #ifdef BOARD_PIN_WS2812_DATA
     bool rgb_changed = false;
-    if(light & (LightRed | LightGreen | LightBlue)) rgb_changed = true;
+    if(light & LightRed)   { led_r = value; rgb_changed = true; }
+    if(light & LightGreen) { led_g = value; rgb_changed = true; }
+    if(light & LightBlue)  { led_b = value; rgb_changed = true; }
     if(rgb_changed) {
         furi_hal_light_lock();
-        if(!ws2812_shutdown) {
-            if(light & LightRed) led_r = value;
-            if(light & LightGreen) led_g = value;
-            if(light & LightBlue) led_b = value;
-            furi_hal_light_ws2812_push();
-        }
+        furi_hal_light_ws2812_push();
         furi_hal_light_unlock();
     }
 #endif
@@ -285,18 +217,13 @@ void furi_hal_light_set_rgb_all(uint8_t r, uint8_t g, uint8_t b) {
 void furi_hal_light_set_pixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
     if(idx >= BOARD_WS2812_LED_COUNT) return;
     furi_hal_light_lock();
-    if(furi_hal_light_ws2812_writable()) {
-        const esp_err_t err = led_strip_set_pixel(led_strip, idx, r, g, b);
-        if(err != ESP_OK) {
-            ESP_LOGW(TAG, "WS2812 pixel %u update failed: %s", (unsigned)idx, esp_err_to_name(err));
-        }
-    }
+    if(furi_hal_light_ws2812_writable()) led_strip_set_pixel(led_strip, idx, r, g, b);
     furi_hal_light_unlock();
 }
 
 void furi_hal_light_refresh(void) {
     furi_hal_light_lock();
-    if(furi_hal_light_ws2812_writable()) (void)furi_hal_light_ws2812_refresh();
+    if(furi_hal_light_ws2812_writable()) led_strip_refresh(led_strip);
     furi_hal_light_unlock();
 }
 
