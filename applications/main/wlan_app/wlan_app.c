@@ -1,4 +1,5 @@
 #include "wlan_app.h"
+#include "views/wlan_sae_flood_view.h"
 #include "wlan_html_inject.h"
 #include "wlan_cred_sniff.h"
 #include <wlan_hal.h>
@@ -88,6 +89,11 @@ static WlanApp* wlan_app_alloc(void) {
     view_set_context(app->view_deauth_all, app->view_dispatcher);
     view_dispatcher_add_view(
         app->view_dispatcher, WlanAppViewDeauthAll, app->view_deauth_all);
+
+    app->view_sae_flood = wlan_sae_flood_view_alloc();
+    view_set_context(app->view_sae_flood, app->view_dispatcher);
+    view_dispatcher_add_view(
+        app->view_dispatcher, WlanAppViewSaeFlood, app->view_sae_flood);
 
     app->view_smart_deauth = wlan_smart_deauth_view_alloc();
     view_set_context(app->view_smart_deauth, app->view_dispatcher);
@@ -278,6 +284,7 @@ static void wlan_app_free(WlanApp* app) {
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewHandshakeChannel);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewDeauther);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewDeauthAll);
+    view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSaeFlood);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSmartDeauth);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewLiveScan);
     view_dispatcher_remove_view(app->view_dispatcher, WlanAppViewSniffer);
@@ -301,6 +308,7 @@ static void wlan_app_free(WlanApp* app) {
     wlan_handshake_channel_view_free(app->view_handshake_channel);
     wlan_deauther_view_free(app->view_deauther);
     wlan_deauth_all_view_free(app->view_deauth_all);
+    wlan_sae_flood_view_free(app->view_sae_flood);
     wlan_smart_deauth_view_free(app->view_smart_deauth);
     wlan_live_scan_view_free(app->view_live_scan);
     wlan_sniffer_view_free(app->sniffer_view_obj);

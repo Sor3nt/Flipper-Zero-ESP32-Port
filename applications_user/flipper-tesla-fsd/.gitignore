@@ -1,0 +1,15 @@
+dist/
+.vscode/
+.ufbt/
+.DS_Store
+.idea
+.tmp
+
+# Python tooling cache
+__pycache__/
+*.pyc
+
+# host unit-test binary (test/Makefile)
+test/test_fsd_core
+*.dSYM/
+/.vs

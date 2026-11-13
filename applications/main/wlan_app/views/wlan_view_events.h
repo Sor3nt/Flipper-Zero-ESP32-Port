@@ -108,4 +108,6 @@ typedef enum {
     WlanAppCustomEventAirPrintConfig = 271,
     WlanAppCustomEventAirPrintNameDone = 272,
     WlanAppCustomEventAirPrintHijackScanDone = 273,
+
+    WlanAppCustomEventSaeFloodOk = 280, // OK → Start/Stop der SAE-Commit-Flood
 } WlanAppCustomEvent;

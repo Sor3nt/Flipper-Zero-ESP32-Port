@@ -35,3 +35,9 @@ releases/*.zip
 # paths and are not used by the build. Root-anchored so build-dir and
 # main/generated paths are unaffected.
 /generated/
+
+# python interpreter shim for ESP-IDF venv (auto-created by buildAndFlash scripts)
+.pyshim/
+
+# Claude Code local state (settings, memory, locks) - not project source
+.claude/

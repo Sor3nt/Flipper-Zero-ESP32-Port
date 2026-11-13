@@ -132,6 +132,38 @@ if [[ "${BUILD_ONLY}" -eq 0 ]]; then
     release_serial_port "${PORT}"
 fi
 
+# --- Python venv shim -------------------------------------------------------
+# ESP-IDF's export.sh derives its virtualenv path from `python3 --version`
+# (e.g. ~/.espressif/python_env/idf5.4_py3.13_env). On this machine Homebrew's
+# python3 is newer (3.15), so IDF looks for a py3.15 venv that was never created
+# and aborts with "virtual environment ... not found". Pin `python3` to the
+# interpreter the installed IDF venv was actually built with, via a tiny shim
+# dir prepended to PATH. Auto-detects the needed minor version from the venv
+# name, so it keeps working after an IDF/python upgrade.
+setup_python_shim() {
+    local env_root="${IDF_PYTHON_ENV_PATH:-${HOME}/.espressif/python_env}"
+    local env_dir pyver py shim
+    env_dir="$(ls -d "${env_root}"/idf*_py3.*_env 2>/dev/null | head -1)"
+    [[ -z "${env_dir}" ]] && return 0  # no venv to pin to; let IDF handle it
+    pyver="$(basename "${env_dir}" | sed -nE 's/.*_py([0-9]+\.[0-9]+)_env/\1/p')"
+    [[ -z "${pyver}" ]] && return 0
+    # Already the right python3? Nothing to do.
+    python3 --version 2>&1 | grep -q " ${pyver}\." && return 0
+    py="$(command -v "python${pyver}" 2>/dev/null || true)"
+    if [[ -z "${py}" ]]; then
+        echo "WARN: IDF venv needs python${pyver}, but 'python${pyver}' is not on PATH." >&2
+        echo "      Install it (e.g. 'brew install python@${pyver}') or the build may fail." >&2
+        return 0
+    fi
+    shim="${ESP32_DIR}/.pyshim"
+    mkdir -p "${shim}"
+    ln -sf "${py}" "${shim}/python3"
+    ln -sf "${py}" "${shim}/python"
+    export PATH="${shim}:${PATH}"
+    echo "Python shim:    python3 -> ${py} (matches IDF venv py${pyver})"
+}
+setup_python_shim
+
 # shellcheck source=/dev/null
 source "${EXPORT_SCRIPT}"
 

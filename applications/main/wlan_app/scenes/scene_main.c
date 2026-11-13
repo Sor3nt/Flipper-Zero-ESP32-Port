@@ -15,6 +15,7 @@ enum MainIndex {
     MainIndexDeauthAll = 16,
     MainIndexWebFs = 17,
     MainIndexChannelLiveScan = 18,
+    MainIndexSaeFlood = 20,
     // MainIndexChannelBleScan (19) dipindah ke app Bluetooth (ble_spam).
 };
 
@@ -81,6 +82,9 @@ void wlan_app_scene_main_on_enter(void* context) {
     // "BLE Wardriving" dipindah ke app Bluetooth (ble_spam) → tak lagi di menu WiFi.
     submenu_add_item(
         app->submenu, "Deauth All", MainIndexDeauthAll,
+        wlan_app_scene_main_submenu_cb, app);
+    submenu_add_item(
+        app->submenu, "SAE Flood (WPA3)", MainIndexSaeFlood,
         wlan_app_scene_main_submenu_cb, app);
     submenu_add_item(
         app->submenu, "Evil Portal", MainIndexChannelEvilPortal,
@@ -163,6 +167,10 @@ bool wlan_app_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case MainIndexDeauthAll:
             scene_manager_next_scene(app->scene_manager, WlanAppSceneDeauthAll);
+            consumed = true;
+            break;
+        case MainIndexSaeFlood:
+            scene_manager_next_scene(app->scene_manager, WlanAppSceneSaeFlood);
             consumed = true;
             break;
         case MainIndexChannelEvilPortal:
