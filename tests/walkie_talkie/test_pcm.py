@@ -6,7 +6,8 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 source = (root / 'components/furi_hal/furi_hal_speaker.c').read_text()
 start = source.index('bool furi_hal_speaker_write_pcm(')
-end = source.index('\n#else', start)
+# The I2S writer ends at the next board branch (#elif Paradoxt buzzer or #else).
+end = min(source.find(t, start) for t in ('\n#elif', '\n#else') if source.find(t, start) != -1)
 writer = source[start:end]
 harness = r'''
 #include <assert.h>
