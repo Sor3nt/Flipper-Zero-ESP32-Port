@@ -140,6 +140,17 @@ bool furi_hal_display_draw_rgb565(
     /* Keep the bus lock until the DMA queue is empty; see furi_hal_display_sync(). */
     bool drained = furi_hal_display_sync();
     furi_hal_spi_bus_unlock();
+
+    /* This raw panel write overwrote pixels the GUI commit path caches
+     * assumptions about: the margin strips (painted once, only repainted on a
+     * colour change) and the de-dup shadow of the last mono frame. Invalidate
+     * both so the next furi_hal_display_commit() repaints the margins and does
+     * not skip the frame as "unchanged". Without this, leaving a direct-draw
+     * full-screen app (Sub-GHz spectrum, streaming) left its pixels in the
+     * margins and the UI looked inset/smaller. */
+    margin_painted = false;
+    fb_shadow_valid = false;
+
     return result == ESP_OK && drained;
 }
 
