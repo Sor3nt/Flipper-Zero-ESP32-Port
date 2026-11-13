@@ -9,6 +9,9 @@
 #include <lib/subghz/protocols/raw.h>
 #include <lib/subghz/devices/devices.h>
 
+#define SUBGHZ_TX_POWER_LEVELS 9U
+#define SUBGHZ_TX_POWER_MAX_INDEX (SUBGHZ_TX_POWER_LEVELS - 1U)
+
 typedef struct SubGhzTxRx SubGhzTxRx;
 
 typedef void (*SubGhzTxRxNeedSaveCallback)(void* context);

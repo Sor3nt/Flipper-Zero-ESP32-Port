@@ -1,4 +1,5 @@
 #include "../gpio_app_i.h"
+#include <sdkconfig.h>
 #include <furi_hal_power.h>
 #include <furi_hal_usb.h>
 #include <dolphin/dolphin.h>
@@ -6,9 +7,12 @@
 enum GpioItem {
     GpioItemUsbUart,
     GpioItemTest,
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
     GpioItemOtg,
+#endif
 };
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
 enum GpioOtg {
     GpioOtgOff,
     GpioOtgOn,
@@ -19,6 +23,7 @@ const char* const gpio_otg_text[GpioOtgSettingsNum] = {
     "OFF",
     "ON",
 };
+#endif
 
 /* List position -> GpioItem. "GPIO Manual Control" is listed only on boards with an
  * external GPIO header (Paradoxt), so positions and GpioItem values can differ. */
@@ -47,6 +52,7 @@ static void gpio_scene_start_var_list_enter_callback(void* context, uint32_t pos
     }
 }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
 static void gpio_scene_start_var_list_change_callback(VariableItem* item) {
     GpioApp* app = variable_item_get_context(item);
     uint8_t index = variable_item_get_current_value_index(item);
@@ -58,12 +64,15 @@ static void gpio_scene_start_var_list_change_callback(VariableItem* item) {
         view_dispatcher_send_custom_event(app->view_dispatcher, GpioStartEventOtgOn);
     }
 }
+#endif
 
 void gpio_scene_start_on_enter(void* context) {
     GpioApp* app = context;
     VariableItemList* var_item_list = app->var_item_list;
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
     VariableItem* item;
+#endif
     variable_item_list_set_enter_callback(
         var_item_list, gpio_scene_start_var_list_enter_callback, app);
 
@@ -76,8 +85,7 @@ void gpio_scene_start_on_enter(void* context) {
         gpio_start_items[gpio_start_items_count++] = GpioItemTest;
     }
 
-    /* On ESP32-S3 boards this is the only place to switch 5V (VBUS / OTG): the Infrared
-     * app no longer offers it there. */
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
     gpio_start_items[gpio_start_items_count++] = GpioItemOtg;
     item = variable_item_list_add(
         var_item_list,
@@ -92,6 +100,7 @@ void gpio_scene_start_on_enter(void* context) {
         variable_item_set_current_value_index(item, GpioOtgOff);
         variable_item_set_current_value_text(item, gpio_otg_text[GpioOtgOff]);
     }
+#endif
 
     variable_item_list_set_selected_item(
         var_item_list,
@@ -106,11 +115,7 @@ bool gpio_scene_start_on_event(void* context, SceneManagerEvent event) {
     bool consumed = false;
 
     if(event.type == SceneManagerEventTypeCustom) {
-        if(event.event == GpioStartEventOtgOn) {
-            power_enable_otg(app->power, true);
-        } else if(event.event == GpioStartEventOtgOff) {
-            power_enable_otg(app->power, false);
-        } else if(event.event == GpioStartEventManualControl) {
+        if(event.event == GpioStartEventManualControl) {
             scene_manager_set_scene_state(app->scene_manager, GpioSceneStart, GpioItemTest);
             scene_manager_next_scene(app->scene_manager, GpioSceneTest);
         } else if(event.event == GpioStartEventUsbUart) {
@@ -122,6 +127,13 @@ bool gpio_scene_start_on_event(void* context, SceneManagerEvent event) {
                 scene_manager_next_scene(app->scene_manager, GpioSceneUsbUartCloseRpc);
             }
         }
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || !CONFIG_IDF_TARGET_ESP32S3
+        else if(event.event == GpioStartEventOtgOn) {
+            power_enable_otg(app->power, true);
+        } else if(event.event == GpioStartEventOtgOff) {
+            power_enable_otg(app->power, false);
+        }
+#endif
         consumed = true;
     }
     return consumed;

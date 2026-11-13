@@ -4,12 +4,10 @@
 #include <furi.h>
 #include <furi_hal.h>
 #include <furi_hal_display.h>
-#include <furi_hal_spi_bus.h>
 #include <gui/gui.h>
 #include <input/input.h>
 #include <string.h>
 
-#include <esp_lcd_panel_ops.h>
 #include <esp_heap_caps.h>
 
 #define TAG "SubGhzSpectrum"
@@ -23,7 +21,9 @@
  * ST7789 SPI byte order. */
 
 #define WF_ROWS_MAX 96
-#define STRIPE_H    17
+// Keep the contiguous DMA allocation small because it must come from internal
+// memory. The display is updated per sweep, so smaller SPI stripes are acceptable.
+#define STRIPE_H 8
 
 #define BINS SUBGHZ_SPECTRUM_BINS
 
@@ -33,6 +33,16 @@
 
 #define CENTER_MIN 300000000UL
 #define CENTER_MAX 928000000UL
+/* Common CC1101 remote/ISM channels. Up/Down select the next band directly;
+ * Left/Right remain available for fine center/span/cursor adjustments. */
+static const uint32_t subghz_spectrum_bands[] = {
+    315000000UL,
+    390000000UL,
+    418000000UL,
+    433920000UL,
+    868350000UL,
+    915000000UL,
+};
 
 static const uint32_t subghz_spectrum_spans[] = {
     1000000UL,
@@ -62,15 +72,17 @@ struct SubGhzSpectrum {
     FuriThread* render_thread;
     FuriMutex* mutex;
 
-    esp_lcd_panel_handle_t panel;
     uint16_t w;
     uint16_t h;
+    uint32_t start_center;
     uint16_t* fb; // PSRAM, w*h RGB565 (byte-swapped)
     uint16_t* stripe; // DRAM DMA, w*STRIPE_H
     uint8_t* wf; // PSRAM, WF_ROWS_MAX*BINS normalized power (0..255)
 
-    volatile bool running;
-    volatile bool dirty;
+    bool running; // guarded by mutex
+    bool dirty; // guarded by mutex
+    bool worker_started;
+    bool render_thread_started;
 
     // model (mutex-protected)
     float rssi[BINS];
@@ -335,19 +347,14 @@ static void subghz_spectrum_compose(SubGhzSpectrum* s) {
 static void subghz_spectrum_blit(SubGhzSpectrum* s) {
     const int w = s->w;
     const int h = s->h;
-    furi_hal_spi_bus_lock();
     for(int y0 = 0; y0 < h; y0 += STRIPE_H) {
         int rows = (y0 + STRIPE_H > h) ? (h - y0) : STRIPE_H;
         memcpy(s->stripe, &s->fb[(size_t)y0 * w], (size_t)rows * w * sizeof(uint16_t));
-        esp_lcd_panel_draw_bitmap(s->panel, 0, y0, w, y0 + rows, s->stripe);
-        /* Drain before the next memcpy reuses the stripe buffer, and before
-         * releasing the shared bus: esp_lcd returns as soon as the DMA is
-         * queued, so without this the buffer is overwritten mid-transfer and
-         * another device can start a command on a busy SPI peripheral
-         * (espressif/esp-idf#17860). */
-        furi_hal_display_sync();
+        if(!furi_hal_display_draw_rgb565(0, y0, w, rows, s->stripe)) {
+            FURI_LOG_W(TAG, "Display stripe transfer failed at y=%d", y0);
+            break;
+        }
     }
-    furi_hal_spi_bus_unlock();
 }
 
 static int32_t subghz_spectrum_render_thread(void* context) {
@@ -355,14 +362,21 @@ static int32_t subghz_spectrum_render_thread(void* context) {
 
     s->gui = furi_record_open(RECORD_GUI);
     gui_direct_draw_acquire(s->gui);
-    s->panel = furi_hal_display_get_panel_handle();
 
-    while(s->running) {
-        if(s->dirty && s->panel && s->fb && s->stripe && s->wf) {
-            furi_mutex_acquire(s->mutex, FuriWaitForever);
+    while(true) {
+        bool running;
+        bool redraw = false;
+        furi_mutex_acquire(s->mutex, FuriWaitForever);
+        running = s->running;
+        if(running && s->dirty && s->fb && s->stripe && s->wf) {
             s->dirty = false;
             subghz_spectrum_compose(s);
-            furi_mutex_release(s->mutex);
+            redraw = true;
+        }
+        furi_mutex_release(s->mutex);
+
+        if(!running) break;
+        if(redraw) {
             subghz_spectrum_blit(s);
         }
         furi_delay_ms(25);
@@ -394,12 +408,20 @@ static size_t subghz_span_index(uint32_t span) {
 static void subghz_spectrum_input_callback(const void* value, void* context) {
     SubGhzSpectrum* s = context;
     const InputEvent* event = value;
-    if(!s->running) return;
+    furi_mutex_acquire(s->mutex, FuriWaitForever);
+    const bool running = s->running;
+    furi_mutex_release(s->mutex);
+    if(!running) return;
 
     // Back (side key short, or encoder long) -> exit
     if(event->key == InputKeyBack && event->type == InputTypePress) {
+        furi_mutex_acquire(s->mutex, FuriWaitForever);
+        const bool notify = s->running;
         s->running = false;
-        if(s->callback) s->callback(SubGhzCustomEventViewSpectrumBack, s->context);
+        furi_mutex_release(s->mutex);
+        if(notify && s->callback) {
+            s->callback(SubGhzCustomEventViewSpectrumBack, s->context);
+        }
         return;
     }
 
@@ -416,6 +438,36 @@ static void subghz_spectrum_input_callback(const void* value, void* context) {
     bool is_dir = (event->key == InputKeyUp) || (event->key == InputKeyDown) ||
                   (event->key == InputKeyLeft) || (event->key == InputKeyRight);
     if(!move || !is_dir) return;
+
+    if(event->key == InputKeyUp || event->key == InputKeyDown) {
+        uint32_t new_center = 0;
+        uint32_t new_span = 0;
+        furi_mutex_acquire(s->mutex, FuriWaitForever);
+        size_t nearest = 0;
+        uint32_t nearest_delta = UINT32_MAX;
+        for(size_t i = 0; i < COUNT_OF(subghz_spectrum_bands); i++) {
+            const uint32_t band = subghz_spectrum_bands[i];
+            const uint32_t delta = band > s->center ? band - s->center : s->center - band;
+            if(delta < nearest_delta) {
+                nearest = i;
+                nearest_delta = delta;
+            }
+        }
+        if(event->key == InputKeyUp) {
+            nearest = (nearest + 1) % COUNT_OF(subghz_spectrum_bands);
+        } else {
+            nearest = (nearest + COUNT_OF(subghz_spectrum_bands) - 1) %
+                      COUNT_OF(subghz_spectrum_bands);
+        }
+        s->center = subghz_spectrum_bands[nearest];
+        subghz_spectrum_reset_data(s);
+        s->dirty = true;
+        new_center = s->center;
+        new_span = s->span;
+        furi_mutex_release(s->mutex);
+        subghz_spectrum_worker_set_window(s->worker, new_center, new_span);
+        return;
+    }
 
     int dir = (event->key == InputKeyDown || event->key == InputKeyRight) ? 1 : -1;
     bool changed_window = false;
@@ -496,11 +548,39 @@ void subghz_spectrum_set_callback(
     instance->context = context;
 }
 
-void subghz_spectrum_start(SubGhzSpectrum* instance) {
+static void subghz_spectrum_release_buffers(SubGhzSpectrum* instance) {
+    if(instance->fb) {
+        free(instance->fb);
+        instance->fb = NULL;
+    }
+    if(instance->wf) {
+        free(instance->wf);
+        instance->wf = NULL;
+    }
+    if(instance->stripe) {
+        free(instance->stripe);
+        instance->stripe = NULL;
+    }
+}
+
+bool subghz_spectrum_start(SubGhzSpectrum* instance) {
     furi_assert(instance);
+
+    // The scene can be re-entered after a previous failure or exit. Keep the
+    // start operation idempotent and release any stale partial state first.
+    subghz_spectrum_stop(instance);
 
     instance->w = furi_hal_display_get_h_res();
     instance->h = furi_hal_display_get_v_res();
+
+    if(instance->w == 0 || instance->h == 0) {
+        FURI_LOG_E(
+            TAG,
+            "Invalid display dimensions: %ux%u",
+            (unsigned)instance->w,
+            (unsigned)instance->h);
+        return false;
+    }
 
     instance->fb =
         heap_caps_malloc((size_t)instance->w * instance->h * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -508,47 +588,101 @@ void subghz_spectrum_start(SubGhzSpectrum* instance) {
     instance->stripe =
         heap_caps_malloc((size_t)instance->w * STRIPE_H * sizeof(uint16_t), MALLOC_CAP_DMA);
 
-    instance->center = 433920000UL;
+    if(!instance->fb || !instance->wf || !instance->stripe) {
+        FURI_LOG_E(
+            TAG,
+            "Buffer alloc failed (fb=%p wf=%p stripe=%p); PSRAM free/largest=%u/%u, DMA free/largest=%u/%u",
+            instance->fb,
+            instance->wf,
+            instance->stripe,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+        subghz_spectrum_release_buffers(instance);
+        return false;
+    }
+
+    instance->center = furi_hal_subghz_is_frequency_valid(instance->start_center) ?
+                           instance->start_center :
+                           433920000UL;
     instance->span = 6000000UL;
     instance->cursor = BINS / 2;
     instance->adjust = SubGhzSpectrumAdjustCursor;
     subghz_spectrum_reset_data(instance);
+    furi_mutex_acquire(instance->mutex, FuriWaitForever);
     instance->dirty = true;
+    furi_mutex_release(instance->mutex);
 
     // Worker
     instance->worker = subghz_spectrum_worker_alloc();
+    if(!instance->worker) {
+        FURI_LOG_E(TAG, "Sweep worker allocation failed");
+        subghz_spectrum_release_buffers(instance);
+        return false;
+    }
     subghz_spectrum_worker_set_window(instance->worker, instance->center, instance->span);
     subghz_spectrum_worker_set_callback(
         instance->worker, subghz_spectrum_sweep_callback, instance);
 
     // Input
     instance->input = furi_record_open(RECORD_INPUT_EVENTS);
+    if(!instance->input) {
+        FURI_LOG_E(TAG, "Input events record unavailable");
+        subghz_spectrum_stop(instance);
+        return false;
+    }
     instance->input_sub =
         furi_pubsub_subscribe(instance->input, subghz_spectrum_input_callback, instance);
+    if(!instance->input_sub) {
+        FURI_LOG_E(TAG, "Input subscription failed");
+        subghz_spectrum_stop(instance);
+        return false;
+    }
 
     // Render thread (takes over the display)
-    instance->running = true;
     instance->render_thread = furi_thread_alloc_ex(
         "SubGhzSpectrumRender", 4096, subghz_spectrum_render_thread, instance);
+    if(!instance->render_thread) {
+        FURI_LOG_E(TAG, "Render thread allocation failed");
+        subghz_spectrum_stop(instance);
+        return false;
+    }
+
+    furi_mutex_acquire(instance->mutex, FuriWaitForever);
+    instance->running = true;
+    furi_mutex_release(instance->mutex);
     furi_thread_start(instance->render_thread);
+    instance->render_thread_started = true;
 
     subghz_spectrum_worker_start(instance->worker);
+    instance->worker_started = true;
+    return true;
 }
 
 void subghz_spectrum_stop(SubGhzSpectrum* instance) {
     furi_assert(instance);
-    if(!instance->render_thread) return; // start() was never called
+
+    furi_mutex_acquire(instance->mutex, FuriWaitForever);
+    instance->running = false;
+    furi_mutex_release(instance->mutex);
 
     // Stop sweeps first (frees the SPI bus for the final render teardown).
-    if(instance->worker && subghz_spectrum_worker_is_running(instance->worker)) {
+    if(instance->worker && instance->worker_started &&
+       subghz_spectrum_worker_is_running(instance->worker)) {
         subghz_spectrum_worker_stop(instance->worker);
     }
+    instance->worker_started = false;
 
     // Stop the render loop; the thread releases direct-draw before it returns.
-    instance->running = false;
-    furi_thread_join(instance->render_thread);
-    furi_thread_free(instance->render_thread);
-    instance->render_thread = NULL;
+    if(instance->render_thread) {
+        if(instance->render_thread_started) {
+            furi_thread_join(instance->render_thread);
+        }
+        furi_thread_free(instance->render_thread);
+        instance->render_thread = NULL;
+    }
+    instance->render_thread_started = false;
 
     if(instance->input_sub) {
         furi_pubsub_unsubscribe(instance->input, instance->input_sub);
@@ -564,18 +698,7 @@ void subghz_spectrum_stop(SubGhzSpectrum* instance) {
         instance->worker = NULL;
     }
 
-    if(instance->fb) {
-        free(instance->fb);
-        instance->fb = NULL;
-    }
-    if(instance->wf) {
-        free(instance->wf);
-        instance->wf = NULL;
-    }
-    if(instance->stripe) {
-        free(instance->stripe);
-        instance->stripe = NULL;
-    }
+    subghz_spectrum_release_buffers(instance);
 }
 
 /* Blank placeholder view — the color frame is drawn via direct display
@@ -588,17 +711,23 @@ static void subghz_spectrum_view_draw(Canvas* canvas, void* model) {
 }
 
 SubGhzSpectrum* subghz_spectrum_alloc(void) {
-    SubGhzSpectrum* instance = malloc(sizeof(SubGhzSpectrum));
-    memset(instance, 0, sizeof(SubGhzSpectrum));
+    SubGhzSpectrum* instance = calloc(1, sizeof(SubGhzSpectrum));
+    if(!instance) return NULL;
     instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     instance->view = view_alloc();
+    if(!instance->mutex || !instance->view) {
+        if(instance->view) view_free(instance->view);
+        if(instance->mutex) furi_mutex_free(instance->mutex);
+        free(instance);
+        return NULL;
+    }
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, subghz_spectrum_view_draw);
     return instance;
 }
 
 void subghz_spectrum_free(SubGhzSpectrum* instance) {
-    furi_assert(instance);
+    if(!instance) return;
     subghz_spectrum_stop(instance);
     view_free(instance->view);
     furi_mutex_free(instance->mutex);
@@ -608,4 +737,9 @@ void subghz_spectrum_free(SubGhzSpectrum* instance) {
 View* subghz_spectrum_get_view(SubGhzSpectrum* instance) {
     furi_assert(instance);
     return instance->view;
+}
+
+void subghz_spectrum_set_start_frequency(SubGhzSpectrum* instance, uint32_t frequency) {
+    furi_assert(instance);
+    instance->start_center = frequency;
 }

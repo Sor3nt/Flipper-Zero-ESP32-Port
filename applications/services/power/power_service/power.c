@@ -4,6 +4,7 @@
 #include <furi.h>
 #include <furi_hal.h>
 #include <boards/board.h>
+#include <sdkconfig.h>
 
 #include <update_util/update_operation.h>
 #include <notification/notification_messages.h>
@@ -17,6 +18,27 @@
 
 #define POWER_VBUS_LOW_THRESHOLD   (4.0f)
 #define POWER_HEALTH_LOW_THRESHOLD (70U)
+
+static void power_apply_vbus_5v_setting(Power* power) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+    power->is_otg_requested = power->settings.vbus_5v_enabled != 0;
+    if(!power->is_otg_requested) {
+        furi_hal_power_disable_otg();
+    } else if(power->info.voltage_vbus < 4.5f) {
+        /* Keep the request pending while USB supplies VBUS. The periodic
+         * service tick enables OTG after that external source is removed. */
+        furi_hal_power_enable_otg();
+    } else {
+        furi_hal_power_disable_otg();
+        FURI_LOG_D(
+            TAG,
+            "Postponing persistent OTG enable while VBUS is present (%0.1f V)",
+            (double)power->info.voltage_vbus);
+    }
+#else
+    UNUSED(power);
+#endif
+}
 
 static void power_draw_battery_callback(Canvas* canvas, void* context) {
     furi_assert(context);
@@ -554,6 +576,8 @@ static void power_settings_apply(Power* power) {
     notification_set_usb_led_auto_off(notification, power->settings.led_usb_auto_off != 0);
     furi_record_close(RECORD_NOTIFICATION);
 
+    power_apply_vbus_5v_setting(power);
+
     //apply auto_poweroff settings
     if(power->settings.auto_poweroff_delay_ms && !power->app_running) {
         power_auto_poweroff_arm(power);
@@ -603,7 +627,14 @@ static void power_message_callback(FuriEventLoopObject* object, void* context) {
         power_settings_apply(power);
         break;
     case PowerMessageTypeSwitchOTG:
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+        /* Temporary OTG clients must not override an enabled persistent user
+         * preference. The Infrared setting changes PowerSettings directly. */
+        power->is_otg_requested =
+            power->settings.vbus_5v_enabled != 0 || *msg.bool_param;
+#else
         power->is_otg_requested = *msg.bool_param;
+#endif
         if(power->is_otg_requested) {
             // Only try to enable if VBUS voltage is low, otherwise charger will refuse
             if(power->info.voltage_vbus < 4.5f) {
@@ -617,6 +648,7 @@ static void power_message_callback(FuriEventLoopObject* object, void* context) {
                     FURI_LOG_W(TAG, "Failed to enable OTG, will try later");
                 }
             } else {
+                furi_hal_power_disable_otg();
                 FURI_LOG_W(
                     TAG,
                     "Postponing OTG enable: VBUS(%0.1f) >= 4.5v",
@@ -625,6 +657,20 @@ static void power_message_callback(FuriEventLoopObject* object, void* context) {
         } else {
             furi_hal_power_disable_otg();
         }
+        break;
+    case PowerMessageTypeIsOTGEnabled:
+        furi_assert(msg.lock);
+        *msg.bool_param = power->is_otg_requested;
+        break;
+    case PowerMessageTypeSetVbus5V:
+        furi_assert(msg.lock);
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
+        if((power->settings.vbus_5v_enabled != 0) != *msg.bool_param) {
+            power->settings.vbus_5v_enabled = *msg.bool_param;
+            power_apply_vbus_5v_setting(power);
+            power_settings_save(&power->settings);
+        }
+#endif
         break;
     default:
         furi_crash();
@@ -710,11 +756,8 @@ static void power_init_settings(Power* power) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     furi_pubsub_subscribe(storage_get_pubsub(storage), power_storage_callback, power);
 
-    if(storage_sd_status(storage) != FSE_OK) {
-        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
-        return;
-    }
-
+    /* Power settings live on internal storage; load them even when no SD card
+     * is mounted so the persisted VBUS preference can be restored at boot. */
     power_settings_load(&power->settings);
     power_settings_apply(power);
     furi_record_close(RECORD_STORAGE);
@@ -725,6 +768,8 @@ static Power* power_alloc(void) {
     Power* power = malloc(sizeof(Power));
     power->input_events_subscription = NULL;
     power->input_wake_events_subscription = NULL;
+    power->is_otg_requested = false;
+    power->info = (PowerInfo){0};
     // Pubsub
     power->event_pubsub = furi_pubsub_alloc();
     // State initialization
@@ -788,10 +833,10 @@ int32_t power_srv(void* p) {
 
     Power* power = power_alloc();
 
+    power_update_info(power);
+
     // power service settings initialization
     power_init_settings(power);
-
-    power_update_info(power);
 
     furi_record_create(RECORD_POWER, power);
 

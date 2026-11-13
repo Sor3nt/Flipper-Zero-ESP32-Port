@@ -74,6 +74,10 @@ bool subghz_scene_frequency_analyzer_on_event(void* context, SceneManagerEvent e
             scene_manager_previous_scene(subghz->scene_manager); // Stops the worker
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiver);
             return true;
+        } else if(event.event == SubGhzCustomEventViewFreqAnalStartError) {
+            furi_string_set(subghz->error_str, "Unable to start\nFrequency Analyzer.");
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneShowErrorSub);
+            return true;
         }
     }
     return false;

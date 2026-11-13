@@ -70,6 +70,8 @@ typedef enum {
     SubGhzCustomEventTpmsEditTemperature,
     SubGhzCustomEventTpmsEditId,
     SubGhzCustomEventTpmsToggleBattery,
+    SubGhzCustomEventViewSpectrumStartError,
+    SubGhzCustomEventViewFreqAnalStartError,
 } SubGhzCustomEvent;
 
 typedef enum {

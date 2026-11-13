@@ -153,6 +153,7 @@ void view_port_enabled_set(ViewPort* view_port, bool enabled) {
     // Make sure that you don't call viewport methods inside of another mutex, especially one that is used in draw call
     if(furi_mutex_acquire(view_port->mutex, 2) != FuriStatusOk) {
         FURI_LOG_W(TAG, "ViewPort lockup: see %s:%d", __FILE__, __LINE__ - 3);
+        return;
     }
     if(view_port->is_enabled != enabled) {
         view_port->is_enabled = enabled;
@@ -211,6 +212,7 @@ void view_port_update(ViewPort* view_port) {
     // Make sure that you don't call viewport methods inside of another mutex, especially one that is used in draw call
     if(furi_mutex_acquire(view_port->mutex, 2) != FuriStatusOk) {
         FURI_LOG_W(TAG, "ViewPort lockup: see %s:%d", __FILE__, __LINE__ - 3);
+        return;
     }
 
     if(view_port->gui && view_port->is_enabled) gui_update(view_port->gui);
@@ -232,6 +234,7 @@ void view_port_draw(ViewPort* view_port, Canvas* canvas) {
     // Make sure that you don't call viewport methods inside of another mutex, especially one that is used in draw call
     if(furi_mutex_acquire(view_port->mutex, 2) != FuriStatusOk) {
         FURI_LOG_W(TAG, "ViewPort lockup: see %s:%d", __FILE__, __LINE__ - 3);
+        return;
     }
 
     furi_check(view_port->gui);
@@ -271,6 +274,7 @@ ViewPortOrientation view_port_get_orientation(const ViewPort* view_port) {
     // Make sure that you don't call viewport methods inside of another mutex, especially one that is used in draw call
     if(furi_mutex_acquire(view_port->mutex, 2) != FuriStatusOk) {
         FURI_LOG_W(TAG, "ViewPort lockup: see %s:%d", __FILE__, __LINE__ - 3);
+        return ViewPortOrientationHorizontal;
     }
     ViewPortOrientation orientation = view_port->orientation;
     furi_mutex_release(view_port->mutex);

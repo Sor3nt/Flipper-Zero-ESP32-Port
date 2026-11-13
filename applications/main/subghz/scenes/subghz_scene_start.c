@@ -112,18 +112,22 @@ void subghz_scene_start_on_enter(void* context) {
         SubmenuIndexAddManuallyAdvanced,
         subghz_scene_start_submenu_callback,
         subghz);
-    submenu_add_item(
-        subghz->submenu,
-        "Frequency Analyzer",
-        SubmenuIndexFrequencyAnalyzer,
-        subghz_scene_start_submenu_callback,
-        subghz);
-    submenu_add_item(
-        subghz->submenu,
-        "RF Spectrum",
-        SubmenuIndexSpectrum,
-        subghz_scene_start_submenu_callback,
-        subghz);
+    if(subghz->subghz_frequency_analyzer) {
+        submenu_add_item(
+            subghz->submenu,
+            "Frequency Analyzer",
+            SubmenuIndexFrequencyAnalyzer,
+            subghz_scene_start_submenu_callback,
+            subghz);
+    }
+    if(subghz->subghz_spectrum) {
+        submenu_add_item(
+            subghz->submenu,
+            "RF Spectrum",
+            SubmenuIndexSpectrum,
+            subghz_scene_start_submenu_callback,
+            subghz);
+    }
     submenu_add_item(
         subghz->submenu,
         "Radio Settings",

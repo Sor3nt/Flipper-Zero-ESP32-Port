@@ -8,7 +8,7 @@
 #define TAG "SubGhzReceiver"
 
 typedef struct {
-    SubGhzProtocolEncoderBase* base;
+    SubGhzProtocolDecoderBase* base;
 } SubGhzReceiverSlot;
 
 ARRAY_DEF(SubGhzReceiverSlotArray, SubGhzReceiverSlot, M_POD_OPLIST); //-V658
@@ -37,9 +37,14 @@ SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
             subghz_protocol_registry_get_by_index(protocol_registry_items, i);
 
         if(protocol->decoder && protocol->decoder->alloc) {
-            SubGhzReceiverSlot* slot = SubGhzReceiverSlotArray_push_new(instance->slots);
-            slot->base = protocol->decoder->alloc(environment);
-            loaded_decoders++;
+            SubGhzProtocolDecoderBase* decoder = protocol->decoder->alloc(environment);
+            if(decoder) {
+                SubGhzReceiverSlot* slot = SubGhzReceiverSlotArray_push_new(instance->slots);
+                slot->base = decoder;
+                loaded_decoders++;
+            } else {
+                FURI_LOG_W(TAG, "Skipping decoder '%s': allocation failed", protocol->name);
+            }
         }
     }
 

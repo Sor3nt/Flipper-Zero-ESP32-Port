@@ -153,9 +153,12 @@ static InfraredApp* infrared_alloc(void) {
     InfraredAppState* app_state = &infrared->app_state;
     app_state->is_learning_new_remote = false;
     app_state->is_debug_enabled = furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug);
+    app_state->is_transmitting = false;
+    app_state->is_otg_enabled = false;
     app_state->edit_target = InfraredEditTargetNone;
     app_state->edit_mode = InfraredEditModeNone;
     app_state->current_button_index = InfraredButtonIndexNone;
+    app_state->tx_pin = FuriHalInfraredTxPinInternal;
 
     infrared->scene_manager = scene_manager_alloc(&infrared_scene_handlers, infrared);
     infrared->view_dispatcher = view_dispatcher_alloc();
@@ -499,12 +502,6 @@ void infrared_set_tx_pin(InfraredApp* infrared, FuriHalInfraredTxPin tx_pin) {
 }
 
 void infrared_enable_otg(InfraredApp* infrared, bool enable) {
-#if !INFRARED_HAS_5V_SETTINGS
-    /* ESP32-S3: 5V is owned by the GPIO app; Infrared never switches it. */
-    UNUSED(enable);
-    infrared->app_state.is_otg_enabled = false;
-    return;
-#endif
     Power* power = furi_record_open(RECORD_POWER);
 
     power_enable_otg(power, enable);
@@ -513,8 +510,26 @@ void infrared_enable_otg(InfraredApp* infrared, bool enable) {
     furi_record_close(RECORD_POWER);
 }
 
+void infrared_set_vbus_5v_enabled(InfraredApp* infrared, bool enable) {
+#if INFRARED_IS_ESP32S3
+    Power* power = furi_record_open(RECORD_POWER);
+    power_set_vbus_5v_enabled(power, enable);
+    infrared->app_state.is_otg_enabled = enable;
+    furi_record_close(RECORD_POWER);
+#else
+    infrared_enable_otg(infrared, enable);
+#endif
+}
+
 static void infrared_load_settings(InfraredApp* infrared) {
     InfraredSettings settings = {0};
+
+#if INFRARED_IS_ESP32S3
+    /* Power service owns the persisted VBUS request and restores it at boot. */
+    Power* power = furi_record_open(RECORD_POWER);
+    infrared->app_state.is_otg_enabled = power_is_otg_enabled(power);
+    furi_record_close(RECORD_POWER);
+#endif
 
     if(!saved_struct_load(
            INFRARED_SETTINGS_PATH,
@@ -526,6 +541,14 @@ static void infrared_load_settings(InfraredApp* infrared) {
         infrared_save_settings(infrared);
     }
 
+#if INFRARED_IS_ESP32S3
+    if(furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX) {
+        infrared->app_state.tx_pin = furi_hal_infrared_get_tx_output();
+    } else {
+        infrared->app_state.tx_pin = FuriHalInfraredTxPinInternal;
+    }
+    return;
+#else
     if(furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX) {
         /* External TX pin board: the HAL owns the choice (saved by Infrared
          * Settings, default Internal). An older value in this file was never
@@ -534,17 +557,11 @@ static void infrared_load_settings(InfraredApp* infrared) {
         return;
     }
 
-#if !INFRARED_HAS_5V_SETTINGS
-    /* ESP32-S3 without an external TX pin: GPIO Settings is not offered, so an older saved
-     * choice (A7 / Detect) must not apply; only the internal LED exists here anyway. */
-    infrared->app_state.tx_pin = FuriHalInfraredTxPinInternal;
-    return;
-#endif
-
     infrared_set_tx_pin(infrared, settings.tx_pin);
     if(settings.tx_pin < FuriHalInfraredTxPinMax) {
         infrared_enable_otg(infrared, settings.otg_enabled);
     }
+#endif
 }
 
 void infrared_save_settings(InfraredApp* infrared) {
@@ -659,7 +676,10 @@ int32_t infrared_app(void* p) {
     if(furi_hal_infrared_get_ext_tx_pin() == UINT16_MAX) {
         infrared_set_tx_pin(infrared, FuriHalInfraredTxPinInternal);
     }
+#if !INFRARED_IS_ESP32S3
+    /* Preserve the existing app-scoped OTG behavior on non-S3 boards. */
     infrared_enable_otg(infrared, false);
+#endif
     infrared_free(infrared);
 
     return 0;

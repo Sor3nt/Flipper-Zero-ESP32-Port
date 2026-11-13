@@ -1,3 +1,8 @@
+# ESP-IDF's CMake helpers iterate include directories as CMake strings. A
+# Windows-form IDF_PATH (for example, C:\Espressif\...) contains backslashes
+# that CMake interprets as escape sequences, so normalize it first.
+file(TO_CMAKE_PATH "$ENV{IDF_PATH}" _idf_path)
+
 idf_component_register(
     SRCS
         "wlan_hal.c"
@@ -10,8 +15,8 @@ idf_component_register(
         "wifite/link.c"
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS
-        "$ENV{IDF_PATH}/components/wpa_supplicant/esp_supplicant/src"
-        "$ENV{IDF_PATH}/components/wpa_supplicant/src"
+        "${_idf_path}/components/wpa_supplicant/esp_supplicant/src"
+        "${_idf_path}/components/wpa_supplicant/src"
     REQUIRES
         furi
         furi_hal

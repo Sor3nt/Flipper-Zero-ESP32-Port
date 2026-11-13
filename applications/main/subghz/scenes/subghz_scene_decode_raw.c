@@ -96,7 +96,7 @@ bool subghz_scene_decode_raw_start(SubGhz* subghz) {
         //FURI_LOG_I(TAG, "Listening at \033[0;33m%s\033[0m.", furi_string_get_cstr(file_name));
 
         subghz->decode_raw_file_worker_encoder = subghz_file_encoder_worker_alloc();
-        if(subghz_file_encoder_worker_start(
+        if(subghz->decode_raw_file_worker_encoder && subghz_file_encoder_worker_start(
                subghz->decode_raw_file_worker_encoder,
                furi_string_get_cstr(file_name),
                subghz_txrx_radio_device_get_name(subghz->txrx))) {
@@ -107,7 +107,10 @@ bool subghz_scene_decode_raw_start(SubGhz* subghz) {
         }
 
         if(!success) {
-            subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+            if(subghz->decode_raw_file_worker_encoder) {
+                subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+            }
+            subghz->decode_raw_file_worker_encoder = NULL;
         }
     }
 
@@ -216,10 +219,14 @@ bool subghz_scene_decode_raw_on_event(void* context, SceneManagerEvent event) {
 
             subghz_txrx_set_rx_callback(subghz->txrx, NULL, subghz);
 
-            if(subghz_file_encoder_worker_is_running(subghz->decode_raw_file_worker_encoder)) {
-                subghz_file_encoder_worker_stop(subghz->decode_raw_file_worker_encoder);
+            if(subghz->decode_raw_file_worker_encoder) {
+                if(subghz_file_encoder_worker_is_running(
+                       subghz->decode_raw_file_worker_encoder)) {
+                    subghz_file_encoder_worker_stop(subghz->decode_raw_file_worker_encoder);
+                }
+                subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
             }
-            subghz_file_encoder_worker_free(subghz->decode_raw_file_worker_encoder);
+            subghz->decode_raw_file_worker_encoder = NULL;
 
             subghz->state_notifications = SubGhzNotificationStateIDLE;
             scene_manager_set_scene_state(

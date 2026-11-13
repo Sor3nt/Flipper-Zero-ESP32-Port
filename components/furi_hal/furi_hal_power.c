@@ -137,6 +137,11 @@ static FuriHalPowerState furi_hal_power = {
     .last_battery_voltage = FURI_HAL_POWER_FULL_BATTERY_VOLTAGE_V,
 };
 
+/* OTG requests also come from radio loaders outside the Power service. Keep
+ * the charger REG03 read-modify-write and cached request state serialized. */
+static SemaphoreHandle_t furi_hal_power_otg_mutex = NULL;
+static StaticSemaphore_t furi_hal_power_otg_mutex_buffer;
+
 static FuriPubSub* furi_hal_power_idle_pubsub;
 static volatile bool furi_hal_power_idle;
 
@@ -368,6 +373,11 @@ void furi_hal_power_init(void) {
     /* Normally already done by the early constructor; idempotent. */
     furi_hal_power_sleep_release_holds();
     furi_hal_power_ensure_initialized();
+    if(!furi_hal_power_otg_mutex) {
+        furi_hal_power_otg_mutex =
+            xSemaphoreCreateMutexStatic(&furi_hal_power_otg_mutex_buffer);
+        furi_check(furi_hal_power_otg_mutex);
+    }
     if(!furi_hal_power_idle_pubsub) {
         furi_hal_power_idle_pubsub = furi_pubsub_alloc();
     }
@@ -903,6 +913,8 @@ bool furi_hal_power_enable_otg(void) {
      * the host, so an external 5 V module is powered either way). On a board without a charger this
      * stays a pure flag so the Sub-GHz radio loaders' retry loop still terminates (they poll
      * furi_hal_power_is_otg_enabled() after each call). */
+    furi_check(furi_hal_power_otg_mutex);
+    furi_check(xSemaphoreTake(furi_hal_power_otg_mutex, portMAX_DELAY) == pdTRUE);
     if(furi_hal_bq25896_is_present()) {
         if(furi_hal_bq25896_is_vbus_present()) {
             ESP_LOGW(TAG, "OTG requested while VBUS present; host supplies 5 V, boost left off");
@@ -910,15 +922,19 @@ bool furi_hal_power_enable_otg(void) {
             furi_hal_bq25896_enable_otg();
         }
     }
-    furi_hal_power.otg_enabled = true;
+    __atomic_store_n(&furi_hal_power.otg_enabled, true, __ATOMIC_RELEASE);
+    xSemaphoreGive(furi_hal_power_otg_mutex);
     return true;
 }
 
 void furi_hal_power_disable_otg(void) {
+    furi_check(furi_hal_power_otg_mutex);
+    furi_check(xSemaphoreTake(furi_hal_power_otg_mutex, portMAX_DELAY) == pdTRUE);
     if(furi_hal_bq25896_is_present()) {
         furi_hal_bq25896_disable_otg();
     }
-    furi_hal_power.otg_enabled = false;
+    __atomic_store_n(&furi_hal_power.otg_enabled, false, __ATOMIC_RELEASE);
+    xSemaphoreGive(furi_hal_power_otg_mutex);
 }
 
 bool furi_hal_power_check_otg_fault(void) {
@@ -929,7 +945,7 @@ void furi_hal_power_check_otg_status(void) {
 }
 
 bool furi_hal_power_is_otg_enabled(void) {
-    return furi_hal_power.otg_enabled;
+    return __atomic_load_n(&furi_hal_power.otg_enabled, __ATOMIC_ACQUIRE);
 }
 
 float furi_hal_power_get_battery_charge_voltage_limit(void) {

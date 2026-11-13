@@ -185,7 +185,9 @@ static void draw_scan_mode(Canvas* canvas, SdViewModel* vm) {
         }
 
         char tag[4];
-        snprintf(tag, sizeof(tag), "%u", ci->channel);
+        // This is the row number; the selected target's actual radio channel is
+        // shown in Attack mode.
+        snprintf(tag, sizeof(tag), "%u", (unsigned)(pos + 1));
         canvas_draw_str(canvas, 2, base, tag);
 
         draw_sig_bars(canvas, 18, base, ci->rssi, true);

@@ -7,6 +7,8 @@
 #define SUBGHZ_TXRX_WORKER_BUF_SIZE      2048
 //you can not set more than 62 because it will not fit into the FIFO CC1101
 #define SUBGHZ_TXRX_WORKER_MAX_TXRX_SIZE 60
+// The CC1101 FIFO read path clamps variable-length packets to 64 bytes.
+#define SUBGHZ_TXRX_WORKER_RX_BUFFER_SIZE 64U
 
 #define SUBGHZ_TXRX_WORKER_TIMEOUT_READ_WRITE_BUF 40
 
@@ -146,7 +148,9 @@ static int32_t subghz_tx_rx_worker_thread(void* context) {
     subghz_devices_set_frequency(instance->device, instance->frequency);
     subghz_devices_flush_rx(instance->device);
 
-    uint8_t data[SUBGHZ_TXRX_WORKER_MAX_TXRX_SIZE + 1] = {0};
+    // The HAL CC1101 FIFO reader reports at most 64 bytes. The previous
+    // TX-sized 61-byte array was too small for a valid full FIFO packet.
+    uint8_t data[SUBGHZ_TXRX_WORKER_RX_BUFFER_SIZE] = {0};
     size_t size_tx = 0;
     uint8_t size_rx[1] = {0};
     uint8_t timeout_tx = 0;
@@ -206,7 +210,7 @@ static int32_t subghz_tx_rx_worker_thread(void* context) {
 }
 
 SubGhzTxRxWorker* subghz_tx_rx_worker_alloc(void) {
-    SubGhzTxRxWorker* instance = malloc(sizeof(SubGhzTxRxWorker));
+    SubGhzTxRxWorker* instance = calloc(1, sizeof(SubGhzTxRxWorker));
 
     instance->thread =
         furi_thread_alloc_ex("SubGhzTxRxWorker", 2048, subghz_tx_rx_worker_thread, instance);
@@ -237,21 +241,20 @@ bool subghz_tx_rx_worker_start(
     uint32_t frequency) {
     furi_check(instance);
     furi_check(!instance->worker_running);
-    bool res = false;
+    if(!device || !furi_hal_subghz_is_tx_allowed(frequency)) {
+        return false;
+    }
+
     furi_stream_buffer_reset(instance->stream_tx);
     furi_stream_buffer_reset(instance->stream_rx);
 
+    instance->frequency = frequency;
+    instance->device = device;
     instance->worker_running = true;
-
-    if(furi_hal_subghz_is_tx_allowed(frequency)) {
-        instance->frequency = frequency;
-        instance->device = device;
-        res = true;
-    }
 
     furi_thread_start(instance->thread);
 
-    return res;
+    return true;
 }
 
 void subghz_tx_rx_worker_stop(SubGhzTxRxWorker* instance) {

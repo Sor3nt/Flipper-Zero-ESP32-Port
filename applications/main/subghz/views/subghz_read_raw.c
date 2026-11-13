@@ -5,6 +5,7 @@
 #include <furi_hal.h>
 #include <input/input.h>
 #include <gui/elements.h>
+#include <string.h>
 
 #include <assets_icons.h>
 #define SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE 100
@@ -21,7 +22,7 @@ typedef struct {
     FuriString* preset_str;
     FuriString* sample_write;
     FuriString* file_name;
-    uint8_t* rssi_history;
+    uint8_t rssi_history[SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE];
     uint8_t rssi_current;
     bool rssi_history_end;
     uint8_t ind_write;
@@ -466,6 +467,7 @@ bool subghz_read_raw_input(InputEvent* event, void* context) {
                         model->not_showing_samples = true;
                         furi_string_set(model->sample_write, "0 spl.");
                         furi_string_reset(model->file_name);
+            memset(model->rssi_history, 0, sizeof(model->rssi_history));
                         instance->callback(SubGhzCustomEventViewReadRAWErase, instance->context);
                     }
                 }
@@ -525,7 +527,9 @@ void subghz_read_raw_set_status(
                 model->status = SubGhzReadRAWStatusStart;
                 model->rssi_history_end = false;
                 model->ind_write = 0;
+                model->rssi_current = 0;
                 model->not_showing_samples = true;
+                memset(model->rssi_history, 0, sizeof(model->rssi_history));
                 furi_string_reset(model->file_name);
                 furi_string_set(model->sample_write, "0 spl.");
                 model->raw_threshold_rssi = raw_threshold_rssi;
@@ -547,7 +551,9 @@ void subghz_read_raw_set_status(
                 model->status = SubGhzReadRAWStatusLoadKeyIDLE;
                 model->rssi_history_end = false;
                 model->ind_write = 0;
+                model->rssi_current = 0;
                 model->not_showing_samples = true;
+                memset(model->rssi_history, 0, sizeof(model->rssi_history));
                 furi_string_set(model->file_name, file_name);
                 furi_string_set(model->sample_write, "RAW");
             },
@@ -600,10 +606,15 @@ void subghz_read_raw_exit(void* context) {
 }
 
 SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
-    SubGhzReadRAW* instance = malloc(sizeof(SubGhzReadRAW));
+    SubGhzReadRAW* instance = calloc(1, sizeof(SubGhzReadRAW));
+    if(!instance) return NULL;
 
     // View allocation and configuration
     instance->view = view_alloc();
+    if(!instance->view) {
+        free(instance);
+        return NULL;
+    }
     view_allocate_model(instance->view, ViewModelTypeLocking, sizeof(SubGhzReadRAWModel));
     view_set_context(instance->view, instance);
     view_set_draw_callback(instance->view, (ViewDrawCallback)subghz_read_raw_draw);
@@ -621,7 +632,13 @@ SubGhzReadRAW* subghz_read_raw_alloc(bool raw_send_only) {
             model->sample_write = furi_string_alloc();
             model->file_name = furi_string_alloc();
             model->raw_send_only = raw_send_only;
-            model->rssi_history = malloc(SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE * sizeof(uint8_t));
+            memset(model->rssi_history, 0, sizeof(model->rssi_history));
+            model->rssi_current = 0;
+            model->rssi_history_end = false;
+            model->ind_write = 0;
+            model->ind_sin = 0;
+            model->status = SubGhzReadRAWStatusIDLE;
+            model->not_showing_samples = true;
             model->raw_threshold_rssi = -127.0f;
         },
         true);
@@ -640,7 +657,6 @@ void subghz_read_raw_free(SubGhzReadRAW* instance) {
             furi_string_free(model->preset_str);
             furi_string_free(model->sample_write);
             furi_string_free(model->file_name);
-            free(model->rssi_history);
         },
         true);
     view_free(instance->view);

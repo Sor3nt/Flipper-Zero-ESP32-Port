@@ -129,7 +129,12 @@ void subghz_scene_read_raw_on_enter(void* context) {
     //set callback view raw
     subghz_read_raw_set_callback(subghz->subghz_read_raw, subghz_scene_read_raw_callback, subghz);
 
-    furi_check(subghz_txrx_load_decoder_by_name_protocol(subghz->txrx, SUBGHZ_PROTOCOL_RAW_NAME));
+    if(!subghz_txrx_load_decoder_by_name_protocol(subghz->txrx, SUBGHZ_PROTOCOL_RAW_NAME)) {
+        furi_string_free(file_name);
+        furi_string_set(subghz->error_str, "RAW receiver unavailable.");
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneShowError);
+        return;
+    }
 
     //set filter RAW feed
     subghz_txrx_receiver_set_filter(subghz->txrx, SubGhzProtocolFlag_RAW);

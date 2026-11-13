@@ -37,11 +37,9 @@ void infrared_scene_start_on_enter(void* context) {
         SubmenuIndexSavedRemotes,
         infrared_scene_start_submenu_callback,
         infrared);
-    /* Boards with an external IR TX pin (Paradoxt, T-Embed) get Infrared Settings (TX pin
-     * choice, no 5V). GPIO Settings (signal output + 5V on GPIO) exists only on non-ESP32-S3
-     * boards: on ESP32-S3 the 5V switch is in the GPIO app, and without an external TX pin the
-     * signal output choice does nothing (furi_hal_infrared_set_tx_output ignores it). */
-    if(furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX) {
+    /* ESP32-S3 exposes its persistent VBUS switch here. Boards with an external IR TX pin
+     * continue to use Infrared Settings for pin selection. */
+    if(furi_hal_infrared_get_ext_tx_pin() != UINT16_MAX || INFRARED_IS_ESP32S3) {
         submenu_add_item(
             submenu,
             "Infrared Settings",

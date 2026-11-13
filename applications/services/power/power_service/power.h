@@ -116,6 +116,9 @@ void power_api_set_settings(Power* instance, const PowerSettings* settings);
  */
 void power_enable_otg(Power* power, bool enable);
 
+/** Set the persistent VBUS 5 V preference (ESP32-S3). */
+void power_set_vbus_5v_enabled(Power* power, bool enable);
+
 /** Check OTG status
  * 
  * @return          true if OTG  is requested

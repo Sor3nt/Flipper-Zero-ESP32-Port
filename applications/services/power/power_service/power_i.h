@@ -62,6 +62,8 @@ typedef enum {
     PowerMessageTypeSetSettings,
     PowerMessageTypeReloadSettings,
     PowerMessageTypeSwitchOTG,
+    PowerMessageTypeIsOTGEnabled,
+    PowerMessageTypeSetVbus5V,
 } PowerMessageType;
 
 typedef struct {

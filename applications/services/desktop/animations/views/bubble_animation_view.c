@@ -37,7 +37,7 @@ struct BubbleAnimationView {
 };
 
 static void bubble_animation_activate(BubbleAnimationView* view, bool force);
-static void bubble_animation_activate_right_now(BubbleAnimationView* view);
+static void bubble_animation_activate_right_now(BubbleAnimationView* view, bool rearm_timer);
 
 static bool bubble_animation_view_is_paused(const BubbleAnimationView* view) {
     return __atomic_load_n(&view->paused, __ATOMIC_ACQUIRE);
@@ -144,8 +144,6 @@ static bool bubble_animation_input_callback(InputEvent* event, void* context) {
     BubbleAnimationView* animation_view = context;
     bool consumed = false;
 
-    esp_rom_printf("\r\n[BANIM] key=%d type=%d\r\n", event->key, event->type);
-
     if(event->type == InputTypePress) {
         bubble_animation_activate(animation_view, false);
     }
@@ -197,7 +195,7 @@ static void bubble_animation_activate(BubbleAnimationView* view, bool force) {
         model->active_shift = ACTIVE_SHIFT;
         view_commit_model(view->view, false);
     } else {
-        bubble_animation_activate_right_now(view);
+        bubble_animation_activate_right_now(view, true);
     }
 }
 
@@ -214,7 +212,7 @@ static uint32_t bubble_animation_frame_period(uint8_t frame_rate) {
     return furi_ms_to_ticks(period_ms);
 }
 
-static void bubble_animation_activate_right_now(BubbleAnimationView* view) {
+static void bubble_animation_activate_right_now(BubbleAnimationView* view, bool rearm_timer) {
     furi_assert(view);
 
     uint8_t frame_rate = 0;
@@ -227,7 +225,9 @@ static void bubble_animation_activate_right_now(BubbleAnimationView* view) {
     }
     view_commit_model(view->view, true);
 
-    if(frame_rate) {
+    /* The animation timer is periodic. Its callback must not enqueue a timer
+     * command back to the same FreeRTOS timer daemon; keep its current cadence. */
+    if(frame_rate && rearm_timer) {
         bubble_animation_timer_start(view, bubble_animation_frame_period(frame_rate));
     }
 }
@@ -286,7 +286,7 @@ static void bubble_animation_timer_callback(void* context) {
     view_commit_model(view->view, !activate);
 
     if(activate) {
-        bubble_animation_activate_right_now(view);
+        bubble_animation_activate_right_now(view, false);
     }
 }
 

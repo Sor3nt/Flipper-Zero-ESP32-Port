@@ -186,6 +186,16 @@ static void desktop_storage_callback(const void* message, void* context) {
     }
 }
 
+static void desktop_load_momentum_settings(Desktop* desktop, bool force_reload) {
+    if(force_reload) {
+        momentum_settings_reload();
+    } else {
+        momentum_settings_load();
+    }
+    momentum_settings_mark_statusbar_ready();
+    gui_update(desktop->gui);
+}
+
 static void desktop_lock_icon_draw_callback(Canvas* canvas, void* context) {
     UNUSED(context);
     furi_assert(canvas);
@@ -327,6 +337,7 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop_apply_settings(desktop);
 
     } else if(event == DesktopGlobalReloadSettings) {
+        desktop_load_momentum_settings(desktop, true);
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
 
@@ -509,7 +520,7 @@ static void desktop_apply_settings(Desktop* desktop) {
 static void desktop_init_settings(Desktop* desktop) {
     furi_pubsub_subscribe(storage_get_pubsub(desktop->storage), desktop_storage_callback, desktop);
 
-    momentum_settings_load();
+    desktop_load_momentum_settings(desktop, false);
     lock_screen_get_style();
     desktop_settings_load(&desktop->settings);
     gui_set_status_bar_background(

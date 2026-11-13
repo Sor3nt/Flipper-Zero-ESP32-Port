@@ -23,7 +23,7 @@ typedef enum {
 } NotificationLedLayerIndex;
 
 /* WS2812 ring effect modes (T-Embed Plus). Solid is the static settings.led_color.
- * Off is unconditional dark. The rest are animated and run on a periodic timer
+ * Off is unconditional dark. The rest are animated and run on a periodic task
  * whose interval comes from settings.led_speed_tick_ms.
  * Storage uses uint8_t for forward compat. */
 typedef enum {
@@ -103,7 +103,16 @@ struct NotificationApp {
     FuriTimer* night_shift_timer;
     FuriTimer* night_shift_demo_timer;
     FuriTimer* led_off_timer;
-    FuriTimer* led_effect_timer;
+    /* WS2812 effects use a dedicated task so radio/display load cannot starve
+     * the low-priority FreeRTOS timer daemon and bunch up animation frames. */
+    FuriThread* led_effect_thread;
+    FuriMutex* led_effect_mutex;
+    volatile uint32_t led_effect_period; /* ticks between frames; 0 = stopped */
+    FuriMutex* led_apply_mutex;
+    volatile uint32_t led_off_deadline;
+    volatile bool led_off_deadline_valid;
+    volatile bool led_off_pending;
+    volatile bool led_rearm_pending;
     FuriTimer* ui_spectrum_timer;
     /* Auto Off LED USB (Settings > Power): 5 s USB re-check while the screen
      * is off, so plugging / unplugging USB is noticed without input. */

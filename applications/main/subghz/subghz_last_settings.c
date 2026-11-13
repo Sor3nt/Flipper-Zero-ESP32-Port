@@ -23,7 +23,7 @@
 #define SUBGHZ_LAST_SETTING_FIELD_FREQUENCY_OFFSET                  "FreqOffset"
 
 SubGhzLastSettings* subghz_last_settings_alloc(void) {
-    SubGhzLastSettings* instance = malloc(sizeof(SubGhzLastSettings));
+    SubGhzLastSettings* instance = calloc(1, sizeof(SubGhzLastSettings));
     return instance;
 }
 
@@ -127,6 +127,13 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
                 flipper_format_rewind(fff_data_file);
             }
             instance->tx_power = (uint8_t)(tx_power & 0xFF);
+            if(instance->tx_power > SUBGHZ_TX_POWER_MAX_INDEX) {
+                FURI_LOG_W(
+                    TAG,
+                    "Invalid TX power index %u; using preset power",
+                    (unsigned)instance->tx_power);
+                instance->tx_power = 0;
+            }
             if(!flipper_format_read_float(
                    fff_data_file,
                    SUBGHZ_LAST_SETTING_FIELD_HOPPING_THRESHOLD,

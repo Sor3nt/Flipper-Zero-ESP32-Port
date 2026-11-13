@@ -7,6 +7,7 @@
 
 #include <flipper_format/flipper_format_i.h>
 #include <lib/toolbox/stream/stream.h>
+#include <stdatomic.h>
 
 #define TAG "SubGhzProtocolRaw"
 
@@ -28,9 +29,11 @@ struct SubGhzProtocolDecoderRAW {
     FlipperFormat* flipper_file;
     uint32_t file_is_open;
     FuriString* file_name;
-    size_t sample_write;
+    atomic_size_t sample_count;
     bool last_level;
-    bool pause;
+    bool last_paused;
+    atomic_bool pause;
+    bool write_failed;
     SubGhzProtocolDecoderRAWDataCallback data_callback;
     void* data_callback_context;
 };
@@ -89,12 +92,26 @@ bool subghz_protocol_raw_save_to_file_init(
     SubGhzRadioPreset* preset) {
     furi_check(instance);
 
+    furi_check(instance->file_is_open == RAWFileIsOpenClose);
+    atomic_store_explicit(&instance->sample_count, 0, memory_order_relaxed);
+    atomic_store_explicit(&instance->pause, false, memory_order_relaxed);
+    instance->ind_write = 0;
+    instance->last_level = false;
+    instance->last_paused = false;
+    instance->write_failed = false;
+
     instance->storage = furi_record_open(RECORD_STORAGE);
     instance->flipper_file = flipper_format_file_alloc(instance->storage);
+    if(!instance->flipper_file) {
+        furi_record_close(RECORD_STORAGE);
+        instance->storage = NULL;
+        return false;
+    }
 
     FuriString* temp_str;
     temp_str = furi_string_alloc();
     bool init = false;
+    bool file_opened = false;
 
     do {
         // Create subghz folder directory if necessary
@@ -121,6 +138,7 @@ bool subghz_protocol_raw_save_to_file_init(
             FURI_LOG_E(TAG, "Unable to open file for write: %s", furi_string_get_cstr(temp_str));
             break;
         }
+        file_opened = true;
 
         if(!flipper_format_write_header_cstr(
                instance->flipper_file, SUBGHZ_RAW_FILE_TYPE, SUBGHZ_RAW_FILE_VERSION)) {
@@ -159,12 +177,38 @@ bool subghz_protocol_raw_save_to_file_init(
         }
 
         instance->upload_raw = malloc(SUBGHZ_DOWNLOAD_MAX_SIZE * sizeof(int32_t));
+        if(!instance->upload_raw) {
+            FURI_LOG_E(TAG, "Unable to allocate RAW capture buffer");
+            break;
+        }
         instance->file_is_open = RAWFileIsOpenWrite;
-        instance->sample_write = 0;
+        instance->ind_write = 0;
         instance->last_level = false;
-        instance->pause = false;
+        instance->last_paused = false;
+        instance->write_failed = false;
         init = true;
     } while(0);
+
+    if(!init) {
+        free(instance->upload_raw);
+        instance->upload_raw = NULL;
+        instance->ind_write = 0;
+        atomic_store_explicit(&instance->pause, false, memory_order_relaxed);
+        instance->write_failed = false;
+        instance->file_is_open = RAWFileIsOpenClose;
+
+        if(file_opened) {
+            flipper_format_file_close(instance->flipper_file);
+            if(!storage_simply_remove(instance->storage, furi_string_get_cstr(temp_str))) {
+                FURI_LOG_W(TAG, "Unable to remove incomplete RAW capture file");
+            }
+        }
+
+        flipper_format_free(instance->flipper_file);
+        instance->flipper_file = NULL;
+        furi_record_close(RECORD_STORAGE);
+        instance->storage = NULL;
+    }
 
     furi_string_free(temp_str);
 
@@ -179,6 +223,15 @@ static bool subghz_protocol_raw_save_to_file_write(SubGhzProtocolDecoderRAW* ins
         if(!flipper_format_write_int32(
                instance->flipper_file, "RAW_Data", instance->upload_raw, instance->ind_write)) {
             FURI_LOG_E(TAG, "Unable to add RAW_Data");
+            // Keep feed() from writing index 512 (or beyond) after a failed flush.
+            instance->write_failed = true;
+            atomic_store_explicit(&instance->pause, true, memory_order_relaxed);
+            const size_t count = atomic_load_explicit(&instance->sample_count, memory_order_relaxed);
+            atomic_store_explicit(
+                &instance->sample_count,
+                count >= instance->ind_write ? count - instance->ind_write : 0,
+                memory_order_relaxed);
+            instance->ind_write = 0;
         } else {
             if(instance->data_callback) {
                 instance->data_callback(
@@ -186,7 +239,6 @@ static bool subghz_protocol_raw_save_to_file_write(SubGhzProtocolDecoderRAW* ins
                     instance->ind_write,
                     instance->data_callback_context);
             }
-            instance->sample_write += instance->ind_write;
             instance->ind_write = 0;
             is_write = true;
         }
@@ -197,7 +249,8 @@ static bool subghz_protocol_raw_save_to_file_write(SubGhzProtocolDecoderRAW* ins
 void subghz_protocol_raw_save_to_file_stop(SubGhzProtocolDecoderRAW* instance) {
     furi_check(instance);
 
-    if(instance->file_is_open == RAWFileIsOpenWrite && instance->ind_write)
+    if(instance->file_is_open == RAWFileIsOpenWrite && instance->ind_write &&
+       !instance->write_failed)
         subghz_protocol_raw_save_to_file_write(instance);
     if(instance->file_is_open != RAWFileIsOpenClose) {
         free(instance->upload_raw);
@@ -208,14 +261,12 @@ void subghz_protocol_raw_save_to_file_stop(SubGhzProtocolDecoderRAW* instance) {
     }
 
     instance->file_is_open = RAWFileIsOpenClose;
+    instance->ind_write = 0;
 }
 
 void subghz_protocol_raw_save_to_file_pause(SubGhzProtocolDecoderRAW* instance, bool pause) {
     furi_check(instance);
-
-    if(instance->pause != pause) {
-        instance->pause = pause;
-    }
+    atomic_store_explicit(&instance->pause, pause, memory_order_relaxed);
 }
 
 void subghz_protocol_decoder_raw_set_data_callback(
@@ -229,20 +280,23 @@ void subghz_protocol_decoder_raw_set_data_callback(
 
 size_t subghz_protocol_raw_get_sample_write(SubGhzProtocolDecoderRAW* instance) {
     furi_check(instance);
-    return instance->sample_write + instance->ind_write;
+    return atomic_load_explicit(&instance->sample_count, memory_order_relaxed);
 }
 
 void* subghz_protocol_decoder_raw_alloc(SubGhzEnvironment* environment) {
     UNUSED(environment);
-    SubGhzProtocolDecoderRAW* instance = malloc(sizeof(SubGhzProtocolDecoderRAW));
+    SubGhzProtocolDecoderRAW* instance = calloc(1, sizeof(SubGhzProtocolDecoderRAW));
+    if(!instance) return NULL;
+
+    atomic_init(&instance->sample_count, 0);
+    atomic_init(&instance->pause, false);
     instance->base.protocol = &subghz_protocol_raw;
-    instance->upload_raw = NULL;
-    instance->ind_write = 0;
-    instance->last_level = false;
     instance->file_is_open = RAWFileIsOpenClose;
     instance->file_name = furi_string_alloc();
-    instance->data_callback = NULL;
-    instance->data_callback_context = NULL;
+    if(!instance->file_name) {
+        free(instance);
+        return NULL;
+    }
 
     return instance;
 }
@@ -250,6 +304,9 @@ void* subghz_protocol_decoder_raw_alloc(SubGhzEnvironment* environment) {
 void subghz_protocol_decoder_raw_free(void* context) {
     furi_check(context);
     SubGhzProtocolDecoderRAW* instance = context;
+    if(instance->file_is_open != RAWFileIsOpenClose) {
+        subghz_protocol_raw_save_to_file_stop(instance);
+    }
     furi_string_free(instance->file_name);
     free(instance);
 }
@@ -257,6 +314,11 @@ void subghz_protocol_decoder_raw_free(void* context) {
 void subghz_protocol_decoder_raw_reset(void* context) {
     furi_check(context);
     SubGhzProtocolDecoderRAW* instance = context;
+    const size_t count = atomic_load_explicit(&instance->sample_count, memory_order_relaxed);
+    atomic_store_explicit(
+        &instance->sample_count,
+        count >= instance->ind_write ? count - instance->ind_write : 0,
+        memory_order_relaxed);
     instance->ind_write = 0;
     instance->last_level = false;
 }
@@ -264,12 +326,35 @@ void subghz_protocol_decoder_raw_reset(void* context) {
 void subghz_protocol_decoder_raw_feed(void* context, bool level, uint32_t duration) {
     furi_check(context);
     SubGhzProtocolDecoderRAW* instance = context;
+    const bool paused = atomic_load_explicit(&instance->pause, memory_order_relaxed);
+    if(paused != instance->last_paused) {
+        /* Do not join pulse durations across an RSSI-gated capture gap. */
+        instance->last_level = level;
+        instance->last_paused = paused;
+    }
     // Add check if we got duration higher than 1 second, we skipping it, temp fix
-    if((!instance->pause && (instance->upload_raw != NULL)) && (duration < ((uint32_t)1000000))) {
+    if((!paused && !instance->write_failed && (instance->upload_raw != NULL)) &&
+       (duration < ((uint32_t)1000000))) {
         if(duration > subghz_protocol_raw_const.te_short) {
             if(instance->last_level != level) {
                 instance->last_level = (level ? true : false);
-                instance->upload_raw[instance->ind_write++] = (level ? duration : -duration);
+                if(instance->ind_write >= SUBGHZ_DOWNLOAD_MAX_SIZE) {
+                    FURI_LOG_E(TAG, "RAW capture buffer index out of range");
+                    instance->write_failed = true;
+                    atomic_store_explicit(&instance->pause, true, memory_order_relaxed);
+                    const size_t count =
+                        atomic_load_explicit(&instance->sample_count, memory_order_relaxed);
+                    atomic_store_explicit(
+                        &instance->sample_count,
+                        count >= instance->ind_write ? count - instance->ind_write : 0,
+                        memory_order_relaxed);
+                    instance->ind_write = 0;
+                } else {
+                    instance->upload_raw[instance->ind_write++] = (level ? duration : -duration);
+                    const size_t count =
+                        atomic_load_explicit(&instance->sample_count, memory_order_relaxed);
+                    atomic_store_explicit(&instance->sample_count, count + 1, memory_order_relaxed);
+                }
             }
         }
 
@@ -297,7 +382,7 @@ void subghz_protocol_decoder_raw_get_string(void* context, FuriString* output) {
 
 void* subghz_protocol_encoder_raw_alloc(SubGhzEnvironment* environment) {
     UNUSED(environment);
-    SubGhzProtocolEncoderRAW* instance = malloc(sizeof(SubGhzProtocolEncoderRAW));
+    SubGhzProtocolEncoderRAW* instance = calloc(1, sizeof(SubGhzProtocolEncoderRAW));
 
     instance->base.protocol = &subghz_protocol_raw;
     instance->file_name = furi_string_alloc();
@@ -310,9 +395,10 @@ void subghz_protocol_encoder_raw_stop(void* context) {
     furi_check(context);
     SubGhzProtocolEncoderRAW* instance = context;
     instance->is_running = false;
-    if(instance->file_worker_encoder &&
-       subghz_file_encoder_worker_is_running(instance->file_worker_encoder)) {
-        subghz_file_encoder_worker_stop(instance->file_worker_encoder);
+    if(instance->file_worker_encoder) {
+        if(subghz_file_encoder_worker_is_running(instance->file_worker_encoder)) {
+            subghz_file_encoder_worker_stop(instance->file_worker_encoder);
+        }
         subghz_file_encoder_worker_free(instance->file_worker_encoder);
         instance->file_worker_encoder = NULL;
     }
@@ -333,6 +419,10 @@ void subghz_protocol_raw_file_encoder_worker_set_callback_end(
     void* context_end) {
     furi_check(instance);
     furi_check(callback_end);
+    if(!instance->file_worker_encoder) {
+        FURI_LOG_W(TAG, "RAW file encoder worker is unavailable");
+        return;
+    }
     subghz_file_encoder_worker_callback_end(
         instance->file_worker_encoder, callback_end, context_end);
 }
@@ -342,6 +432,10 @@ static bool subghz_protocol_encoder_raw_worker_init(SubGhzProtocolEncoderRAW* in
     furi_check(!instance->file_worker_encoder);
 
     instance->file_worker_encoder = subghz_file_encoder_worker_alloc();
+    if(!instance->file_worker_encoder) {
+        FURI_LOG_E(TAG, "Unable to allocate RAW file encoder worker");
+        return false;
+    }
     if(subghz_file_encoder_worker_start(
            instance->file_worker_encoder,
            furi_string_get_cstr(instance->file_name),

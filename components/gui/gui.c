@@ -578,7 +578,8 @@ void gui_direct_draw_release(Gui* gui) {
 
 Gui* gui_alloc(void) {
     Gui* gui = calloc(1, sizeof(Gui));
-    gui->status_bar_background = true;
+    /* Desktop applies the persisted background preference after its settings load. */
+    gui->status_bar_background = false;
     // Thread ID
     gui->thread_id = furi_thread_get_current_id();
     // Allocate mutex

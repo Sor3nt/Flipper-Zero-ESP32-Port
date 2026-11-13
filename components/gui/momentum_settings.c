@@ -31,6 +31,7 @@ static MomentumSettings momentum_settings = {
 
 static bool momentum_settings_loaded = false;
 static bool momentum_settings_loading = false;
+static bool momentum_settings_statusbar_ready = false;
 
 static const size_t momentum_settings_bool_offsets[MomentumSettingsBoolCount] = {
     [MomentumSettingsBoolLockOnBoot] = offsetof(MomentumSettings, lock_on_boot),
@@ -77,6 +78,11 @@ void momentum_settings_load(void) {
 
     MomentumSettings* loaded = malloc(sizeof(MomentumSettings));
     furi_check(loaded);
+
+    /* Wait for StorageSrv so saved_struct_load can prefer the SD copy over NVS. */
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    furi_record_close(RECORD_STORAGE);
+
     const bool settings_loaded = saved_struct_load(
            MOMENTUM_SETTINGS_PATH,
            loaded,
@@ -89,7 +95,7 @@ void momentum_settings_load(void) {
         momentum_settings_sanitize(loaded);
         FURI_LOG_I(TAG, "Loaded");
     } else {
-        Storage* storage = furi_record_open(RECORD_STORAGE);
+        storage = furi_record_open(RECORD_STORAGE);
         storage_ready = storage_sd_status(storage) == FSE_OK;
         furi_record_close(RECORD_STORAGE);
         FURI_LOG_I(TAG, "Using defaults");
@@ -105,6 +111,16 @@ void momentum_settings_load(void) {
         FURI_CRITICAL_EXIT();
     }
     free(loaded);
+}
+
+void momentum_settings_reload(void) {
+    bool load_in_progress;
+    FURI_CRITICAL_ENTER();
+    load_in_progress = momentum_settings_loading;
+    if(!load_in_progress) momentum_settings_loaded = false;
+    FURI_CRITICAL_EXIT();
+
+    if(!load_in_progress) momentum_settings_load();
 }
 
 void momentum_settings_save(void) {
@@ -133,6 +149,12 @@ void momentum_settings_get_snapshot(MomentumSettings* out) {
     furi_check(out);
     FURI_CRITICAL_ENTER();
     *out = momentum_settings;
+    FURI_CRITICAL_EXIT();
+}
+
+void momentum_settings_mark_statusbar_ready(void) {
+    FURI_CRITICAL_ENTER();
+    momentum_settings_statusbar_ready = true;
     FURI_CRITICAL_EXIT();
 }
 
@@ -196,7 +218,8 @@ void momentum_settings_set_asset_pack(const char* name) {
 bool momentum_settings_statusbar_icon_visible(ViewPortStatusBarIcon icon) {
     if(icon == ViewPortStatusBarIconNone || icon >= ViewPortStatusBarIconCount) return true;
     FURI_CRITICAL_ENTER();
-    const bool visible = !(momentum_settings.statusbar_hidden & (1UL << icon));
+    const bool visible = momentum_settings_statusbar_ready &&
+                         !(momentum_settings.statusbar_hidden & (1UL << icon));
     FURI_CRITICAL_EXIT();
     return visible;
 }
