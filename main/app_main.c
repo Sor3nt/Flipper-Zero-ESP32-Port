@@ -116,12 +116,32 @@ static void furi_log_esp_callback(const uint8_t* data, size_t size, void* contex
 
 void app_main(void) {
     ESP_LOGI(TAG, "Starting Furi Core on ESP32...");
-#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
-    esp_reset_reason_t reset_reason = esp_reset_reason();
-    ESP_LOGI(TAG, "Plus SD recovery 1.3.2; reset reason=%d", (int)reset_reason);
-    if(reset_reason == ESP_RST_BROWNOUT) {
-        ESP_LOGW(TAG, "Supply brownout reset detected; SD recovery cannot correct low supply voltage");
+    {
+        static const char* reset_names[] = {
+            [ESP_RST_UNKNOWN] = "UNKNOWN",
+            [ESP_RST_POWERON] = "POWERON",
+            [ESP_RST_EXT] = "EXT",
+            [ESP_RST_SW] = "SW",
+            [ESP_RST_PANIC] = "PANIC",
+            [ESP_RST_INT_WDT] = "INT_WDT",
+            [ESP_RST_TASK_WDT] = "TASK_WDT",
+            [ESP_RST_WDT] = "WDT",
+            [ESP_RST_DEEPSLEEP] = "DEEPSLEEP",
+            [ESP_RST_BROWNOUT] = "BROWNOUT",
+            [ESP_RST_SDIO] = "SDIO",
+        };
+        esp_reset_reason_t reset_reason = esp_reset_reason();
+        const char* reset_name = (reset_reason < sizeof(reset_names) / sizeof(reset_names[0]) &&
+                                  reset_names[reset_reason]) ?
+                                     reset_names[reset_reason] :
+                                     "?";
+        ESP_LOGI(TAG, "Reset reason=%d (%s)", (int)reset_reason, reset_name);
+        if(reset_reason == ESP_RST_BROWNOUT) {
+            ESP_LOGW(TAG, "Supply brownout reset detected");
+        }
     }
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+    ESP_LOGI(TAG, "Plus SD recovery 1.3.2");
 #endif
 
     // ESP-IDF: Scheduler is already running!

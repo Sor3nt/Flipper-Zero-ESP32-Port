@@ -70,10 +70,22 @@ const GpioPin gpio_ext_pa6  = {.port = NULL, .pin = BOARD_PIN_CC1101_MISO};
 const GpioPin gpio_ext_pa7  = {.port = NULL, .pin = BOARD_PIN_CC1101_MOSI};
 const GpioPin gpio_cc1101_g0 = {.port = NULL, .pin = BOARD_PIN_CC1101_GDO0};
 
+#ifdef BOARD_PIN_NFC_CS
+const GpioPin gpio_nfc_cs = {.port = NULL, .pin = BOARD_PIN_NFC_CS};
+#endif
+
+#ifdef BOARD_PIN_NFC_IRQ
+const GpioPin gpio_nfc_irq = {.port = NULL, .pin = BOARD_PIN_NFC_IRQ};
+#endif
+
 #ifdef BOARD_PIN_NRF24_CSN
 const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = BOARD_PIN_NRF24_CSN};
 #else
 const GpioPin gpio_nrf24_cs = {.port = NULL, .pin = UINT16_MAX};
 #endif
+#ifdef BOARD_PIN_IBUTTON
+const GpioPin gpio_ibutton  = {.port = NULL, .pin = BOARD_PIN_IBUTTON};
+#else
 const GpioPin gpio_ibutton  = {.port = NULL, .pin = UINT16_MAX};
+#endif
 const GpioPin gpio_speaker  = {.port = NULL, .pin = UINT16_MAX};

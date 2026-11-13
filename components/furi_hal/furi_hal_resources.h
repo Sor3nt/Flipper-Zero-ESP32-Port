@@ -91,6 +91,12 @@ extern const GpioPin gpio_ext_pa6; /* CC1101 MISO - GPIO17 */
 extern const GpioPin gpio_ext_pa7; /* CC1101 MOSI - GPIO3 */
 extern const GpioPin gpio_cc1101_g0; /* CC1101 GDO0 - GPIO23 */
 extern const GpioPin gpio_nrf24_cs; /* NRF24 CSN -- T-Embed: GPIO44 */
+#ifdef BOARD_PIN_NFC_CS
+extern const GpioPin gpio_nfc_cs; /* NFC (ST25R3916) chip select */
+#endif
+#ifdef BOARD_PIN_NFC_IRQ
+extern const GpioPin gpio_nfc_irq; /* NFC (ST25R3916) interrupt line */
+#endif
 extern const GpioPin gpio_ibutton;
 extern const GpioPin gpio_speaker;
 

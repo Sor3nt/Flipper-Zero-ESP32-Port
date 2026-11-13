@@ -18,6 +18,7 @@ declare -A TARGETS=(
     ["waveshare_c6_1.9"]="esp32c6"
     ["waveshare_c6_1.47"]="esp32c6"
     ["t_embed"]="esp32s3"
+    ["fatalcore"]="esp32s3"
     ["paradoxt"]="esp32s3"
 )
 declare -A NAMES=(
@@ -26,6 +27,7 @@ declare -A NAMES=(
     ["waveshare_c6_1.9"]="waveshare_c6_1.9"
     ["waveshare_c6_1.47"]="waveshare_c6_1.47"
     ["t_embed"]="lilygo_t_embed_cc1101"
+    ["fatalcore"]="fatalcore"
     ["paradoxt"]="paradoxt"
 )
 declare -A DIRS=(
@@ -34,13 +36,14 @@ declare -A DIRS=(
     ["waveshare_c6_1.9"]="build_waveshare_c6"
     ["waveshare_c6_1.47"]="build_waveshare_c6_1.47"
     ["t_embed"]="build_t_embed"
+    ["fatalcore"]="build_fatalcore"
     ["paradoxt"]="build_paradoxt"
 )
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --board <name> [options]
-Boards: esp32s3, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47, t_embed, paradoxt
+Boards: esp32s3, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47, t_embed, fatalcore, paradoxt
 Options: -p|--port, -m|--monitor, --build-only
 EOF
 }
@@ -135,8 +138,12 @@ fi
 # choices (e.g. dual-core on T-Embed / paradoxt) never leak into another.
 SDKCONFIG_OPT=("-DSDKCONFIG=${BUILD_DIR}/sdkconfig")
 
-# Set target (creates/updates sdkconfig)
-idf.py -B "${BUILD_DIR}" "${SDKCONFIG_OPT[@]}" "${BOARD_DEFAULTS_OPTS[@]}" set-target "${TARGET}"
+# Set target (creates/updates sdkconfig). -DFLIPPER_BOARD must be passed here
+# too: set-target runs a full CMake configure with the default board, and a
+# board whose defaults disagree with it (single-core requirement, pins) fails
+# before the reconfigure below ever runs.
+idf.py -B "${BUILD_DIR}" -DFLIPPER_BOARD="${BOARD}" "${SDKCONFIG_OPT[@]}" \
+    "${BOARD_DEFAULTS_OPTS[@]}" set-target "${TARGET}"
 
 # Construct command
 COMMANDS=("reconfigure" "build")

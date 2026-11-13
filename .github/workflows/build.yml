@@ -34,6 +34,12 @@ jobs:
             artifact_name: flipper-waveshare-c6-1.9
             chip: esp32c6
             flash_size: 8MB
+          - name: fatalcore
+            script_key: fatalcore
+            build_dir: build_fatalcore
+            artifact_name: flipper-fatalcore
+            chip: esp32s3
+            flash_size: 16MB
 
     steps:
       - name: Checkout code

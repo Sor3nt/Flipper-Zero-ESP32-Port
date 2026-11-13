@@ -49,10 +49,14 @@ bool furi_log_add_handler(FuriLogHandler handler) {
     FuriLogHandlersList_it(it, furi_log.tx_handlers);
     while(!FuriLogHandlersList_end_p(it)) {
         if(memcmp(FuriLogHandlersList_ref(it), &handler, sizeof(FuriLogHandler)) == 0) {
+            /* Duplicate handler: report it and stop. Without the break this
+             * loop never advanced the iterator and never finished, so adding
+             * the same handler twice hung the caller forever while holding the
+             * log mutex - freezing every task that tried to log anything. */
             ret = false;
-        } else {
-            FuriLogHandlersList_next(it);
+            break;
         }
+        FuriLogHandlersList_next(it);
     }
 
     if(ret) {

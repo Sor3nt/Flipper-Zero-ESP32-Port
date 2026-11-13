@@ -212,9 +212,30 @@ void nfc_start(Nfc* instance, NfcEventCallback callback, void* context);
  *
  * The instance can only be stopped if it is running.
  *
+ * Requests an abort before joining the worker: a worker parked in an
+ * indefinite hardware wait (stalled chip or silent card) would otherwise make
+ * the join block the calling thread forever. Use nfc_stop_no_abort() only when
+ * the worker is guaranteed to finish on its own.
+ *
  * @param[in,out] instance pointer to the instance to be stopped.
  */
 void nfc_stop(Nfc* instance);
+
+/**
+ * @brief Stop Nfc instance without requesting an abort.
+ *
+ * The instance can only be stopped if it is running.
+ *
+ * Unlike nfc_stop(), no abort is raised, so the worker is expected to reach
+ * its own exit condition. It is meant for the transport-level detection pass,
+ * where the worker's callback returns NfcCommandStop as soon as the single
+ * detection attempt is over. Raising an abort there would cancel the attempt
+ * before it even starts (the abort is delivered while the worker is still in
+ * its start-up guard-time wait), so no frame would ever be sent.
+ *
+ * @param[in,out] instance pointer to the instance to be stopped.
+ */
+void nfc_stop_no_abort(Nfc* instance);
 
 /**
  * @brief Transmit and receive a data frame in poller mode.

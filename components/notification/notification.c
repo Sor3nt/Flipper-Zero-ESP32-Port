@@ -331,7 +331,24 @@ static void notification_message_send(
         .back_event = back_event,
     };
 
-    furi_check(furi_message_queue_put(app->queue, &message, FuriWaitForever) == FuriStatusOk);
+    if(back_event == NULL) {
+        /* Fire-and-forget API: never block the caller. This path is reached
+         * from the input service thread (synchronously inside the pubsub
+         * callback, with the pubsub mutex held) and from furi_timer callbacks
+         * running in the FreeRTOS timer daemon. A blocking put froze all
+         * input / all furi timers - and with them every furi_timer_start()
+         * caller that then blocks forever on the timer command queue -
+         * whenever the queue backed up while the consumer slept inside a
+         * sequence delay. A dropped sequence is a cosmetic glitch, not a hang;
+         * the 32-slot queue makes even that rare. */
+        if(furi_message_queue_put(app->queue, &message, 0) != FuriStatusOk) {
+            FURI_LOG_W(TAG, "notification queue full, sequence dropped");
+        }
+    } else {
+        /* Blocking APIs wait for completion of the very message they post, so
+         * delivery must be guaranteed - keep the unbounded put. */
+        furi_check(furi_message_queue_put(app->queue, &message, FuriWaitForever) == FuriStatusOk);
+    }
 }
 
 static bool notification_load_settings(NotificationApp* app) {
@@ -798,7 +815,10 @@ static void notification_led_post_process(NotificationApp* app) {
 static NotificationApp* notification_app_alloc(void) {
     NotificationApp* app = malloc(sizeof(NotificationApp));
 
-    app->queue = furi_message_queue_alloc(8, sizeof(NotificationAppMessage));
+    /* Deep enough that bursts (every input event queues a backlight-on message
+     * through the pubsub callback) don't drop anything while the consumer
+     * sleeps inside a sequence delay. */
+    app->queue = furi_message_queue_alloc(32, sizeof(NotificationAppMessage));
     app->display_timer = furi_timer_alloc(notification_display_timer, FuriTimerTypeOnce, app);
     app->night_shift_timer = furi_timer_alloc(night_shift_timer_callback, FuriTimerTypePeriodic, app);
     app->night_shift_demo_timer = furi_timer_alloc(night_shift_demo_timer_callback, FuriTimerTypeOnce, app);

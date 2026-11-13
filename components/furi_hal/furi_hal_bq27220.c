@@ -29,6 +29,11 @@ static const char* TAG = "BQ27220";
 
 /* I2C configuration — shared with NFC (PN532) and Qwiic */
 #if defined(BOARD_PIN_QWIIC_SDA) && defined(BOARD_PIN_QWIIC_SCL)
+#ifdef BOARD_I2C_PORT
+#define BQ_I2C_PORT     BOARD_I2C_PORT
+#else
+#define BQ_I2C_PORT     I2C_NUM_0
+#endif
 #define BQ_I2C_FREQ_HZ  100000
 #define BQ_I2C_TIMEOUT  (1000 / portTICK_PERIOD_MS)
 #else
