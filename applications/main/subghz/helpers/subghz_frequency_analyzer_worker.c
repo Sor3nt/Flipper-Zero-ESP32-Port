@@ -31,6 +31,14 @@ static void subghz_fa_worker_set_path_for_frequency(uint32_t freq) {
 #define SUBGHZ_FA_HOLD_MS 1500
 #define SUBGHZ_FA_RECAL_MS 30000
 
+/* Adaptive per-channel noise baseline (rejects the board's own radiated spurs).
+ * A channel is only a candidate when it rises SPUR_MARGIN dB above its own
+ * learned floor. The floor follows slow drift via an EWMA (ALPHA) but is frozen
+ * during a real excursion. WARMUP sweeps seed the floors before detecting. */
+#define SUBGHZ_FA_SPUR_MARGIN 10.0f
+#define SUBGHZ_FA_BASELINE_ALPHA 0.05f
+#define SUBGHZ_FA_WARMUP_SCANS 3
+
 static const uint8_t subghz_preset_ook_58khz[][2] = {
     {CC1101_MDMCFG4, 0b11110111}, // Rx BW filter is 58.035714kHz
     /* End  */
@@ -156,6 +164,12 @@ static int32_t subghz_frequency_analyzer_worker_thread(void* context) {
     subghz_frequency_analyzer_worker_load_registers(subghz_preset_ook_650khz);
     subghz_frequency_analyzer_worker_calibrate_all(instance);
 
+    /* Mark every channel's noise baseline as "not seeded yet" (calloc zeroed it
+     * to 0 dBm, which would otherwise read as a real floor). */
+    for(size_t i = 0; i < instance->frequency_count; i++) {
+        instance->coarse_points[i].noise_floor = SUBGHZ_RSSI_SCAN_RSSI_NONE;
+    }
+
     size_t recal_index = 0;
     uint32_t last_recalibration = furi_get_tick();
     uint32_t fine_center = 0;
@@ -166,6 +180,11 @@ static int32_t subghz_frequency_analyzer_worker_thread(void* context) {
     uint32_t last_hit_tick = 0;
     uint32_t held_frequency = 0;
     float held_rssi = 0;
+
+    /* The per-channel noise baseline needs a couple of full sweeps to settle
+     * (it is seeded from the first measurement of each channel) before we trust
+     * the "excess over baseline" detector. */
+    uint32_t warmup_scans = 0;
 
     while(subghz_frequency_analyzer_worker_should_run(instance)) {
         furi_delay_ms(5);
@@ -194,6 +213,7 @@ static int32_t subghz_frequency_analyzer_worker_thread(void* context) {
 
         float trigger = subghz_frequency_analyzer_worker_get_trigger_snapshot(instance);
         float coarse_rssi = SUBGHZ_RSSI_SCAN_RSSI_NONE;
+        float coarse_excess = 0.0f; // rssi above this channel's own noise baseline
         SubGhzRssiScanPoint* coarse_point = NULL;
 
         for(size_t i = 0; subghz_frequency_analyzer_worker_should_run(instance) &&
@@ -210,16 +230,44 @@ static int32_t subghz_frequency_analyzer_worker_thread(void* context) {
                 continue;
             }
             const float rssi = subghz_rssi_scan_measure(coarse_settle_us, 1);
-            if(rssi > coarse_rssi) {
+
+            /* Per-channel adaptive noise baseline. The board's own radiated
+             * spurs (ESP32/PSRAM/flash + CC1101 26 MHz harmonics picked up by
+             * the antenna) sit at fixed frequencies with a stable level, so
+             * they get learned as that channel's quiescent floor and stop
+             * counting as a signal. A real transmitter raises its channel well
+             * above its own baseline. Detection is therefore by *excess over
+             * baseline*, not absolute RSSI — so a weak real signal on a quiet
+             * channel still beats a strong spur sitting at its baseline. */
+            if(point->noise_floor <= SUBGHZ_RSSI_SCAN_RSSI_NONE) {
+                point->noise_floor = rssi; // seed
+            }
+            const float excess = rssi - point->noise_floor;
+            if(excess < SUBGHZ_FA_SPUR_MARGIN) {
+                /* Quiescent (or only a spur): let the baseline track slow
+                 * temperature/supply drift. Frozen during a real excursion so a
+                 * held transmitter is never absorbed into the floor. */
+                point->noise_floor += (rssi - point->noise_floor) * SUBGHZ_FA_BASELINE_ALPHA;
+            }
+            if(excess > coarse_excess) {
+                coarse_excess = excess;
                 coarse_rssi = rssi;
                 coarse_point = point;
             }
         }
 
+        if(warmup_scans < SUBGHZ_FA_WARMUP_SCANS) warmup_scans++;
+
+        /* A coarse candidate must rise clearly above its own learned floor
+         * (rejects the fixed internal spurs) and still clear the user's
+         * absolute trigger. */
+        const bool coarse_candidate = warmup_scans >= SUBGHZ_FA_WARMUP_SCANS && coarse_point &&
+                                      coarse_excess >= SUBGHZ_FA_SPUR_MARGIN &&
+                                      coarse_rssi > trigger;
+
         float fine_rssi = SUBGHZ_RSSI_SCAN_RSSI_NONE;
         uint32_t fine_frequency = 0;
-        if(subghz_frequency_analyzer_worker_should_run(instance) && coarse_point &&
-           coarse_rssi > trigger) {
+        if(subghz_frequency_analyzer_worker_should_run(instance) && coarse_candidate) {
             if(fine_center != coarse_point->frequency) {
                 memset(instance->fine_points, 0, sizeof(instance->fine_points));
                 fine_center = coarse_point->frequency;
@@ -258,11 +306,11 @@ static int32_t subghz_frequency_analyzer_worker_thread(void* context) {
         bool hit = false;
         float hit_rssi = coarse_rssi;
         uint32_t hit_frequency = coarse_point ? coarse_point->frequency : 0;
-        if(fine_rssi > trigger) {
+        if(coarse_candidate && fine_rssi > trigger) {
             hit = true;
             hit_rssi = fine_rssi;
             hit_frequency = fine_frequency;
-        } else if(coarse_point && coarse_rssi > trigger) {
+        } else if(coarse_candidate) {
             hit = true;
         }
 
