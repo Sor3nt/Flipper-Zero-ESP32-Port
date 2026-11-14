@@ -3,8 +3,8 @@
 FuriHalNfcEventInternal* furi_hal_nfc_event = NULL;
 
 void furi_hal_nfc_event_init(void) {
-    /* Idempotent: furi_hal_nfc_init() may run again from the app thread when
-     * the boot-time bring-up failed, and the event object must not leak. */
+    /* Idempotent: furi_hal_nfc_init() owns the one-shot bring-up at boot and
+     * the event object must not leak if that path is ever re-entered. */
     if(furi_hal_nfc_event) return;
     furi_hal_nfc_event = malloc(sizeof(FuriHalNfcEventInternal));
 }
