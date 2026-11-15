@@ -8,6 +8,9 @@
 #include <storage/storage.h>
 #include <gui/icon_i.h>
 #include <momentum_settings.h>
+#include <sdkconfig.h>
+#include <esp_heap_caps.h>
+#include <esp_memory_utils.h>
 
 #include "animation_manager.h"
 #include "animation_storage.h"
@@ -36,7 +39,13 @@ static bool animation_storage_manifest_at(Storage* storage, const char* dir) {
     return exists;
 }
 
-static void animation_storage_select_manifest(void) {
+/* Built-in idle animation that is always valid; the other built-in ones only
+ * apply in their own state (bad battery, no SD card). */
+#define ANIMATION_STORAGE_BUILTIN_IDLE_NAME "L1_Tv_128x47"
+
+/* Selects the manifest for the current asset pack; returns true if it is the
+ * pack's own manifest (false: default /ext/dolphin). */
+static bool animation_storage_select_manifest(void) {
     FuriString* path = furi_string_alloc();
     char pack[ASSET_PACKS_NAME_LEN];
     momentum_settings_get_asset_pack(pack, sizeof(pack));
@@ -65,6 +74,7 @@ static void animation_storage_select_manifest(void) {
         "%s/manifest.txt",
         animation_dir);
     furi_string_free(path);
+    return use_asset_pack;
 }
 
 static bool animation_storage_load_single_manifest_info(
@@ -129,7 +139,8 @@ void animation_storage_fill_animation_list(StorageAnimationList_t* animation_lis
     furi_assert(!StorageAnimationList_size(*animation_list));
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
-    animation_storage_select_manifest();
+    const bool from_asset_pack = animation_storage_select_manifest();
+    size_t manifest_entries = 0;
     FlipperFormat* file = flipper_format_file_alloc(storage);
     /* Forbid skipping fields */
     flipper_format_set_strict_mode(file, true);
@@ -165,6 +176,7 @@ void animation_storage_fill_animation_list(StorageAnimationList_t* animation_lis
             storage_animation->manifest_info.weight = u32value;
 
             StorageAnimationList_push_back(*animation_list, storage_animation);
+            manifest_entries++;
         } while(1);
 
         animation_storage_free_storage_animation(&storage_animation);
@@ -173,8 +185,16 @@ void animation_storage_fill_animation_list(StorageAnimationList_t* animation_lis
     furi_string_free(read_string);
     flipper_format_free(file);
 
-    // add hard-coded animations
+    /* add hard-coded animations. With an asset pack that lists animations, the
+     * always-valid built-in idle one stays out of the draw: it would replace
+     * the pack's animation at random (1 in 2 for a one-animation pack). It is
+     * still the fallback when none of the pack's animations is valid. */
+    const bool skip_builtin_idle = from_asset_pack && manifest_entries > 0;
     for(size_t i = 0; i < dolphin_internal_size; ++i) {
+        if(skip_builtin_idle &&
+           !strcmp(dolphin_internal[i].manifest_info.name, ANIMATION_STORAGE_BUILTIN_IDLE_NAME)) {
+            continue;
+        }
         StorageAnimationList_push_back(*animation_list, (StorageAnimation*)&dolphin_internal[i]);
     }
 
@@ -311,6 +331,35 @@ static void animation_storage_free_frames(BubbleAnimation* animation) {
     icon->frames = NULL;
 }
 
+/* Frame data (and the frame pointer table) of SD animations goes to PSRAM when
+ * the target has it, so the desktop can keep its animation loaded while an app
+ * runs without taking internal RAM from that app (see
+ * animation_storage_can_keep_loaded). Zeroed like the furi malloc() it falls
+ * back to; freed with free(). */
+static void* animation_storage_frame_alloc(size_t size) {
+#if CONFIG_SPIRAM
+    void* buffer = heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(buffer) return buffer;
+#endif
+    return malloc(size);
+}
+
+bool animation_storage_can_keep_loaded(StorageAnimation* storage_animation) {
+    furi_assert(storage_animation);
+#if CONFIG_SPIRAM
+    if(!storage_animation->external || !storage_animation->animation) return false;
+    const Icon* icon = &storage_animation->animation->icon_animation;
+    if(!icon->frames || !esp_ptr_external_ram(icon->frames)) return false;
+    for(int i = 0; i < icon->frame_count; ++i) {
+        if(!icon->frames[i] || !esp_ptr_external_ram(icon->frames[i])) return false;
+    }
+    return true;
+#else
+    UNUSED(storage_animation);
+    return false;
+#endif
+}
+
 static bool animation_storage_load_frames(
     Storage* storage,
     const char* name,
@@ -335,40 +384,47 @@ static bool animation_storage_load_frames(
     FURI_CONST_ASSIGN(icon->frame_rate, 0);
     FURI_CONST_ASSIGN(icon->height, height);
     FURI_CONST_ASSIGN(icon->width, width);
-    icon->frames = malloc(sizeof(const uint8_t*) * icon->frame_count);
+    icon->frames = animation_storage_frame_alloc(sizeof(const uint8_t*) * icon->frame_count);
+    if(!icon->frames) return false;
 
     bool frames_ok = false;
     File* file = storage_file_alloc(storage);
-    FileInfo file_info;
+    uint64_t file_size = 0;
     FuriString* filename;
     filename = furi_string_alloc();
     size_t max_filesize = ROUND_UP_TO(width, 8) * height + 1;
 
+    /* One open per frame: the size comes from the open file instead of a
+     * separate stat, which walked the whole path on the SD card a second time
+     * for every frame (the SD shares its SPI bus with the display). */
     for(int i = 0; i < icon->frame_count; ++i) {
         frames_ok = false;
+        file_size = 0;
         furi_string_printf(filename, "%s/%s/frame_%d.bm", animation_dir, name, i);
 
-        if(storage_common_stat(storage, furi_string_get_cstr(filename), &file_info) != FSE_OK)
-            break;
-        if(file_info.size > max_filesize) {
-            FURI_LOG_E(
-                TAG,
-                "Filesize %llu, max: %zu (width %u, height %u)",
-                file_info.size,
-                max_filesize,
-                width,
-                height);
-            break;
-        }
         if(!storage_file_open(
                file, furi_string_get_cstr(filename), FSAM_READ, FSOM_OPEN_EXISTING)) {
             FURI_LOG_E(TAG, "Can't open file \'%s\'", furi_string_get_cstr(filename));
             break;
         }
+        file_size = storage_file_size(file);
+        if(file_size == 0 || file_size > max_filesize) {
+            FURI_LOG_E(
+                TAG,
+                "Filesize %llu, max: %zu (width %u, height %u)",
+                file_size,
+                max_filesize,
+                width,
+                height);
+            storage_file_close(file);
+            break;
+        }
 
-        FURI_CONST_ASSIGN_PTR(icon->frames[i], malloc(file_info.size));
-        if(storage_file_read(file, (void*)icon->frames[i], file_info.size) != file_info.size) {
+        FURI_CONST_ASSIGN_PTR(icon->frames[i], animation_storage_frame_alloc(file_size));
+        if(!icon->frames[i] ||
+           storage_file_read(file, (void*)icon->frames[i], file_size) != file_size) {
             FURI_LOG_E(TAG, "Read failed: \'%s\'", furi_string_get_cstr(filename));
+            storage_file_close(file);
             break;
         }
         storage_file_close(file);
@@ -382,7 +438,7 @@ static bool animation_storage_load_frames(
             furi_string_get_cstr(filename),
             width,
             height,
-            file_info.size);
+            file_size);
         animation_storage_free_frames(animation);
     } else {
         furi_check(animation->icon_animation.frames);
