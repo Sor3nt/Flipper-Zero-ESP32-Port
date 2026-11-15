@@ -24,6 +24,7 @@ typedef struct {
     uint32_t frames;
     uint8_t current_channel;
     uint32_t elapsed_ms;
+    uint32_t run_start_ms;     // timestamp (now_ms) saat Start ditekan → elapsed presisi
     char target_ssid[DEAUTH_SSID_BUFF_SIZE];
 
     // --- kontrol UI ---

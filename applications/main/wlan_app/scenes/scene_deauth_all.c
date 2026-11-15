@@ -495,9 +495,14 @@ static void wlan_marauder_hopping_task_fn(void* arg) {
             ESP_LOGI(MARAUDER_TAG, "Rescan @ cycle %lu (AP=%u, interval=%lums)",
                      (unsigned long)cycle_counter, (unsigned)s_marauder_ap_count,
                      (unsigned long)interval);
+            // Anchor jadwal ke saat interval terpenuhi (`now`), BUKAN ke waktu
+            // selesai scan. Kalau di-anchor setelah scan, periode nyata =
+            // interval + durasi scan (drift ~ratusan ms tiap siklus). Dengan
+            // anchor ke `now`, rescan berikutnya tepat `interval` dari titik
+            // pemicuan → timer presisi sesuai yang diatur user.
+            s_last_rescan_ms = now;
             bool ok = wlan_app_auto_scan(s_marauder_ap_records, &s_marauder_ap_count);
             s_marauder_scanning = false;
-            s_last_rescan_ms = now_ms();
             if(!s_marauder_task_run) break;
             if(ok) {
                 channel_mask = build_channel_mask(s_marauder_ap_records, s_marauder_ap_count);
@@ -649,8 +654,18 @@ static void deauth_all_toggle_run(WlanApp* app) {
         s_force_rescan_on_start = true;
         DeauthStartResult res = deauth_marauder_worker_start(app);
         if(res == DEAUTH_START_OK) {
+            // Reset metrik tiap Start (termasuk Start setelah Stop di scene yang
+            // sama): tanpa ini elapsed_ms/frames melanjutkan hitungan sesi lama.
             with_view_model(
-                app->view_deauth_all, WlanDeauthAllModel * m, { m->running = true; }, true);
+                app->view_deauth_all, WlanDeauthAllModel * m,
+                {
+                    m->running = true;
+                    m->elapsed_ms = 0;
+                    m->run_start_ms = now_ms();
+                    m->frames = 0;
+                    m->current_channel = WIFI_CHANNEL_MIN;
+                },
+                true);
         } else if(res == DEAUTH_START_BUSY) {
             ESP_LOGW(MARAUDER_TAG, "Busy");
             s_force_rescan_on_start = false;
@@ -686,6 +701,12 @@ static void deauth_all_apply_settings(WlanApp* app) {
         false);
     s_auto_scan_enabled = c.auto_scan_enabled ? true : false;
     s_auto_scan_interval_ms = (uint32_t)c.interval_s * 1000U;
+    // Re-anchor countdown rescan ke saat user mengubah setting: mengaktifkan
+    // Auto Scan / mengganti interval memulai hitungan baru dari sekarang, jadi
+    // rescan pertama jatuh tepat `interval` detik kemudian (bukan langsung,
+    // kalau s_last_rescan_ms kebetulan sudah lama berlalu).
+    s_last_rescan_ms = now_ms();
+    s_skip_rescan_until_ms = 0;
     deauth_all_cfg_save(&c);
 }
 
@@ -797,6 +818,7 @@ void wlan_app_scene_deauth_all_on_enter(void* context) {
             model->frames = 0;
             model->current_channel = WIFI_CHANNEL_MIN;
             model->elapsed_ms = 0;
+            model->run_start_ms = now_ms();
 
             model->focus = DeauthAllFocusStart; // default fokus = Start
             model->editing_duration = false;
@@ -885,7 +907,9 @@ bool wlan_app_scene_deauth_all_on_event(void* context, SceneManagerEvent event) 
 
                     model->frames = s_marauder_frames_sent;
                     model->current_channel = s_marauder_current_channel;
-                    model->elapsed_ms += DEAUTH_UI_REFRESH_MS;
+                    // Elapsed dihitung dari timestamp Start (bukan akumulasi per
+                    // tick) → presisi & tidak terpengaruh jitter scene-tick.
+                    model->elapsed_ms = now_ms() - model->run_start_ms;
                 } else if(model->running) {
                     model->running = false;
                     strncpy(model->target_ssid, "STOPPED", sizeof(model->target_ssid) - 1);
