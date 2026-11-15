@@ -1,0 +1,51 @@
+Filetype: Flipper Animation Manifest
+Version: 1
+
+Name: Torchic
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: Treecko
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: Mudkip
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: TorchicPokeball
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: TreeckoPokeball
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: MudkipPokeball
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3
+
+Name: All
+Min butthurt: 0
+Max butthurt: 18
+Min level: 0
+Max level: 30
+Weight: 3

@@ -1,0 +1,37 @@
+Filetype: Flipper Animation Manifest
+Version: 1
+
+Name: Ronaldo_Sui 
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3 
+
+Name: Messi
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3 
+
+Name: Messi_Ankara 
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3 
+
+Name: Ronaldo 
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3 
+
+Name: Ronaldo_FreeKick 
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3 

@@ -1,0 +1,51 @@
+Filetype: Flipper Animation Manifest
+Version: 1
+
+Name: Logo_Downstep
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: Logo_Sidestep
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: RL_Logo_Text
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: RL_LogoFlash
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: Still_Image
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: Text_Glitch
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: WEN_SHIP
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3

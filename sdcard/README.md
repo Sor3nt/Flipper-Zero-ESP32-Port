@@ -16,7 +16,7 @@ This directory is a partial overlay of SD card files to add or replace; it is no
 | `apps_assets/fmtx/` | `/apps_assets/fmtx/` | MP3 tracks required by the FMTX FAP. |
 | `apps_assets/proto_pirate/` | `/apps_assets/proto_pirate/` | ProtoPirate plugin FALs, model database, and keystore data. |
 | `apps_data/js_app/plugins/js_badusb.fal` | `/apps_data/js_app/plugins/js_badusb.fal` | Updated JavaScript BadUSB plugin; replace the older file at this path. |
-| `asset_packs/` | `/asset_packs/` | 35 animation packs, with their manifests and frame files. Select one in Settings → Interface → Graphics → Asset Pack. |
+| `asset_packs/` | `/asset_packs/` | 55 asset packs in Momentum format: the Momentum catalog (momentum-fw.dev/asset-packs) plus Crows and SkullBats. A pack can contain animations (`Anims/`), icon and passport replacements (`Icons/`), and fonts (`Fonts/`). Select one in Settings → Interface → Graphics → Asset Pack. Animations switch immediately; icons and fonts apply after the offered restart. Replace the whole folder: the old one-animation pirate packs (Angot … You, Surcouf) are now the single `Kuro - BlackFlags` pack. |
 | `u2f/assets/` | `/u2f/assets/` | The matching `cert.der` and `cert_key.u2f` pair required to provision U2F. On first use, firmware imports and encrypts the key. |
 
 ### Replace the previous U2F files
