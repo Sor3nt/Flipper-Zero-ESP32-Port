@@ -237,6 +237,17 @@ void furi_thread_set_context(FuriThread* thread, void* context);
 void furi_thread_set_priority(FuriThread* thread, FuriThreadPriority priority);
 
 /**
+ * @brief Pin a FuriThread to one CPU core (ESP32 port extension).
+ *
+ * The thread MUST be stopped when calling this function. By default threads
+ * have no core affinity.
+ *
+ * @param[in,out] thread pointer to the FuriThread instance to be modified
+ * @param[in] core core index, or a negative value for no affinity
+ */
+void furi_thread_set_core(FuriThread* thread, int32_t core);
+
+/**
  * @brief Get the priority of a FuriThread.
  *
  * @param[in] thread pointer to the FuriThread instance to be queried

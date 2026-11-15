@@ -1,6 +1,8 @@
 #include <furi.h>
 #include <furi_hal.h>
+#include <furi_hal_spi_bus.h>
 #include <flipper.h>
+#include <string.h>
 #include <applications.h>
 
 #include <esp_log.h>
@@ -146,6 +148,11 @@ void app_main(void) {
             FLIPPER_SERVICES[i].app,
             NULL);
         furi_thread_set_appid(thread, FLIPPER_SERVICES[i].appid);
+        /* The GUI thread drives the LCD and must share its core with the SPI
+         * bus interrupt, see FURI_HAL_SPI_BUS_ISR_CORE. */
+        if(FLIPPER_SERVICES[i].appid && strcmp(FLIPPER_SERVICES[i].appid, "gui") == 0) {
+            furi_thread_set_core(thread, FURI_HAL_SPI_BUS_ISR_CORE);
+        }
         furi_thread_start(thread);
 
         furi_delay_ms(10);

@@ -59,6 +59,7 @@ struct FuriThread {
     char* appid;
 
     FuriThreadPriority priority;
+    BaseType_t core_id; /* tskNO_AFFINITY unless furi_thread_set_core() */
 
     size_t stack_size;
     size_t heap_size;
@@ -172,6 +173,7 @@ static void furi_thread_init_common(FuriThread* thread) {
     }
 
     thread->priority = FuriThreadPriorityNormal;
+    thread->core_id = tskNO_AFFINITY;
 
     FuriHalRtcHeapTrackMode mode = furi_hal_rtc_get_heap_track_mode();
     if(mode == FuriHalRtcHeapTrackModeAll) {
@@ -423,15 +425,25 @@ void furi_thread_start(FuriThread* thread) {
 
     uint32_t stack_depth = thread->stack_size / sizeof(StackType_t);
 
+    /* Same as xTaskCreateStatic() (which passes tskNO_AFFINITY) unless a core
+     * was set with furi_thread_set_core(). */
     furi_check(
-        xTaskCreateStatic(
+        xTaskCreateStaticPinnedToCore(
             furi_thread_body,
             thread->name,
             stack_depth,
             thread,
             thread->priority,
             thread->stack_buffer,
-            &thread->container) == (TaskHandle_t)thread);
+            &thread->container,
+            thread->core_id) == (TaskHandle_t)thread);
+}
+
+void furi_thread_set_core(FuriThread* thread, int32_t core) {
+    furi_check(thread);
+    furi_check(thread->state == FuriThreadStateStopped);
+    furi_check(core < 0 || core < portNUM_PROCESSORS);
+    thread->core_id = core < 0 ? tskNO_AFFINITY : (BaseType_t)core;
 }
 
 bool furi_thread_join(FuriThread* thread) {

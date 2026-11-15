@@ -152,6 +152,7 @@ static bool furi_hal_spi_bus_init_if_needed(FuriHalSpiBus* bus, const FuriHalSpi
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 4096,
+        .isr_cpu_id = FURI_HAL_SPI_BUS_ISR_CPU_AFFINITY,
     };
 
     esp_err_t err = spi_bus_initialize(bus->host_id, &bus_config, SPI_DMA_CH_AUTO);

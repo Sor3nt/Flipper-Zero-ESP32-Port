@@ -191,6 +191,7 @@ void furi_hal_display_init(void) {
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = LCD_H_RES * STRIPE_HEIGHT * sizeof(uint16_t),
+        .isr_cpu_id = FURI_HAL_SPI_BUS_ISR_CPU_AFFINITY,
     };
     esp_err_t spi_err = spi_bus_initialize(LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     /* ESP_ERR_INVALID_STATE is OK — bus may already be initialized by SubGHz on shared-bus boards */
