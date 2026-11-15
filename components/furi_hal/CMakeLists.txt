@@ -110,7 +110,9 @@ elseif(IDF_TARGET STREQUAL "esp32s2")
     )
     list(APPEND FURI_HAL_REQUIRES espressif__esp_tinyusb)
 else()
-    list(APPEND FURI_HAL_SRCS "furi_hal_usb_hid_stub.c")
+    # furi_hal_usb_msc.c compiles to its no-USB stubs here (#else branch):
+    # firmware_api.c exports the MSC API to FAPs on every target.
+    list(APPEND FURI_HAL_SRCS "furi_hal_usb_hid_stub.c" "furi_hal_usb_msc.c")
 endif()
 
 idf_component_register(
