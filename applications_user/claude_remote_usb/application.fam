@@ -1,0 +1,17 @@
+App(
+    appid="claude_remote_usb",
+    name="Agentic Remote USB",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="claude_remote_usb_app",
+    requires=[
+        "gui",
+        "dialogs",
+    ],
+    stack_size=4 * 1024,
+    fap_category="USB",
+    fap_version="1.0",
+    fap_icon="claude_remote.png",
+    fap_description="One-handed USB remote for AI coding agents. 5-button D-pad control, macros, offline manual + quiz.",
+    fap_author="Kasen Sansonetti (ESP32 port)",
+    cdefines=["HID_TRANSPORT_USB"],
+)
