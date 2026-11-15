@@ -150,7 +150,11 @@ bool protopirate_radio_init(ProtoPirateApp* app) {
     FURI_LOG_D(TAG, "SubGhz devices initialized");
 #endif
 
-    app->txrx->radio_device = radio_device_loader_set(NULL, SubGhzRadioDeviceTypeExternalCC1101);
+    // PORT: this firmware has no external CC1101. "cc1101_ext" is only an alias that drives the
+    // internal chip and always reports connected, so "prefer external" always picked it: OTG 5 V
+    // boost on, furi_hal_subghz_init() re-run on begin, and subghz_devices_end() ->
+    // furi_hal_subghz_shutdown() on the internal radio at radio teardown. Use the internal device.
+    app->txrx->radio_device = radio_device_loader_set(NULL, SubGhzRadioDeviceTypeInternal);
 
     if(!app->txrx->radio_device) {
         FURI_LOG_W(TAG, "External CC1101 not found, trying internal radio");
