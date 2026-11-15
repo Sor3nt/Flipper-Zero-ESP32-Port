@@ -13,6 +13,8 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #define TAG "Elf"
 
@@ -22,6 +24,23 @@
 #define RESOLVER_THREAD_YIELD_STEP 30
 
 // #define ELF_DEBUG_LOG 1
+
+/* First failure reason of the most recent elf_file_open()/elf_file_load_sections(), for the
+ * loader to show on screen (the detailed FURI_LOG_E lines only reach the serial log). Only one
+ * FAP loads at a time (the loader thread), so a single static buffer is enough. */
+static char elf_last_error[64];
+
+static void elf_note_error(const char* fmt, ...) {
+    if(elf_last_error[0]) return; /* keep the first, root-cause error */
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(elf_last_error, sizeof(elf_last_error), fmt, args);
+    va_end(args);
+}
+
+const char* elf_file_get_last_error(void) {
+    return elf_last_error;
+}
 
 #ifndef ELF_DEBUG_LOG
 #undef FURI_LOG_D
@@ -219,6 +238,7 @@ static Elf32_Addr elf_address_of(ELFFile* elf, Elf32_Sym* sym, const char* sName
             return addr;
         }
         FURI_LOG_E(TAG, "  API lookup FAILED: '%s' hash=0x%08lx", sName, (unsigned long)hash);
+        elf_note_error("Missing: %s", sName);
     } else {
         ELFSection* symSec = elf_section_of(elf, sym->st_shndx);
         if(symSec) {
@@ -238,6 +258,7 @@ static Elf32_Addr elf_address_of(ELFFile* elf, Elf32_Sym* sym, const char* sName
             }
             return addr;
         }
+        elf_note_error("No section for %s", sName);
         FURI_LOG_E(TAG, "  Section idx=%u not loaded for '%s' (bind=%u type=%u)",
             sym->st_shndx, sName, ELF32_ST_BIND(sym->st_info), ELF32_ST_TYPE(sym->st_info));
     }
@@ -312,13 +333,14 @@ static bool elf_relocate_slot0(Elf32_Addr relAddr, Elf32_Addr symAddr, Elf32_Swo
         int32_t offset = (int32_t)(l32r_target - pc_aligned);
 
         if(offset & 3) {
-            FURI_LOG_E(TAG, "  L32R target not 4-byte aligned");
+            FURI_LOG_E(TAG, "  L32R target not 4-byte aligned"); elf_note_error("Reloc: %s", "  L32R target not 4-byte aligned" + 2);
             return false;
         }
 
         int32_t units = offset >> 2;
         if(units < -65536 || units > -1) {
             FURI_LOG_E(TAG, "  L32R offset out of range: %d (units=%d)", (int)offset, (int)units);
+            elf_note_error("Reloc: L32R range %d", (int)offset);
             return false;
         }
 
@@ -337,13 +359,14 @@ static bool elf_relocate_slot0(Elf32_Addr relAddr, Elf32_Addr symAddr, Elf32_Swo
         int32_t offset = (int32_t)(target - pc_base);
 
         if(offset & 3) {
-            FURI_LOG_E(TAG, "  CALL0 target not aligned");
+            FURI_LOG_E(TAG, "  CALL0 target not aligned"); elf_note_error("Reloc: %s", "  CALL0 target not aligned" + 2);
             return false;
         }
 
         int32_t offset18 = offset >> 2;
         if(offset18 < -131072 || offset18 > 131071) {
             FURI_LOG_E(TAG, "  CALL0 offset out of range: %d", (int)offset18);
+            elf_note_error("Reloc: CALL0 range %d", (int)offset18);
             return false;
         }
 
@@ -365,7 +388,7 @@ static bool elf_relocate_slot0(Elf32_Addr relAddr, Elf32_Addr symAddr, Elf32_Swo
             int32_t offset18 = offset;
 
             if(offset18 < -131072 || offset18 > 131071) {
-                FURI_LOG_E(TAG, "  J offset out of range");
+                FURI_LOG_E(TAG, "  J offset out of range"); elf_note_error("Reloc: %s", "  J offset out of range" + 2);
                 return false;
             }
 
@@ -424,6 +447,7 @@ static bool
         break;
     default:
         FURI_LOG_E(TAG, "  Unsupported Xtensa relocation type %d", type);
+        elf_note_error("Reloc type %d", (int)type);
         return false;
     }
     return true;
@@ -648,6 +672,7 @@ static SectionTypeInfo elf_preload_section(
 
         if(info.result != ELFLoadSectionResultSuccess) {
             FURI_LOG_E(TAG, "Error loading section '%s'", name);
+            elf_note_error("Section %s", name);
         }
 
         return info;
@@ -833,6 +858,7 @@ bool elf_file_open(ELFFile* elf, const char* path) {
     Elf32_Shdr sH;
 
     FURI_LOG_I(TAG, "Opening ELF file: %s", path);
+    elf_last_error[0] = '\0';
 
     if(!storage_file_open(elf->fd, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
         FURI_LOG_E(TAG, "Failed to open file: %s", path);
@@ -947,6 +973,7 @@ ElfLoadSectionTableResult elf_file_load_section_table(ELFFile* elf) {
         if(section_type_info.result != ELFLoadSectionResultSuccess) {
             if(section_type_info.result == ELFLoadSectionResultNoMemory) {
                 FURI_LOG_E(TAG, "Not enough memory");
+                elf_note_error("Out of memory");
                 result = ElfLoadSectionTableResultNoMemory;
             } else if(section_type_info.result == ELFLoadSectionResultError) {
                 FURI_LOG_E(TAG, "Error loading section");
