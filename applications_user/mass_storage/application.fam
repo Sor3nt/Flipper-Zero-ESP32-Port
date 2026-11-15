@@ -1,0 +1,17 @@
+App(
+    appid="mass_storage",
+    name="Mass Storage",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="mass_storage_app",
+    requires=[
+        "gui",
+        "dialogs",
+    ],
+    stack_size=4 * 1024,
+    fap_description="Expose a disk image (.img) on the SD card as a USB mass storage device; create new images too",
+    fap_category="USB",
+    fap_version="1.0",
+    fap_icon="assets/mass_storage_10px.png",
+    fap_icon_assets="assets",
+    fap_author="flipperdevices good-faps (ESP32 port)",
+)
