@@ -1,0 +1,25 @@
+App(
+    appid="morse_beacon",
+    name="Morse Beacon",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="morse_beacon_app",
+    stack_size=2 * 1024,
+    fap_category="Sub-GHz",
+    fap_icon="morse_beacon.png",
+    # PORT: fap_icon_assets="images" dropped — no code references a generated I_* icon.
+    fap_author="jdmills",
+    fap_version="1.0",
+    fap_description="Sub-GHz Morse station ID and text beacon",
+    # Listed explicitly rather than globbed: the default "*.c*" is recursive and
+    # would sweep tools/sched_test.c, which is host-side C, into the firmware.
+    sources=[
+        "beacon.c",
+        "config.c",
+        "idlog.c",
+        "link.c",
+        "morse.c",
+        "morse_beacon.c",
+        "radio.c",
+    ],
+    requires=["gui", "storage", "notification", "dialogs", "bt", "subghz"],
+)
