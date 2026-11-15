@@ -1,6 +1,7 @@
 #include "wlan_fw_update.h"
 
 #include <furi.h>
+#include <board.h>
 #include <storage/storage.h>
 #include <toolbox/fw_version.h>
 #include <string.h>
@@ -12,8 +13,13 @@
 #include <fw_ota/fw_ota.h>
 
 #define FW_UPDATE_TAG "WlanFwUpdate"
-// Muss mit dem Release-Layout übereinstimmen (siehe auch wlan_sd_update.c).
-#define FW_BASE_URL "https://sor3nt.github.io/release/t-embed/latest"
+// OTA-Update-URL: per default der Autor (sor3nt), ueberschreibbar ueber
+// BOARD_FW_OTA_URL in board_*.h (z.B. eigene GitHub-Pages). Erwartet
+// version.txt und furi_esp32.bin unter <base>/latest/.
+#ifndef BOARD_FW_OTA_URL
+#define BOARD_FW_OTA_URL "https://sor3nt.github.io/release/t-embed"
+#endif
+#define FW_BASE_URL BOARD_FW_OTA_URL "/latest"
 #define FW_VERSION_URL FW_BASE_URL "/version.txt"
 #define FW_BIN_URL FW_BASE_URL "/furi_esp32.bin"
 // FW-Marker (/ext/.fw_version) und Staging-Pfad (/ext/update/furi_esp32.bin)

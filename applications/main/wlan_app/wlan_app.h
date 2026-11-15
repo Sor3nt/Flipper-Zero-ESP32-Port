@@ -63,6 +63,7 @@ typedef enum {
     WlanAppViewHandshakeChannel,
     WlanAppViewDeauther,
     WlanAppViewDeauthAll,
+    WlanAppViewSaeFlood,
     WlanAppViewSmartDeauth,
     WlanAppViewLiveScan,
     WlanAppViewSniffer,
@@ -150,6 +151,7 @@ struct WlanApp {
     View* view_handshake_channel;
     View* view_deauther;
     View* view_deauth_all;
+    View* view_sae_flood;
     View* view_smart_deauth;
     View* view_live_scan;
     View* view_sniffer;

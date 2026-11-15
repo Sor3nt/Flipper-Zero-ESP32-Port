@@ -48,6 +48,7 @@ BOARDS = {
     "waveshare_c6_1.47": ("waveshare_c6_1.47",     "esp32c6", "build_waveshare_c6_1.47"),
     "thormini":          ("thormini",              "esp32s3", "build_thormini"),
     "thorchimera":       ("thorchimera",           "esp32s3", "build_thorchimera"),
+    "fatalcore":         ("fatalcore",             "esp32s3", "build_fatalcore"),
     "paradoxt":          ("paradoxt",              "esp32s3", "build_paradoxt"),
     "m5stick_s3":        ("m5stick_s3",            "esp32s3", "build_m5stick_s3"),
     "cardputer_adv":     ("m5stack_cardputer_adv", "esp32s3", "build_cardputer_adv"),

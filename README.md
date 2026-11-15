@@ -26,6 +26,7 @@ Join the [Flipper Zero meets ESP32 - Discord](https://discord.gg/5DnAqFXaBC) for
 | **Waveshare ESP32-C6-LCD-1.9** | ESP32-C6 (RISC-V) | ST7789V2 320×172 | CST816S touch | — | — | — | SPI |
 | **Waveshare ESP32-C6-LCD-1.47** ⚠️ | ESP32-C6 (RISC-V) | JD9853 320×172 | AXS5106L touch | — | — | — | SPI |
 | **DIY ESP32-S3 (N16R8)** | ESP32-S3 (Xtensa LX7) | ST7789 320×172 | 6× Tactile buttons | CC1101 (+ NRF24) | PN532 (I2C) | TX + RX | SPI |
+| **Fatal Core / FATALCORE BTW** ([hardware](https://github.com/Teapot174/fatalcore)) | ESP32-S3 (Xtensa LX7, 16 MB flash / 8 MB PSRAM) | ST7789 320×172 | 6× Tactile buttons (4-way D-pad + OK + Back/Power) | CC1101 (shared SPI) + nRF24 | ST25R3916 (SPI) | TX + RX | SPI (shared, hardened) |
 | **ThorChimera** | ESP32-S3 (Xtensa LX7) | ST7789 320×170 | Rotary encoder + button | CC1101 + NRF24 | PN532 (I2C) | RMT TX + RX | SPI |
 | **ThorMini** | ESP32-S3 (Xtensa LX7) | SSD1306 / SH1106 OLED (I²C) | 6× buttons | CC1101 + NRF24 | PN532 (I2C) | TX + RX | SPI |
 | **M5Stack M5Stick S3** † | ESP32-S3-PICO (8 MB PSRAM) | ST7789 135×240 | 2 buttons + BMI270 tilt-to-wake | CC1101 + NRF24 † | PN532 (I2C) † | RMT TX + RX | SPI (+ LittleFS) |
@@ -285,8 +286,11 @@ The repository-side SD card files, including the FAP binaries required on the ca
 #DIY ESP32-S3
 ./build_diy.sh
 
+# Fatal Core / FATALCORE BTW (ST25R3916 NFC over SPI)
+./build.sh --board fatalcore --build-only
+
 # Generic builder for the other boards: ./build.sh --board <name>
-# supported: t_embed, esp32s3, paradoxt, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47
+# supported: t_embed, esp32s3, fatalcore, paradoxt, waveshare_c6, waveshare_c6_1.9, waveshare_c6_1.47
 ./build.sh --board paradoxt
 ```
 

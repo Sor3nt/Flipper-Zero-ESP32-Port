@@ -2,5 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/applications_user/flipper-tesla-fsd" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/tmp/airsnitch" vcs="Git" />
   </component>
 </project>

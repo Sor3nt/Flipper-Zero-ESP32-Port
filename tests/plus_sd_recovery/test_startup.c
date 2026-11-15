@@ -18,8 +18,12 @@ enum { GpioModeInput, GpioModeOutputPushPull, GpioPullUp, GpioSpeedLow, FuriStat
 #define ESP_OK 0
 #define ESP_ERR_NVS_NO_FREE_PAGES 1
 #define ESP_ERR_NVS_NEW_VERSION_FOUND 2
+#define ESP_ERR_INVALID_STATE 3
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
+#define ESP_LOGE(...) ((void)0)
+static const char* TAG="FuriHal";
+static const char* esp_err_to_name(esp_err_t e) {(void)e;return "";}
 static const GpioPin gpio_sdcard_cs={0,13}, gpio_lcd_cs={0,41}, gpio_ext_pa4={0,12}, gpio_nrf24_cs={0,44};
 static const int furi_hal_spi_bus_handle_subghz=1;
 static bool output[49], written[49], level[49];
@@ -47,7 +51,7 @@ static void furi_hal_gpio_init(const GpioPin* p,int mode,int pull,int speed) {
     assert(p->pin==43||p->pin==44);output[p->pin]=false;
 }
 static int nvs_flash_init(void) {return ESP_OK;}
-static void nvs_flash_erase(void) {assert(false);}
+static esp_err_t nvs_flash_erase(void) {assert(false);return ESP_OK;}
 #define INIT_STUB(name) static void name(void) {}
 INIT_STUB(furi_hal_rtc_init)
 INIT_STUB(furi_hal_version_init)
@@ -58,6 +62,9 @@ INIT_STUB(furi_hal_usb_init)
 INIT_STUB(furi_hal_light_init)
 INIT_STUB(furi_hal_speaker_init)
 INIT_STUB(furi_hal_nfc_init)
+INIT_STUB(furi_hal_gpio_init_isr_service)
+INIT_STUB(furi_hal_uart_shared_init)
+static bool furi_hal_crypto_u2f_storage_key_migrate(void) {return true;}
 static void furi_hal_spi_bus_handle_init(const int* h) {assert(*h==1);assert(!spi_traffic);bus_ready=true;}
 static void furi_delay_ms(unsigned ms) {delays+=ms;}
 static int furi_hal_sd_init(bool reset) {

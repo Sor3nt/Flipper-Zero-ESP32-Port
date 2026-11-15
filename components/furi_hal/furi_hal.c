@@ -7,7 +7,52 @@
 #include <nvs_flash.h>
 #include <furi_hal_sd.h>
 
+#include <driver/gpio.h>
+#include <esp_rom_sys.h>
+
+#ifdef BOARD_HEARTBEAT_DEBUG
+#include <freertos/task.h>
+#include <esp_system.h>
+#endif
+
 static const char* TAG = "FuriHal";
+
+#ifdef BOARD_HEARTBEAT_DEBUG
+/* Diagnostic task: proves the system is still scheduling and, once, dumps the
+ * state of every FreeRTOS task. When the UI "freezes", the serial log tells us
+ * immediately whether the whole system wedged (heartbeat stops) or only some
+ * service is blocked (heartbeat keeps going and the dump shows which task is
+ * not Ready). Only compiled in for boards that opt in. */
+static void furi_hal_heartbeat_task(void* context) {
+    UNUSED(context);
+    uint32_t beat = 0;
+
+    while(true) {
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        beat++;
+        ESP_LOGI(
+            TAG,
+            "heartbeat=%lu heap=%u min=%u",
+            (unsigned long)beat,
+            (unsigned)esp_get_free_heap_size(),
+            (unsigned)esp_get_minimum_free_heap_size());
+
+        if(beat == 5) {
+            TaskStatus_t statuses[32];
+            UBaseType_t count = uxTaskGetSystemState(statuses, 32, NULL);
+            for(UBaseType_t i = 0; i < count; i++) {
+                ESP_LOGI(
+                    TAG,
+                    "  task %-18s state=%u prio=%u hwm=%u",
+                    statuses[i].pcTaskName,
+                    (unsigned)statuses[i].eCurrentState,
+                    (unsigned)statuses[i].uxCurrentPriority,
+                    (unsigned)statuses[i].usStackHighWaterMark);
+            }
+        }
+    }
+}
+#endif
 
 bool furi_hal_external_uart_available(void) {
 #if CONFIG_T_EMBED_EXTERNAL_UART && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG && defined(BOARD_EXTERNAL_UART_TX)
@@ -154,11 +199,17 @@ void furi_hal_init_early(void) {
 #if BOARD_PIN_SD_CS != 13 || BOARD_PIN_NRF24_CSN != 44 || BOARD_PIN_NRF24_CE != 43 || !BOARD_CC1101_SPI_SHARED
 #error "Plus SD recovery requires the T-Embed CC1101 shared-SPI pin layout"
 #endif
+#endif
+
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY || defined(BOARD_EARLY_SD_INIT)
     /* Preload every shared-bus select before enabling its output. A reset
      * need not reset the peripherals: keep them deselected before power-up
      * and before any SPI clock, including the CC1101 probe. */
     const GpioPin* shared_selects[] = {
         &gpio_sdcard_cs, &gpio_lcd_cs, &gpio_ext_pa4, &gpio_nrf24_cs,
+#ifdef BOARD_PIN_NFC_CS
+        &gpio_nfc_cs,
+#endif
     };
     for(size_t i = 0; i < sizeof(shared_selects) / sizeof(shared_selects[0]); ++i) {
         furi_hal_gpio_write(shared_selects[i], true);
@@ -238,7 +289,11 @@ void furi_hal_init(void) {
     furi_hal_version_init();
     furi_hal_info_init();
     furi_hal_power_init();
-#if CONFIG_T_EMBED_PLUS_SD_RECOVERY
+#ifdef BOARD_NFC_EARLY_PROBE
+    /* Must run before the SD card and the display bring up SPI2. */
+    furi_hal_nfc_early_probe();
+#endif
+#if CONFIG_T_EMBED_PLUS_SD_RECOVERY || defined(BOARD_EARLY_SD_INIT)
     /* Adding the radio handle initializes SPI2 but sends no radio commands.
      * The SD card must enter SPI mode before either radio or LCD traffic.
      * No filesystem is mounted here; the storage service still owns it. */
@@ -255,4 +310,8 @@ void furi_hal_init(void) {
     furi_hal_speaker_init();
     furi_hal_nfc_init();
     ESP_LOGI(TAG, "Init complete");
+
+#ifdef BOARD_HEARTBEAT_DEBUG
+    xTaskCreate(furi_hal_heartbeat_task, "hb", 4096, NULL, 6, NULL);
+#endif
 }

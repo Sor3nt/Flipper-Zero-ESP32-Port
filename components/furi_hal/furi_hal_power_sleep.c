@@ -183,6 +183,12 @@ static const FuriHalPowerPinEntry furi_hal_power_dslp_pins[] = {
 #ifdef BOARD_PIN_NFC_IRQ
     {BOARD_PIN_NFC_IRQ, FuriHalPowerPinExternal},
 #endif
+#if defined(BOARD_PIN_NFC_CS) && defined(BOARD_NFC_USE_ST25R3916) && BOARD_NFC_USE_ST25R3916
+    /* SPI front-end: hold CS high so the ST25R3916 stays deselected while the
+     * shared bus is parked. This board has no reset line, so a chip that latches
+     * bus traffic as a command stays wedged across MCU resets. */
+    {BOARD_PIN_NFC_CS, DSLP_CS_IDLE},
+#endif
 #ifdef BOARD_PIN_TOUCH_RST
     {BOARD_PIN_TOUCH_RST, FuriHalPowerPinLow},
     {BOARD_PIN_TOUCH_INT, FuriHalPowerPinExternal},
@@ -600,6 +606,14 @@ static const FuriHalPowerLsPinEntry furi_hal_power_ls_pins[] = {
 #endif
 #ifdef BOARD_PIN_NFC_IRQ
     {BOARD_PIN_NFC_IRQ, FuriHalPowerLsPinNoPull},
+#endif
+#if defined(BOARD_PIN_NFC_CS) && defined(BOARD_NFC_USE_ST25R3916) && BOARD_NFC_USE_ST25R3916
+    /* Keep the SPI front-end deselected in light sleep. Without this entry the
+     * pad is isolated (CONFIG_PM_SLP_DISABLE_GPIO) and floats, so the ST25R3916
+     * can latch the shared-bus traffic as it wakes and stop answering. Light
+     * sleep is only entered on battery, which is why NFC dies there and works
+     * on the charger. */
+    {BOARD_PIN_NFC_CS, FuriHalPowerLsPinPullUp},
 #endif
 #ifdef BOARD_PIN_DISPLAY_SDA
     {BOARD_PIN_DISPLAY_SDA, FuriHalPowerLsPinPullUp},

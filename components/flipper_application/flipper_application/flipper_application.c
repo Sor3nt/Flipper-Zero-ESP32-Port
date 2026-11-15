@@ -2,6 +2,7 @@
 #include "elf/elf_file.h"
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include <esp_attr.h> /* IRAM_ATTR */
 #include <esp_intr_alloc.h> /* esp_intr_noniram_disable/enable */
 #if !CONFIG_FREERTOS_UNICORE
 #include <esp_ipc_isr.h> /* esp_ipc_isr_stall_other_cpu */
@@ -185,6 +186,47 @@ const FlipperApplicationManifest* flipper_application_get_manifest(FlipperApplic
     return &app->manifest;
 }
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+/* Flush the CPU caches after relocated FAP code and data have been written
+ * into PSRAM.
+ *
+ * Cache_WriteBack_All()/Cache_Invalidate_ICache_All() are ROM helpers that
+ * turn the cache off while they run. Every instruction executed in that window
+ * -- including the instructions after the call and the function's own return
+ * path -- must therefore come from IRAM, not from flash. Leaving this block
+ * inline in flipper_application_map_to_memory() put it in flash and produced a
+ * reproducible illegal-instruction panic during FAP load ("Cache disabled but
+ * cached memory region accessed"). The IDF config code that calls the same ROM
+ * helpers marks its functions IRAM_ATTR for exactly this reason
+ * (spi_flash/cache_utils.c: esp_config_instruction_cache_mode()).
+ *
+ * noinline keeps the compiler from folding the body back into the
+ * flash-resident caller.
+ */
+static void __attribute__((noinline)) IRAM_ATTR flipper_application_flush_caches(void) {
+    extern void Cache_WriteBack_All(void);
+    extern void Cache_Invalidate_ICache_All(void);
+
+#if !CONFIG_FREERTOS_UNICORE
+    /* The non-IRAM interrupt mask below applies to this core only. Stay on this
+     * core (critical section, so no migration between disable and enable) and
+     * stall the other CPU so it does not run from the cache while it is
+     * flushed. esp_ipc_isr_stall_other_cpu() is IRAM-resident itself. */
+    static portMUX_TYPE fap_cache_lock = portMUX_INITIALIZER_UNLOCKED;
+    portENTER_CRITICAL(&fap_cache_lock);
+    esp_ipc_isr_stall_other_cpu();
+#endif
+    esp_intr_noniram_disable();
+    Cache_WriteBack_All();
+    Cache_Invalidate_ICache_All();
+    esp_intr_noniram_enable();
+#if !CONFIG_FREERTOS_UNICORE
+    esp_ipc_isr_release_other_cpu();
+    portEXIT_CRITICAL(&fap_cache_lock);
+#endif
+}
+#endif
+
 FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplication* app) {
     furi_check(app);
 
@@ -197,32 +239,10 @@ FlipperApplicationLoadStatus flipper_application_map_to_memory(FlipperApplicatio
         /* Cache coherency: relocated values were written via data cache.
          * 1. Write back data cache to PSRAM (so PSRAM has the new values)
          * 2. Invalidate instruction cache (so CPU fetches fresh code from PSRAM)
-         * ROM functions Cache_WriteBack_All / Cache_Invalidate_ICache_All are only
-         * present on Xtensa ESP32-S3.  Skip on RISC-V targets (C6 etc.). */
+         * Both steps run with the cache off, so they live in an IRAM helper.
+         * ROM functions only exist on Xtensa ESP32-S3; skip on RISC-V (C6). */
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-        extern void Cache_WriteBack_All(void);
-        extern void Cache_Invalidate_ICache_All(void);
-        /* The ROM Cache_* helpers briefly disable the cache. Any non-IRAM ISR
-         * firing in that window faults with "Cache disabled but cached memory
-         * region accessed" (seen as an RMT TX ISR crash during plugin load).
-         * Mask non-IRAM interrupts across the cache ops — the same guard the
-         * IDF flash driver uses for cache-disabled sections. */
-#if !CONFIG_FREERTOS_UNICORE
-        /* Dual core: the mask above is per core. Stay on this core (critical
-         * section, so no migration between disable and enable) and stall the
-         * other CPU so it does not run from the cache while it is flushed. */
-        static portMUX_TYPE fap_cache_lock = portMUX_INITIALIZER_UNLOCKED;
-        portENTER_CRITICAL(&fap_cache_lock);
-        esp_ipc_isr_stall_other_cpu();
-#endif
-        esp_intr_noniram_disable();
-        Cache_WriteBack_All();
-        Cache_Invalidate_ICache_All();
-        esp_intr_noniram_enable();
-#if !CONFIG_FREERTOS_UNICORE
-        esp_ipc_isr_release_other_cpu();
-        portEXIT_CRITICAL(&fap_cache_lock);
-#endif
+        flipper_application_flush_caches();
         FURI_LOG_I(TAG, "Cache flushed: DCache writeback + ICache invalidate");
 #endif
 

@@ -96,6 +96,19 @@ esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void);
 bool furi_hal_display_draw_rgb565(
     uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint16_t* pixels);
 
+/** Drain the panel's queued DMA transfers.
+ *
+ * Must be called while holding the shared SPI bus lock (furi_hal_spi_bus_lock)
+ * and before releasing it, whenever the caller queued a bitmap directly through
+ * esp_lcd_panel_draw_bitmap() or furi_hal_display_get_panel_handle(). esp_lcd
+ * returns from draw_bitmap() as soon as the transfer is queued, so without this
+ * the next device on the bus can start a command while the LCD command is
+ * still running and trip spi_hal_setup_trans() (espressif/esp-idf#17860).
+ *
+ * Returns false if the drain command could not be issued.
+ */
+bool furi_hal_display_sync(void);
+
 #ifdef __cplusplus
 }
 #endif

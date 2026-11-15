@@ -19,6 +19,10 @@ typedef struct {
     uint8_t freq[3];
     uint8_t fscal[3];
     bool valid;
+    /* Adaptive noise baseline for this channel (dBm). <= RSSI_NONE means "not
+     * seeded yet". Used by the frequency analyzer to reject fixed internal
+     * spurs; left untouched by the calibrate/tune primitives. */
+    float noise_floor;
 } SubGhzRssiScanPoint;
 
 static inline bool subghz_rssi_scan_burst(uint8_t address, uint8_t* data, size_t size) {

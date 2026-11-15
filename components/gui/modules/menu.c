@@ -714,8 +714,33 @@ static void menu_scroll_timer_callback(void* context) {
     with_view_model(menu->view, MenuModel* model, { model->scroll_counter++; }, true);
 }
 
+/* Styles whose primary (prev/next item) navigation runs along the horizontal
+ * axis: Up/Down do nothing for them, Left/Right move the selection. On the
+ * T-Embed's single-axis rotary encoder the plain turn physically emits
+ * Up/Down, so these styles must put the view into ViewInputModeLeftRight to get
+ * the turn remapped to Left/Right (see view_dispatcher input remap). The other
+ * styles (List, Wii, MNTM, C64, Compact) keep Up/Down as their primary axis and
+ * stay in the default ViewInputModeUpDown. */
+static bool menu_style_is_horizontal(MenuStyle style) {
+    switch(style) {
+    case MenuStyleDsi:
+    case MenuStylePs4:
+    case MenuStyleVertical:
+    case MenuStyleCoverFlow:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void menu_enter(void* context) {
     Menu* menu = context;
+    /* Match the encoder axis to the active menu style. Done on enter so a style
+     * change made in Settings takes effect as soon as the menu is shown again. */
+    view_set_input_mode(
+        menu->view,
+        menu_style_is_horizontal(menu_get_style()) ? ViewInputModeLeftRight :
+                                                      ViewInputModeUpDown);
     with_view_model(
         menu->view,
         MenuModel* model,

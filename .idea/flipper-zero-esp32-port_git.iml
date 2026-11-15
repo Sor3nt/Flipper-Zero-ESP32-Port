@@ -7,6 +7,11 @@
       <excludeFolder url="file://$MODULE_DIR$/build" />
       <excludeFolder url="file://$MODULE_DIR$/build_t_embed" />
       <excludeFolder url="file://$MODULE_DIR$/build_waveshare_c6" />
+      <excludeFolder url="file://$MODULE_DIR$/multi-boot/bruce" />
+      <excludeFolder url="file://$MODULE_DIR$/build_waveshare_c6_1.47" />
+      <excludeFolder url="file://$MODULE_DIR$/00_Skills" />
+      <excludeFolder url="file://$MODULE_DIR$/build_diy" />
+      <excludeFolder url="file://$MODULE_DIR$/build_thorchimera" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

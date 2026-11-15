@@ -7,6 +7,7 @@ App(
     requires=[
         "gui",
         "dialogs",
+        "toolbox",
     ],
     stack_size=1 * 1024,
     order=10,

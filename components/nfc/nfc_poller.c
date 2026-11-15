@@ -262,7 +262,11 @@ bool nfc_poller_detect(NfcPoller* instance) {
     }
 
     nfc_start(instance->nfc, nfc_poller_detect_head_callback, instance);
-    nfc_stop(instance->nfc);
+    /* Join without aborting: the detect callback returns NfcCommandStop as soon
+     * as its single attempt is over, so the worker exits on its own. nfc_stop()
+     * would raise an abort that the worker consumes while still in its start-up
+     * guard-time wait, skipping the very detection this call is waiting for. */
+    nfc_stop_no_abort(instance->nfc);
 
     if(tail_poller != instance->list.head) {
         iter->poller_api->set_callback(

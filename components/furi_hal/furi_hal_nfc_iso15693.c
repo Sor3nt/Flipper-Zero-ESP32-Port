@@ -1,0 +1,356 @@
+#include "furi_hal_nfc_i.h"
+#include "furi_hal_nfc_tech_i.h"
+
+/*
+ * This port implements the ISO15693 (NFC-V) poller only. The listener /
+ * card-emulation path in upstream Flipper Zero relies on the `digital_signal`
+ * and `signal_reader` libraries, which are not present in this firmware.
+ * The listener entry points below are therefore stubs that report an error
+ * instead of driving the ST25R3916 in transparent mode.
+ */
+
+#define FURI_HAL_NFC_ISO15693_MAX_FRAME_SIZE         (1024U)
+#define FURI_HAL_NFC_ISO15693_POLLER_MAX_BUFFER_SIZE (64)
+#define FURI_HAL_NFC_ISO15693_BIT_LEN                (4)
+
+#define FURI_HAL_NFC_ISO15693_RESP_SOF_SIZE    (5)
+#define FURI_HAL_NFC_ISO15693_RESP_EOF_SIZE    (5)
+#define FURI_HAL_NFC_ISO15693_RESP_SOF_MASK    (0x1FU)
+#define FURI_HAL_NFC_ISO15693_RESP_SOF_PATTERN (0x17U)
+#define FURI_HAL_NFC_ISO15693_RESP_EOF_PATTERN (0x1DU)
+
+#define FURI_HAL_NFC_ISO15693_RESP_PATTERN_MASK (0x03U)
+#define FURI_HAL_NFC_ISO15693_RESP_PATTERN_0    (0x01U)
+#define FURI_HAL_NFC_ISO15693_RESP_PATTERN_1    (0x02U)
+
+// Derived experimentally
+#define FURI_HAL_NFC_ISO15693_POLLER_FWT_COMP_FC   (-1300)
+#define FURI_HAL_NFC_ISO15693_LISTENER_FDT_COMP_FC (2850)
+
+#define BITS_IN_BYTE (8U)
+
+#define TAG "FuriHalIso15693"
+
+typedef struct {
+    // 4 bits per data bit on transmit
+    uint8_t fifo_buf[FURI_HAL_NFC_ISO15693_POLLER_MAX_BUFFER_SIZE * FURI_HAL_NFC_ISO15693_BIT_LEN];
+    size_t fifo_buf_bits;
+    uint8_t frame_buf[FURI_HAL_NFC_ISO15693_POLLER_MAX_BUFFER_SIZE * FURI_HAL_NFC_ISO15693_BIT_LEN];
+    size_t frame_buf_bits;
+} FuriHalNfcIso15693Poller;
+
+static FuriHalNfcIso15693Poller* furi_hal_nfc_iso15693_poller = NULL;
+
+static FuriHalNfcIso15693Poller* furi_hal_nfc_iso15693_poller_alloc(void) {
+    FuriHalNfcIso15693Poller* instance = malloc(sizeof(FuriHalNfcIso15693Poller));
+
+    return instance;
+}
+
+static void furi_hal_nfc_iso15693_poller_free(FuriHalNfcIso15693Poller* instance) {
+    furi_check(instance);
+
+    free(instance);
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_common_init(const FuriHalSpiBusHandle* handle) {
+    // Common NFC-V settings, 26.48 kbps
+
+    // 1st stage zero = 12 kHz, 3rd stage zero = 80 kHz, low-pass = 600 kHz
+    st25r3916_write_reg(
+        handle,
+        ST25R3916_REG_RX_CONF1,
+        ST25R3916_REG_RX_CONF1_z12k | ST25R3916_REG_RX_CONF1_h80 |
+            ST25R3916_REG_RX_CONF1_lp_600khz);
+
+    // Enable AGC
+    // AGC Ratio 6
+    // AGC algorithm with RESET (recommended for ISO15693)
+    // AGC operation during complete receive period
+    // Squelch automatic activation on TX end
+    st25r3916_write_reg(
+        handle,
+        ST25R3916_REG_RX_CONF2,
+        ST25R3916_REG_RX_CONF2_agc6_3 | ST25R3916_REG_RX_CONF2_agc_m |
+            ST25R3916_REG_RX_CONF2_agc_en | ST25R3916_REG_RX_CONF2_sqm_dyn);
+
+    // HF operation, full gain on AM and PM channels
+    st25r3916_write_reg(handle, ST25R3916_REG_RX_CONF3, 0x00);
+    // No gain reduction on AM and PM channels
+    st25r3916_write_reg(handle, ST25R3916_REG_RX_CONF4, 0x00);
+
+    // Collision detection level 53%
+    // AM & PM summation before digitizing on
+    st25r3916_write_reg(
+        handle,
+        ST25R3916_REG_CORR_CONF1,
+        ST25R3916_REG_CORR_CONF1_corr_s0 | ST25R3916_REG_CORR_CONF1_corr_s1 |
+            ST25R3916_REG_CORR_CONF1_corr_s4);
+    // 424 kHz subcarrier stream mode on
+    st25r3916_write_reg(handle, ST25R3916_REG_CORR_CONF2, ST25R3916_REG_CORR_CONF2_corr_s8);
+    return FuriHalNfcErrorNone;
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_poller_init(const FuriHalSpiBusHandle* handle) {
+    furi_check(furi_hal_nfc_iso15693_poller == NULL);
+
+    furi_hal_nfc_iso15693_poller = furi_hal_nfc_iso15693_poller_alloc();
+
+    // Enable Subcarrier Stream mode, OOK modulation
+    st25r3916_change_reg_bits(
+        handle,
+        ST25R3916_REG_MODE,
+        ST25R3916_REG_MODE_om_mask | ST25R3916_REG_MODE_tr_am,
+        ST25R3916_REG_MODE_om_subcarrier_stream | ST25R3916_REG_MODE_tr_am_ook);
+
+    // Subcarrier 424 kHz mode
+    // 8 sub-carrier pulses in report period
+    st25r3916_write_reg(
+        handle,
+        ST25R3916_REG_STREAM_MODE,
+        ST25R3916_REG_STREAM_MODE_scf_sc424 | ST25R3916_REG_STREAM_MODE_stx_106 |
+            ST25R3916_REG_STREAM_MODE_scp_8pulses);
+
+    // Use regulator AM, resistive AM disabled
+    st25r3916_clear_reg_bits(
+        handle,
+        ST25R3916_REG_AUX_MOD,
+        ST25R3916_REG_AUX_MOD_dis_reg_am | ST25R3916_REG_AUX_MOD_res_am);
+
+    return furi_hal_nfc_iso15693_common_init(handle);
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_poller_deinit(const FuriHalSpiBusHandle* handle) {
+    UNUSED(handle);
+    furi_check(furi_hal_nfc_iso15693_poller);
+
+    furi_hal_nfc_iso15693_poller_free(furi_hal_nfc_iso15693_poller);
+    furi_hal_nfc_iso15693_poller = NULL;
+
+    return FuriHalNfcErrorNone;
+}
+
+static void iso15693_3_poller_encode_frame(
+    const uint8_t* tx_data,
+    size_t tx_bits,
+    uint8_t* frame_buf,
+    size_t frame_buf_size,
+    size_t* frame_buf_bits) {
+    static const uint8_t bit_patterns_1_out_of_4[] = {0x02, 0x08, 0x20, 0x80};
+    size_t frame_buf_size_calc = (tx_bits / 2) + 2;
+    furi_check(frame_buf_size >= frame_buf_size_calc);
+
+    // Add SOF 1 out of 4
+    frame_buf[0] = 0x21;
+
+    size_t byte_pos = 1;
+    for(size_t i = 0; i < tx_bits / BITS_IN_BYTE; ++i) {
+        for(size_t j = 0; j < BITS_IN_BYTE; j += (BITS_IN_BYTE) / 4) {
+            const uint8_t bit_pair = (tx_data[i] >> j) & 0x03;
+            frame_buf[byte_pos++] = bit_patterns_1_out_of_4[bit_pair];
+        }
+    }
+    // Add EOF
+    frame_buf[byte_pos++] = 0x04;
+    *frame_buf_bits = byte_pos * BITS_IN_BYTE;
+}
+
+static FuriHalNfcError iso15693_3_poller_decode_frame(
+    const uint8_t* buf,
+    size_t buf_bits,
+    uint8_t* buf_decoded,
+    size_t buf_decoded_size,
+    size_t* buf_decoded_bits) {
+    FuriHalNfcError ret = FuriHalNfcErrorDataFormat;
+    size_t bit_pos = 0;
+    memset(buf_decoded, 0, buf_decoded_size);
+
+    do {
+        if(buf_bits == 0) break;
+        // Check SOF
+        if((buf[0] & FURI_HAL_NFC_ISO15693_RESP_SOF_MASK) !=
+           FURI_HAL_NFC_ISO15693_RESP_SOF_PATTERN)
+            break;
+
+        if(buf_bits == BITS_IN_BYTE) {
+            ret = FuriHalNfcErrorIncompleteFrame;
+            break;
+        }
+
+        // 2 response bits = 1 data bit
+        for(uint32_t i = FURI_HAL_NFC_ISO15693_RESP_SOF_SIZE;
+            i < buf_bits - FURI_HAL_NFC_ISO15693_RESP_SOF_SIZE;
+            i += BITS_IN_BYTE / 4) {
+            const size_t byte_index = i / BITS_IN_BYTE;
+            const size_t bit_offset = i % BITS_IN_BYTE;
+            const uint8_t resp_byte = (buf[byte_index] >> bit_offset) |
+                                      (buf[byte_index + 1] << (BITS_IN_BYTE - bit_offset));
+
+            // Check EOF
+            if(resp_byte == FURI_HAL_NFC_ISO15693_RESP_EOF_PATTERN) {
+                ret = FuriHalNfcErrorNone;
+                break;
+            }
+
+            const uint8_t bit_pattern = resp_byte & FURI_HAL_NFC_ISO15693_RESP_PATTERN_MASK;
+
+            if(bit_pattern == FURI_HAL_NFC_ISO15693_RESP_PATTERN_0) {
+                bit_pos++;
+            } else if(bit_pattern == FURI_HAL_NFC_ISO15693_RESP_PATTERN_1) {
+                buf_decoded[bit_pos / BITS_IN_BYTE] |= 1 << (bit_pos % BITS_IN_BYTE);
+                bit_pos++;
+            } else {
+                break;
+            }
+            if(bit_pos / BITS_IN_BYTE > buf_decoded_size) {
+                break;
+            }
+        }
+
+    } while(false);
+
+    if(ret == FuriHalNfcErrorNone) {
+        *buf_decoded_bits = bit_pos;
+    }
+
+    return ret;
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_poller_tx(
+    const FuriHalSpiBusHandle* handle,
+    const uint8_t* tx_data,
+    size_t tx_bits) {
+    FuriHalNfcIso15693Poller* instance = furi_hal_nfc_iso15693_poller;
+    iso15693_3_poller_encode_frame(
+        tx_data,
+        tx_bits,
+        instance->frame_buf,
+        sizeof(instance->frame_buf),
+        &instance->frame_buf_bits);
+    return furi_hal_nfc_poller_tx_common(handle, instance->frame_buf, instance->frame_buf_bits);
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_poller_rx(
+    const FuriHalSpiBusHandle* handle,
+    uint8_t* rx_data,
+    size_t rx_data_size,
+    size_t* rx_bits) {
+    FuriHalNfcError error = FuriHalNfcErrorNone;
+    FuriHalNfcIso15693Poller* instance = furi_hal_nfc_iso15693_poller;
+
+    do {
+        error = furi_hal_nfc_common_fifo_rx(
+            handle, instance->fifo_buf, sizeof(instance->fifo_buf), &instance->fifo_buf_bits);
+        if(error != FuriHalNfcErrorNone) break;
+
+        error = iso15693_3_poller_decode_frame(
+            instance->fifo_buf,
+            instance->fifo_buf_bits,
+            instance->frame_buf,
+            sizeof(instance->frame_buf),
+            &instance->frame_buf_bits);
+        if(error != FuriHalNfcErrorNone) break;
+
+        if(rx_data_size < instance->frame_buf_bits / BITS_IN_BYTE) {
+            error = FuriHalNfcErrorBufferOverflow;
+            break;
+        }
+
+        memcpy(rx_data, instance->frame_buf, instance->frame_buf_bits / BITS_IN_BYTE);
+        *rx_bits = instance->frame_buf_bits;
+    } while(false);
+
+    return error;
+}
+
+/*
+ * Listener (card emulation) support requires transparent mode driven by the
+ * `digital_signal` library, which this firmware does not ship. Keep the
+ * technology table populated with safe stubs so that the generic NFC layer
+ * reports an error instead of dereferencing a NULL function pointer.
+ */
+
+static FuriHalNfcError furi_hal_nfc_iso15693_listener_init(const FuriHalSpiBusHandle* handle) {
+    UNUSED(handle);
+    FURI_LOG_W(TAG, "ISO15693 listener is not supported in this port");
+    return FuriHalNfcErrorCommunication;
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_listener_deinit(const FuriHalSpiBusHandle* handle) {
+    UNUSED(handle);
+    return FuriHalNfcErrorNone;
+}
+
+static FuriHalNfcEvent furi_hal_nfc_iso15693_wait_event(uint32_t timeout_ms) {
+    /* The ISO15693 *listener* HAL is a stub in this port (see
+     * furi_hal_nfc_iso15693_listener_init), but nfc_worker_listener() still
+     * calls this on every iteration. Returning 0 immediately turned that loop
+     * into a tight, highest-priority spin that starved the whole system, and it
+     * also made furi_hal_nfc_abort() a no-op for this technology, so nfc_stop()
+     * could never join the worker. Block on the common wait instead: it honours
+     * the abort flag and never spins. */
+    return furi_hal_nfc_wait_event_common(timeout_ms);
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_listener_tx(
+    const FuriHalSpiBusHandle* handle,
+    const uint8_t* tx_data,
+    size_t tx_bits) {
+    UNUSED(handle);
+    UNUSED(tx_data);
+    UNUSED(tx_bits);
+    return FuriHalNfcErrorCommunication;
+}
+
+FuriHalNfcError furi_hal_nfc_iso15693_listener_tx_sof(void) {
+    return FuriHalNfcErrorCommunication;
+}
+
+static FuriHalNfcError furi_hal_nfc_iso15693_listener_rx(
+    const FuriHalSpiBusHandle* handle,
+    uint8_t* rx_data,
+    size_t rx_data_size,
+    size_t* rx_bits) {
+    UNUSED(handle);
+    UNUSED(rx_data);
+    UNUSED(rx_data_size);
+    UNUSED(rx_bits);
+    return FuriHalNfcErrorCommunication;
+}
+
+FuriHalNfcError furi_hal_nfc_iso15693_listener_sleep(const FuriHalSpiBusHandle* handle) {
+    UNUSED(handle);
+
+    return FuriHalNfcErrorNone;
+}
+
+const FuriHalNfcTechBase furi_hal_nfc_iso15693 = {
+    .poller =
+        {
+            .compensation =
+                {
+                    .fdt = FURI_HAL_NFC_POLLER_FDT_COMP_FC,
+                    .fwt = FURI_HAL_NFC_ISO15693_POLLER_FWT_COMP_FC,
+                },
+            .init = furi_hal_nfc_iso15693_poller_init,
+            .deinit = furi_hal_nfc_iso15693_poller_deinit,
+            .wait_event = furi_hal_nfc_wait_event_common,
+            .tx = furi_hal_nfc_iso15693_poller_tx,
+            .rx = furi_hal_nfc_iso15693_poller_rx,
+        },
+
+    .listener =
+        {
+            .compensation =
+                {
+                    .fdt = FURI_HAL_NFC_ISO15693_LISTENER_FDT_COMP_FC,
+                },
+            .init = furi_hal_nfc_iso15693_listener_init,
+            .deinit = furi_hal_nfc_iso15693_listener_deinit,
+            .wait_event = furi_hal_nfc_iso15693_wait_event,
+            .tx = furi_hal_nfc_iso15693_listener_tx,
+            .rx = furi_hal_nfc_iso15693_listener_rx,
+            .sleep = furi_hal_nfc_iso15693_listener_sleep,
+            .idle = furi_hal_nfc_iso15693_listener_sleep,
+        },
+};

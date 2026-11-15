@@ -34,7 +34,9 @@ void furi_hal_shared_pins_release(const void* owner) { assert(owner==pin_owner &
 bool furi_hal_shared_pins_save(const void* owner) {
     /* Snapshot only after the busy check and before BW16 touches the pins. */
     assert(owner==pin_owner && !owned[1] && !owned[2] && !pins_saved);
-    if(save_fail)return false;pins_saved=true;return true;
+    if(save_fail) return false;
+    pins_saved=true;
+    return true;
 }
 void furi_hal_shared_pins_restore(const void* owner) {
     assert(owner==pin_owner && pins_saved && !owned[2]);++restores;if(!restore_fail)pins_saved=false;
