@@ -27,11 +27,16 @@ static void ble_spam_view_draw_callback(Canvas* canvas, void* _model) {
     snprintf(buf, sizeof(buf), "Speed: %lums", (unsigned long)model->delay_ms);
     canvas_draw_str(canvas, 2, 44, buf);
 
-    canvas_set_font(canvas, FontPrimary);
-    if(model->running) {
-        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "OK:Pause  ^v:Speed");
+    if(model->initializing) {
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "Initializing BLE...");
     } else {
-        canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "OK: Start");
+        canvas_set_font(canvas, FontPrimary);
+        if(model->running) {
+            canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "OK:Pause  ^v:Speed");
+        } else {
+            canvas_draw_str_aligned(canvas, 64, 63, AlignCenter, AlignBottom, "OK: Start");
+        }
     }
 }
 

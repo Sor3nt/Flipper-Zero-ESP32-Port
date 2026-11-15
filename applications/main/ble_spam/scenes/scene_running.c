@@ -26,6 +26,20 @@ static const uint32_t speed_steps[] = {50, 100, 150, 200, 300, 500};
 #define SPEED_STEP_COUNT (sizeof(speed_steps) / sizeof(speed_steps[0]))
 
 static FuriThread* s_spam_thread = NULL;
+static FuriThread* s_init_thread = NULL;
+
+// Bring the BLE HAL up off the UI thread so the submenu / Running view do not
+// freeze during the ~150-300ms stack re-init. Readiness is reported back to the
+// scene via app->hal_ready / app->hal_init_failed (polled in the tick handler).
+static int32_t hal_init_thread_fn(void* arg) {
+    BleSpamApp* app = arg;
+    if(ble_spam_hal_start()) {
+        app->hal_ready = true;
+    } else {
+        app->hal_init_failed = true;
+    }
+    return 0;
+}
 
 static uint8_t build_next_payload(BleSpamApp* app, uint8_t* buf) {
     uint8_t len = 0;
@@ -160,13 +174,12 @@ void ble_spam_scene_running_on_enter(void* context) {
     app->delay_ms = 100;
     app->current_index = 0;
     app->current_device[0] = '\0';
+    app->hal_ready = false;
+    app->hal_init_failed = false;
 
-    if(!ble_spam_hal_start()) {
-        ESP_LOGE(TAG, "BLE HAL init failed");
-        scene_manager_previous_scene(app->scene_manager);
-        return;
-    }
-
+    // Show the Running view immediately in an "initializing" state. The heavy
+    // BLE stack bring-up runs on a worker thread (below) so the submenu does not
+    // appear frozen and the Back key stays responsive while the stack comes up.
     BleSpamRunningModel* model = view_get_model(app->view_running);
     strncpy(model->attack_name, attack_short_names[app->attack_type], sizeof(model->attack_name) - 1);
     model->attack_name[sizeof(model->attack_name) - 1] = '\0';
@@ -174,9 +187,17 @@ void ble_spam_scene_running_on_enter(void* context) {
     model->packet_count = 0;
     model->delay_ms = app->delay_ms;
     model->running = false;
+    model->initializing = true;
     view_commit_model(app->view_running, true);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, BleSpamViewRunning);
+
+    s_init_thread = furi_thread_alloc();
+    furi_thread_set_name(s_init_thread, "BleSpamInit");
+    furi_thread_set_stack_size(s_init_thread, 8192);
+    furi_thread_set_context(s_init_thread, app);
+    furi_thread_set_callback(s_init_thread, hal_init_thread_fn);
+    furi_thread_start(s_init_thread);
 }
 
 bool ble_spam_scene_running_on_event(void* context, SceneManagerEvent event) {
@@ -185,7 +206,9 @@ bool ble_spam_scene_running_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == BleSpamCustomEventToggle) {
-            if(!app->running) {
+            if(!app->hal_ready) {
+                // Still initializing — ignore Start/Pause until the HAL is up.
+            } else if(!app->running) {
                 app->running = true;
                 s_spam_thread = furi_thread_alloc();
                 furi_thread_set_name(s_spam_thread, "BleSpam");
@@ -220,10 +243,19 @@ bool ble_spam_scene_running_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
         }
     } else if(event.type == SceneManagerEventTypeTick) {
+        if(app->hal_init_failed) {
+            // Bring-up failed on the worker thread. Leave the scene; on_exit
+            // joins the worker and restores the btshim stack.
+            ESP_LOGE(TAG, "BLE HAL init failed");
+            scene_manager_previous_scene(app->scene_manager);
+            return true;
+        }
+
         BleSpamRunningModel* model = view_get_model(app->view_running);
         model->packet_count = app->packet_count;
         model->delay_ms = app->delay_ms;
         model->running = app->running;
+        model->initializing = !app->hal_ready;
         strncpy(model->device_name, app->current_device, sizeof(model->device_name) - 1);
         model->device_name[sizeof(model->device_name) - 1] = '\0';
         view_commit_model(app->view_running, true);
@@ -234,6 +266,16 @@ bool ble_spam_scene_running_on_event(void* context, SceneManagerEvent event) {
 
 void ble_spam_scene_running_on_exit(void* context) {
     BleSpamApp* app = context;
+
+    // Join the init worker first so the HAL is in a settled state (fully up or
+    // failed) before we stop the spam thread and tear the stack down. If the
+    // user leaves mid-init this blocks until bring-up finishes (ESP init cannot
+    // be aborted), which is still far better than freezing before the view showed.
+    if(s_init_thread) {
+        furi_thread_join(s_init_thread);
+        furi_thread_free(s_init_thread);
+        s_init_thread = NULL;
+    }
 
     if(app->running) {
         app->running = false;

@@ -69,6 +69,8 @@ typedef struct {
     // Attack state
     BleSpamAttackType attack_type;
     volatile bool running;
+    volatile bool hal_ready;       // set by init worker once the BLE stack is up
+    volatile bool hal_init_failed; // set by init worker if bring-up failed
     uint32_t packet_count;
     uint32_t delay_ms;
     uint16_t current_index;

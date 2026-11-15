@@ -9,6 +9,7 @@ typedef struct {
     uint32_t packet_count;
     uint32_t delay_ms;
     bool running;
+    bool initializing;
 } BleSpamRunningModel;
 
 View* ble_spam_view_alloc(void);
