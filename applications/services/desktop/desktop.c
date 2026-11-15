@@ -8,6 +8,7 @@
 #include <gui/gui_i.h>
 #include <gui/modules/menu.h>
 #include <momentum_settings.h>
+#include <asset_packs.h>
 
 #include <locale/locale.h>
 #include <storage/storage.h>
@@ -503,6 +504,10 @@ static void desktop_clock_timer_callback(void* context) {
 static void desktop_apply_settings(Desktop* desktop) {
     desktop->in_transition = true;
 
+    /* Asset pack icons and fonts: loaded once, as soon as the SD card is
+     * mounted (this runs at boot with a card and again on card mount). */
+    asset_packs_init();
+
     gui_set_status_bar_background(
         desktop->gui, desktop->settings.display_status_bar_background != 0);
     desktop_clock_reconfigure(desktop);
@@ -545,6 +550,10 @@ static Desktop* desktop_alloc(void) {
      * before the animation manager picks the first idle animation; otherwise
      * the first animation after boot ignores the selected asset pack. */
     momentum_settings_load();
+    /* Asset pack icons and fonts before any desktop view or IconAnimation is
+     * created (an IconAnimation resolves its icon once, when allocated). A
+     * no-op without a mounted card; desktop_apply_settings retries on mount. */
+    asset_packs_init();
 
     desktop->animation_semaphore = furi_semaphore_alloc(1, 0);
     desktop->animation_manager = animation_manager_alloc();

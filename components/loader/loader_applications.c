@@ -3,6 +3,7 @@
 #include <dialogs/dialogs.h>
 #include <flipper_application/flipper_application.h>
 #include <assets_icons.h>
+#include <icon_i.h>
 #include <gui/gui.h>
 #include <gui/view_holder.h>
 #include <gui/modules/loading.h>
@@ -96,7 +97,16 @@ static bool loader_applications_item_callback(
             path, loader_applications_app->storage, icon_ptr, item_name);
     } else {
         path_extract_filename(path, item_name, false);
-        memcpy(*icon_ptr, icon_get_frame_data(&I_js_script_10px, 0), FAP_MANIFEST_MAX_ICON_SIZE);
+        /* The list draws this buffer as a FAP manifest icon (10x10, firmware
+         * .bm format), so take the firmware bitmap itself, not an asset pack
+         * replacement, and copy only its real length (raw: 1 + 2*10 bytes,
+         * heatshrink: 4-byte header + payload) instead of reading past it. */
+        const uint8_t* js_icon = I_js_script_10px.frames[0];
+        size_t js_icon_size = js_icon[0] ? 4u + ((size_t)js_icon[2] | ((size_t)js_icon[3] << 8)) :
+                                           1u + 2u * 10u;
+        if(js_icon_size > FAP_MANIFEST_MAX_ICON_SIZE) js_icon_size = FAP_MANIFEST_MAX_ICON_SIZE;
+        memset(*icon_ptr, 0, FAP_MANIFEST_MAX_ICON_SIZE);
+        memcpy(*icon_ptr, js_icon, js_icon_size);
         return true;
     }
 }
