@@ -3,6 +3,7 @@
 #include <toolbox/stream/string_stream.h>
 #include <toolbox/stream/file_stream.h>
 #include <toolbox/stream/buffered_file_stream.h>
+#include <toolbox/stream/memory_stream.h>
 #include "flipper_format.h"
 #include "flipper_format_i.h"
 #include "flipper_format_stream.h"
@@ -31,6 +32,13 @@ Stream* flipper_format_get_raw_stream(FlipperFormat* flipper_format) {
 FlipperFormat* flipper_format_string_alloc(void) {
     FlipperFormat* flipper_format = malloc(sizeof(FlipperFormat));
     flipper_format->stream = string_stream_alloc();
+    flipper_format->strict_mode = false;
+    return flipper_format;
+}
+
+FlipperFormat* flipper_format_memory_alloc(const void* data, size_t size) {
+    FlipperFormat* flipper_format = malloc(sizeof(FlipperFormat));
+    flipper_format->stream = memory_stream_alloc((const uint8_t*)data, size);
     flipper_format->strict_mode = false;
     return flipper_format;
 }

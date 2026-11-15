@@ -106,6 +106,18 @@ typedef enum {
  */
 FlipperFormat* flipper_format_string_alloc(void);
 
+/** Allocate a read-only FlipperFormat over an existing memory buffer.
+ *
+ * The buffer is not copied or owned: it must stay valid and unmodified until
+ * the FlipperFormat is freed. All write operations fail.
+ *
+ * @param      data  Pointer to the buffer
+ * @param      size  Buffer size in bytes
+ *
+ * @return     FlipperFormat* pointer to a FlipperFormat instance
+ */
+FlipperFormat* flipper_format_memory_alloc(const void* data, size_t size);
+
 /** Allocate FlipperFormat as file.
  *
  * @param      storage  The storage
