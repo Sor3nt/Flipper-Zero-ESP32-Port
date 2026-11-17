@@ -335,6 +335,13 @@ void view_dispatcher_send_custom_event(ViewDispatcher* view_dispatcher, uint32_t
         FuriStatusOk);
 }
 
+bool view_dispatcher_send_custom_event_nonblocking(
+    ViewDispatcher* view_dispatcher,
+    uint32_t event) {
+    furi_check(view_dispatcher);
+    return furi_message_queue_put(view_dispatcher->event_queue, &event, 0) == FuriStatusOk;
+}
+
 static const ViewPortOrientation view_dispatcher_view_port_orientation_table[] = {
     [ViewOrientationVertical] = ViewPortOrientationVertical,
     [ViewOrientationVerticalFlip] = ViewPortOrientationVerticalFlip,
