@@ -15,6 +15,7 @@ typedef struct {
     uint32_t frames;
     uint8_t current_channel;
     uint32_t elapsed_ms;
+    uint32_t run_start_ms; // timestamp (now_ms) saat Start → elapsed presisi & reset tiap Start
     uint16_t targets; // Anzahl erkannter SAE/WPA3-APs
     char status[SAE_STATUS_BUFF_SIZE];
 } WlanSaeFloodModel;

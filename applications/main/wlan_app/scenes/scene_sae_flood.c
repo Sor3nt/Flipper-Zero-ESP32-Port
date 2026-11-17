@@ -71,6 +71,10 @@ static inline bool sae_lib_is_patched(void) {
     return ieee80211_raw_frame_sanity_check(0xC0, 0, 0) == 0;
 }
 
+static inline uint32_t now_ms(void) {
+    return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
+
 // xorshift32 — reicht für MAC/Payload-Randomisierung (keine Krypto-Ansprüche).
 static inline uint32_t sae_rand(void) {
     uint32_t x = s_sae_rng;
@@ -302,7 +306,18 @@ static void sae_toggle_run(WlanApp* app) {
 
     if(!running) {
         if(sae_worker_start()) {
-            with_view_model(app->view_sae_flood, WlanSaeFloodModel * m, { m->running = true; }, true);
+            // Reset metrik tiap Start (termasuk Start setelah Stop di scene yang
+            // sama): tanpa ini elapsed_ms/frames melanjutkan hitungan sesi lama.
+            with_view_model(
+                app->view_sae_flood, WlanSaeFloodModel * m,
+                {
+                    m->running = true;
+                    m->elapsed_ms = 0;
+                    m->run_start_ms = now_ms();
+                    m->frames = 0;
+                    m->current_channel = SAE_WIFI_CH_MIN;
+                },
+                true);
         } else {
             with_view_model(
                 app->view_sae_flood, WlanSaeFloodModel * m,
@@ -332,6 +347,7 @@ void wlan_app_scene_sae_flood_on_enter(void* context) {
             model->frames = 0;
             model->current_channel = SAE_WIFI_CH_MIN;
             model->elapsed_ms = 0;
+            model->run_start_ms = now_ms();
             model->targets = 0;
             if(!sae_lib_is_patched()) {
                 strncpy(model->status, "LIB UNPATCHED", sizeof(model->status) - 1);
@@ -375,7 +391,9 @@ bool wlan_app_scene_sae_flood_on_event(void* context, SceneManagerEvent event) {
                     model->targets = s_sae_count;
                     model->frames = s_sae_frames;
                     model->current_channel = s_sae_channel;
-                    model->elapsed_ms += SAE_UI_REFRESH_MS;
+                    // Elapsed dihitung dari timestamp Start (bukan akumulasi per
+                    // tick) → presisi & tidak terpengaruh jitter scene-tick.
+                    model->elapsed_ms = now_ms() - model->run_start_ms;
                 } else if(model->running) {
                     model->running = false;
                     strncpy(model->status, "STOPPED", sizeof(model->status) - 1);
