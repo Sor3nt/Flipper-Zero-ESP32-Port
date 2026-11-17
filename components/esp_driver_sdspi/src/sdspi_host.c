@@ -494,6 +494,8 @@ esp_err_t sdspi_host_start_command(sdspi_dev_handle_t handle, sdspi_hw_cmd_t *cm
              __func__, handle, cmd_index, cmd_arg, flags, data, data_size, cmd->crc7);
 
     spi_device_acquire_bus(slot->spi_handle, portMAX_DELAY);
+#if SDSPI_LOCAL_SKIP_IDLE_READY_POLL
+    /* Only built for boards listed in this component's CMakeLists.txt. */
     if (!slot->skip_idle_ready_poll) {
         if (poll_busy(slot, 40, true) == ESP_ERR_TIMEOUT) {
             /* MISO never went high while the bus is idle. Either the line is
@@ -508,6 +510,10 @@ esp_err_t sdspi_host_start_command(sdspi_dev_handle_t handle, sdspi_hw_cmd_t *cm
          * period instead of blocking for the full poll timeout. */
         vTaskDelay(pdMS_TO_TICKS(1));
     }
+#else
+    /* Stock ESP-IDF behaviour (advisory pre-command ready poll). */
+    poll_busy(slot, 40, true);
+#endif
 
     // For CMD0, clock out 80 cycles to help the card enter idle state,
     // *before* CS is asserted.
