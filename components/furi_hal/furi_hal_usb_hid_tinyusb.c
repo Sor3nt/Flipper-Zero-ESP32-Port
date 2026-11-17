@@ -1,6 +1,9 @@
 #include "furi_hal_usb.h"
 #include "furi_hal_usb_hid.h"
 #include "furi_hal_usb_hid_backend.h"
+/* furi_hal_usb_composite_is_installed() / _restore_serial_jtag(): without the prototype the
+ * compiler assumed `int` for a `bool` function (-Wimplicit-function-declaration). */
+#include "furi_hal_usb_tinyusb_composite.h"
 
 #include <furi.h>
 #include <furi_hal_version.h>
