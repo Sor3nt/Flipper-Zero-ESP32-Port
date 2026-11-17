@@ -396,7 +396,13 @@ void furi_hal_power_init(void) {
     furi_hal_power_ls_mutex = xSemaphoreCreateMutexStatic(&furi_hal_power_ls_mutex_buffer);
 
     esp_pm_config_t pm_config = {
+    /* 240 MHz is the S3/S2 maximum; RISC-V parts such as the C6 top out at 160 and
+     * esp_pm_configure() rejects anything higher (PM would then stay off silently). */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2
         .max_freq_mhz = 240,
+#else
+        .max_freq_mhz = 160,
+#endif
         .min_freq_mhz = 80,
         .light_sleep_enable = true,
     };
