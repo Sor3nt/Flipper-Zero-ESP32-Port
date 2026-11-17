@@ -6,6 +6,7 @@
 #include "furi_hal_external_uart.h"
 #include <nvs_flash.h>
 #include <furi_hal_sd.h>
+#include "furi_hal_spi_bus.h"
 
 #include <driver/gpio.h>
 #include <esp_rom_sys.h>
@@ -268,6 +269,10 @@ void furi_hal_init(void) {
     /* GPIO ISRs are allocated on the core that installs the service: do it
      * here, on the boot core, rather than in whichever thread asks first. */
     furi_hal_gpio_init_isr_service();
+    /* Create the shared SPI bus mutex while only the boot thread runs. Every
+     * furi_hal_spi_bus_trx() now takes it, and its lazy allocation in
+     * furi_hal_spi_bus_init() is not safe against two first callers at once. */
+    furi_hal_spi_bus_init();
     furi_hal_uart_shared_init();
     furi_hal_crypto_init();
 
