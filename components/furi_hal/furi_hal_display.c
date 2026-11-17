@@ -341,6 +341,12 @@ void furi_hal_display_init(void) {
     /* Clear entire screen to background (unset pixels = FG) */
     display_fill_color(fg_color);
 
+    /* furi_hal_light_init() leaves the backlight dark so the stale/noisy GRAM
+     * content is never visible at power-up; light it now that the panel holds
+     * a clean frame. The notification service applies the user's brightness
+     * once its settings are loaded. */
+    furi_hal_light_set(LightBacklight, 0xFF);
+
     ESP_LOGI(TAG, "Display initialized (%dx%d, scaled %dx%d, stripe=%d lines, buf=%d bytes)",
              FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
 }

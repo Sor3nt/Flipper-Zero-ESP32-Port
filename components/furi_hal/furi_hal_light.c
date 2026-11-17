@@ -204,14 +204,19 @@ void furi_hal_light_init(void) {
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
 
-    /* Configure LEDC channel on backlight pin */
+    /* Configure LEDC channel on backlight pin. Start dark: the panel shows
+     * whatever the previous run left in its GRAM (or random noise right after
+     * reset), so furi_hal_display_init() clears it first and only then lights
+     * the backlight (via furi_hal_light_set, which also resyncs
+     * s_backlight_value). From PR #141 (Fatal Core), applied to this tree
+     * without that PR's WS2812 hunks, which would revert 5d66b7ac. */
     ledc_channel_config_t channel_conf = {
         .speed_mode = BACKLIGHT_LEDC_SPEED,
         .channel = BACKLIGHT_LEDC_CHANNEL,
         .timer_sel = BACKLIGHT_LEDC_TIMER,
         .intr_type = LEDC_INTR_DISABLE,
         .gpio_num = gpio_lcd_bl.pin,
-        .duty = furi_hal_light_backlight_duty_from_value(255),
+        .duty = furi_hal_light_backlight_duty_from_value(0),
         .hpoint = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
