@@ -131,6 +131,13 @@ void app_main(void) {
             [ESP_RST_DEEPSLEEP] = "DEEPSLEEP",
             [ESP_RST_BROWNOUT] = "BROWNOUT",
             [ESP_RST_SDIO] = "SDIO",
+            /* Present in ESP-IDF 5.4.x; ESP_RST_USB is the usual reason on the S3 right
+             * after flashing over USB-Serial-JTAG. Unknown values still print "?". */
+            [ESP_RST_USB] = "USB",
+            [ESP_RST_JTAG] = "JTAG",
+            [ESP_RST_EFUSE] = "EFUSE",
+            [ESP_RST_PWR_GLITCH] = "PWR_GLITCH",
+            [ESP_RST_CPU_LOCKUP] = "CPU_LOCKUP",
         };
         esp_reset_reason_t reset_reason = esp_reset_reason();
         const char* reset_name = (reset_reason < sizeof(reset_names) / sizeof(reset_names[0]) &&
