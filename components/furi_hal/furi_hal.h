@@ -17,6 +17,8 @@ extern "C" {
 #include <furi_hal_usb.h>
 #include <furi_hal_random.h>
 #include <furi_hal_memory.h>
+#include <furi_hal_psram.h>
+#include <furi_hal_diag.h>
 #include <furi_hal_version.h>
 #include <furi_hal_light.h>
 #include <furi_hal_vibro.h>

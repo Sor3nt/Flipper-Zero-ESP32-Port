@@ -291,6 +291,10 @@ void furi_hal_init(void) {
     }
 
     furi_hal_rtc_init();
+    /* Needs NVS and the RTC clock (above). Runs on this boot task on purpose:
+     * its internal-RAM stack is what the NVS write requires. Moves a crash
+     * record left in RTC memory by the panic handler into NVS. */
+    furi_hal_diag_init();
     furi_hal_version_init();
     furi_hal_info_init();
     furi_hal_power_init();

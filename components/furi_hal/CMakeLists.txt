@@ -42,6 +42,8 @@ set(FURI_HAL_SRCS
     "furi_hal_board_info.c"
     "furi_hal_cortex.c"
     "furi_hal_memory.c"
+    "furi_hal_psram.c"
+    "furi_hal_diag.c"
     "furi_hal_rtc.c"
     "furi_hal_power.c"
     "furi_hal_power_sleep.c"
@@ -139,7 +141,18 @@ idf_component_register(
     SRCS ${FURI_HAL_SRCS}
     INCLUDE_DIRS "." ".." "../.." "boards"
     REQUIRES ${FURI_HAL_REQUIRES}
+    # furi_hal_psram.c: esp_psram.h (the component is empty on targets without PSRAM).
+    PRIV_REQUIRES esp_psram
 )
+
+# Crash log (furi_hal_diag.c): its wrapper records the panic cause in RTC memory,
+# then calls ESP-IDF's esp_panic_handler() unchanged. The ESP32-C6 BLE controller
+# wraps the same function when CONFIG_BT_LE_CONTROLLER_LOG_WRAP_PANIC_HANDLER_ENABLE
+# is set, and only one wrapper can link: ours steps aside then (the C file checks
+# the same option).
+if(NOT CONFIG_BT_LE_CONTROLLER_LOG_WRAP_PANIC_HANDLER_ENABLE)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
+endif()
 
 # Set board include path as compile definition
 target_compile_definitions(${COMPONENT_LIB} PUBLIC

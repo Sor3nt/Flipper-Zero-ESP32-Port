@@ -18,8 +18,6 @@
 
 #include <settings_helpers/submenu_based.h>
 
-#define STORAGE_SETTINGS_MOUNT_INDEX 2
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -44,6 +42,9 @@ typedef struct {
     // helpers
     SubmenuSettingsHelperDescriptor* helper_descriptor;
     SubmenuSettingsHelper* settings_helper;
+    // Menu index of the "Mount/Unmount SD Card" entry: "About PSRAM" is only
+    // listed on boards with PSRAM, so the entries after it move.
+    size_t mount_index;
 
     bool from_favorites;
 } StorageSettings;

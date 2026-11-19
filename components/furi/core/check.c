@@ -6,10 +6,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <esp_cpu.h>
 #include <esp_system.h>
 
 // Forward declaration
@@ -48,6 +50,42 @@ static void __furi_print_name(bool isr) {
     }
 }
 
+/* Appends src to dst (size bytes, always terminated). No printf: interrupts are
+ * off and the system is about to panic. */
+static void __furi_crash_cat(char* dst, size_t size, const char* src) {
+    size_t len = strlen(dst);
+    while(*src && len + 1 < size) {
+        dst[len++] = *src++;
+    }
+    dst[len] = '\0';
+}
+
+/* "<message> [<task>|ISR] at PC 0x<pc> on core <n>" for esp_system_abort(). */
+static void __furi_crash_details(
+    char* dst,
+    size_t size,
+    const char* message,
+    bool isr,
+    uint32_t pc) {
+    char number[11];
+
+    dst[0] = '\0';
+    __furi_crash_cat(dst, size, message);
+    __furi_crash_cat(dst, size, " [");
+    if(isr) {
+        __furi_crash_cat(dst, size, "ISR");
+    } else {
+        const char* name = pcTaskGetName(NULL);
+        __furi_crash_cat(dst, size, name ? name : "main");
+    }
+    __furi_crash_cat(dst, size, "] at PC 0x");
+    utoa(pc, number, 16);
+    __furi_crash_cat(dst, size, number);
+    __furi_crash_cat(dst, size, " on core ");
+    utoa((unsigned)esp_cpu_get_core_id(), number, 10);
+    __furi_crash_cat(dst, size, number);
+}
+
 FURI_NORETURN void __furi_crash_implementation(const char* message) {
     portDISABLE_INTERRUPTS();
 
@@ -72,8 +110,19 @@ FURI_NORETURN void __furi_crash_implementation(const char* message) {
 
     furi_log_puts("\r\n\033[0m\r\n");
 
-    // On ESP32, use abort() which triggers core dump if configured
-    abort();
+    /* Like abort(), but the panic report (and the crash log in Settings > About)
+     * then says what failed and where, e.g.
+     * "furi_check failed [GUI] at PC 0x4201abcd on core 0", instead of only
+     * "abort() was called". The buffer is on this stack, which stays intact
+     * through the panic handler (abort() does the same). */
+    char details[112];
+    __furi_crash_details(
+        details,
+        sizeof(details),
+        message,
+        isr,
+        (uint32_t)__builtin_return_address(0) - 3);
+    esp_system_abort(details);
     __builtin_unreachable();
 }
 

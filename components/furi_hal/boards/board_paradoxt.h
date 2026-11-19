@@ -25,6 +25,9 @@
 /* The ported apps (FAPs) are supported on this board; see furi_hal_board_supports_ported_apps(). */
 #define BOARD_PORTED_APPS_SUPPORTED 1
 #define BOARD_TARGET "esp32s3"
+/* PCB version shown in Settings > About > Hardware. Only boards whose PCB
+ * revision is known define it; About hides the row otherwise. */
+#define BOARD_HW_VERSION "v1.0 rev 3.0"
 
 /* Paradoxt-only power behaviour: BATFET ship-mode power-off, charger sleep
  * preparation, /QON-aware shutdown. Every user is guarded by this macro. */

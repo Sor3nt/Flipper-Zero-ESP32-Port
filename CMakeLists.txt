@@ -134,3 +134,32 @@ message(STATUS "Firmware version (PROJECT_VER): ${PROJECT_VER}")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(furi_esp32)
 include(cmake/wifite_sdk_adapter.cmake)
+
+# ---------------------------------------------------------------------------
+# Build timestamp for Settings > About > Firmware ("Built"): local date/time of
+# the build PC. ESP-IDF's esp_app_desc date/time is __DATE__/__TIME__ of
+# esp_app_desc.c, which is only recompiled when PROJECT_VER changes, so it goes
+# stale on incremental builds. furi_build_time.c is regenerated whenever any
+# component library changes, i.e. exactly when the ELF gets relinked anyway:
+# an up-to-date build stays a no-op.
+# ---------------------------------------------------------------------------
+idf_build_get_property(_furi_components BUILD_COMPONENTS)
+set(_furi_component_libs "")
+foreach(_furi_component ${_furi_components})
+    idf_component_get_property(_furi_lib ${_furi_component} COMPONENT_LIB)
+    if(TARGET ${_furi_lib})
+        get_target_property(_furi_lib_type ${_furi_lib} TYPE)
+        if(_furi_lib_type STREQUAL "STATIC_LIBRARY")
+            list(APPEND _furi_component_libs "$<TARGET_FILE:${_furi_lib}>")
+        endif()
+    endif()
+endforeach()
+set(_furi_build_time_c "${CMAKE_BINARY_DIR}/furi_build_time.c")
+add_custom_command(
+    OUTPUT "${_furi_build_time_c}"
+    COMMAND ${CMAKE_COMMAND} "-DOUT=${_furi_build_time_c}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/furi_build_time.cmake"
+    DEPENDS ${_furi_component_libs} "${CMAKE_SOURCE_DIR}/cmake/furi_build_time.cmake"
+    COMMENT "Stamping the firmware build time"
+    VERBATIM)
+target_sources(${CMAKE_PROJECT_NAME}.elf PRIVATE "${_furi_build_time_c}")
