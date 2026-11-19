@@ -32,10 +32,10 @@
 
 /* ---- session state (single session task; statics are fine) ---- */
 static mbedtls_net_context s_net;
-static mbedtls_ssl_context s_ssl;
-static mbedtls_ssl_config s_conf;
-static mbedtls_entropy_context s_entropy;
-static mbedtls_ctr_drbg_context s_drbg;
+static EXT_RAM_BSS_ATTR mbedtls_ssl_context s_ssl;
+static EXT_RAM_BSS_ATTR mbedtls_ssl_config s_conf;
+static EXT_RAM_BSS_ATTR mbedtls_entropy_context s_entropy;
+static EXT_RAM_BSS_ATTR mbedtls_ctr_drbg_context s_drbg;
 static bool s_tls_live = false;
 
 static TaskHandle_t s_task = NULL;
