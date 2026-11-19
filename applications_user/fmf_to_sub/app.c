@@ -302,7 +302,10 @@ static char fmf2sub_char_at(const FuriString* s, size_t index) {
 
 static uint32_t
     fmf2sub_extract_param(FuriString* song_settings, char param, uint32_t default_value) {
-    uint16_t value = 0;
+    // PORT FIX: was uint16_t with no digit limit, so "b=70000" wrapped to 4464 and
+    // "d=65536" to 0. Saturate instead; 0 / missing digits fall back to the default.
+    uint32_t value = 0;
+    bool any_digit = false;
     char param_equal[3] = {param, '=', 0};
     size_t index = furi_string_search_str(song_settings, param_equal);
     if(index != FURI_STRING_FAILURE) {
@@ -312,9 +315,10 @@ static uint32_t
             if(ch < '0' || ch > '9') {
                 break;
             }
-            value *= 10;
-            value += ch - '0';
+            any_digit = true;
+            if(value < 100000u) value = value * 10u + (uint32_t)(ch - '0');
         } while(true);
+        if(!any_digit || value == 0) value = default_value;
     } else {
         value = default_value;
     }
@@ -445,6 +449,10 @@ static void fmf2sub_load_fmf_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
 #define FMF2SUB_WRITE_CHUNK 4096
 static FuriString* s_write_buf = NULL;
 
+// PORT FIX: highest octave accepted from a song. B in octave 10 is ~63 kHz (pulse ~8 us);
+// beyond that the pulse rounds to 0 and the tone math divides by zero.
+#define FMF2SUB_MAX_OCTAVE 10
+
 static void fmf2sub_file_flush(File* file) {
     if(!s_write_buf || furi_string_empty(s_write_buf)) return;
     storage_file_write(file, furi_string_get_cstr(s_write_buf), furi_string_size(s_write_buf));
@@ -499,6 +507,17 @@ void fmf2sub_save_sub_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
         int16_t octave = -1;
         bool dot = false;
 
+        // PORT FIX: a 0 duration or BPM (".fmf" "BPM: 0", RTTTL "d=0" / "0C") divided by
+        // zero below: count became inf, (uint32_t)inf is undefined and the pulse loop could
+        // run ~4e9 times, filling the SD card. Use sane defaults/limits instead.
+        const uint32_t bpm = (model->data.bpm != 0) ? model->data.bpm : 120u;
+        const int16_t default_duration =
+            (model->data.duration >= 1 && model->data.duration <= 128) ?
+                (int16_t)model->data.duration :
+                4;
+        const int16_t default_octave =
+            (model->data.octave <= FMF2SUB_MAX_OCTAVE) ? (int16_t)model->data.octave : 5;
+
         for(size_t i = 0; i < furi_string_size(notes); i++) {
             char ch = fmf2sub_char_at(notes, i);
             if(ch == ' ' || ch == ',') {
@@ -511,12 +530,15 @@ void fmf2sub_save_sub_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
                 if(duration == -1) {
                     duration = 0;
                 }
-                duration *= 10;
-                duration += ch - '0';
+                if(duration < 1000) { // PORT FIX: no int16 overflow on long digit runs
+                    duration *= 10;
+                    duration += ch - '0';
+                }
                 ch = fmf2sub_char_at(notes, ++i);
             }
-            if(duration == -1) {
-                duration = model->data.duration;
+            if(duration < 1 || duration > 128) {
+                // missing, 0 (divide by zero below) or absurd: use the song default
+                duration = default_duration;
             }
 
             // it should be note.
@@ -569,12 +591,17 @@ void fmf2sub_save_sub_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
                 if(octave == -1) {
                     octave = 0;
                 }
-                octave *= 10;
-                octave += ch - '0';
+                if(octave < 1000) { // PORT FIX: no int16 overflow on long digit runs
+                    octave *= 10;
+                    octave += ch - '0';
+                }
                 ch = fmf2sub_char_at(notes, ++i);
             }
             if(octave == -1) {
-                octave = model->data.octave;
+                octave = default_octave;
+            } else if(octave > FMF2SUB_MAX_OCTAVE) {
+                // PORT FIX: e.g. "C30" doubled the frequency 28 times -> pulse 0 -> count inf.
+                octave = FMF2SUB_MAX_OCTAVE;
             }
 
             if(ch == '.') {
@@ -590,10 +617,11 @@ void fmf2sub_save_sub_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
             }
 
             uint32_t pulse = (1000000 / frequency) / 2;
+            if(pulse == 0) pulse = 1; // PORT FIX: never divide by a 0 pulse below
             // 4/4 timing, duration of quarter note (4) is 500ms.
             float count = (1000000.0 / (pulse * 2.0)) * 2.0 / duration;
             count *= 120.0f;
-            count /= model->data.bpm;
+            count /= bpm;
 
             if(dot) {
                 count += (count / 2.0f);
@@ -615,8 +643,11 @@ void fmf2sub_save_sub_file(Fmf2SubApp* app, Fmf2SubConvertModel* model) {
 
             float duration_tone = ((uint32_t)count) * pulse * 2;
             float duration_beat =
-                (1000000.0 * 2.0 / duration * 120.0 / model->data.bpm) * (dot ? 1.5 : 1.0);
+                (1000000.0 * 2.0 / duration * 120.0 / bpm) * (dot ? 1.5 : 1.0);
             float duration_rem = (duration_beat - duration_tone) / 2.0f;
+            // PORT FIX: a tone forced to one full period (count clamped to 1) can be longer than
+            // its beat (a rest "P" at a high BPM); (uint32_t) of a negative float is undefined.
+            if(duration_rem < 1.0f) duration_rem = 1.0f;
             uint32_t rem_counter = 1;
             while(duration_rem > 20000.0f) {
                 rem_counter *= 2;
