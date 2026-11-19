@@ -55,6 +55,17 @@ FuriStatus furi_hal_sd_info(FuriHalSdInfo* info);
 /** Get maximum mount retry count */
 uint8_t furi_hal_sd_max_mount_retry_count(void);
 
+/** Did the last init attempt find an empty slot?
+ *
+ * There is no card-detect pin, so furi_hal_sd_is_present() is always true.
+ * This is the "card absent" signal instead: true only when the last
+ * furi_hal_sd_init() got no answer to CMD0 at all. A slow or failing card
+ * answers CMD0 and reports false, so it keeps its retries.
+ *
+ * @return true if nothing answered CMD0 on the last attempt
+ */
+bool furi_hal_sd_no_card_detected(void);
+
 /** Mount SD card via ESP-IDF VFS at /sdcard
  * @return true on success
  */

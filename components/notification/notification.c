@@ -29,6 +29,7 @@ typedef enum {
     InternalLayerMessage,
     SaveSettingsMessage,
     LedCheckMessage, /* no sequence: re-evaluate the WS2812 suspend state */
+    LoadSettingsMessage, /* no sequence: SD card mounted, reload settings from it */
 } NotificationAppMessageType;
 
 #define LED_USB_CHECK_MS 5000U
@@ -854,6 +855,44 @@ static void notification_led_usb_check_timer_cb(void* context) {
     notification_post_led_check(context);
 }
 
+/* Storage pubsub, runs in the storage thread inside furi_pubsub_publish().
+ * Only hand the work to the notification thread; never block here. */
+static void notification_storage_callback(const void* message, void* context) {
+    furi_assert(context);
+    NotificationApp* app = context;
+    const StorageEvent* event = message;
+
+    if(event->type != StorageEventTypeCardMount) return;
+
+    NotificationAppMessage msg = {
+        .sequence = NULL,
+        .type = LoadSettingsMessage,
+        .back_event = NULL,
+    };
+    if(furi_message_queue_put(app->queue, &msg, 0) != FuriStatusOk) {
+        FURI_LOG_W(TAG, "notification queue full, settings reload dropped");
+    }
+}
+
+/* Notification thread only. Re-reads the settings file after an SD mount and
+ * applies everything that depends on it. */
+static void notification_reload_settings(NotificationApp* app) {
+    if(!notification_load_settings(app)) return;
+
+    notification_apply_led_color(app);
+    notification_apply_ui_color(app);
+    if(app->settings.night_shift != 1.0f) {
+        night_shift_timer_start(app);
+    } else {
+        night_shift_timer_stop(app);
+    }
+    /* force_on, not backlight_on: with the screen already lit the
+     * lcd_backlight_is_on guard swallows a plain backlight_on, so the reloaded
+     * brightness would only show after the next screen-off. Same sequence the
+     * settings app uses for a live brightness change. */
+    notification_message(app, &sequence_display_backlight_force_on);
+}
+
 static void notification_led_suspend_callback(void* context, bool suspended) {
     UNUSED(suspended);
     NotificationApp* app = context;
@@ -936,7 +975,12 @@ static NotificationApp* notification_app_alloc(void) {
     /* Deep enough that bursts (every input event queues a backlight-on message
      * through the pubsub callback) don't drop anything while the consumer
      * sleeps inside a sequence delay. */
-    app->queue = furi_message_queue_alloc(32, sizeof(NotificationAppMessage));
+    /* 64 slots (was 32): the fire-and-forget path (notification_message_send with
+     * back_event==NULL) drops when full to avoid blocking the input service / timer
+     * daemon. A dropped reset sequence can leave the LED/backlight stuck, so a deeper
+     * queue shrinks that window while the consumer sleeps inside a sequence delay.
+     * The LED/backlight re-arm is already drop-proof via led_rearm_pending. */
+    app->queue = furi_message_queue_alloc(64, sizeof(NotificationAppMessage));
     app->display_timer = furi_timer_alloc(notification_display_timer, FuriTimerTypeOnce, app);
     app->night_shift_timer = furi_timer_alloc(night_shift_timer_callback, FuriTimerTypePeriodic, app);
     app->night_shift_demo_timer = furi_timer_alloc(night_shift_demo_timer_callback, FuriTimerTypeOnce, app);
@@ -1017,17 +1061,34 @@ int32_t notification_srv(void* p) {
 
     NotificationApp* app = notification_app_alloc();
 
-    notification_apply_internal_display_layer(app, 0x00);
+    /* Do NOT push the internal display layer (0x00) to the hardware here.
+     * notification_app_alloc() already set display.value[LayerInternal] = 0 and
+     * display.index = LayerInternal, so the layer bookkeeping matches upstream.
+     * Writing it out (notification_apply_internal_display_layer(app, 0x00)) means
+     * furi_hal_display_set_backlight(0): backlight PWM 0 plus DISPOFF/SLPIN.
+     * On a Flipper that is invisible, because its loop runs the queued
+     * sequence_display_backlight_on a moment later. Here the thread first blocks
+     * on the storage record (the boot mount, 3 retries of 1 s each without a
+     * card), so the panel stayed dark for ~0.3 s with a card and ~8.3 s
+     * without one (together with the SD poll this used to have), the boot
+     * blank. furi_hal_display_init() has already cleared the panel and lit it,
+     * so leaving it alone keeps the screen on. The first queued backlight-on
+     * then applies the user's brightness. */
 
     furi_record_create(RECORD_NOTIFICATION, app);
 
+    /* One SD check, no polling. storage_srv runs the boot mount (all retries)
+     * in storage_ext_init() before it creates RECORD_STORAGE, so once
+     * furi_record_open() returns the boot mount is already settled. The old
+     * 50 x 100 ms poll only added ~5 s of dead time when there was no card. A
+     * later mount (card remounted after USB mass storage, SD recovery) arrives
+     * as StorageEventTypeCardMount and reloads the settings in the loop, the
+     * same scheme as upstream. The record stays open: the subscription lives
+     * as long as this service. */
     Storage* storage = furi_record_open(RECORD_STORAGE);
-    for(int i = 0; i < 50 && storage_sd_status(storage) != FSE_OK; i++) {
-        furi_delay_ms(100);
-    }
-    furi_record_close(RECORD_STORAGE);
+    furi_pubsub_subscribe(storage_get_pubsub(storage), notification_storage_callback, app);
 
-    if(notification_load_settings(app)) {
+    if(storage_sd_status(storage) == FSE_OK && notification_load_settings(app)) {
         notification_apply_led_color(app);
         notification_apply_ui_color(app);
         notification_message(app, &sequence_display_backlight_on);
@@ -1053,6 +1114,9 @@ int32_t notification_srv(void* p) {
             notification_save_settings(app);
             break;
         case LedCheckMessage:
+            break;
+        case LoadSettingsMessage:
+            notification_reload_settings(app);
             break;
         }
         notification_led_post_process(app);

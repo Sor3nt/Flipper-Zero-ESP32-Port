@@ -40,6 +40,7 @@
 #include <freertos/task.h>
 #include <esp_memory_utils.h>
 #include <sdmmc_cmd.h>
+#include <sd_protocol_defs.h> /* MMC_GO_IDLE_STATE for the CMD0 presence probe */
 #include <driver/sdspi_host.h>
 
 #ifdef BOARD_SD_BUS_NOT_SHARED
@@ -70,6 +71,11 @@ static const char* TAG = "FuriHalSd";
 static sdmmc_card_t* sd_card = NULL;
 static sdspi_dev_handle_t sd_handle = 0;
 static bool sd_initialized = false;
+/* True after an init attempt in which nothing answered CMD0, i.e. the slot is
+ * empty. These boards have no card-detect pin (furi_hal_sd_is_present() is
+ * always true), so this is the only "card absent" signal the storage layer
+ * gets; see furi_hal_sd_no_card_detected(). */
+static bool sd_no_card = false;
 static bool sd_diskio_registered = false;
 static bool sd_disk_status_check = false;
 static bool sd_mounted = false;
@@ -483,6 +489,36 @@ static void sd_probe_filesystem(const sdmmc_card_t* card) {
     free(sector);
 }
 
+/* Does anything answer CMD0 (GO_IDLE_STATE) on this device? A card in the
+ * slot always answers with an R1 byte, idle (0x01) or otherwise. With an empty
+ * slot MISO stays high and sdspi reports "R1 response not found", which is
+ * ESP_ERR_TIMEOUT. Sent twice, like sdmmc_send_cmd_go_idle_state(), because
+ * some cards only switch to SPI mode on the second CMD0.
+ *
+ * Only run this after sdmmc_card_init() failed with ESP_ERR_TIMEOUT. That code
+ * alone cannot tell an empty slot (fails at CMD0 within ~20 ms) from a slow
+ * card that never left the ACMD41 busy loop (~1 s). The probe can, and a slow
+ * card keeps its normal retries. Caller holds the bus lock and a live handle.
+ *
+ * Needs an idle-high MISO. Where MISO idles low (fatalcore, see
+ * components/esp_driver_sdspi), an empty slot reads as R1 0x00 and counts as
+ * "answered", so that board just keeps its old retry behaviour. */
+#define SD_PROBE_CMD0_ATTEMPTS   2
+#define SD_PROBE_CMD0_DELAY_MS   20 /* = SDMMC_GO_IDLE_DELAY_MS (private in IDF) */
+#define SD_PROBE_CMD0_TIMEOUT_MS 1000 /* = SDMMC_DEFAULT_CMD_TIMEOUT_MS */
+static bool sd_card_answers_cmd0(sdspi_dev_handle_t handle) {
+    for(int i = 0; i < SD_PROBE_CMD0_ATTEMPTS; i++) {
+        if(i > 0) vTaskDelay(pdMS_TO_TICKS(SD_PROBE_CMD0_DELAY_MS));
+        sdmmc_command_t cmd = {
+            .opcode = MMC_GO_IDLE_STATE,
+            .flags = SCF_CMD_BC | SCF_RSP_R1,
+            .timeout_ms = SD_PROBE_CMD0_TIMEOUT_MS,
+        };
+        if(sdspi_host_do_transaction(handle, &cmd) != ESP_ERR_TIMEOUT) return true;
+    }
+    return false;
+}
+
 static void sd_run_mount_diagnostics(const sdspi_device_config_t* dev_cfg, const sdmmc_host_t* host) {
     ESP_LOGW(TAG, "Running SD diagnostics after mount failure");
 
@@ -871,6 +907,8 @@ static bool sd_prepare_card(void) {
         return true;
     }
 
+    sd_no_card = false; /* set again below only if this attempt finds an empty slot */
+
     if(sd_host_conflicts_with(&furi_hal_spi_bus_external) ||
        sd_host_conflicts_with(&furi_hal_spi_bus_subghz)) {
         ESP_LOGW(
@@ -944,6 +982,10 @@ static bool sd_prepare_card(void) {
 
         host.slot = sd_handle;
         ret = sdmmc_card_init(&host, sd_card);
+        if(ret == ESP_ERR_TIMEOUT && !sd_card_answers_cmd0(sd_handle)) {
+            sd_no_card = true;
+            ESP_LOGI(TAG, "No SD card: nothing answered CMD0");
+        }
         if(ret == ESP_OK) {
             int real_freq_khz = 0;
             esp_err_t freq_err = sdspi_host_get_real_freq(sd_handle, &real_freq_khz);
@@ -1020,7 +1062,9 @@ static bool sd_prepare_card(void) {
          * otherwise a concurrent display transfer trips spi_hal_setup_trans. */
         furi_hal_spi_bus_lock();
         sd_release_host();
-        sd_run_mount_diagnostics(&dev_cfg, &host);
+        /* The diagnostics re-run a full card init to explain a failing card;
+         * with an empty slot there is nothing to explain. */
+        if(!sd_no_card) sd_run_mount_diagnostics(&dev_cfg, &host);
 #endif
         sd_release_host();
         furi_hal_spi_bus_unlock();
@@ -1054,6 +1098,9 @@ bool furi_hal_sd_is_present(void) {
 }
 
 FuriStatus furi_hal_sd_init(bool power_reset) {
+    /* A path below that fails before sd_prepare_card() must not leave the
+     * previous attempt's "empty slot" verdict behind. */
+    sd_no_card = false;
 #if FURI_HAL_SD_RECOVERY
     if(power_reset) {
         /* Keep the existing cross-host pin ownership check ahead of cleanup. */
@@ -1117,6 +1164,10 @@ FuriStatus furi_hal_sd_info(FuriHalSdInfo* info) {
 
 uint8_t furi_hal_sd_max_mount_retry_count(void) {
     return 3;
+}
+
+bool furi_hal_sd_no_card_detected(void) {
+    return sd_no_card;
 }
 
 bool furi_hal_sd_mount(void) {
