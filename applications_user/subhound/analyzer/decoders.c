@@ -399,6 +399,9 @@ bool decoders_detect_crc(const uint8_t* decoded_bits, uint16_t len, uint8_t* out
     if(nbytes < 2) return false;
 
     static uint8_t bytes[SUBHOUND_MAX_DECODED_BITS / 8 + 1];
+    /* PORT: the only caller passes PWM-decoded bits (<= SUBHOUND_MAX_DECODED_BITS),
+     * but never let a longer input overrun this static buffer. */
+    if(nbytes > sizeof(bytes)) nbytes = sizeof(bytes);
     for(uint16_t i = 0; i < nbytes; i++) {
         uint8_t v = 0;
         for(int j = 0; j < 8; j++) {
