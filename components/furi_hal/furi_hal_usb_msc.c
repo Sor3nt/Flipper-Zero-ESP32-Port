@@ -7,11 +7,64 @@
 #include <furi.h>
 #include <string.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 #include "furi_hal_sd.h"
 #include "class/msc/msc.h"
 #include "class/msc/msc_device.h"
 
 #define TAG "FuriHalUsbMsc"
+
+/* Serialises the TinyUSB MSC callbacks (TinyUSB task) against start/stop (app
+ * thread, possibly on the other core).
+ *
+ * Without it a callback could pass its s_active check, then stop() cleared
+ * s_has_backing, and the same callback - reading s_has_backing again - took the
+ * raw-SD path: an image's LBAs written straight onto the SD card that FATFS
+ * still has mounted. stop() also returned while a backing read/write was still
+ * running, so the app closed and freed the File that callback was using (the
+ * apps only slept a fixed 1.5 s and hoped the callback was done).
+ *
+ * Every callback that looks at the backing holds this lock and decides
+ * everything from one view of the state; stop() clears s_active first, then
+ * takes the lock, so it returns only after a running callback has finished and
+ * no later callback can reach the backing. Recursive, so a backing eject()
+ * callback may call furi_hal_usb_msc_stop() on the TinyUSB task. Never held
+ * while waiting for anything but the SD/SPI bus inside a backing callback. */
+static StaticSemaphore_t s_cb_lock_buffer;
+static SemaphoreHandle_t s_cb_lock = NULL;
+static portMUX_TYPE s_cb_lock_init_mux = portMUX_INITIALIZER_UNLOCKED;
+/* 0 = not created, 1 = being created, 2 = ready */
+static volatile uint32_t s_cb_lock_state = 0;
+
+static SemaphoreHandle_t msc_cb_lock_handle(void) {
+    if(s_cb_lock_state != 2) {
+        /* First use can come from the app thread (start) or the TinyUSB task
+         * (a host command): exactly one caller creates it. The critical section
+         * only claims the job; the FreeRTOS call runs outside it. */
+        taskENTER_CRITICAL(&s_cb_lock_init_mux);
+        const bool mine = (s_cb_lock_state == 0);
+        if(mine) s_cb_lock_state = 1;
+        taskEXIT_CRITICAL(&s_cb_lock_init_mux);
+        if(mine) {
+            s_cb_lock = xSemaphoreCreateRecursiveMutexStatic(&s_cb_lock_buffer);
+            __sync_synchronize();
+            s_cb_lock_state = 2;
+        } else {
+            while(s_cb_lock_state != 2) vTaskDelay(1);
+        }
+    }
+    return s_cb_lock;
+}
+
+static void msc_lock(void) {
+    xSemaphoreTakeRecursive(msc_cb_lock_handle(), portMAX_DELAY);
+}
+
+static void msc_unlock(void) {
+    xSemaphoreGiveRecursive(s_cb_lock);
+}
 
 static volatile bool s_active = false;
 /* Set to true while the host has locked the medium with SCSI Prevent/Allow
@@ -32,20 +85,24 @@ static FuriHalUsbMscBacking s_backing;
 static volatile bool s_has_backing = false;
 
 bool furi_hal_usb_msc_start_backing(const FuriHalUsbMscBacking* backing) {
-    if(s_active) {
-        FURI_LOG_E(TAG, "MSC already active — refusing backing start");
-        return false;
-    }
     if(!backing || !backing->read || backing->block_count == 0) {
         FURI_LOG_E(TAG, "Invalid MSC backing");
         return false;
     }
-    uint16_t bs = (backing->block_size != 0) ? (uint16_t)backing->block_size : 512;
-    if(bs != 512 && bs != 2048) {
-        FURI_LOG_E(TAG, "Unsupported MSC backing block size %u", (unsigned)bs);
+    /* Validate the full 32-bit value: a cast to uint16_t first would accept
+     * e.g. 0x10200 as 512. */
+    const uint32_t bs = (backing->block_size != 0) ? backing->block_size : 512u;
+    if(bs != 512u && bs != 2048u) {
+        FURI_LOG_E(TAG, "Unsupported MSC backing block size %" PRIu32, bs);
         return false;
     }
 
+    msc_lock();
+    if(s_active) {
+        msc_unlock();
+        FURI_LOG_E(TAG, "MSC already active — refusing backing start");
+        return false;
+    }
     s_backing = *backing;
     s_backing.block_size = bs;
     /* A writable medium with no write callback would advertise read/write to the
@@ -59,6 +116,7 @@ bool furi_hal_usb_msc_start_backing(const FuriHalUsbMscBacking* backing) {
     /* Same UNIT_ATTENTION hand-off as the SD path: force the host to re-probe. */
     s_signal_medium_change = true;
     s_active = true;
+    msc_unlock();
     FURI_LOG_I(
         TAG,
         "MSC started (file-backed): %" PRIu32 " blocks x %u bytes, %s",
@@ -80,6 +138,15 @@ bool furi_hal_usb_msc_start(void) {
         return false;
     }
 
+    msc_lock();
+    if(s_active) {
+        /* Someone else started meanwhile. Report success only if it is the
+         * raw-SD mode this caller asked for. */
+        const bool raw = !s_has_backing;
+        msc_unlock();
+        return raw;
+    }
+    s_has_backing = false;
     s_removal_locked = false;
     /* Arm the unit-attention shot before flipping active. The next host
      * TEST UNIT READY will fail with UNIT ATTENTION / 0x28 / 0x00, forcing
@@ -87,6 +154,7 @@ bool furi_hal_usb_msc_start(void) {
      * medium" state from a previous session. */
     s_signal_medium_change = true;
     s_active = true;
+    msc_unlock();
     FURI_LOG_I(
         TAG,
         "MSC started: %" PRIu32 " sectors x %u bytes (arming UNIT_ATTENTION)",
@@ -97,15 +165,21 @@ bool furi_hal_usb_msc_start(void) {
 
 void furi_hal_usb_msc_stop(void) {
     if(!s_active) return;
+    /* New callbacks bail out from here on (they re-check s_active under the
+     * lock). Taking the lock then waits for a callback that is still inside the
+     * backing or the raw-SD path, so after this function returns nothing uses
+     * the backing's ctx/File any more and the SD may be re-mounted. */
     s_active = false;
+    msc_lock();
     s_has_backing = false;
+    s_removal_locked = false;
+    msc_unlock();
     /* The host now sees the medium as gone: with s_active false the next TEST
      * UNIT READY / READ / WRITE fails and TinyUSB fills the default sense
      * NOT_READY/MEDIUM_NOT_PRESENT itself (msc_device.c), which hosts treat as
      * an ejected drive. The sense is deliberately not written from here:
      * tud_msc_set_sense() is plain state of the TinyUSB task and this runs on
      * the app task, so a write here could interleave with REQUEST SENSE. */
-    s_removal_locked = false;
     FURI_LOG_I(TAG, "MSC stopped (host sees MEDIUM_NOT_PRESENT)");
 }
 
@@ -135,15 +209,17 @@ static const char s_product_rev[] = "1.0 ";
 
 void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16], uint8_t product_rev[4]) {
     (void)lun;
+    msc_lock();
     if(s_has_backing) {
         memcpy(vendor_id, s_backing.vendor_id, 8);
         memcpy(product_id, s_backing.product_id, 16);
         memcpy(product_rev, s_backing.product_rev, 4);
-        return;
+    } else {
+        memcpy(vendor_id, s_vendor_id, 8);
+        memcpy(product_id, s_product_id, 16);
+        memcpy(product_rev, s_product_rev, 4);
     }
-    memcpy(vendor_id, s_vendor_id, 8);
-    memcpy(product_id, s_product_id, 16);
-    memcpy(product_rev, s_product_rev, 4);
+    msc_unlock();
 }
 
 /* INQUIRY v2 hook: lets us set the peripheral device type. TinyUSB's built-in
@@ -153,7 +229,11 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
 uint32_t tud_msc_inquiry2_cb(uint8_t lun, scsi_inquiry_resp_t* resp, uint32_t bufsize) {
     (void)lun;
     (void)bufsize;
-    if(!(s_has_backing && s_backing.is_cdrom)) return 0; // not a CD-ROM → v1 path
+    msc_lock();
+    if(!(s_has_backing && s_backing.is_cdrom)) {
+        msc_unlock();
+        return 0; // not a CD-ROM → v1 path
+    }
     resp->peripheral_device_type = 0x05; // CD/DVD-ROM
     resp->peripheral_qualifier = 0;
     resp->is_removable = 1;
@@ -163,6 +243,7 @@ uint32_t tud_msc_inquiry2_cb(uint8_t lun, scsi_inquiry_resp_t* resp, uint32_t bu
     memcpy(resp->vendor_id, s_backing.vendor_id, 8);
     memcpy(resp->product_id, s_backing.product_id, 16);
     memcpy(resp->product_rev, s_backing.product_rev, 4);
+    msc_unlock();
     return sizeof(scsi_inquiry_resp_t); // 36
 }
 
@@ -174,6 +255,12 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun) {
          * sense is otherwise clear. */
         return false;
     }
+    msc_lock();
+    if(!s_active) {
+        msc_unlock();
+        return false;
+    }
+    bool ready;
     if(s_signal_medium_change) {
         /* Once per start(): tell the host the medium just (re)appeared.
          * The host will follow up with REQUEST SENSE, read the UA, and
@@ -185,29 +272,33 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun) {
             SCSI_SENSE_UNIT_ATTENTION,
             0x28 /*NOT READY TO READY TRANSITION, MEDIUM MAY HAVE CHANGED*/,
             0x00);
-        return false;
+        ready = false;
+    } else if(s_has_backing) {
+        /* A file-backed image is always "present" while active; only the
+         * raw-SD path has to re-check that a physical card is still there. */
+        ready = true;
+    } else {
+        ready = furi_hal_sd_get_card_state() == FuriStatusOk;
     }
-    /* A file-backed image is always "present" while active; only the raw-SD
-     * path has to re-check that a physical card is still there. */
-    if(s_has_backing) return true;
-    return furi_hal_sd_get_card_state() == FuriStatusOk;
+    msc_unlock();
+    return ready;
 }
 
 void tud_msc_capacity_cb(uint8_t lun, uint32_t* block_count, uint16_t* block_size) {
     (void)lun;
+    msc_lock();
     if(!s_active) {
         *block_count = 0;
         *block_size = 512;
-        return;
-    }
-    if(s_has_backing) {
+    } else if(s_has_backing) {
         *block_count = s_backing.block_count;
         *block_size = (uint16_t)s_backing.block_size;
-        return;
+    } else {
+        *block_count = furi_hal_sd_sector_count();
+        *block_size = furi_hal_sd_sector_size();
+        if(*block_size == 0) *block_size = 512;
     }
-    *block_count = furi_hal_sd_sector_count();
-    *block_size = furi_hal_sd_sector_size();
-    if(*block_size == 0) *block_size = 512;
+    msc_unlock();
 }
 
 bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject) {
@@ -222,8 +313,12 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
          * the UI's back. */
         FURI_LOG_I(TAG, "Host ejected the medium");
         s_removal_locked = false;
-        /* Let a file-backed app react (e.g. close the running screen). */
-        if(s_has_backing && s_backing.eject) s_backing.eject(s_backing.ctx);
+        /* Let a file-backed app react (e.g. close the running screen). Under
+         * the lock so stop() cannot free ctx meanwhile; the lock is recursive,
+         * so eject() may call furi_hal_usb_msc_stop() itself. */
+        msc_lock();
+        if(s_active && s_has_backing && s_backing.eject) s_backing.eject(s_backing.ctx);
+        msc_unlock();
     }
     return true;
 }
@@ -247,71 +342,101 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void* buff
     (void)lun;
     if(!s_active) return -1;
 
-    const uint16_t block_size = s_has_backing ? (uint16_t)s_backing.block_size :
-                                                furi_hal_sd_sector_size();
-    if(block_size == 0) return -1;
+    msc_lock();
+    /* One view of the state for the whole command (see s_cb_lock). */
+    if(!s_active) {
+        msc_unlock();
+        return -1;
+    }
+    const bool backed = s_has_backing;
+    const uint16_t block_size = backed ? (uint16_t)s_backing.block_size :
+                                         furi_hal_sd_sector_size();
+    int32_t result = -1;
 
     /* TinyUSB calls us with (lba, offset, bufsize). offset is always 0 when
      * CFG_TUD_MSC_BUFSIZE is a multiple of block_size, which we ensure (4096). */
-    if(offset != 0 || (bufsize % block_size) != 0) {
+    if(block_size == 0) {
+        /* no medium geometry: fail */
+    } else if(offset != 0 || (bufsize % block_size) != 0) {
         FURI_LOG_E(
             TAG,
             "read10 misalignment: lba=%" PRIu32 " offset=%" PRIu32 " bufsize=%" PRIu32,
             lba,
             offset,
             bufsize);
-        return -1;
-    }
-
-    const uint32_t count = bufsize / block_size;
-    if(s_has_backing) {
-        if(!s_backing.read(s_backing.ctx, lba, count, buffer)) {
-            FURI_LOG_E(TAG, "backing read failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
-            return -1;
+    } else {
+        const uint32_t count = bufsize / block_size;
+        if(backed) {
+            if(s_backing.read(s_backing.ctx, lba, count, buffer)) {
+                result = (int32_t)bufsize;
+            } else {
+                FURI_LOG_E(TAG, "backing read failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
+            }
+        } else if(furi_hal_sd_read_sectors_raw(lba, buffer, count)) {
+            result = (int32_t)bufsize;
+        } else {
+            FURI_LOG_E(TAG, "read10 failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
         }
-    } else if(!furi_hal_sd_read_sectors_raw(lba, buffer, count)) {
-        FURI_LOG_E(TAG, "read10 failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
-        return -1;
     }
-    return (int32_t)bufsize;
+    msc_unlock();
+    return result;
 }
 
 bool tud_msc_is_writable_cb(uint8_t lun) {
     (void)lun;
-    if(s_has_backing) return s_active && s_backing.writable;
-    return s_active;
+    msc_lock();
+    const bool writable = s_active && (!s_has_backing || s_backing.writable);
+    msc_unlock();
+    return writable;
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t bufsize) {
     (void)lun;
     if(!s_active) return -1;
-    if(s_has_backing && !s_backing.writable) return -1;
 
-    const uint16_t block_size = s_has_backing ? (uint16_t)s_backing.block_size :
-                                                furi_hal_sd_sector_size();
-    if(block_size == 0) return -1;
+    msc_lock();
+    /* One view of the state for the whole command: a backed session that is
+     * stopped mid-command must never fall through to the raw-SD write below,
+     * which would put the image's LBAs onto the mounted SD card. */
+    if(!s_active) {
+        msc_unlock();
+        return -1;
+    }
+    const bool backed = s_has_backing;
+    int32_t result = -1;
+    if(backed && (!s_backing.writable || !s_backing.write)) {
+        msc_unlock();
+        return -1;
+    }
+    const uint16_t block_size = backed ? (uint16_t)s_backing.block_size :
+                                         furi_hal_sd_sector_size();
 
-    if(offset != 0 || (bufsize % block_size) != 0) {
+    if(block_size == 0) {
+        /* no medium geometry: fail */
+    } else if(offset != 0 || (bufsize % block_size) != 0) {
         FURI_LOG_E(
             TAG,
             "write10 misalignment: lba=%" PRIu32 " offset=%" PRIu32 " bufsize=%" PRIu32,
             lba,
             offset,
             bufsize);
-        return -1;
-    }
-
-    const uint32_t count = bufsize / block_size;
-    if(s_has_backing) {
-        if(!s_backing.write || !s_backing.write(s_backing.ctx, lba, count, buffer)) {
-            FURI_LOG_E(TAG, "backing write failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
-            return -1;
+    } else {
+        const uint32_t count = bufsize / block_size;
+        if(backed) {
+            if(s_backing.write(s_backing.ctx, lba, count, buffer)) {
+                result = (int32_t)bufsize;
+            } else {
+                FURI_LOG_E(
+                    TAG, "backing write failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
+            }
+        } else if(furi_hal_sd_write_sectors_raw(lba, buffer, count)) {
+            result = (int32_t)bufsize;
+        } else {
+            FURI_LOG_E(TAG, "write10 failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
         }
-    } else if(!furi_hal_sd_write_sectors_raw(lba, buffer, count)) {
-        FURI_LOG_E(TAG, "write10 failed: lba=%" PRIu32 " count=%" PRIu32, lba, count);
-        return -1;
     }
-    return (int32_t)bufsize;
+    msc_unlock();
+    return result;
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -434,6 +559,33 @@ static int32_t
             cd_put_be16(buf, (uint16_t)(idx - 2));
             buf[2] = 1; // first session
             buf[3] = 1; // last session
+            return cd_done(idx, alloc, bufsize);
+        } else if(format == 2) {
+            /* Full TOC (raw Q sub-channel), always in MSF. macOS asks for this
+             * for CD media and does not mount the disc when it is rejected.
+             * Four 11-byte descriptors for session 1: POINT A0 (first track),
+             * A1 (last track), A2 (lead-out start) and track 1 itself.
+             * Layout: [0]session [1]ADR/CTRL [2]TNO=0 [3]POINT [4..6]ATIME
+             * [7]zero [8]PMIN [9]PSEC [10]PFRAME. */
+            static const uint8_t points[4] = {0xA0, 0xA1, 0xA2, 0x01};
+            for(size_t i = 0; i < 4; i++) {
+                uint8_t* d = &buf[idx];
+                memset(d, 0, 11);
+                d[0] = 1; // session 1
+                d[1] = 0x14; // ADR=1, Control=4 (data track)
+                d[3] = points[i];
+                if(points[i] == 0xA0 || points[i] == 0xA1) {
+                    d[8] = 1; // first / last track number; PSEC=0 (CD-ROM disc type)
+                } else if(points[i] == 0xA2) {
+                    cd_put_msf(&d[7], N); // lead-out: [7]=0, [8..10]=M,S,F
+                } else {
+                    cd_put_msf(&d[7], 0); // track 1 starts at 00:02:00
+                }
+                idx += 11;
+            }
+            cd_put_be16(buf, (uint16_t)(idx - 2));
+            buf[2] = 1; // first complete session
+            buf[3] = 1; // last complete session
             return cd_done(idx, alloc, bufsize);
         }
         return cd_invalid_field(lun);
@@ -564,16 +716,15 @@ static int32_t
 }
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void* buffer, uint16_t bufsize) {
-    if(s_has_backing && s_backing.is_cdrom) {
-        return cdrom_scsi_cmd(lun, scsi_cmd, (uint8_t*)buffer, bufsize);
+    int32_t result = -1;
+    msc_lock();
+    if(s_active && s_has_backing && s_backing.is_cdrom) {
+        result = cdrom_scsi_cmd(lun, scsi_cmd, (uint8_t*)buffer, bufsize);
     }
-    /* Reject all SCSI commands we don't implement — TinyUSB falls back to
-     * standard sense for these. */
-    (void)lun;
-    (void)scsi_cmd;
-    (void)buffer;
-    (void)bufsize;
-    return -1;
+    msc_unlock();
+    /* Otherwise reject all SCSI commands we don't implement — TinyUSB falls
+     * back to standard sense for these. */
+    return result;
 }
 
 #else /* !ESP32-S3 / S2 */

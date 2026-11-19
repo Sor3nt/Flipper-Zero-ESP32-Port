@@ -233,7 +233,7 @@ static void draw_bad_image(Canvas* canvas, UsbCdromApp* app) {
     canvas_draw_str_aligned(canvas, 64, 20, AlignCenter, AlignTop, "Not a valid ISO");
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 64, 34, AlignCenter, AlignTop, "Size must be a multiple");
-    canvas_draw_str_aligned(canvas, 64, 43, AlignCenter, AlignTop, "of 2048, under 4 GB");
+    canvas_draw_str_aligned(canvas, 64, 43, AlignCenter, AlignTop, "of 2048, under 2 GB");
     draw_hint(canvas, "Back", NULL, "OK");
 }
 

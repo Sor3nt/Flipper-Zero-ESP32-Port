@@ -243,8 +243,11 @@ static bool mass_create_image(MassStorageApp* app, uint32_t size) {
             furi_string_printf(
                 path, "%snew_%s_%d%s", MASS_STORAGE_APP_FOLDER, sz, n, MASS_STORAGE_IMAGE_EXT);
         }
-        if(storage_common_stat(app->storage, furi_string_get_cstr(path), &info) != FSE_OK) break;
-        if(n > 99) {
+        const FS_Error st = storage_common_stat(app->storage, furi_string_get_cstr(path), &info);
+        if(st == FSE_NOT_EXIST) break; // free name
+        // PORT: any other stat error (SD hiccup, bad name) must not count as "free":
+        // FSOM_CREATE_ALWAYS below would truncate an existing image of that name.
+        if(st != FSE_OK || n > 99) {
             furi_string_free(path);
             return false;
         }
@@ -351,7 +354,7 @@ static void draw_bad_image(Canvas* canvas, MassStorageApp* app) {
     canvas_draw_str_aligned(canvas, 64, 20, AlignCenter, AlignTop, "Bad image");
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 64, 34, AlignCenter, AlignTop, "Size must be a multiple");
-    canvas_draw_str_aligned(canvas, 64, 43, AlignCenter, AlignTop, "of 512, under 4 GB");
+    canvas_draw_str_aligned(canvas, 64, 43, AlignCenter, AlignTop, "of 512, under 2 GB");
     draw_hint(canvas, "Back", NULL, "OK");
 }
 

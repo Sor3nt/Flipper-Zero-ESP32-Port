@@ -14,8 +14,10 @@
 
 // CD-ROM sector size is 2048 bytes (Mode 1 user data).
 #define CD_BLOCK_SIZE 2048u
-// 32-bit file offset limit: (block_count * 2048) must fit in uint32_t.
-#define CD_MAX_BLOCKS 2097151u // ~4 GB
+// File offset limit: storage_file_seek() ends in fseek(long), and long is 32-bit
+// here, so every byte offset must stay below 2 GiB (an offset >= 0x80000000 turns
+// negative and the seek fails -> MEDIUM ERROR for the rest of the disc).
+#define CD_MAX_BLOCKS 1048575u // (2 GiB / 2048) - 1 -> just under 2 GiB
 #define CD_MAX_SIZE   ((uint64_t)CD_MAX_BLOCKS * CD_BLOCK_SIZE)
 
 #define USB_CDROM_APP_FOLDER APP_DATA_PATH("")

@@ -13,8 +13,10 @@
 #include <furi_hal_usb_msc.h>
 
 #define MASS_BLOCK_SIZE 512u
-// 32-bit file offset limit: (block_count * 512) must fit in uint32_t.
-#define MASS_MAX_SIZE   0xFFFFFE00u // < 4 GB, multiple of 512
+// File offset limit: storage_file_seek() ends in fseek(long), and long is 32-bit
+// here, so every byte offset must stay below 2 GiB (an offset >= 0x80000000 turns
+// negative and the seek fails -> MEDIUM ERROR past 2 GiB).
+#define MASS_MAX_SIZE   0x7FFFFE00u // < 2 GiB, multiple of 512
 
 #define MASS_STORAGE_APP_FOLDER APP_DATA_PATH("")
 #define MASS_STORAGE_IMAGE_EXT  ".img"

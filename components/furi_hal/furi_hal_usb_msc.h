@@ -53,7 +53,8 @@ typedef struct {
     uint32_t block_size; /* bytes per LBA: 512 for disk/floppy, 2048 for CD-ROM */
     uint32_t block_count; /* total number of addressable LBAs */
     bool writable; /* false => write-protected / read-only medium */
-    bool is_cdrom; /* reserved: CD-ROM emulation (peripheral type 0x05 + MMC) */
+    bool is_cdrom; /* CD/DVD-ROM: INQUIRY type 0x05 + the MMC commands (READ TOC,
+                    * GET CONFIGURATION, ...); use block_size 2048, read-only */
     char vendor_id[8]; /* SCSI INQUIRY vendor  (space-padded, not NUL-terminated) */
     char product_id[16]; /* SCSI INQUIRY product (space-padded) */
     char product_rev[4]; /* SCSI INQUIRY revision (space-padded) */
@@ -63,7 +64,8 @@ typedef struct {
     /* Write `count` blocks starting at `lba`. Not called when !writable; may be
      * NULL in that case. Return true on success. */
     bool (*write)(void* ctx, uint32_t lba, uint32_t count, const uint8_t* buf);
-    /* Host asked to eject (SCSI START STOP UNIT, load_eject). Optional (NULL). */
+    /* Host asked to eject (SCSI START STOP UNIT, load_eject). Optional (NULL).
+     * Runs on the TinyUSB task; must not block for long. */
     void (*eject)(void* ctx);
 } FuriHalUsbMscBacking;
 
@@ -73,7 +75,9 @@ typedef struct {
 bool furi_hal_usb_msc_start_backing(const FuriHalUsbMscBacking* backing);
 
 /** Deactivate the MSC layer. Host will see the drive go offline.
- * After this returns, the SD card may be re-mounted by the firmware.
+ * Waits for a SCSI callback that is still running (e.g. a backing read), so
+ * after this returns no callback uses the backing's ctx any more: the app may
+ * close its image file and free ctx, and the SD card may be re-mounted.
  */
 void furi_hal_usb_msc_stop(void);
 
