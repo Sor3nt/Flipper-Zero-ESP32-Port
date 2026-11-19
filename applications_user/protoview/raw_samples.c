@@ -10,6 +10,7 @@
 /* Allocate and initialize a samples buffer. */
 RawSamplesBuffer* raw_samples_alloc(void) {
     RawSamplesBuffer* buf = malloc(sizeof(*buf));
+    memset(buf, 0, sizeof(*buf)); // PORT: ESP-IDF malloc does not zero
     buf->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     raw_samples_reset(buf);
     return buf;
@@ -39,11 +40,25 @@ void raw_samples_center(RawSamplesBuffer* s, uint32_t offset) {
     s->idx = (s->idx + offset) % RAW_SAMPLES_NUM;
 }
 
-/* Add the specified sample in the circular buffer. */
+/* PORT FIX: samples[].dur is a 15-bit field. Storing a longer duration kept it
+ * modulo 32768 (a 40 ms gap became a 7 ms "pulse", so the decoders saw a
+ * bogus short pulse instead of a frame separator). Saturate instead. */
+#define RAW_SAMPLE_DUR_MAX 0x7FFFu
+static inline uint32_t raw_sample_dur_clamp(uint32_t dur) {
+    return dur > RAW_SAMPLE_DUR_MAX ? RAW_SAMPLE_DUR_MAX : dur;
+}
+
+/* Add the specified sample in the circular buffer.
+ *
+ * PORT NOTE: protoview_rx_callback() calls this from the GPIO interrupt. A
+ * FuriMutex cannot be taken there (furi_mutex_acquire() returns
+ * FuriStatusErrorISR without locking), so the ISR writes unlocked - exactly as
+ * upstream does from its TIM2 ISR. That stays memory-safe because every index
+ * is reduced modulo RAW_SAMPLES_NUM; a reader at worst copies one torn sample. */
 void raw_samples_add(RawSamplesBuffer* s, bool level, uint32_t dur) {
     furi_mutex_acquire(s->mutex, FuriWaitForever);
     s->samples[s->idx].level = level;
-    s->samples[s->idx].dur = dur;
+    s->samples[s->idx].dur = raw_sample_dur_clamp(dur);
     s->idx = (s->idx + 1) % RAW_SAMPLES_NUM;
     furi_mutex_release(s->mutex);
 }
@@ -61,11 +76,12 @@ void raw_samples_add_or_update(RawSamplesBuffer* s, bool level, uint32_t dur) {
     uint32_t previdx = (s->idx - 1) % RAW_SAMPLES_NUM;
     if(s->samples[previdx].level == level && s->samples[previdx].dur != 0) {
         /* Update the last sample: it has the same level. */
-        s->samples[previdx].dur += dur;
+        s->samples[previdx].dur =
+            raw_sample_dur_clamp((uint32_t)s->samples[previdx].dur + raw_sample_dur_clamp(dur));
     } else {
         /* Add a new sample. */
         s->samples[s->idx].level = level;
-        s->samples[s->idx].dur = dur;
+        s->samples[s->idx].dur = raw_sample_dur_clamp(dur);
         s->idx = (s->idx + 1) % RAW_SAMPLES_NUM;
     }
     furi_mutex_release(s->mutex);
