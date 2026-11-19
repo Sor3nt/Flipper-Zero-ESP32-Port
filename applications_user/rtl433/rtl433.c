@@ -517,6 +517,9 @@ static void render(App *a) {
   }
 }
 static void action(App *a, InputEvent *e) {
+  /* RTLDBG: temporary diagnostics for the "submenu does nothing" report. */
+  FURI_LOG_I("RTLDBG", "input key=%d type=%d screen=%d menu=%u", e->key, e->type,
+             a->screen, a->menu);
   int d = nui_delta(e);
   bool ok = e->key == InputKeyOk && e->type == InputTypeShort;
   bool held = e->key == InputKeyOk && e->type == InputTypeLong;
@@ -746,7 +749,11 @@ int32_t rtl433_app(void *ctx) {
   while (!a->exit) {
     InputEvent e;
     if (nui_poll(&a->ui, &e, furi_ms_to_ticks(5))) {
+      Screen before = a->screen; /* RTLDBG: temporary */
       action(a, &e);
+      if (a->screen != before)
+        FURI_LOG_I("RTLDBG", "screen %d -> %d (rx=%d)", before, a->screen,
+                   atomic_load(&a->radio.running));
       a->ui.dirty = true;
     }
     drain(a);

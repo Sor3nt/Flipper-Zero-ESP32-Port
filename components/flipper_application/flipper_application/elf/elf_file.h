@@ -57,6 +57,10 @@ void elf_file_free(ELFFile* elf_file);
 bool elf_file_open(ELFFile* elf_file, const char* path);
 ElfLoadSectionTableResult elf_file_load_section_table(ELFFile* elf_file);
 ELFFileLoadStatus elf_file_load_sections(ELFFile* elf_file);
+
+/** First failure reason of the last elf_file_open()/elf_file_load_sections(), e.g.
+ * "Missing: furi_hal_foo" or "Reloc: L32R range -270000"; "" when none was recorded. */
+const char* elf_file_get_last_error(void);
 void elf_file_call_init(ELFFile* elf);
 bool elf_file_is_init_complete(ELFFile* elf);
 void* elf_file_get_entry_point(ELFFile* elf_file);

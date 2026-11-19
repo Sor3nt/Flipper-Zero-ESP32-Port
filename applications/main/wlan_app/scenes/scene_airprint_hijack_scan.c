@@ -4,6 +4,7 @@
  * blockiert für die Dauer des Timeouts), damit die GUI nicht einfriert. */
 
 #include "../wlan_app.h"
+#include <esp_attr.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -13,7 +14,7 @@
 
 #define PH_SCAN_TIMEOUT_MS 2500
 
-static WlanPrinterEntry s_printers[WLAN_PRINTHIJACK_MAX];
+static EXT_RAM_BSS_ATTR WlanPrinterEntry s_printers[WLAN_PRINTHIJACK_MAX];
 static volatile int s_count;
 static volatile bool s_scanning;
 static volatile bool s_scan_complete;

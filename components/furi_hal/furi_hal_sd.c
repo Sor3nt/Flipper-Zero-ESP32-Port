@@ -11,6 +11,7 @@
 #include "furi_hal_resources.h"
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
+#include "furi_hal_qfdiag.h"
 #include <sdkconfig.h>
 #include <driver/gpio.h>
 
@@ -39,6 +40,7 @@
 #include <freertos/task.h>
 #include <esp_memory_utils.h>
 #include <sdmmc_cmd.h>
+#include <sd_protocol_defs.h> /* MMC_GO_IDLE_STATE for the CMD0 presence probe */
 #include <driver/sdspi_host.h>
 
 #ifdef BOARD_SD_BUS_NOT_SHARED
@@ -69,6 +71,11 @@ static const char* TAG = "FuriHalSd";
 static sdmmc_card_t* sd_card = NULL;
 static sdspi_dev_handle_t sd_handle = 0;
 static bool sd_initialized = false;
+/* True after an init attempt in which nothing answered CMD0, i.e. the slot is
+ * empty. These boards have no card-detect pin (furi_hal_sd_is_present() is
+ * always true), so this is the only "card absent" signal the storage layer
+ * gets; see furi_hal_sd_no_card_detected(). */
+static bool sd_no_card = false;
 static bool sd_diskio_registered = false;
 static bool sd_disk_status_check = false;
 static bool sd_mounted = false;
@@ -113,6 +120,74 @@ static bool sd_ensure_bounce_buf(void) {
         return false;
     }
     return true;
+}
+
+/* QFDIAG -------------------------------------------------------------------
+ * Diagnostic-only bookkeeping for the qFlipper large-transfer stall. Records
+ * what the diskio layer is doing so the USB bridge can snapshot it, and splits
+ * a slow request into "waiting for the shared SPI bus lock" vs "the card
+ * transaction itself". Does not change behaviour. Counters and the bus-holder
+ * lookup run only with CONFIG_FURI_QFDIAG; the lock/xfer split in the
+ * "slow read/write" warnings is always on (two esp_timer reads). */
+static volatile uint8_t sd_dbg_op; /* 0 idle, 1 read, 2 write */
+static volatile uint32_t sd_dbg_op_since_ms;
+static volatile uint32_t sd_dbg_lock_since_ms;
+static volatile uint32_t sd_dbg_writes, sd_dbg_reads, sd_dbg_errors;
+static volatile uint32_t sd_dbg_max_write_ms, sd_dbg_max_lockwait_ms;
+static volatile int32_t sd_dbg_last_err;
+static volatile uint32_t sd_dbg_write_sectors, sd_dbg_write_busy_ms;
+static volatile uint32_t sd_dbg_read_sectors, sd_dbg_read_busy_ms;
+
+static inline uint32_t sd_dbg_now_ms(void) {
+    const uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return ms ? ms : 1; /* 0 means "not running" */
+}
+
+/* furi_hal_spi_bus_lock() with timing; returns how long we waited (us). */
+static int64_t sd_dbg_bus_lock(const char* what, DWORD sector) {
+    char holder[16] = "?";
+    if(QFDIAG_ENABLED) {
+        furi_hal_spi_bus_owner_name(holder, sizeof(holder));
+        sd_dbg_lock_since_ms = sd_dbg_now_ms();
+    }
+    const int64_t t0 = esp_timer_get_time();
+    furi_hal_spi_bus_lock();
+    const int64_t waited_us = esp_timer_get_time() - t0;
+    if(!QFDIAG_ENABLED) return waited_us;
+    sd_dbg_lock_since_ms = 0;
+    const uint32_t waited_ms = (uint32_t)(waited_us / 1000);
+    if(waited_ms > sd_dbg_max_lockwait_ms) sd_dbg_max_lockwait_ms = waited_ms;
+    if(waited_us > SD_SLOW_OP_US) {
+        ESP_LOGW(
+            TAG,
+            "QD %s @%lu: SPI bus lock wait %lu ms (holder when wait began: %s)",
+            what,
+            (unsigned long)sector,
+            (unsigned long)waited_ms,
+            holder);
+    }
+    return waited_us;
+}
+
+void furi_hal_sd_debug_get(FuriHalSdDebug* out) {
+    if(!out) return;
+    const uint32_t now = sd_dbg_now_ms();
+    const uint8_t op = sd_dbg_op;
+    const uint32_t since = sd_dbg_op_since_ms;
+    const uint32_t lsince = sd_dbg_lock_since_ms;
+    out->inflight_op = op;
+    out->inflight_ms = (op && since) ? now - since : 0;
+    out->lockwait_ms = lsince ? now - lsince : 0;
+    out->writes = sd_dbg_writes;
+    out->reads = sd_dbg_reads;
+    out->errors = sd_dbg_errors;
+    out->max_write_ms = sd_dbg_max_write_ms;
+    out->max_lockwait_ms = sd_dbg_max_lockwait_ms;
+    out->last_err = sd_dbg_last_err;
+    out->write_sectors = sd_dbg_write_sectors;
+    out->write_busy_ms = sd_dbg_write_busy_ms;
+    out->read_sectors = sd_dbg_read_sectors;
+    out->read_busy_ms = sd_dbg_read_busy_ms;
 }
 
 static bool sd_buf_is_dma_capable(const void* buf) {
@@ -414,6 +489,36 @@ static void sd_probe_filesystem(const sdmmc_card_t* card) {
     free(sector);
 }
 
+/* Does anything answer CMD0 (GO_IDLE_STATE) on this device? A card in the
+ * slot always answers with an R1 byte, idle (0x01) or otherwise. With an empty
+ * slot MISO stays high and sdspi reports "R1 response not found", which is
+ * ESP_ERR_TIMEOUT. Sent twice, like sdmmc_send_cmd_go_idle_state(), because
+ * some cards only switch to SPI mode on the second CMD0.
+ *
+ * Only run this after sdmmc_card_init() failed with ESP_ERR_TIMEOUT. That code
+ * alone cannot tell an empty slot (fails at CMD0 within ~20 ms) from a slow
+ * card that never left the ACMD41 busy loop (~1 s). The probe can, and a slow
+ * card keeps its normal retries. Caller holds the bus lock and a live handle.
+ *
+ * Needs an idle-high MISO. Where MISO idles low (fatalcore, see
+ * components/esp_driver_sdspi), an empty slot reads as R1 0x00 and counts as
+ * "answered", so that board just keeps its old retry behaviour. */
+#define SD_PROBE_CMD0_ATTEMPTS   2
+#define SD_PROBE_CMD0_DELAY_MS   20 /* = SDMMC_GO_IDLE_DELAY_MS (private in IDF) */
+#define SD_PROBE_CMD0_TIMEOUT_MS 1000 /* = SDMMC_DEFAULT_CMD_TIMEOUT_MS */
+static bool sd_card_answers_cmd0(sdspi_dev_handle_t handle) {
+    for(int i = 0; i < SD_PROBE_CMD0_ATTEMPTS; i++) {
+        if(i > 0) vTaskDelay(pdMS_TO_TICKS(SD_PROBE_CMD0_DELAY_MS));
+        sdmmc_command_t cmd = {
+            .opcode = MMC_GO_IDLE_STATE,
+            .flags = SCF_CMD_BC | SCF_RSP_R1,
+            .timeout_ms = SD_PROBE_CMD0_TIMEOUT_MS,
+        };
+        if(sdspi_host_do_transaction(handle, &cmd) != ESP_ERR_TIMEOUT) return true;
+    }
+    return false;
+}
+
 static void sd_run_mount_diagnostics(const sdspi_device_config_t* dev_cfg, const sdmmc_host_t* host) {
     ESP_LOGW(TAG, "Running SD diagnostics after mount failure");
 
@@ -521,6 +626,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
     int64_t lock_wait_us = 0;
     int64_t xfer_us = 0;
     esp_err_t err = ESP_OK;
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_op_since_ms = sd_dbg_now_ms();
+        sd_dbg_op = 1;
+    }
     /* Do NOT hold furi_hal_spi_bus_lock() across the whole transfer. SD reads
      * can take hundreds of milliseconds and the display commit path also needs
      * this lock for its SPI transactions; holding it here made the UI
@@ -534,12 +643,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         BYTE* cur_dst = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            const int64_t lock_start_us = esp_timer_get_time();
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("read", cur_sector); /* QFDIAG */
             const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_read_sectors(sd_card, cur_dst, cur_sector, chunk);
             xfer_us += esp_timer_get_time() - xfer_start_us;
-            lock_wait_us += xfer_start_us - lock_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_dst += block_size * chunk;
@@ -554,8 +661,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         BYTE* cur_dst = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("read", cur_sector); /* QFDIAG */
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
@@ -567,7 +676,17 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         err = ESP_ERR_NO_MEM;
     }
 
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_reads++;
+        sd_dbg_read_sectors += count;
+        sd_dbg_read_busy_ms += (uint32_t)((esp_timer_get_time() - op_start_us) / 1000);
+        sd_dbg_op = 0;
+    }
     if(err != ESP_OK) {
+        if(QFDIAG_ENABLED) {
+            sd_dbg_errors++;
+            sd_dbg_last_err = err;
+        }
         ESP_LOGE(TAG, "SD read failed: %s", esp_err_to_name(err));
         return RES_ERROR;
     }
@@ -593,7 +712,13 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
     }
 
     const int64_t op_start_us = esp_timer_get_time();
+    int64_t lock_wait_us = 0; /* QFDIAG */
+    int64_t xfer_us = 0;
     esp_err_t err = ESP_OK;
+    if(QFDIAG_ENABLED) {
+        sd_dbg_op_since_ms = sd_dbg_now_ms();
+        sd_dbg_op = 2;
+    }
     if(sd_buf_is_dma_capable(buff)) {
         const size_t block_size = sd_card->csd.sector_size;
         UINT remaining = count;
@@ -601,8 +726,10 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         const BYTE* cur_src = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("write", cur_sector);
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_write_sectors(sd_card, cur_src, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
@@ -617,8 +744,10 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
             memcpy(sd_bounce_buf, cur_src, block_size * chunk);
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("write", cur_sector);
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
@@ -629,19 +758,42 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         err = ESP_ERR_NO_MEM;
     }
 
+    const int64_t op_us = esp_timer_get_time() - op_start_us;
+    const uint32_t op_ms = (uint32_t)(op_us / 1000);
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_writes++;
+        sd_dbg_write_sectors += count;
+        sd_dbg_write_busy_ms += op_ms;
+        if(op_ms > sd_dbg_max_write_ms) sd_dbg_max_write_ms = op_ms;
+        sd_dbg_op = 0;
+    }
+
     if(err != ESP_OK) {
-        ESP_LOGE(TAG, "SD write failed: %s", esp_err_to_name(err));
+        if(QFDIAG_ENABLED) {
+            sd_dbg_errors++;
+            sd_dbg_last_err = err;
+        }
+        ESP_LOGE(
+            TAG,
+            "SD write failed: %s (%u sect @%lu after %lu ms, lock=%lld xfer=%lld)",
+            esp_err_to_name(err),
+            (unsigned)count,
+            (unsigned long)sector,
+            (unsigned long)op_ms,
+            (long long)(lock_wait_us / 1000),
+            (long long)(xfer_us / 1000));
         return RES_ERROR;
     }
 
-    const int64_t op_us = esp_timer_get_time() - op_start_us;
     if(op_us > SD_SLOW_OP_US) {
         ESP_LOGW(
             TAG,
-            "slow write: %u sect @%lu took %lld ms",
+            "slow write: %u sect @%lu took %lld ms (lock=%lld xfer=%lld)",
             (unsigned)count,
             (unsigned long)sector,
-            (long long)(op_us / 1000));
+            (long long)(op_us / 1000),
+            (long long)(lock_wait_us / 1000),
+            (long long)(xfer_us / 1000));
     }
 
     return RES_OK;
@@ -755,6 +907,8 @@ static bool sd_prepare_card(void) {
         return true;
     }
 
+    sd_no_card = false; /* set again below only if this attempt finds an empty slot */
+
     if(sd_host_conflicts_with(&furi_hal_spi_bus_external) ||
        sd_host_conflicts_with(&furi_hal_spi_bus_subghz)) {
         ESP_LOGW(
@@ -828,6 +982,10 @@ static bool sd_prepare_card(void) {
 
         host.slot = sd_handle;
         ret = sdmmc_card_init(&host, sd_card);
+        if(ret == ESP_ERR_TIMEOUT && !sd_card_answers_cmd0(sd_handle)) {
+            sd_no_card = true;
+            ESP_LOGI(TAG, "No SD card: nothing answered CMD0");
+        }
         if(ret == ESP_OK) {
             int real_freq_khz = 0;
             esp_err_t freq_err = sdspi_host_get_real_freq(sd_handle, &real_freq_khz);
@@ -904,7 +1062,9 @@ static bool sd_prepare_card(void) {
          * otherwise a concurrent display transfer trips spi_hal_setup_trans. */
         furi_hal_spi_bus_lock();
         sd_release_host();
-        sd_run_mount_diagnostics(&dev_cfg, &host);
+        /* The diagnostics re-run a full card init to explain a failing card;
+         * with an empty slot there is nothing to explain. */
+        if(!sd_no_card) sd_run_mount_diagnostics(&dev_cfg, &host);
 #endif
         sd_release_host();
         furi_hal_spi_bus_unlock();
@@ -938,6 +1098,9 @@ bool furi_hal_sd_is_present(void) {
 }
 
 FuriStatus furi_hal_sd_init(bool power_reset) {
+    /* A path below that fails before sd_prepare_card() must not leave the
+     * previous attempt's "empty slot" verdict behind. */
+    sd_no_card = false;
 #if FURI_HAL_SD_RECOVERY
     if(power_reset) {
         /* Keep the existing cross-host pin ownership check ahead of cleanup. */
@@ -1001,6 +1164,10 @@ FuriStatus furi_hal_sd_info(FuriHalSdInfo* info) {
 
 uint8_t furi_hal_sd_max_mount_retry_count(void) {
     return 3;
+}
+
+bool furi_hal_sd_no_card_detected(void) {
+    return sd_no_card;
 }
 
 bool furi_hal_sd_mount(void) {

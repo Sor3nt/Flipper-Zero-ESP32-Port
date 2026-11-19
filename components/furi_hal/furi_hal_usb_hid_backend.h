@@ -14,7 +14,14 @@ extern "C" {
 bool furi_hal_usb_hid_backend_start(const FuriHalUsbHidConfig* cfg);
 void furi_hal_usb_hid_backend_stop(void);
 bool furi_hal_usb_hid_backend_release_stack(void);
+/* Drops the D+ pull-up now and reconnects ~300 ms later from a timer, so the
+ * caller (an app thread holding the USB HAL mutex) does not sleep through the
+ * disconnect window. */
 bool furi_hal_usb_backend_force_reenumeration(void);
+/* Completes a pending reconnect immediately. Call before every
+ * tinyusb_driver_uninstall(): the delayed tud_connect() must never run against a
+ * stack that is being torn down. */
+void furi_hal_usb_backend_flush_reenumeration(void);
 void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited);
 
 #ifdef __cplusplus

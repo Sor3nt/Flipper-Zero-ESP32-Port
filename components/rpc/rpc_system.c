@@ -28,6 +28,9 @@
 
 #include "rpc_i.h"
 
+#include <esp_log.h> /* QFDIAG */
+#include <furi_hal_qfdiag.h>
+
 #define TAG "RpcSystem"
 
 /* Pfad aus system_update_request, konsumiert von system_reboot_request(UPDATE). */
@@ -71,7 +74,21 @@ static void rpc_system_system_ping_process(const PB_Main* request, void* context
         ping_response->data->size = ping_request->data->size;
     }
 
+    /* QFDIAG: qFlipper restarts its 30 s operation timeout only on a ping
+     * reply, so the spacing between replies is the number that matters. */
+    static uint32_t qd_last_reply;
+    const uint32_t qd_t0 = QFDIAG_ENABLED ? furi_get_tick() : 0;
     rpc_send_and_release(session, &response);
+    if(QFDIAG_ENABLED) {
+        const uint32_t qd_now = furi_get_tick();
+        ESP_LOGI(
+            TAG,
+            "QD ping reply id=%lu (send %lu ms, %lu ms since previous reply)",
+            (unsigned long)request->command_id,
+            (unsigned long)(qd_now - qd_t0),
+            (unsigned long)(qd_last_reply ? qd_now - qd_last_reply : 0));
+        qd_last_reply = qd_now;
+    }
 }
 
 static void rpc_system_system_reboot_process(const PB_Main* request, void* context) {

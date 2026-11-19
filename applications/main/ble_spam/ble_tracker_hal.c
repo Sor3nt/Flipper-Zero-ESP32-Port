@@ -1,4 +1,5 @@
 #include "ble_tracker_hal.h"
+#include <esp_attr.h>
 
 #include <esp_bt.h>
 #include <esp_bt_main.h>
@@ -9,7 +10,7 @@
 
 #define TAG "BleTracker"
 
-static TrackerDevice s_devices[TRACKER_MAX_DEVICES];
+static EXT_RAM_BSS_ATTR TrackerDevice s_devices[TRACKER_MAX_DEVICES];
 static uint16_t s_device_count = 0;
 static volatile bool s_scanning = false;
 

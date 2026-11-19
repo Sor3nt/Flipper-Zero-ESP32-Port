@@ -3,10 +3,16 @@
 FuriHalNfcEventInternal* furi_hal_nfc_event = NULL;
 
 void furi_hal_nfc_event_init(void) {
-    /* Idempotent: furi_hal_nfc_init() may run again from the app thread when
-     * the boot-time bring-up failed, and the event object must not leak. */
+    /* Idempotent: furi_hal_nfc_init() owns the one-shot bring-up at boot and
+     * the event object must not leak if that path is ever re-entered. */
     if(furi_hal_nfc_event) return;
-    furi_hal_nfc_event = malloc(sizeof(FuriHalNfcEventInternal));
+    FuriHalNfcEventInternal* event = malloc(sizeof(FuriHalNfcEventInternal));
+    /* ESP-IDF malloc does not zero (Flipper's does). A garbage ->thread made the
+     * IRQ / timer ISR call furi_thread_flags_set() on a wild task handle for any
+     * interrupt that arrived before furi_hal_nfc_event_start(). Publish only the
+     * zeroed object. */
+    memset(event, 0, sizeof(*event));
+    furi_hal_nfc_event = event;
 }
 
 FuriHalNfcError furi_hal_nfc_event_start(void) {

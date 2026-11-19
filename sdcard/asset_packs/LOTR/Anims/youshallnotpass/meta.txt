@@ -1,0 +1,50 @@
+Filetype: Flipper Animation
+Version: 1
+
+Width: 128
+Height: 64
+Passive frames: 8
+Active frames: 32
+Frames order: 0 0 0 0 1 1 1 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33
+Active cycles: 1
+Frame rate: 5
+Duration: 360
+Active cooldown: 7
+
+Bubble slots: 1
+
+Slot: 0
+X: 50
+Y: 45
+Text: You
+AlignH: Center
+AlignV: Center
+StartFrame: 9
+EndFrame: 14
+
+Slot: 0
+X: 50
+Y: 45
+Text: Shall
+AlignH: Center
+AlignV: Center
+StartFrame: 16
+EndFrame: 20
+
+Slot: 0
+X: 50
+Y: 45
+Text: Not
+AlignH: Center
+AlignV: Center
+StartFrame: 21
+EndFrame: 24
+
+Slot: 0
+X: 50
+Y: 45
+Text: PASS
+AlignH: Center
+AlignV: Center
+StartFrame: 27
+EndFrame: 33

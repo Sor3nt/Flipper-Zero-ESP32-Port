@@ -1,18 +1,39 @@
 #include "storage_settings.h"
 
-const SubmenuSettingsHelperDescriptor descriptor_template = {
-    .app_name = "Storage",
-    .options_cnt = 6,
-    .options =
-        {
-            {.name = "About Internal Storage", .scene_id = StorageSettingsInternalInfo},
-            {.name = "About SD Card", .scene_id = StorageSettingsSDInfo},
-            {.name = "Unmount SD Card", .scene_id = StorageSettingsUnmountConfirm},
-            {.name = "Format SD Card", .scene_id = StorageSettingsFormatConfirm},
-            {.name = "Benchmark SD Card", .scene_id = StorageSettingsBenchmarkConfirm},
-            {.name = "Factory Reset", .scene_id = StorageSettingsFactoryReset},
-        },
+#include <furi_hal_psram.h>
+
+static const SubmenuSettingsHelperOption storage_settings_options[] = {
+    {.name = "About Internal Storage", .scene_id = StorageSettingsInternalInfo},
+    {.name = "About SD Card", .scene_id = StorageSettingsSDInfo},
+    // Only listed when the board has PSRAM (see storage_settings_descriptor_alloc).
+    {.name = "About PSRAM", .scene_id = StorageSettingsPsramInfo},
+    {.name = "Unmount SD Card", .scene_id = StorageSettingsUnmountConfirm},
+    {.name = "Format SD Card", .scene_id = StorageSettingsFormatConfirm},
+    {.name = "Benchmark SD Card", .scene_id = StorageSettingsBenchmarkConfirm},
+    {.name = "Factory Reset", .scene_id = StorageSettingsFactoryReset},
 };
+
+// Menu for this board: storage_settings_options minus "About PSRAM" when there is
+// no PSRAM. Also records where the Mount/Unmount entry landed.
+static void storage_settings_descriptor_alloc(StorageSettings* app) {
+    const bool has_psram = furi_hal_psram_is_available();
+    const size_t options_max = COUNT_OF(storage_settings_options);
+
+    app->helper_descriptor = malloc(
+        sizeof(SubmenuSettingsHelperDescriptor) +
+        options_max * sizeof(SubmenuSettingsHelperOption));
+    app->helper_descriptor->app_name = "Storage";
+    app->mount_index = 0;
+
+    size_t count = 0;
+    for(size_t i = 0; i < options_max; i++) {
+        const SubmenuSettingsHelperOption* option = &storage_settings_options[i];
+        if(option->scene_id == StorageSettingsPsramInfo && !has_psram) continue;
+        if(option->scene_id == StorageSettingsUnmountConfirm) app->mount_index = count;
+        app->helper_descriptor->options[count++] = *option;
+    }
+    app->helper_descriptor->options_cnt = count;
+}
 
 static bool storage_settings_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
@@ -54,11 +75,7 @@ static StorageSettings* storage_settings_alloc(void) {
     view_dispatcher_add_view(
         app->view_dispatcher, StorageSettingsViewDialogEx, dialog_ex_get_view(app->dialog_ex));
 
-    size_t descriptor_size =
-        sizeof(SubmenuSettingsHelperDescriptor) +
-        (descriptor_template.options_cnt * sizeof(SubmenuSettingsHelperOption));
-    app->helper_descriptor = malloc(descriptor_size);
-    memcpy(app->helper_descriptor, &descriptor_template, descriptor_size);
+    storage_settings_descriptor_alloc(app);
     app->settings_helper = submenu_settings_helpers_alloc(app->helper_descriptor);
     submenu_settings_helpers_assign_objects(
         app->settings_helper,

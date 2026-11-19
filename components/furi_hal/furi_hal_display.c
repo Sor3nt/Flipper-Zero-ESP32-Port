@@ -231,6 +231,7 @@ void furi_hal_display_init(void) {
          * one stripe of SCALED_WIDTH pixels, or a full-width margin strip
          * painted through the same scratch buffer. */
         .max_transfer_sz = LCD_H_RES * STRIPE_HEIGHT * sizeof(uint16_t),
+        .isr_cpu_id = FURI_HAL_SPI_BUS_ISR_CPU_AFFINITY,
     };
     esp_err_t spi_err = spi_bus_initialize(LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     /* ESP_ERR_INVALID_STATE is OK — bus may already be initialized by SubGHz on shared-bus boards */
@@ -339,6 +340,12 @@ void furi_hal_display_init(void) {
 
     /* Clear entire screen to background (unset pixels = FG) */
     display_fill_color(fg_color);
+
+    /* furi_hal_light_init() leaves the backlight dark so the stale/noisy GRAM
+     * content is never visible at power-up; light it now that the panel holds
+     * a clean frame. The notification service applies the user's brightness
+     * once its settings are loaded. */
+    furi_hal_light_set(LightBacklight, 0xFF);
 
     ESP_LOGI(TAG, "Display initialized (%dx%d, scaled %dx%d, stripe=%d lines, buf=%d bytes)",
              FB_WIDTH, FB_HEIGHT, SCALED_WIDTH, SCALED_HEIGHT, STRIPE_HEIGHT, (int)stripe_bytes);
@@ -558,7 +565,14 @@ esp_lcd_panel_handle_t furi_hal_display_get_panel_handle(void) {
 }
 
 void furi_hal_display_set_fg_color(uint16_t color) {
-    if(color != fg_color) margin_painted = false;
+    if(color != fg_color) {
+        margin_painted = false;
+        /* The scaled centre is colored during the mono->rgb565 stripe render, not
+         * in the mono framebuffer. Invalidate the de-dup shadow so the next commit
+         * re-renders with the new colour even when the mono content is unchanged
+         * (e.g. a static clock/menu) — otherwise the centre keeps the old colour. */
+        fb_shadow_valid = false;
+    }
     fg_color = color;
 }
 
@@ -567,6 +581,9 @@ uint16_t furi_hal_display_get_fg_color(void) {
 }
 
 void furi_hal_display_set_bg_color(uint16_t color) {
+    /* Same reason as set_fg_color: the background is applied during the stripe
+     * render, so invalidate the shadow or a static frame keeps the old bg. */
+    if(color != bg_color) fb_shadow_valid = false;
     bg_color = color;
 }
 

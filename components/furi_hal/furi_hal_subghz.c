@@ -113,7 +113,13 @@ static FuriHalSubGhzContext furi_hal_subghz = {
 #define FURI_HAL_SUBGHZ_RMT_RESOLUTION_HZ     (1000000u)
 #define FURI_HAL_SUBGHZ_RMT_MEM_BLOCK_SYMBOLS (64u)
 #define FURI_HAL_SUBGHZ_RMT_TX_QUEUE_DEPTH    (1u)
-#define FURI_HAL_SUBGHZ_RMT_MAX_DURATION_TICKS (UINT16_MAX)
+/* rmt_symbol_word_t.duration0/1 are 15-bit fields: the longest single RMT half-symbol is 32767
+ * ticks (32.767 ms at 1 MHz). This used to be UINT16_MAX, so any run longer than 32.767 ms was
+ * stored modulo 32768 (a 60 ms Morse dot went out as 27 ms), and a chunk of exactly 32768 became
+ * duration 0, which RMT treats as the end marker and stops the transmission. Longer runs are split
+ * into several same-level chunks by furi_hal_subghz_async_tx_next_chunk(). Same limit as
+ * IR_RMT_MAX_DURATION in furi_hal_infrared.c. */
+#define FURI_HAL_SUBGHZ_RMT_MAX_DURATION_TICKS (0x7FFFu)
 
 static volatile uint32_t furi_hal_subghz_rx_irq_count = 0;
 

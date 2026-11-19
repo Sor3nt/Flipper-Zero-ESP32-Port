@@ -1,0 +1,16 @@
+Filetype: Flipper Animation Manifest
+Version: 1
+
+Name: Haseo_A_New_Hope
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3
+
+Name: Haseo_Troopers
+Min butthurt: 0
+Max butthurt: 18
+Min level: 1
+Max level: 30
+Weight: 3

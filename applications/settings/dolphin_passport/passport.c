@@ -6,6 +6,7 @@
 #include <dolphin/helpers/dolphin_state.h>
 
 #include <assets_icons.h>
+#include <asset_packs.h>
 
 #define MOODS_TOTAL  3
 #define BUTTHURT_MAX 3
@@ -53,12 +54,45 @@ static void render_callback(Canvas* canvas, void* ctx) {
 
     uint32_t xp_progress = 0;
     uint32_t xp_to_levelup = dolphin_state_xp_to_levelup(stats->icounter);
-    uint32_t xp_for_current_level =
-        xp_to_levelup + dolphin_state_xp_above_last_levelup(stats->icounter);
+    uint32_t xp_above_last_levelup = dolphin_state_xp_above_last_levelup(stats->icounter);
+    uint32_t xp_for_current_level = xp_to_levelup + xp_above_last_levelup;
     if(stats->level == 3) {
         xp_progress = 0;
     } else {
         xp_progress = xp_to_levelup * 64 / xp_for_current_level;
+    }
+
+    furi_assert((stats->level > 0) && (stats->level <= 3));
+    const Icon* portrait = portraits[mood][stats->level - 1];
+    const char* my_name = furi_hal_version_get_name_ptr();
+    snprintf(level_str, 20, "Level: %hu", stats->level);
+
+    /* Asset pack with a full passport background (Momentum layout). */
+    const Icon* background = asset_packs_get_passport_background();
+    if(background) {
+        char xp_str[24];
+        canvas_draw_icon(canvas, 0, 0, background);
+        canvas_draw_icon(canvas, 11, 2, portrait);
+        canvas_draw_str(canvas, 59, 10, my_name ? my_name : "Unknown");
+        canvas_draw_str(canvas, 59, 22, mood_str);
+        canvas_draw_str(canvas, 59, 34, level_str);
+        if(stats->level == 3) {
+            snprintf(xp_str, sizeof(xp_str), "Max Level!");
+        } else {
+            snprintf(
+                xp_str,
+                sizeof(xp_str),
+                "%lu/%lu",
+                (unsigned long)xp_above_last_levelup,
+                (unsigned long)xp_for_current_level);
+        }
+        canvas_set_font(canvas, FontBatteryPercent);
+        canvas_draw_str(canvas, 59, 42, xp_str);
+        canvas_set_font(canvas, FontSecondary);
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_box(canvas, 123 - xp_progress, 45, xp_progress + (xp_progress > 0), 5);
+        canvas_set_color(canvas, ColorBlack);
+        return;
     }
 
     // multipass
@@ -69,14 +103,11 @@ static void render_callback(Canvas* canvas, void* ctx) {
     canvas_draw_dot(canvas, 126, 1);
 
     // portrait
-    furi_assert((stats->level > 0) && (stats->level <= 3));
-    canvas_draw_icon(canvas, 9, 5, portraits[mood][stats->level - 1]);
+    canvas_draw_icon(canvas, 9, 5, portrait);
     canvas_draw_line(canvas, 58, 16, 123, 16);
     canvas_draw_line(canvas, 58, 30, 123, 30);
     canvas_draw_line(canvas, 58, 44, 123, 44);
 
-    const char* my_name = furi_hal_version_get_name_ptr();
-    snprintf(level_str, 20, "Level: %hu", stats->level);
     canvas_draw_str(canvas, 58, 12, my_name ? my_name : "Unknown");
     canvas_draw_str(canvas, 58, 26, mood_str);
     canvas_draw_str(canvas, 58, 40, level_str);

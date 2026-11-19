@@ -57,9 +57,12 @@ CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
 CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
 CONFIG_ESP_WIFI_AMSDU_TX_ENABLED=n
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+# NOTE: CONFIG_ESP_WIFI_TX_BUFFER_NUM / CONFIG_ESP_WIFI_RX_BUFFER_NUM do NOT
+# exist in ESP-IDF 5.4.1 (they were silent no-ops here — RX stayed at the IDF
+# default of 10). RX/dynamic trimming now lives in sdkconfig.defaults.esp32s3
+# (static_rx=8, dynamic_rx=16), shared by every esp32s3 board. STATIC_TX below
+# is also inactive while TX type is dynamic, but kept harmless for clarity.
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
-CONFIG_ESP_WIFI_TX_BUFFER_NUM=4
-CONFIG_ESP_WIFI_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_TASK_STACK_SIZE=2560
 
 # =============================================================================
@@ -88,7 +91,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # =============================================================================
 # RMT (Infrared)
 # =============================================================================
-CONFIG_RMT_ISR_IRAM_SAFE=y
+# Not IRAM-safe: the IR RX done callback and the Sub-GHz TX encoder call into
+# flash (infrared worker, gptimer, rmt_receive, protocol encoders). With the
+# ISR IRAM-safe they could run during a flash write and crash the device.
+# CONFIG_RMT_ISR_IRAM_SAFE is not set
 CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
 
 # =============================================================================

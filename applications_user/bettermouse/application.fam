@@ -1,0 +1,16 @@
+App(
+    appid="bettermouse",
+    name="Better Mouse",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="bettermouse_app",
+    requires=[
+        "gui",
+        "dialogs",
+    ],
+    stack_size=4 * 1024,
+    fap_description="USB mouse remote with a real motion engine: smooth acceleration, true diagonals, scroll mode and optional momentum",
+    fap_category="USB",
+    fap_version="1.0",
+    fap_icon="bettermouse.png",
+    fap_author="timon (ESP32 port)",
+)

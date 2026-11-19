@@ -546,7 +546,19 @@ build_for_target() {
 
     # Link
     echo "  Linking ${#OBJECTS[@]} objects (entry=$ENTRY_POINT)"
-    "$LD" -r -T "$SCRIPT_DIR/tools/fap.ld" --entry="$ENTRY_POINT" -o "$BUILD_DIR/app.elf" "${OBJECTS[@]}"
+    # Pass the objects through a response file: large apps (rtl433: 347 objects)
+    # overflow the Windows command-line limit ("Argument list too long") when the
+    # objects are passed directly. The linker is a native Windows binary under
+    # Git Bash, so paths inside the file must be native (cygpath -m) — MSYS only
+    # converts paths that appear as direct arguments.
+    local RSP="$BUILD_DIR/objects.rsp"
+    : > "$RSP"
+    local obj_path
+    for obj_path in "${OBJECTS[@]}"; do
+        if command -v cygpath >/dev/null 2>&1; then obj_path="$(cygpath -m "$obj_path")"; fi
+        printf '"%s"\n' "$obj_path" >> "$RSP"
+    done
+    "$LD" -r -T "$SCRIPT_DIR/tools/fap.ld" --entry="$ENTRY_POINT" -o "$BUILD_DIR/app.elf" "@$RSP"
     local SECTIONS=$("$READELF" -S "$BUILD_DIR/app.elf" | grep -c '^\s*\[')
 
     # Manifest with icon

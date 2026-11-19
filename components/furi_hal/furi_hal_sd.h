@@ -55,6 +55,17 @@ FuriStatus furi_hal_sd_info(FuriHalSdInfo* info);
 /** Get maximum mount retry count */
 uint8_t furi_hal_sd_max_mount_retry_count(void);
 
+/** Did the last init attempt find an empty slot?
+ *
+ * There is no card-detect pin, so furi_hal_sd_is_present() is always true.
+ * This is the "card absent" signal instead: true only when the last
+ * furi_hal_sd_init() got no answer to CMD0 at all. A slow or failing card
+ * answers CMD0 and reports false, so it keeps its retries.
+ *
+ * @return true if nothing answered CMD0 on the last attempt
+ */
+bool furi_hal_sd_no_card_detected(void);
+
 /** Mount SD card via ESP-IDF VFS at /sdcard
  * @return true on success
  */
@@ -91,6 +102,24 @@ uint32_t furi_hal_sd_sector_count(void);
 
 /** Get sector size of the active card in bytes, or 0 if not initialized. */
 uint16_t furi_hal_sd_sector_size(void);
+
+/* QFDIAG: diagnostic snapshot of the FatFs diskio layer. */
+typedef struct {
+    uint8_t inflight_op; /* 0 idle, 1 read, 2 write */
+    uint32_t inflight_ms; /* how long the current op has been running */
+    uint32_t lockwait_ms; /* how long it has been waiting for the SPI bus lock */
+    uint32_t writes;
+    uint32_t reads;
+    uint32_t errors;
+    uint32_t max_write_ms;
+    uint32_t max_lockwait_ms;
+    int32_t last_err;
+    uint32_t write_sectors; /* cumulative */
+    uint32_t write_busy_ms; /* cumulative time inside disk_write */
+    uint32_t read_sectors; /* cumulative */
+    uint32_t read_busy_ms; /* cumulative time inside disk_read */
+} FuriHalSdDebug;
+void furi_hal_sd_debug_get(FuriHalSdDebug* out);
 
 #ifdef __cplusplus
 }

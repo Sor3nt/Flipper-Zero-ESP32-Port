@@ -28,6 +28,7 @@ idf_component_register(
         "stream/stream.c"
         "stream/file_stream.c"
         "stream/string_stream.c"
+        "stream/memory_stream.c"
         "stream/buffered_file_stream.c"
         "stream/stream_cache.c"
         "bit_buffer.c"

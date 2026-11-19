@@ -21,8 +21,10 @@
 #include <esp_bt.h>
 #include <esp_heap_caps.h>
 #include <esp_bt_main.h>
+#include <esp_wifi.h>
 #include <esp_gap_ble_api.h>
 #include <ble_serial.h>
+#include <ble_hid.h>
 
 #define BT_RPC_EVENT_BUFF_SENT    (1UL << 0)
 #define BT_RPC_EVENT_DISCONNECTED (1UL << 1)
@@ -563,10 +565,39 @@ static void bt_handle_get_settings(Bt* bt, BtMessage* message) {
     *message->data.settings = bt->bt_settings;
 }
 
+static void bt_handle_stop_stack(Bt* bt);
+static void bt_handle_start_stack(Bt* bt);
+
+/* WiFi and BLE share the radio and the internal heap; the WiFi service and the
+ * lock menu keep them mutually exclusive. esp_wifi_get_mode() fails with
+ * ESP_ERR_WIFI_NOT_INIT whenever the WiFi driver is not allocated. */
+static bool bt_wifi_driver_active(void) {
+    wifi_mode_t mode;
+    return esp_wifi_get_mode(&mode) == ESP_OK;
+}
+
 static void bt_handle_set_settings(Bt* bt, BtMessage* message) {
     bt->bt_settings = *message->data.csettings;
-    bt_apply_settings(bt);
     bt_settings_save(&bt->bt_settings);
+
+    /* A user toggle (Settings app, lock menu, WiFi service) is the only caller,
+     * and none runs while a FAP owns the controller. Turning Bluetooth off
+     * releases the controller + Bluedroid heap instead of only stopping
+     * advertising; turning it on brings the stack back up, unless WiFi holds
+     * the radio (then only the setting is stored, as before). Both stack
+     * handlers are idempotent. bt_load_settings() keeps advertising-only
+     * semantics on purpose: it also runs from the SD-mount callback, when a
+     * FAP may own the controller. */
+    if(!bt->bt_settings.enabled) {
+        bt_apply_settings(bt);
+        bt_handle_stop_stack(bt);
+    } else if(
+        esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED &&
+        !bt_wifi_driver_active()) {
+        bt_handle_start_stack(bt); /* starts advertising itself */
+    } else {
+        bt_apply_settings(bt);
+    }
 }
 
 static void bt_handle_reload_keys_settings(Bt* bt) {
@@ -615,6 +646,7 @@ static void bt_handle_stop_stack(Bt* bt) {
     }
 
     ble_serial_reset_initialized();
+    ble_hid_reset_initialized(); // symmetric: next HID alloc re-inits controller/callbacks
     furi_hal_bt_reinit(); // clear stale profile pointer in HAL
 
     bt->status = BtStatusOff;
@@ -708,8 +740,14 @@ void bt_disconnect(Bt* bt) {
 void bt_set_status_changed_callback(Bt* bt, BtStatusChangedCallback callback, void* context) {
     furi_check(bt);
 
+    /* Callback and context are a pair: BtSrv must never see the new callback
+     * with the old context (or vice versa). An app clearing them (cb=NULL,
+     * ctx=NULL) while BtSrv was mid-dispatch could otherwise make BtSrv call
+     * the old callback with ctx==NULL, or re-read cb as NULL and call it. */
+    FURI_CRITICAL_ENTER();
     bt->status_changed_cb = callback;
     bt->status_changed_ctx = context;
+    FURI_CRITICAL_EXIT();
 }
 
 void bt_forget_bonded_devices(Bt* bt) {
@@ -817,12 +855,18 @@ int32_t bt_srv(void* p) {
      * startet vor StorageSrv (order 45 vs 120), und Runtime-Saves landen in der
      * SD-Datei (/ext). Läden wir vor dem Mount, bekämen wir nur die stale
      * NVS-Kopie → BT würde beim Boot ggf. kurz anspringen und dann von WiFi
-     * wieder abgeschaltet. Bounded warten (~5s), dann aus der SD-Datei laden.
-     * Symmetrisch zu wifi_srv, siehe project_global_wifi_toggle. */
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    for(int i = 0; i < 50 && storage_sd_status(storage) != FSE_OK; i++) {
-        furi_delay_ms(100);
-    }
+     * wieder abgeschaltet. Symmetrisch zu wifi_srv, siehe project_global_wifi_toggle.
+     *
+     * Opening the record is the wait, not a poll after it: storage_srv runs the
+     * boot mount, including every retry, in storage_ext_init() before it
+     * creates RECORD_STORAGE. Once furi_record_open() returns, the mount
+     * result is final and saved_struct reads the SD file if the card is
+     * mounted, NVS otherwise. The old 50 x 100 ms storage_sd_status() poll
+     * could never change that result. It only held the BLE start ~5 s longer
+     * when there was no card (BT came up at ~10.5 s). With BLE enabled, a
+     * later mount reloads keys and settings through bt_storage_callback
+     * (StorageEventTypeCardMount), which bt_init_keys_settings() subscribes. */
+    furi_record_open(RECORD_STORAGE);
     furi_record_close(RECORD_STORAGE);
 
     bt_settings_load(&bt->bt_settings);
@@ -864,8 +908,15 @@ int32_t bt_srv(void* p) {
         if(message.type == BtMessageTypeUpdateStatus) {
             bt_statusbar_update(bt);
             bt_pin_code_hide(bt);
-            if(bt->status_changed_cb) {
-                bt->status_changed_cb(bt->status, bt->status_changed_ctx);
+            /* Snapshot the pair atomically (see bt_set_status_changed_callback). */
+            BtStatusChangedCallback status_cb;
+            void* status_ctx;
+            FURI_CRITICAL_ENTER();
+            status_cb = bt->status_changed_cb;
+            status_ctx = bt->status_changed_ctx;
+            FURI_CRITICAL_EXIT();
+            if(status_cb) {
+                status_cb(bt->status, status_ctx);
             }
         } else if(message.type == BtMessageTypeUpdateBatteryLevel) {
             furi_hal_bt_update_battery_level(message.data.battery_level);

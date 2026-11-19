@@ -81,7 +81,10 @@ bool u2f_scene_main_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == U2fCustomEventConnect) {
+            // A (re)connect is a new host session; the presence request of the
+            // old one was cancelled, so its prompt must not stay latched.
             furi_timer_stop(app->timer);
+            app->event_cur = U2fCustomEventNone;
             u2f_view_set_state(app->u2f_view, U2fMsgIdle);
         } else if(event.event == U2fCustomEventDisconnect) {
             furi_timer_stop(app->timer);

@@ -1,6 +1,7 @@
 #include "native_ui.h"
 #include "../rtl_text.h"
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <furi_hal_display.h>
 #include <furi_hal_power.h>
 #include <stdarg.h>
@@ -87,6 +88,7 @@ void nui_status(NativeUi *u, const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(u->status, sizeof u->status, fmt, ap);
   va_end(ap);
+  FURI_LOG_I("RTLDBG", "status: %s", u->status); /* RTLDBG: temporary */
   u->status_at=furi_get_tick();
   u->dirty = true;
 }
@@ -116,14 +118,33 @@ void nui_draw(NativeUi *u) {
   memcpy(next.status, u->status, sizeof next.status);
   memcpy(next.foot, u->foot, sizeof next.foot);
   uint32_t changed = rtl_screen_changes(&u->painted, &next, u->painted_valid);
+  /* RTLDBG: temporary diagnostics for the "broken display" report. */
+  static uint32_t dbg_frames, dbg_fails, dbg_stripes, dbg_max_us, dbg_logged_at;
+  uint32_t dbg_t0 = (uint32_t)esp_timer_get_time();
   for (unsigned sy = 0; sy < 170; sy += 8) {
     if (!(changed & (1u << (sy / 8)))) continue;
     rtl_screen_stripe(&next, u->stripe, sy);
     unsigned h = 170 - sy < 8 ? 170 - sy : 8;
+    dbg_stripes++;
     if (!furi_hal_display_draw_rgb565(0, sy, 320, h, u->stripe)) {
+      dbg_fails++;
+      FURI_LOG_W("RTLDBG", "draw fail stripe y=%u valid=%d mask=%08lx live=%d",
+                 sy, u->painted_valid, (unsigned long)changed, next.live.enabled);
       u->painted_valid = false;
       return; /* keep dirty and retry after a failed SPI flush */
     }
+  }
+  uint32_t dbg_us = (uint32_t)esp_timer_get_time() - dbg_t0;
+  if (dbg_us > dbg_max_us) dbg_max_us = dbg_us;
+  dbg_frames++;
+  if (now - dbg_logged_at >= furi_ms_to_ticks(2000)) {
+    FURI_LOG_I("RTLDBG", "frames=%lu fails=%lu stripes=%lu max=%luus last_mask=%08lx full=%d live=%d hres=%u vres=%u",
+               (unsigned long)dbg_frames, (unsigned long)dbg_fails,
+               (unsigned long)dbg_stripes, (unsigned long)dbg_max_us,
+               (unsigned long)changed, !u->painted_valid, next.live.enabled,
+               furi_hal_display_get_h_res(), furi_hal_display_get_v_res());
+    dbg_logged_at = now;
+    dbg_max_us = 0;
   }
   u->painted = next;
   u->painted_valid = true;

@@ -1,0 +1,17 @@
+App(
+    appid="usb_cdrom",
+    name="USB CD-ROM",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="usb_cdrom_app",
+    requires=[
+        "gui",
+        "dialogs",
+    ],
+    stack_size=4 * 1024,
+    fap_description="Emulate a USB CD/DVD-ROM drive from an .iso image on the SD card (read-only)",
+    fap_category="USB",
+    fap_version="1.0",
+    fap_icon="assets/cd_10px.png",
+    fap_icon_assets="assets",
+    fap_author="piersroberts (ESP32 port)",
+)

@@ -74,3 +74,9 @@ The regression suites also passed on Linux with GCC AddressSanitizer and
 UndefinedBehaviorSanitizer. The supplied T-Embed artifacts were checked for metadata, relocations and imports
 against five linked local firmware images for the two variants. Hardware retests
 of rapid real-fob reception and the final Configuration fix remain pending.
+
+## Internal radio only (2026-11-15)
+This firmware has no external CC1101: `cc1101_ext` is an alias that drives the internal chip and
+always reports connected, so `radio_device_loader_set(NULL, ...ExternalCC1101)` always chose it
+(OTG boost on, `furi_hal_subghz_init()` re-run on begin, `furi_hal_subghz_shutdown()` on the internal
+radio at radio teardown). `protopirate_radio.c` now requests `SubGhzRadioDeviceTypeInternal`.

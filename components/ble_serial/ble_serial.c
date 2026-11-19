@@ -17,6 +17,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_bt.h>
 #include <esp_bt_defs.h>
@@ -144,6 +145,11 @@ static struct {
     bool rand_addr_enabled;
     bool app_registered;
     bool service_started;
+    /* Number of serial GATTS apps registered in Bluedroid (one). app_unregister
+     * on free completes asynchronously (UNREG event); counted here so free() can
+     * wait for the teardown to drain before the next profile registers on the
+     * shared GATTS callback. Mirrors ble_hid's gatts_app_count. */
+    int gatts_app_count;
     BleSerial* active;
 } serial_state = {0};
 
@@ -584,17 +590,34 @@ static void serial_gatts_event_handler(
     case ESP_GATTS_REG_EVT:
         if(param->reg.status == ESP_GATT_OK) {
             ESP_LOGI(TAG, "gatts: app registered, gatts_if=%d", gatts_if);
+            /* Only build the serial attribute table when this component actually
+             * owns an active instance. If a REG_EVT ever reaches us without one
+             * (e.g. another profile's app_register briefly sharing the global
+             * GATTS callback), creating the table on its gatts_if would corrupt
+             * that profile's handles — so ignore it defensively. */
             if(serial) {
                 serial->gatts_if = gatts_if;
+                serial_lock_global();
+                serial_state.app_registered = true;
+                serial_state.gatts_app_count++;
+                serial_unlock_global();
+                /* Create attribute table */
+                esp_ble_gatts_create_attr_tab(serial_gatt_db, gatts_if, IDX_NB, 0);
+            } else {
+                ESP_LOGW(TAG, "gatts: REG_EVT with no active serial instance, ignoring");
             }
-            serial_lock_global();
-            serial_state.app_registered = true;
-            serial_unlock_global();
-            /* Create attribute table */
-            esp_ble_gatts_create_attr_tab(serial_gatt_db, gatts_if, IDX_NB, 0);
         } else {
             ESP_LOGE(TAG, "gatts: app register failed: %d", param->reg.status);
         }
+        break;
+
+    case ESP_GATTS_UNREG_EVT:
+        /* Async completion of esp_ble_gatts_app_unregister(). Decrement regardless
+         * of the active instance (free() already cleared it) so ble_serial_free()'s
+         * teardown-drain can observe the serial GATTS app actually gone. */
+        serial_lock_global();
+        if(serial_state.gatts_app_count > 0) serial_state.gatts_app_count--;
+        serial_unlock_global();
         break;
 
     case ESP_GATTS_CREAT_ATTR_TAB_EVT:
@@ -626,6 +649,9 @@ static void serial_gatts_event_handler(
 
     case ESP_GATTS_START_EVT:
         ESP_LOGI(TAG, "gatts: service started, status=%d", param->start.status);
+        /* A late START_EVT after a failed/timed-out alloc has no instance;
+         * the chain below dereferences serial->gatts_if. */
+        if(!serial) break;
         if(!serial_state.service_started) {
             /* Serial service just started — now create DIS */
             serial_lock_global();
@@ -992,6 +1018,57 @@ static bool serial_has_custom_mac(const BleSerialConfig* config) {
     return memcmp(config->mac, zero, 6) != 0;
 }
 
+/* Tear down this serial instance's GATTS app: delete its services, unregister
+ * the app and wait (bounded) for the UNREG event.
+ *
+ * The services MUST be deleted explicitly. esp_ble_gatts_app_unregister() only
+ * clears the BTA app record (bta_gatts_deregister); the BTA service control
+ * blocks (srvc_cb[], CONFIG_BT_GATT_MAX_SR_PROFILES = 8 slots) are released
+ * solely by bta_gatts_delete_service(). Without this every serial profile start
+ * leaked 3 slots (serial + DIS + BAS), so the third start in a boot failed:
+ * BAS create -> "BT_APPL: service not created", START_EVT never came and
+ * ble_serial_alloc() blocked its caller for the full 5 s ready_sem timeout
+ * (e.g. Morse Beacon "Remote text" froze ~5 s and then had no BLE link).
+ *
+ * The deletes and the unregister go through the same BTC -> BTA queues in
+ * order, so the slots are free by the time the UNREG event below arrives. */
+static void serial_gatts_teardown(BleSerial* serial) {
+    if(!serial_state.app_registered) return;
+
+    const uint16_t services[] = {
+        bas_handle_table[BAS_IDX_SVC],
+        dis_handle_table[DIS_IDX_SVC],
+        serial->handle_table[IDX_SVC],
+    };
+    for(size_t i = 0; i < sizeof(services) / sizeof(services[0]); i++) {
+        if(services[i]) esp_ble_gatts_delete_service(services[i]);
+    }
+    memset(bas_handle_table, 0, sizeof(bas_handle_table));
+    memset(dis_handle_table, 0, sizeof(dis_handle_table));
+    memset(serial->handle_table, 0, sizeof(serial->handle_table));
+
+    esp_ble_gatts_app_unregister(serial->gatts_if);
+    serial_state.app_registered = false;
+
+    /* app_unregister completes asynchronously (UNREG event). The GATTS callback
+     * is a single global slot shared with ble_hid, so if the next profile
+     * registers its app before this drains, the two interleave and the new
+     * profile's startup times out -> intermittent BLE freeze on the switch.
+     * Wait (bounded) for the serial GATTS app to actually emit UNREG first. */
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(2000);
+    while(true) {
+        serial_lock_global();
+        int remaining = serial_state.gatts_app_count;
+        serial_unlock_global();
+        if(remaining <= 0) break;
+        if((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
+            ESP_LOGE(TAG, "serial GATTS teardown timeout, app still registered");
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 /* ---- Public API ---- */
 
 void ble_serial_get_default_mac(uint8_t mac[6]) {
@@ -1037,6 +1114,8 @@ BleSerial* ble_serial_alloc(const BleSerialConfig* config) {
     bas_service_started = false;
     serial_state.rand_addr_pending = false;
     serial_state.rand_addr_enabled = false;
+    /* Fresh session: the app_register below will bring this to 1 on REG_EVT. */
+    serial_state.gatts_app_count = 0;
     serial_unlock_global();
 
     /* Register GAP callback */
@@ -1124,6 +1203,11 @@ error:
     serial_lock_global();
     if(serial_state.active == serial) serial_state.active = NULL;
     serial_unlock_global();
+    /* A failed start (e.g. ready_sem timeout) used to leave the GATTS app
+     * registered with its half-built services: nobody unregistered it, so the
+     * next alloc's app_register for the same app id never got a REG_EVT and
+     * timed out too (BLE dead until reboot). Release it here as well. */
+    serial_gatts_teardown(serial);
     if(serial->mutex) vSemaphoreDelete(serial->mutex);
     free(serial);
     return NULL;
@@ -1141,10 +1225,7 @@ void ble_serial_free(BleSerial* serial) {
     if(serial_state.active == serial) serial_state.active = NULL;
     serial_unlock_global();
 
-    if(serial_state.app_registered) {
-        esp_ble_gatts_app_unregister(serial->gatts_if);
-        serial_state.app_registered = false;
-    }
+    serial_gatts_teardown(serial);
 
     if(serial->mutex) vSemaphoreDelete(serial->mutex);
     free(serial);

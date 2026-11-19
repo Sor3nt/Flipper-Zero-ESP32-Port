@@ -252,12 +252,18 @@ int32_t wifi_srv(void* p) {
     /* Settings-Load bis nach dem SD-Mount aufschieben: dieser Service startet vor
      * StorageSrv, und der Runtime-Save landet in der SD-Datei (/ext → SD). Läden
      * wir vor dem Mount, bekämen wir nur die stale NVS-Kopie → WiFi bliebe fälsch-
-     * lich „disabled" und würde nicht reconnecten. Bounded warten (~5s), dann
-     * laden (SD-Datei falls gemountet, sonst NVS-Fallback). */
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    for(int i = 0; i < 50 && storage_sd_status(storage) != FSE_OK; i++) {
-        furi_delay_ms(100);
-    }
+     * lich „disabled" und würde nicht reconnecten. Danach laden (SD-Datei falls
+     * gemountet, sonst NVS-Fallback).
+     *
+     * Opening the record is the wait, not a poll after it: storage_srv runs the
+     * boot mount, including every retry, in storage_ext_init() before it
+     * creates RECORD_STORAGE. Once furi_record_open() returns, the mount
+     * result is final. The old 50 x 100 ms storage_sd_status() poll could never
+     * change it and only cost ~5 s at boot when there was no card. A card that
+     * mounts later is deliberately not reloaded here: re-reading `enabled` at
+     * runtime could switch the radio (and the WiFi/BT exclusivity) when a card
+     * is merely inserted. */
+    furi_record_open(RECORD_STORAGE);
     furi_record_close(RECORD_STORAGE);
 
     wifi_settings_load(&wifi->settings);

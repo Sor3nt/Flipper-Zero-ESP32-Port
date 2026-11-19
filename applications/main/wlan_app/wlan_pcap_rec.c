@@ -9,6 +9,7 @@
 #include <freertos/ringbuf.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <esp_attr.h>
 
 #define TAG "WlanPcapRec"
 
@@ -41,7 +42,7 @@ static char s_path[112];
 
 // Staging-Puffer für ein Ring-Item. Nur der WiFi-Task (Promiscuous-Callback)
 // schreibt hier — Single-Producer, daher static unbedenklich.
-static uint8_t s_stage[WLAN_PCAP_REC_TS_LEN + WLAN_PCAP_REC_SNAPLEN];
+static EXT_RAM_BSS_ATTR uint8_t s_stage[WLAN_PCAP_REC_TS_LEN + WLAN_PCAP_REC_SNAPLEN];
 
 // Elternverzeichnis des Dateipfads rekursiv anlegen. wlan_pcap_open() legt nur
 // "/ext/wifi" an, nicht tiefere Ebenen wie "/ext/wifi/sniffer".

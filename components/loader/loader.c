@@ -3,6 +3,8 @@
 #include <applications.h>
 #include <flipper_application/flipper_application.h>
 #include <flipper_application/api_hashtable/api_hashtable.h>
+#include <flipper_application/elf/elf_file.h>
+#include <dialogs/dialogs.h>
 #include <storage/storage.h>
 #include <toolbox/path.h>
 
@@ -47,6 +49,41 @@ LoaderStatus loader_start(
     return result.value;
 }
 
+/* PORT: this loader used to only log a failed start, so a FAP that could not be loaded (missing
+ * import, relocation, bad manifest, out of memory) just dropped back to the menu with no hint.
+ * Show the reason on screen, like the stock firmware's loader does. The text is wrapped to the
+ * 128 px dialog by hand (~21 chars per line, at most 4 lines). */
+static void loader_show_gui_error(const char* name, FuriString* error_message) {
+    const char* src = (error_message && !furi_string_empty(error_message)) ?
+                          furi_string_get_cstr(error_message) :
+                          "Unknown error";
+    FuriString* text = furi_string_alloc();
+    size_t col = 0;
+    uint8_t lines = 1;
+    for(const char* c = src; *c && lines <= 4; c++) {
+        if(*c == '\n' || col >= 21) {
+            if(lines == 4) break;
+            furi_string_push_back(text, '\n');
+            lines++;
+            col = 0;
+            if(*c == '\n') continue;
+        }
+        furi_string_push_back(text, *c);
+        col++;
+    }
+
+    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+    DialogMessage* message = dialog_message_alloc();
+    dialog_message_set_header(message, "Cannot start app", 64, 1, AlignCenter, AlignTop);
+    dialog_message_set_text(message, furi_string_get_cstr(text), 64, 34, AlignCenter, AlignCenter);
+    dialog_message_set_buttons(message, NULL, "OK", NULL);
+    dialog_message_show(dialogs, message);
+    dialog_message_free(message);
+    furi_record_close(RECORD_DIALOGS);
+    furi_string_free(text);
+    FURI_LOG_E(TAG, "Start error for %s shown on screen", name ? name : "(null)");
+}
+
 LoaderStatus
     loader_start_with_gui_error(Loader* loader, const char* name, const char* args) {
     furi_check(loader);
@@ -57,6 +94,10 @@ LoaderStatus
         loader_start_internal(loader, name, args, error_message);
     if(result.value != LoaderStatusOk) {
         FURI_LOG_E(TAG, "Start error: %s", furi_string_get_cstr(error_message));
+        /* "Loader is locked" means another app runs; nothing to report on screen then. */
+        if(result.value != LoaderStatusErrorAppStarted) {
+            loader_show_gui_error(name, error_message);
+        }
     }
     furi_string_free(error_message);
     return result.value;
@@ -287,6 +328,9 @@ static LoaderStatus loader_start_external_fap(
                     "Preload failed for \"%s\": %s",
                     manifest->name[0] ? manifest->name : path,
                     flipper_application_preload_status_to_string(preload_status));
+                /* PORT: the ELF loader's first concrete reason, if it recorded one. */
+                const char* detail = elf_file_get_last_error();
+                if(detail[0]) furi_string_cat_printf(error_message, "\n%s", detail);
             }
             FURI_LOG_E(
                 TAG,
@@ -312,6 +356,9 @@ static LoaderStatus loader_start_external_fap(
                     error_message,
                     "Load failed: %s",
                     flipper_application_load_status_to_string(load_status));
+                /* PORT: e.g. "Missing: furi_hal_foo" or "Reloc: L32R range ..." */
+                const char* detail = elf_file_get_last_error();
+                if(detail[0]) furi_string_cat_printf(error_message, "\n%s", detail);
             }
             FURI_LOG_E(
                 TAG,
@@ -578,6 +625,9 @@ int32_t loader_srv(void* p) {
                         TAG,
                         "Detached start error: %s",
                         furi_string_get_cstr(error_message));
+                    if(status.value != LoaderStatusErrorAppStarted) {
+                        loader_show_gui_error(message.start.name, error_message);
+                    }
                 }
                 if(message.start.name) free((void*)message.start.name);
                 if(message.start.args) free((void*)message.start.args);

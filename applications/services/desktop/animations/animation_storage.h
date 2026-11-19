@@ -1,4 +1,5 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 #include <m-list.h>
 #include "views/bubble_animation_view.h"
@@ -80,6 +81,17 @@ StorageAnimationManifestInfo* animation_storage_get_meta(StorageAnimation* stora
  * @storage_animation   item to free. NULL-ed after all.
  */
 void animation_storage_free_storage_animation(StorageAnimation** storage_animation);
+
+/**
+ * Whether an animation may stay loaded while an app runs: an SD animation
+ * whose frame data all lives in external RAM (PSRAM), so keeping it takes no
+ * internal RAM from the app. False for built-in animations (nothing to reload),
+ * for frames that fell back to internal RAM, and on targets without PSRAM.
+ *
+ * @storage_animation   loaded animation to check
+ * @return              true if it can be kept instead of freed
+ */
+bool animation_storage_can_keep_loaded(StorageAnimation* storage_animation);
 
 /**
  * Has to be called at least 1 time to initialize runtime structures

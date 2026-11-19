@@ -35,6 +35,7 @@ struct NfcPoller {
 
 static void nfc_poller_list_alloc(NfcPoller* instance) {
     instance->list.head = malloc(sizeof(NfcPollerListElement));
+    memset(instance->list.head, 0, sizeof(*instance->list.head)); /* ESP-IDF malloc does not zero */
     instance->list.head->protocol = instance->protocol;
     instance->list.head->poller_api = nfc_pollers_api[instance->protocol];
     instance->list.head->child = NULL;
@@ -80,6 +81,7 @@ NfcPoller* nfc_poller_alloc(Nfc* nfc, NfcProtocol protocol) {
     furi_check(protocol < NfcProtocolNum);
 
     NfcPoller* instance = malloc(sizeof(NfcPoller));
+    memset(instance, 0, sizeof(*instance)); /* ESP-IDF malloc does not zero */
     instance->session_state = NfcPollerSessionStateIdle;
     instance->nfc = nfc;
     instance->protocol = protocol;

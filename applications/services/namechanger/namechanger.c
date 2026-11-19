@@ -11,17 +11,15 @@
 static bool namechanger_init() {
     Storage* storage = furi_record_open(RECORD_STORAGE);
 
-    // Kostil + velosiped = top ficha
-    uint8_t timeout = 0;
-    while(timeout < 11) {
-        if(storage_sd_status(storage) == FSE_OK) break;
-        furi_delay_ms(250);
-        timeout++;
-        /*if(timeout == 10) {
-            // Failed to init namechanger, SD card not ready
-            furi_record_close(RECORD_STORAGE);
-            return false;
-        }*/
+    /* One check, no polling. storage_srv runs the boot mount, including every
+     * retry, before it creates RECORD_STORAGE, and namechanger_on_system_start()
+     * only gets here once that record exists. So the SD status is already
+     * final. The old 11 x 250 ms poll could never change it. It only delayed
+     * every later on_system_start hook (and the "All services started" line)
+     * by ~2.75 s when there was no card. */
+    if(storage_sd_status(storage) != FSE_OK) {
+        furi_record_close(RECORD_STORAGE);
+        return false;
     }
 
     FuriString* str = furi_string_alloc();

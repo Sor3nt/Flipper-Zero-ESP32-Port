@@ -273,6 +273,9 @@ Nfc* nfc_alloc(void) {
     furi_check(furi_hal_nfc_acquire() == FuriHalNfcErrorNone);
 
     Nfc* instance = malloc(sizeof(Nfc));
+    /* ESP-IDF malloc does not zero (Flipper's does): clear every field first,
+     * then set the explicit initial values below. */
+    memset(instance, 0, sizeof(*instance));
     instance->state = NfcStateIdle;
     instance->comm_state = NfcCommStateIdle;
     instance->config_state = NfcConfigurationStateIdle;

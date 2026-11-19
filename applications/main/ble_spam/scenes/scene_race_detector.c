@@ -191,10 +191,11 @@ bool ble_spam_scene_race_detector_on_event(void* context, SceneManagerEvent even
             consumed = true;
         }
     } else if(event.type == SceneManagerEventTypeBack) {
+        /* Only signal the probe to abort here. Returning consumed=false pops this
+         * scene, which runs on_exit — the single owner of the HAL teardown. Doing
+         * disconnect/stop here as well caused a double stop+restart of the whole
+         * BLE stack back-to-back, churning Bluedroid right before the next app. */
         app->race_probe_abort = true;
-        ble_walk_hal_disconnect();
-        ble_walk_hal_stop_scan();
-        ble_walk_hal_stop();
         consumed = false;
     } else if(event.type == SceneManagerEventTypeTick) {
         RaceDetectorModel* model = view_get_model(app->view_race_detector);

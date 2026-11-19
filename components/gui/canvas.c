@@ -1,5 +1,7 @@
 #include "canvas_i.h"
 #include "icon_animation_i.h"
+#include "asset_packs.h"
+#include "icon_i.h"
 
 #include <furi.h>
 #include <furi_hal.h>
@@ -142,7 +144,8 @@ size_t canvas_current_font_width(const Canvas* canvas) {
 const CanvasFontParameters* canvas_get_font_params(const Canvas* canvas, Font font) {
     furi_check(canvas);
     furi_check(font < FontTotalNumber);
-    return &canvas_font_params[font];
+    const CanvasFontParameters* pack_params = asset_packs_get_font_params(font);
+    return pack_params ? pack_params : &canvas_font_params[font];
 }
 
 void canvas_clear(Canvas* canvas) {
@@ -167,7 +170,10 @@ void canvas_invert_color(Canvas* canvas) {
 void canvas_set_font(Canvas* canvas, Font font) {
     furi_check(canvas);
     u8g2_SetFontMode(&canvas->fb, 1);
-    if(font == FontPrimary) {
+    const uint8_t* pack_font = asset_packs_get_font(font);
+    if(pack_font) {
+        u8g2_SetFont(&canvas->fb, pack_font);
+    } else if(font == FontPrimary) {
         u8g2_SetFont(&canvas->fb, u8g2_font_helvB08_tr);
     } else if(font == FontSecondary) {
         u8g2_SetFont(&canvas->fb, u8g2_font_haxrcorp4089_tr);
@@ -419,25 +425,20 @@ void canvas_draw_icon_ex(
     IconRotation rotation) {
     furi_check(canvas);
     furi_check(icon);
+    /* Resolve the asset pack swap once and read size and data from the same
+     * Icon: a pack published between separate accessor calls must never pair
+     * one icon's bitmap with another icon's size. */
+    icon = asset_packs_swap_icon(icon);
 
     x += canvas->offset_x;
     y += canvas->offset_y;
     uint8_t* icon_data = NULL;
-    compress_icon_decode(canvas->compress_icon, icon_get_frame_data(icon, 0), &icon_data);
-    canvas_draw_u8g2_bitmap(
-        &canvas->fb, x, y, icon_get_width(icon), icon_get_height(icon), icon_data, rotation);
+    compress_icon_decode(canvas->compress_icon, icon->frames[0], &icon_data);
+    canvas_draw_u8g2_bitmap(&canvas->fb, x, y, icon->width, icon->height, icon_data, rotation);
 }
 
 void canvas_draw_icon(Canvas* canvas, int32_t x, int32_t y, const Icon* icon) {
-    furi_check(canvas);
-    furi_check(icon);
-
-    x += canvas->offset_x;
-    y += canvas->offset_y;
-    uint8_t* icon_data = NULL;
-    compress_icon_decode(canvas->compress_icon, icon_get_frame_data(icon, 0), &icon_data);
-    canvas_draw_u8g2_bitmap(
-        &canvas->fb, x, y, icon_get_width(icon), icon_get_height(icon), icon_data, IconRotation0);
+    canvas_draw_icon_ex(canvas, x, y, icon, IconRotation0);
 }
 
 void canvas_draw_dot(Canvas* canvas, int32_t x, int32_t y) {
@@ -581,8 +582,16 @@ void canvas_draw_icon_bitmap(
 
     x += canvas->offset_x;
     y += canvas->offset_y;
+    /* An asset pack replacement has its own size: the caller's w/h describe
+     * the firmware bitmap, so draw a replacement at its real size (correct row
+     * stride, no reads past its data). Resolved once, see canvas_draw_icon_ex. */
+    const Icon* drawn = asset_packs_swap_icon(icon);
+    if(drawn != icon) {
+        w = (int16_t)drawn->width;
+        h = (int16_t)drawn->height;
+    }
     uint8_t* icon_data = NULL;
-    compress_icon_decode(canvas->compress_icon, icon_get_frame_data(icon, 0), &icon_data);
+    compress_icon_decode(canvas->compress_icon, drawn->frames[0], &icon_data);
     u8g2_DrawXBM(&canvas->fb, x, y, w, h, icon_data);
 }
 

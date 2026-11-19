@@ -240,6 +240,7 @@ static bool furi_hal_usb_composite_install_internal(
         if(deinit_err != ESP_OK) {
             FURI_LOG_W(TAG, "tusb_cdc_acm_deinit after failed init: %d", deinit_err);
         }
+        furi_hal_usb_backend_flush_reenumeration();
         esp_err_t uninstall_err = tinyusb_driver_uninstall();
         if(uninstall_err != ESP_OK) {
             FURI_LOG_E(TAG, "TinyUSB cleanup after CDC init failure failed: %d", uninstall_err);
@@ -271,7 +272,10 @@ static bool furi_hal_usb_composite_uninstall_internal(void) {
      *    (real in esp_tinyusb 1.7.x — resets the DWC2 core and drops the D+
      *    pull-up so the host sees the composite disconnect) and deletes the OTG
      *    PHY. Despite the long-standing "no-op teardown" lore, tusb.h defines
-     *    tusb_teardown() -> tusb_deinit(0) and it is compiled in this build. */
+     *    tusb_teardown() -> tusb_deinit(0) and it is compiled in this build.
+     *    A reconnect still pending from furi_hal_usb_reinit() is completed
+     *    first so its timer never touches the stack being torn down. */
+    furi_hal_usb_backend_flush_reenumeration();
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);

@@ -5,6 +5,7 @@
 
 #include <furi.h>
 #include <string.h>
+#include <esp_attr.h>
 #include <freertos/FreeRTOS.h>
 
 #include "sdkconfig.h"
@@ -46,8 +47,12 @@ static const uint8_t s_report_descriptor[] = {
     0xC0,             /* End Collection */
 };
 
+/* No remote-wakeup attribute: a U2F key never wakes the host, and advertising it
+ * only invites host power management (HID selective suspend) to suspend the idle
+ * key a few seconds after enumeration. Upstream Flipper's U2F descriptor does not
+ * set it either. */
 static const uint8_t s_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, 41, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_CONFIG_DESCRIPTOR(1, 1, 0, 41, 0, 100),
     9, TUSB_DESC_INTERFACE, 0, 0, 2, TUSB_CLASS_HID, 0, 0, 4,
     9, HID_DESC_TYPE_HID, 0x11, 0x01, 0, 1, HID_DESC_TYPE_REPORT,
     sizeof(s_report_descriptor), 0,
@@ -89,13 +94,16 @@ typedef struct {
     uint8_t packet[U2F_PACKET_SIZE];
 } U2fReport;
 
-static U2fReport s_rx_ring[U2F_RING_SIZE];
+static EXT_RAM_BSS_ATTR U2fReport s_rx_ring[U2F_RING_SIZE]; /* task-context only (TinyUSB task / U2F worker) */
 static uint8_t s_rx_head;
 static uint8_t s_rx_tail;
 static uint8_t s_rx_count;
 static uint32_t s_rx_dropped;
 static bool s_active;
 static bool s_mounted;
+/* The host suspended the bus while the key stays configured. Not a disconnect:
+ * the host resumes it whenever a browser talks to the key again. */
+static bool s_suspended;
 static bool s_stopping;
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static FuriSemaphore* s_rx_semaphore;
@@ -130,15 +138,39 @@ static void furi_hal_usb_u2f_callback_invoke(
     furi_hal_usb_u2f_callback_finish();
 }
 
+/* Caller holds s_state_lock. A reserved callback must be run through
+ * furi_hal_usb_u2f_callback_invoke(), which drops the reservation that
+ * backend_stop()/set_callback(NULL) wait on. */
+static bool furi_hal_usb_u2f_callback_reserve_locked(
+    HidU2fCallback* callback,
+    void** context) {
+    *callback = s_callback;
+    *context = s_callback_context;
+    if(*callback) s_callbacks_in_flight++;
+    return *callback != NULL;
+}
+
 static bool furi_hal_usb_u2f_callback_reserve(
     HidU2fCallback* callback,
     void** context) {
     portENTER_CRITICAL(&s_state_lock);
-    *callback = s_callback;
-    *context = s_callback_context;
-    if(*callback) s_callbacks_in_flight++;
+    const bool reserved = furi_hal_usb_u2f_callback_reserve_locked(callback, context);
     portEXIT_CRITICAL(&s_state_lock);
-    return *callback != NULL;
+    return reserved;
+}
+
+/* Caller holds s_state_lock. Stale reports belong to the previous session. */
+static void furi_hal_usb_u2f_rx_clear_locked(void) {
+    s_rx_head = 0;
+    s_rx_tail = 0;
+    s_rx_count = 0;
+    s_rx_dropped = 0;
+}
+
+static void furi_hal_usb_u2f_rx_drain_semaphore(void) {
+    if(!s_rx_semaphore) return;
+    while(furi_semaphore_acquire(s_rx_semaphore, 0) == FuriStatusOk) {
+    }
 }
 
 const uint8_t* furi_hal_usb_u2f_report_descriptor(void) {
@@ -156,7 +188,38 @@ bool furi_hal_usb_u2f_backend_is_mounted(void) {
     return mounted;
 }
 
+/* Invariant: s_suspended is only set while s_mounted, and every path that
+ * changes s_mounted clears it. */
+static bool furi_hal_usb_u2f_backend_update_mounted(bool mounted, bool only_if_suspended) {
+    HidU2fCallback callback;
+    void* context;
+    portENTER_CRITICAL(&s_state_lock);
+    if(s_stopping || (only_if_suspended && !s_suspended)) {
+        portEXIT_CRITICAL(&s_state_lock);
+        return false;
+    }
+    /* Unmount and resume both mean the bus is no longer suspended. */
+    s_suspended = false;
+    if(s_mounted == mounted) {
+        portEXIT_CRITICAL(&s_state_lock);
+        return false;
+    }
+    s_mounted = mounted;
+    if(!mounted) furi_hal_usb_u2f_rx_clear_locked();
+    furi_hal_usb_u2f_callback_reserve_locked(&callback, &context);
+    portEXIT_CRITICAL(&s_state_lock);
+
+    if(!mounted) furi_hal_usb_u2f_rx_drain_semaphore();
+    furi_hal_usb_u2f_callback_invoke(
+        callback, context, mounted ? HidU2fConnected : HidU2fDisconnected);
+    return true;
+}
+
 void furi_hal_usb_u2f_backend_set_mounted(bool mounted) {
+    furi_hal_usb_u2f_backend_update_mounted(mounted, false);
+}
+
+void furi_hal_usb_u2f_backend_set_configured(void) {
     HidU2fCallback callback;
     void* context;
     portENTER_CRITICAL(&s_state_lock);
@@ -164,30 +227,36 @@ void furi_hal_usb_u2f_backend_set_mounted(bool mounted) {
         portEXIT_CRITICAL(&s_state_lock);
         return;
     }
-    if(s_mounted == mounted) {
-        portEXIT_CRITICAL(&s_state_lock);
-        return;
-    }
-    s_mounted = mounted;
-    if(!mounted) {
-        s_rx_head = 0;
-        s_rx_tail = 0;
-        s_rx_count = 0;
-        s_rx_dropped = 0;
-    }
-    callback = s_callback;
-    context = s_callback_context;
-    if(callback) s_callbacks_in_flight++;
+    /* SET_CONFIGURATION after a bus reset starts a new host session even when
+     * the key never looked unmounted (a re-plug without VBUS sensing is seen
+     * only as suspend). Always publish it so the worker drops channel locks,
+     * half-assembled requests and a presence approval given to the old host. */
+    const bool cleared = s_mounted;
+    if(cleared) furi_hal_usb_u2f_rx_clear_locked();
+    s_suspended = false;
+    s_mounted = true;
+    furi_hal_usb_u2f_callback_reserve_locked(&callback, &context);
     portEXIT_CRITICAL(&s_state_lock);
 
-    if(!mounted && s_rx_semaphore) {
-        while(furi_semaphore_acquire(s_rx_semaphore, 0) == FuriStatusOk) {
-        }
-    }
-    if(callback) {
-        furi_hal_usb_u2f_callback_invoke(
-            callback, context, mounted ? HidU2fConnected : HidU2fDisconnected);
-    }
+    /* Runs on the TinyUSB task, the only producer of reports, so no report can
+     * be queued between the clear above and this drain. Leaving stale counts
+     * behind could overflow the semaphore in receive_report(). */
+    if(cleared) furi_hal_usb_u2f_rx_drain_semaphore();
+    furi_hal_usb_u2f_callback_invoke(callback, context, HidU2fConnected);
+}
+
+void furi_hal_usb_u2f_backend_suspend(void) {
+    portENTER_CRITICAL(&s_state_lock);
+    /* TinyUSB only reports a suspend once the device was connected; before the
+     * host configured the key there is nothing to keep. */
+    if(!s_stopping && s_mounted) s_suspended = true;
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+bool furi_hal_usb_u2f_backend_detach_if_suspended(void) {
+    /* Atomic with mount/resume: if the host already woke or re-enumerated the
+     * key, the bus is not suspended any more and nothing is detached. */
+    return furi_hal_usb_u2f_backend_update_mounted(false, true);
 }
 
 bool furi_hal_usb_u2f_backend_start(void) {
@@ -215,6 +284,7 @@ bool furi_hal_usb_u2f_backend_start(void) {
     s_rx_count = 0;
     s_rx_dropped = 0;
     s_mounted = false;
+    s_suspended = false;
     s_stopping = false;
     __atomic_store_n(&s_active, true, __ATOMIC_RELEASE);
     portEXIT_CRITICAL(&s_state_lock);
@@ -271,6 +341,7 @@ bool furi_hal_usb_u2f_backend_stop(void) {
     portEXIT_CRITICAL(&s_state_lock);
     furi_hal_usb_u2f_callback_wait_idle();
 
+    furi_hal_usb_backend_flush_reenumeration();
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         portENTER_CRITICAL(&s_state_lock);
@@ -287,6 +358,7 @@ bool furi_hal_usb_u2f_backend_stop(void) {
 
     portENTER_CRITICAL(&s_state_lock);
     s_mounted = false;
+    s_suspended = false;
     s_rx_head = 0;
     s_rx_tail = 0;
     s_rx_count = 0;

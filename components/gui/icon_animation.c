@@ -1,5 +1,6 @@
 #include "icon_animation_i.h"
 #include "icon_i.h" // IWYU pragma: keep
+#include "asset_packs.h"
 
 #include <furi.h>
 
@@ -7,7 +8,9 @@ IconAnimation* icon_animation_alloc(const Icon* icon) {
     furi_check(icon);
 
     IconAnimation* instance = malloc(sizeof(IconAnimation));
-    instance->icon = icon;
+    /* Resolve the asset pack replacement once: the animation reads frame
+     * count, rate and frames from this pointer for its whole lifetime. */
+    instance->icon = asset_packs_swap_icon(icon);
     instance->timer =
         furi_timer_alloc(icon_animation_timer_callback, FuriTimerTypePeriodic, instance);
 

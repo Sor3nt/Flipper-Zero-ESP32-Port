@@ -6,6 +6,7 @@
  * list view; OK on a server continues to the login scene. */
 
 #include "../wlan_app.h"
+#include <esp_attr.h>
 #include <wlan_hal.h>
 
 #include <freertos/FreeRTOS.h>
@@ -28,7 +29,7 @@ typedef struct {
     char name[WLAN_APP_HOSTNAME_MAX];
 } SmbServer;
 
-static SmbServer s_servers[SMB_SCAN_MAX_SERVERS];
+static EXT_RAM_BSS_ATTR SmbServer s_servers[SMB_SCAN_MAX_SERVERS];
 static volatile uint8_t s_count;
 static volatile bool s_scanning;
 static volatile bool s_scan_complete;

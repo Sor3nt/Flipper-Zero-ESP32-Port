@@ -470,8 +470,12 @@ static void infrared_cli_brute_force_signals(
             printf("Missing signal name.\r\n");
             break;
         }
-        if(infrared_brute_force_calculate_messages(brute_force) != InfraredErrorCodeNone) {
-            printf("Invalid remote name.\r\n");
+        const InfraredErrorCode load_error = infrared_brute_force_calculate_messages(brute_force);
+        if(INFRARED_ERROR_PRESENT(load_error)) {
+            printf(
+                "Cannot load remote '%s' (error 0x%08lX).\r\n",
+                furi_string_get_cstr(remote_name),
+                (uint32_t)load_error);
             break;
         }
 
@@ -489,6 +493,12 @@ static void infrared_cli_brute_force_signals(
 
         while(running) {
             running = infrared_brute_force_send(brute_force, current_signal);
+            if(!running && current_signal < signal_count) {
+                printf(
+                    "\r\nSignal %lu could not be read correctly, stopped.\r\n",
+                    current_signal + 1);
+                break;
+            }
 
             if(cli_is_pipe_broken_or_is_etx_next_char(pipe)) break;
 

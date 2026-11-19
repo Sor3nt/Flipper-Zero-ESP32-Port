@@ -113,6 +113,19 @@ static bool sd_mount_card_internal(StorageData* storage, bool notify) {
             furi_record_close(RECORD_NOTIFICATION);
         }
 
+        if(!result && furi_hal_sd_no_card_detected()) {
+            /* Empty slot: nothing answered CMD0. Without a card-detect pin
+             * furi_hal_sd_is_present() is always true, so this is where the
+             * loop learns the card is absent; the Flipper's CD pin would have
+             * kept it from starting at all. Retrying 1 s apart cannot make a
+             * card appear. At boot it only held storage_srv, and with it
+             * RECORD_STORAGE and every service and the desktop waiting on that,
+             * for ~3.2 s: a lit but empty screen. Status stays ErrorInternal,
+             * as before. */
+            FURI_LOG_I(TAG, "no card in slot, not retrying");
+            break;
+        }
+
         if(!result) {
 #if CONFIG_T_EMBED_PLUS_SD_RECOVERY
             if(!sd_data->recovery_attempt)

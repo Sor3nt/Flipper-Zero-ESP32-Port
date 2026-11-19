@@ -5,6 +5,7 @@
 #include <furi_hal.h>
 #include <furi_hal_info.h>
 #include <time.h>
+#include <string.h>
 #include <lib/toolbox/args.h>
 #include <toolbox/pipe.h>
 
@@ -409,6 +410,72 @@ void cli_command_sleep(PipeSide* pipe, FuriString* args, void* context) {
     furi_string_free(duration_string);
 }
 
+/* The crash log text uses '\n' (TextBox); a terminal wants "\r\n". */
+static void cli_command_crashlog_print(const char* text) {
+    for(const char* line = text; *line;) {
+        const char* end = strchr(line, '\n');
+        const int len = end ? (int)(end - line) : (int)strlen(line);
+        printf("%.*s\r\n", len, line);
+        line += len + (end ? 1 : 0);
+    }
+}
+
+/**
+ * crashlog              print the saved crash log (same text as About > Diagnostics)
+ * crashlog test [kind]  crash on purpose to check it end to end;
+ *                       kind: fault (default), abort, furi
+ */
+static void cli_command_crashlog(PipeSide* pipe, FuriString* args, void* context) {
+    UNUSED(pipe);
+    UNUSED(context);
+
+    FuriString* word = furi_string_alloc();
+    if(args_read_string_and_trim(args, word)) {
+        if(furi_string_cmp_str(word, "test") != 0) {
+            printf("Usage: crashlog [test [fault|abort|furi]]\r\n");
+            furi_string_free(word);
+            return;
+        }
+        FuriHalDiagTestCrash kind = FuriHalDiagTestCrashFault;
+        if(args_read_string_and_trim(args, word)) {
+            if(furi_string_cmp_str(word, "abort") == 0) {
+                kind = FuriHalDiagTestCrashAbort;
+            } else if(furi_string_cmp_str(word, "furi") == 0) {
+                kind = FuriHalDiagTestCrashFuriCheck;
+            }
+        }
+        furi_string_free(word);
+        printf("Crashing on purpose; after the reboot run 'crashlog'.\r\n");
+        furi_delay_ms(200); /* let the line reach the terminal */
+        furi_hal_diag_test_crash(kind);
+        return;
+    }
+    furi_string_free(word);
+
+    printf(
+        "This boot: reset by %s, up ",
+        furi_hal_diag_get_reset_reason_name(furi_hal_diag_get_reset_reason()));
+    const uint32_t uptime = (uint32_t)(furi_hal_diag_get_uptime_us() / 1000000);
+    printf(
+        "%lud %02luh %02lum %02lus\r\n\r\n",
+        (unsigned long)(uptime / 86400),
+        (unsigned long)((uptime / 3600) % 24),
+        (unsigned long)((uptime / 60) % 60),
+        (unsigned long)(uptime % 60));
+
+    /* On the heap: ~0.7 KB is too much for a CLI command stack. */
+    FuriHalDiagCrash* crash = malloc(sizeof(FuriHalDiagCrash));
+    if(furi_hal_diag_get_last_crash(crash) && (crash->has_panic || crash->has_other)) {
+        FuriString* text = furi_string_alloc();
+        furi_hal_diag_format_log(crash, text);
+        cli_command_crashlog_print(furi_string_get_cstr(text));
+        furi_string_free(text);
+    } else {
+        printf("No crash recorded.\r\n");
+    }
+    free(crash);
+}
+
 void cli_main_commands_init(CliRegistry* registry) {
     cli_registry_add_command(
         registry, "!", CliCommandFlagParallelSafe, cli_command_info, (void*)true);
@@ -428,6 +495,8 @@ void cli_main_commands_init(CliRegistry* registry) {
     cli_registry_add_command(registry, "echo", CliCommandFlagParallelSafe, cli_command_echo, NULL);
     cli_registry_add_command(
         registry, "sleep", CliCommandFlagParallelSafe, cli_command_sleep, NULL);
+    cli_registry_add_command(
+        registry, "crashlog", CliCommandFlagParallelSafe, cli_command_crashlog, NULL);
 
 }
 

@@ -1,6 +1,8 @@
 #include <furi.h>
 #include <furi_hal.h>
+#include <furi_hal_spi_bus.h>
 #include <flipper.h>
+#include <string.h>
 #include <applications.h>
 
 #include <esp_log.h>
@@ -129,6 +131,13 @@ void app_main(void) {
             [ESP_RST_DEEPSLEEP] = "DEEPSLEEP",
             [ESP_RST_BROWNOUT] = "BROWNOUT",
             [ESP_RST_SDIO] = "SDIO",
+            /* Present in ESP-IDF 5.4.x; ESP_RST_USB is the usual reason on the S3 right
+             * after flashing over USB-Serial-JTAG. Unknown values still print "?". */
+            [ESP_RST_USB] = "USB",
+            [ESP_RST_JTAG] = "JTAG",
+            [ESP_RST_EFUSE] = "EFUSE",
+            [ESP_RST_PWR_GLITCH] = "PWR_GLITCH",
+            [ESP_RST_CPU_LOCKUP] = "CPU_LOCKUP",
         };
         esp_reset_reason_t reset_reason = esp_reset_reason();
         const char* reset_name = (reset_reason < sizeof(reset_names) / sizeof(reset_names[0]) &&
@@ -166,6 +175,11 @@ void app_main(void) {
             FLIPPER_SERVICES[i].app,
             NULL);
         furi_thread_set_appid(thread, FLIPPER_SERVICES[i].appid);
+        /* The GUI thread drives the LCD and must share its core with the SPI
+         * bus interrupt, see FURI_HAL_SPI_BUS_ISR_CORE. */
+        if(FLIPPER_SERVICES[i].appid && strcmp(FLIPPER_SERVICES[i].appid, "gui") == 0) {
+            furi_thread_set_core(thread, FURI_HAL_SPI_BUS_ISR_CORE);
+        }
         furi_thread_start(thread);
 
         furi_delay_ms(10);

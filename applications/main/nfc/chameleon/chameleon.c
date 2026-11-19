@@ -15,6 +15,7 @@
 #include <esp_gattc_api.h>
 #include <esp_gatt_common_api.h>
 #include <esp_log.h>
+#include <esp_attr.h>
 #include <furi.h>
 #include <btshim.h>
 #include <string.h>
@@ -61,7 +62,7 @@ typedef struct {
     uint16_t start;
     uint16_t end;
 } ChamSvc;
-static ChamSvc s_svcs[CHAM_MAX_SVC];
+static EXT_RAM_BSS_ATTR ChamSvc s_svcs[CHAM_MAX_SVC];
 static volatile uint16_t s_svc_count = 0;
 
 static volatile bool s_search_done = false;
@@ -75,9 +76,9 @@ static volatile bool s_cccd_written = false;
 static int s_device_mode = -1; /* cache to skip redundant CHANGE_DEVICE_MODE */
 
 /* RX frame reassembly + last parsed response (commands are serialized) */
-static uint8_t s_acc[CHAMELEON_RESP_DATA_MAX + 32];
+static EXT_RAM_BSS_ATTR uint8_t s_acc[CHAMELEON_RESP_DATA_MAX + 32];
 static size_t s_acc_len = 0;
-static ChameleonResp s_last_resp;
+static EXT_RAM_BSS_ATTR ChameleonResp s_last_resp;
 static volatile bool s_resp_ready = false;
 
 static bool uuid_is(const esp_bt_uuid_t* u, const uint8_t ref[16]) {

@@ -559,6 +559,21 @@ bool storage_simply_remove(Storage* storage, const char* path);
  */
 bool storage_simply_remove_recursive(Storage* storage, const char* path);
 
+/** Polled between entries by storage_simply_remove_recursive_abortable();
+ * return true to stop. */
+typedef bool (*StorageRemoveAbortCallback)(void* context);
+
+/**
+ * @brief Like storage_simply_remove_recursive(), but abort_cb is polled before
+ * every entry and the removal stops (returning false, tree partly removed) once
+ * it returns true. abort_cb may be NULL.
+ */
+bool storage_simply_remove_recursive_abortable(
+    Storage* storage,
+    const char* path,
+    StorageRemoveAbortCallback abort_cb,
+    void* abort_context);
+
 /**
  * @brief Create a directory.
  *

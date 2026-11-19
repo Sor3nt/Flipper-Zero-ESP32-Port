@@ -1,0 +1,2127 @@
+﻿Executing action: all (aliases: build)
+Running ninja in directory 'C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_paradoxt'
+Executing "ninja all"...
+[1/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/check.c.obj
+
+[2/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/memmgr_heap.c.obj
+
+[3/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/thread.c.obj
+
+[4/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/log.c.obj
+
+[5/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/flipper.c.obj
+
+[6/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/thread_list.c.obj
+
+[7/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/semaphore.c.obj
+
+[8/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/mutex.c.obj
+
+[9/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/furi.c.obj
+
+[10/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/kernel.c.obj
+
+[11/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/pubsub.c.obj
+
+[12/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/event_loop_tick.c.obj
+
+[13/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/hex.c.obj
+
+[14/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/dir_walk.c.obj
+
+[15/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/pipe.c.obj
+
+[16/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/event_loop_timer.c.obj
+
+[17/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/record.c.obj
+
+[18/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/args.c.obj
+
+[19/1028] Building C object esp-idf/furi/CMakeFiles/__idf_furi.dir/core/event_loop.c.obj
+
+[20/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/md5_calc.c.obj
+
+[21/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/path.c.obj
+
+[22/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/compress.c.obj
+
+[23/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/property.c.obj
+
+[24/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/manchester_encoder.c.obj
+
+[25/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/saved_struct.c.obj
+
+[26/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/tar/tar_archive.c.obj
+
+[27/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/cli_ansi.c.obj
+
+[28/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/name_generator.c.obj
+
+[29/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/cli_command.c.obj
+
+[30/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/settings_helpers/submenu_based.c.obj
+
+[31/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/shell/cli_shell_line.c.obj
+
+[32/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/shell/cli_shell.c.obj
+
+[33/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/shell/cli_shell_completions.c.obj
+
+[34/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/cli/cli_registry.c.obj
+
+[35/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/stream/stream.c.obj
+
+[36/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/stream/file_stream.c.obj
+
+[37/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/stream/string_stream.c.obj
+
+[38/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/stream/buffered_file_stream.c.obj
+
+[39/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/stream/stream_cache.c.obj
+
+[40/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/bit_buffer.c.obj
+
+[41/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/simple_array.c.obj
+
+[42/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/__/__/lib/toolbox/protocols/protocol_dict.c.obj
+
+[43/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/keys_dict.c.obj
+
+[44/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/__/__/lib/toolbox/buffer_stream.c.obj
+
+[45/1028] Building C object esp-idf/toolbox/CMakeFiles/__idf_toolbox.dir/__/__/lib/toolbox/str_buffer.c.obj
+
+[46/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/application_manifest.c.obj
+
+[47/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/plugins/plugin_manager.c.obj
+
+[48/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/api_hashtable/api_hashtable.c.obj
+
+[49/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/flipper_application.c.obj
+
+[50/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/plugins/composite_resolver.c.obj
+
+[51/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/elf/elf_file.c.obj
+
+[52/1028] Building C object esp-idf/wifi/CMakeFiles/__idf_wifi.dir/wlan_passwords.c.obj
+
+[53/1028] Building C object esp-idf/wifi/CMakeFiles/__idf_wifi.dir/wifi_settings.c.obj
+
+[54/1028] Linking C static library esp-idf\furi\libfuri.a
+
+[55/1028] Building C object esp-idf/wifi/CMakeFiles/__idf_wifi.dir/wifi_service.c.obj
+
+[56/1028] Building C object esp-idf/infrared/CMakeFiles/__idf_infrared.dir/__/__/lib/infrared/worker/infrared_transmit.c.obj
+
+[57/1028] Building C object esp-idf/locale/CMakeFiles/__idf_locale.dir/locale.c.obj
+
+[58/1028] Building C object esp-idf/wifi/CMakeFiles/__idf_wifi.dir/wlan_hal.c.obj
+
+[59/1028] Building C object esp-idf/infrared/CMakeFiles/__idf_infrared.dir/__/__/lib/infrared/signal/infrared_brute_force.c.obj
+
+[60/1028] Building C object esp-idf/wifi/CMakeFiles/__idf_wifi.dir/wifite/radio.c.obj
+
+[61/1028] Building C object esp-idf/infrared/CMakeFiles/__idf_infrared.dir/__/__/lib/infrared/signal/infrared_signal.c.obj
+
+[62/1028] Building C object esp-idf/infrared/CMakeFiles/__idf_infrared.dir/__/__/lib/infrared/worker/infrared_worker.c.obj
+
+[63/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/crypto1.c.obj
+
+[64/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/felica_crc.c.obj
+
+[65/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/nfc_util.c.obj
+
+[66/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/iso14443_4_layer.c.obj
+
+[67/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/nxp_native_command.c.obj
+
+[68/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/helpers/nfc_data_generator.c.obj
+
+[69/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc_device_i.c.obj
+
+[70/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc.c.obj
+
+[71/1028] Linking C static library esp-idf\toolbox\libtoolbox.a
+
+[72/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc_device.c.obj
+
+[73/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc_listener.c.obj
+
+[74/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc_poller.c.obj
+
+[75/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/nfc_scanner.c.obj
+
+[76/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/emv/emv.c.obj
+
+[77/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/emv/emv_poller.c.obj
+
+[78/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_i.c.obj
+
+[79/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/emv/emv_poller_i.c.obj
+
+[80/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_listener.c.obj
+
+[81/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica.c.obj
+
+[82/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_listener_i.c.obj
+
+[83/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_poller_i.c.obj
+
+[84/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a.c.obj
+
+[85/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_poller_sync.c.obj
+
+[86/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/felica/felica_poller.c.obj
+
+[87/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a_listener_i.c.obj
+
+[88/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a_listener.c.obj
+
+[89/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a_poller.c.obj
+
+[90/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a_poller_i.c.obj
+
+[91/1028] Building C object esp-idf/flipper_application/CMakeFiles/__idf_flipper_application.dir/flipper_application/firmware_api.c.obj
+
+[92/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3a/iso14443_3a_poller_sync.c.obj
+
+[93/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3b/iso14443_3b.c.obj
+
+[94/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3b/iso14443_3b_poller.c.obj
+
+[95/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_3b/iso14443_3b_poller_i.c.obj
+
+[96/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a.c.obj
+
+[97/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a_i.c.obj
+
+[98/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a_listener.c.obj
+
+[99/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a_poller.c.obj
+
+[100/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a_listener_i.c.obj
+
+[101/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4a/iso14443_4a_poller_i.c.obj
+
+[102/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4b/iso14443_4b.c.obj
+
+[103/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4b/iso14443_4b_i.c.obj
+
+[104/1028] Linking C static library esp-idf\flipper_application\libflipper_application.a
+
+[105/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4b/iso14443_4b_poller.c.obj
+
+[106/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso14443_4b/iso14443_4b_poller_i.c.obj
+
+[107/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3.c.obj
+
+[108/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3_listener.c.obj
+
+[109/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3_i.c.obj
+
+[110/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3_poller.c.obj
+
+[111/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3_listener_i.c.obj
+
+[112/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/iso15693_3/iso15693_3_poller_i.c.obj
+
+[113/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_classic/mf_classic.c.obj
+
+[114/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_classic/mf_classic_listener.c.obj
+
+[115/1028] Linking C static library esp-idf\wifi\libwifi.a
+
+[116/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_classic/mf_classic_poller_sync.c.obj
+
+[117/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_classic/mf_classic_poller_i.c.obj
+
+[118/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_desfire/mf_desfire_poller.c.obj
+
+[119/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_desfire/mf_desfire.c.obj
+
+[120/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_desfire/mf_desfire_i.c.obj
+
+[121/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_classic/mf_classic_poller.c.obj
+
+[122/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_plus/mf_plus.c.obj
+
+[123/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_desfire/mf_desfire_poller_i.c.obj
+
+[124/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_plus/mf_plus_i.c.obj
+
+[125/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_plus/mf_plus_poller.c.obj
+
+[126/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_plus/mf_plus_poller_i.c.obj
+
+[127/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight.c.obj
+
+[128/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight_listener_i.c.obj
+
+[129/1028] Linking C static library esp-idf\infrared\libinfrared.a
+
+[130/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight_listener.c.obj
+
+[131/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight_poller_i.c.obj
+
+[132/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight_poller.c.obj
+
+[133/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/mf_ultralight/mf_ultralight_poller_sync.c.obj
+
+[134/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/nfc_device_defs.c.obj
+
+[135/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/nfc_protocol.c.obj
+
+[136/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/ntag4xx/ntag4xx.c.obj
+
+[137/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/ntag4xx/ntag4xx_i.c.obj
+
+[138/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/ntag4xx/ntag4xx_poller.c.obj
+
+[139/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/ntag4xx/ntag4xx_poller_i.c.obj
+
+[140/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix_i.c.obj
+
+[141/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix.c.obj
+
+[142/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix_listener.c.obj
+
+[143/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix_listener_i.c.obj
+
+[144/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix_poller.c.obj
+
+[145/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/slix/slix_poller_i.c.obj
+
+[146/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/st25tb/st25tb.c.obj
+
+[147/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/st25tb/st25tb_poller.c.obj
+
+[148/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/st25tb/st25tb_poller_i.c.obj
+
+[149/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/st25tb/st25tb_poller_sync.c.obj
+
+[150/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag.c.obj
+
+[151/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag_i.c.obj
+
+[152/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag_listener.c.obj
+
+[153/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag_poller.c.obj
+
+[154/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag_poller_i.c.obj
+
+[155/1028] Building C object esp-idf/nfc/CMakeFiles/__idf_nfc.dir/protocols/type_4_tag/type_4_tag_listener_i.c.obj
+
+[156/1028] Linking C static library esp-idf\locale\liblocale.a
+
+[157/1028] Building C object esp-idf/mjs/CMakeFiles/__idf_mjs.dir/__/__/lib/mjs/common/platforms/platform_flipper.c.obj
+
+[158/1028] Building C object esp-idf/mjs/CMakeFiles/__idf_mjs.dir/__/__/lib/mjs/mjs_object.c.obj
+
+[159/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/applications/drivers/subghz/cc1101_ext/cc1101_ext.c.obj
+
+[160/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/devices/cc1101_configs.c.obj
+
+[161/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.c.obj
+
+[162/1028] Building C object esp-idf/mjs/CMakeFiles/__idf_mjs.dir/__/__/lib/mjs/mjs_util.c.obj
+
+[163/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/devices/cc1101_int/cc1101_int_interconnect.c.obj
+
+[164/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/blocks/generic.c.obj
+
+[165/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/devices/devices.c.obj
+
+[166/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/devices/registry.c.obj
+
+[167/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/environment.c.obj
+
+[168/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/aes_common.c.obj
+
+[169/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/base.c.obj
+
+[170/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/ansonic.c.obj
+
+[171/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/bett.c.obj
+
+[172/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/agilize_key_pro.c.obj
+
+[173/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/beninca_arc.c.obj
+
+[174/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/alutech_at_4n.c.obj
+
+[175/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/bin_raw.c.obj
+
+[176/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/came.c.obj
+
+[177/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/came_atomo.c.obj
+
+[178/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/came_twee.c.obj
+
+[179/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/chamberlain_code.c.obj
+
+[180/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/clemsa.c.obj
+
+[181/1028] Linking C static library esp-idf\nfc\libnfc.a
+
+[182/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/dickert_mahs.c.obj
+
+[183/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/ditec_gol4.c.obj
+
+[184/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/doitrand.c.obj
+
+[185/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/elplast.c.obj
+
+[186/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/dooya.c.obj
+
+[187/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/feron.c.obj
+
+[188/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/gangqi.c.obj
+
+[189/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/faac_slh.c.obj
+
+[190/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/hay21.c.obj
+
+[191/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/gate_tx.c.obj
+
+[192/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/holtek.c.obj
+
+[193/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/holtek_ht12x.c.obj
+
+[194/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/holtek_ht6p20b.c.obj
+
+[195/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/honeywell.c.obj
+
+[196/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/honeywell_wdb.c.obj
+
+[197/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/hollarm.c.obj
+
+[198/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/ido.c.obj
+
+[199/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/intertechno_v3.c.obj
+
+[200/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/keeloq_common.c.obj
+
+[201/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/jarolift.c.obj
+
+[202/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/hormann.c.obj
+
+[203/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/keyfinder.c.obj
+
+[204/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/kinggates_stylo_4k.c.obj
+
+[205/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/keeloq.c.obj
+
+[206/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/legrand.c.obj
+
+[207/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/linear.c.obj
+
+[208/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/linear_delta3.c.obj
+
+[209/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/magellan.c.obj
+
+[210/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/marantec.c.obj
+
+[211/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/marantec24.c.obj
+
+[212/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/megacode.c.obj
+
+[213/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/mastercode.c.obj
+
+[214/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/nero_sketch.c.obj
+
+[215/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/nice_flo.c.obj
+
+[216/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/phoenix_v2.c.obj
+
+[217/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/nero_radio.c.obj
+
+[218/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/nice_flor_s.c.obj
+
+[219/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/power_smart.c.obj
+
+[220/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/protocol_items.c.obj
+
+[221/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/princeton.c.obj
+
+[222/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/raw.c.obj
+
+[223/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/revers_rb2.c.obj
+
+[224/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/roger.c.obj
+
+[225/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/schrader_gg4.c.obj
+
+[226/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/secplus_v1.c.obj
+
+[227/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/secplus_v2.c.obj
+
+[228/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/smc5326.c.obj
+
+[229/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/somfy_keytis.c.obj
+
+[230/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/tpms_citroen.c.obj
+
+[231/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/somfy_telis.c.obj
+
+[232/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/tpms_ford.c.obj
+
+[233/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/tpms_pmv107j.c.obj
+
+[234/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/tpms_generic.c.obj
+
+[235/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/tpms_renault.c.obj
+
+[236/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/protocols/treadmill37.c.obj
+
+[237/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/receiver.c.obj
+
+[238/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/registry.c.obj
+
+[239/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/subghz_file_encoder_worker.c.obj
+
+[240/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/subghz_tx_rx_worker.c.obj
+
+[241/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/subghz_keystore.c.obj
+
+[242/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/subghz_worker.c.obj
+
+[243/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/subghz_setting.c.obj
+
+[244/1028] Building C object esp-idf/subghz/CMakeFiles/__idf_subghz.dir/__/__/lib/subghz/transmitter.c.obj
+
+[245/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc_system.c.obj
+
+[246/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc_storage.c.obj
+
+[247/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc.c.obj
+
+[248/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc_app.c.obj
+
+[249/1028] Building C object esp-idf/fw_ota/CMakeFiles/__idf_fw_ota.dir/fw_ota.c.obj
+
+[250/1028] Building C object esp-idf/loader/CMakeFiles/__idf_loader.dir/loader_applications.c.obj
+
+[251/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc_property.c.obj
+
+[252/1028] Building C object esp-idf/loader/CMakeFiles/__idf_loader.dir/loader.c.obj
+
+[253/1028] Building C object esp-idf/rpc/CMakeFiles/__idf_rpc.dir/rpc_gui.c.obj
+
+[254/1028] Building C object esp-idf/loader/CMakeFiles/__idf_loader.dir/loader_menu.c.obj
+
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/loader/loader_menu.c:339:13: warning: 'loader_menu_is_default_visible' defined but not used [-Wunused-function]
+
+  339 | static bool loader_menu_is_default_visible(const LoaderMenuApp* app, const char* appid) {
+
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[255/1028] Building C object esp-idf/loader/CMakeFiles/__idf_loader.dir/menu_custom.c.obj
+
+[256/1028] Building C object esp-idf/loader/CMakeFiles/__idf_loader.dir/apps/about_app.c.obj
+
+[257/1028] Linking C static library esp-idf\mjs\libmjs.a
+
+[258/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/archive.c.obj
+
+[259/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/helpers/archive_files.c.obj
+
+[260/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/helpers/archive_apps.c.obj
+
+[261/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_new_dir.c.obj
+
+[262/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_delete.c.obj
+
+[263/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/helpers/archive_favorites.c.obj
+
+[264/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_browser.c.obj
+
+[265/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/helpers/archive_browser.c.obj
+
+[266/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_info.c.obj
+
+[267/1028] Building C object esp-idf/btshim/CMakeFiles/__idf_btshim.dir/bt_settings.c.obj
+
+[268/1028] Linking C static library esp-idf\subghz\libsubghz.a
+
+[269/1028] Building C object esp-idf/btshim/CMakeFiles/__idf_btshim.dir/btshim.c.obj
+
+[270/1028] Building C object esp-idf/btshim/CMakeFiles/__idf_btshim.dir/bt_keys_storage.c.obj
+
+[271/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_show.c.obj
+
+[272/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/scenes/archive_scene_rename.c.obj
+
+[273/1028] Building C object esp-idf/btshim/CMakeFiles/__idf_btshim.dir/bt_settings_app.c.obj
+
+[274/1028] Building C object esp-idf/flipper_format/CMakeFiles/__idf_flipper_format.dir/flipper_format.c.obj
+
+[275/1028] Building C object esp-idf/flipper_format/CMakeFiles/__idf_flipper_format.dir/flipper_format_stream.c.obj
+
+[276/1028] Building C object esp-idf/archive/CMakeFiles/__idf_archive.dir/archive/views/archive_browser_view.c.obj
+
+[277/1028] Building C object esp-idf/dialogs/CMakeFiles/__idf_dialogs.dir/dialogs/dialogs.c.obj
+
+[278/1028] Building C object esp-idf/dialogs/CMakeFiles/__idf_dialogs.dir/dialogs/dialogs_api.c.obj
+
+[279/1028] Building C object esp-idf/dialogs/CMakeFiles/__idf_dialogs.dir/dialogs/dialogs_module_file_browser.c.obj
+
+[280/1028] Building C object esp-idf/dialogs/CMakeFiles/__idf_dialogs.dir/dialogs/dialogs_module_message.c.obj
+
+[281/1028] Linking C static library esp-idf\rpc\librpc.a
+
+[282/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/momentum_settings.c.obj
+
+[283/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/gui.c.obj
+
+[284/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/icon.c.obj
+
+[285/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/icon_animation.c.obj
+
+[286/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/asset_packs.c.obj
+
+[287/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/elements.c.obj
+
+[288/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/canvas.c.obj
+
+[289/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/view.c.obj
+
+[290/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/view_holder.c.obj
+
+[291/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/view_stack.c.obj
+
+[292/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/view_port.c.obj
+
+[293/1028] Linking C static library esp-idf\fw_ota\libfw_ota.a
+
+[294/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/button_panel.c.obj
+
+[295/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/view_dispatcher.c.obj
+
+[296/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/byte_input.c.obj
+
+[297/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/button_menu.c.obj
+
+[298/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/scene_manager.c.obj
+
+[299/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/dialog_ex.c.obj
+
+[300/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/date_time_input.c.obj
+
+[301/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/empty_screen.c.obj
+
+[302/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/loading.c.obj
+
+[303/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/file_browser_worker.c.obj
+
+[304/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/file_browser.c.obj
+
+[305/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/number_input.c.obj
+
+[306/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/popup.c.obj
+
+[307/1028] Linking C static library esp-idf\loader\libloader.a
+
+[308/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/text_box.c.obj
+
+[309/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/menu.c.obj
+
+[310/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/submenu.c.obj
+
+[311/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/text_input.c.obj
+
+[312/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/validators.c.obj
+
+[313/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/variable_item_list.c.obj
+
+[314/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget.c.obj
+
+[315/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_icon.c.obj
+
+[316/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_circle.c.obj
+
+[317/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_button.c.obj
+
+[318/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_line.c.obj
+
+[319/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_marquee_header.c.obj
+
+[320/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_rect.c.obj
+
+[321/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_string.c.obj
+
+[322/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_string_multiline.c.obj
+
+[323/1028] Linking C static library esp-idf\archive\libarchive.a
+
+[324/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_text_box.c.obj
+
+[325/1028] Building C object esp-idf/gui/CMakeFiles/__idf_gui.dir/modules/widget_elements/widget_element_text_scroll.c.obj
+
+[326/1028] Building C object esp-idf/u8g2/CMakeFiles/__idf_u8g2.dir/u8g2_glue.c.obj
+
+[327/1028] Building C object esp-idf/notification/CMakeFiles/__idf_notification.dir/notification.c.obj
+
+[328/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal.c.obj
+
+[329/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_i2c.c.obj
+
+[330/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_bt.c.obj
+
+[331/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_power.c.obj
+
+[332/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_info.c.obj
+
+[333/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_spi_bus.c.obj
+
+[334/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb.c.obj
+
+[335/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_speaker.c.obj
+
+[336/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb_cdc.c.obj
+
+[337/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_crypto.c.obj
+
+[338/1028] Linking C static library esp-idf\btshim\libbtshim.a
+
+[339/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_spi.c.obj
+
+[340/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_subghz.c.obj
+
+[341/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_touch.c.obj
+
+[342/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_uart_shared.c.obj
+
+[343/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_rfid.c.obj
+
+[344/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_sd.c.obj
+
+[345/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_infrared.c.obj
+
+[346/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_nfc.c.obj
+
+[347/1028] Linking C static library esp-idf\flipper_format\libflipper_format.a
+
+[348/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_display.c.obj
+
+[349/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb_hid_tinyusb.c.obj
+
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/furi_hal/furi_hal_usb_hid_tinyusb.c: In function 'furi_hal_usb_hid_backend_start':
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/furi_hal/furi_hal_usb_hid_tinyusb.c:242:8: warning: implicit declaration of function 'furi_hal_usb_composite_is_installed' [-Wimplicit-function-declaration]
+  242 |     if(furi_hal_usb_composite_is_installed()) {
+      |        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/furi_hal/furi_hal_usb_hid_tinyusb.c:314:9: warning: implicit declaration of function 'furi_hal_usb_composite_restore_serial_jtag' [-Wimplicit-function-declaration]
+
+  314 |         furi_hal_usb_composite_restore_serial_jtag();
+
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[350/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb_tinyusb_composite.c.obj
+
+[351/1028] Building C object esp-idf/datetime/CMakeFiles/__idf_datetime.dir/datetime.c.obj
+
+[352/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb_msc.c.obj
+
+[353/1028] Building C object esp-idf/furi_hal/CMakeFiles/__idf_furi_hal.dir/furi_hal_usb_u2f.c.obj
+
+[354/1028] Building C object esp-idf/ble_profile/CMakeFiles/__idf_ble_profile.dir/extra_profiles/hid_profile.c.obj
+
+[355/1028] Building C object esp-idf/input/CMakeFiles/__idf_input.dir/input.c.obj
+
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/input/input.c: In function 'input_event_router_callback':
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/input/input.c:69:71: warning: passing argument 2 of 'furi_pubsub_publish' discards 'const' qualifier from pointer target type [-Wdiscarded-qualifiers]
+   69 |         wake_only ? router->wake_event_pubsub : router->event_pubsub, input_event);
+      |                                                                       ^~~~~~~~~~~
+In file included from C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/furi/furi.h:16,
+                 from C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/targets/target_input.h:11,
+                 from C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/input/input.c:10:
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/components/furi/core/pubsub.h:64:52: note: expected 'void *' but argument is of type 'const InputEvent *'
+   64 | void furi_pubsub_publish(FuriPubSub* pubsub, void* message);
+
+      |                                              ~~~~~~^~~~~~~
+
+[356/1028] Building C object esp-idf/ble_profile/CMakeFiles/__idf_ble_profile.dir/extra_profiles/serial_profile.c.obj
+
+[357/1028] Building C object esp-idf/input/CMakeFiles/__idf_input.dir/__/__/targets/paradoxt/target_input.c.obj
+
+[358/1028] Linking C static library esp-idf\dialogs\libdialogs.a
+
+[359/1028] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/generated/applications.c.obj
+
+[360/1028] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/app_main.c.obj
+
+[361/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_cli.dir/__/applications/services/cli/cli_main_commands.c.obj
+
+[362/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_cli.dir/__/applications/services/cli/cli_main_shell.c.obj
+
+[363/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_apps_assets.dir/__/applications/examples/example_apps_assets/example_apps_assets.c.obj
+
+[364/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_number_input.dir/__/applications/examples/example_number_input/example_number_input.c.obj
+
+[365/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_apps_data.dir/__/applications/examples/example_apps_data/example_apps_data.c.obj
+
+[366/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_cli_subghz.dir/__/applications/main/subghz/helpers/subghz_chat.c.obj
+
+[367/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_cli_subghz.dir/__/applications/main/subghz/subghz_cli.c.obj
+
+[368/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_number_input.dir/__/applications/examples/example_number_input/scenes/example_number_input_scene_input_max.c.obj
+
+[369/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_number_input.dir/__/applications/examples/example_number_input/scenes/example_number_input_scene_input_min.c.obj
+
+[370/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_number_input.dir/__/applications/examples/example_number_input/scenes/example_number_input_scene_input_number.c.obj
+
+[371/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_example_number_input.dir/__/applications/examples/example_number_input/scenes/example_number_input_scene_show_number.c.obj
+
+[372/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_blebeacon.dir/__/applications/system/js_app/modules/js_blebeacon.c.obj
+
+[373/1028] Linking C static library esp-idf\gui\libgui.a
+
+[374/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_event_loop.dir/__/applications/system/js_app/modules/js_event_loop/js_event_loop.c.obj
+
+[375/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui.dir/__/applications/system/js_app/modules/js_gui/js_gui.c.obj
+
+[376/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__button_menu.dir/__/applications/system/js_app/modules/js_gui/button_menu.c.obj
+
+[377/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__dialog.dir/__/applications/system/js_app/modules/js_gui/dialog.c.obj
+
+[378/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__button_panel.dir/__/applications/system/js_app/modules/js_gui/button_panel.c.obj
+
+[379/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__byte_input.dir/__/applications/system/js_app/modules/js_gui/byte_input.c.obj
+
+[380/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__empty_screen.dir/__/applications/system/js_app/modules/js_gui/empty_screen.c.obj
+
+[381/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__icon.dir/__/applications/system/js_app/modules/js_gui/icon.c.obj
+
+[382/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__file_picker.dir/__/applications/system/js_app/modules/js_gui/file_picker.c.obj
+
+[383/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__loading.dir/__/applications/system/js_app/modules/js_gui/loading.c.obj
+
+[384/1028] Building CXX object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui.dir/__/applications/system/js_app/modules/js_gui/js_gui_api_table.cpp.obj
+
+[385/1028] Building CXX object esp-idf/main/CMakeFiles/esp32_fam_app_js_event_loop.dir/__/applications/system/js_app/modules/js_event_loop/js_event_loop_api_table.cpp.obj
+
+[386/1028] Linking C static library esp-idf\notification\libnotification.a
+
+[387/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__menu.dir/__/applications/system/js_app/modules/js_gui/menu.c.obj
+
+[388/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__number_input.dir/__/applications/system/js_app/modules/js_gui/number_input.c.obj
+
+[389/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__popup.dir/__/applications/system/js_app/modules/js_gui/popup.c.obj
+
+[390/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__submenu.dir/__/applications/system/js_app/modules/js_gui/submenu.c.obj
+
+[391/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__text_input.dir/__/applications/system/js_app/modules/js_gui/text_input.c.obj
+
+[392/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__text_box.dir/__/applications/system/js_app/modules/js_gui/text_box.c.obj
+
+[393/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__vi_list.dir/__/applications/system/js_app/modules/js_gui/vi_list.c.obj
+
+[394/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_gui__widget.dir/__/applications/system/js_app/modules/js_gui/widget.c.obj
+
+[395/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_infrared.dir/__/applications/system/js_app/modules/js_infrared/js_infrared.c.obj
+
+[396/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_math.dir/__/applications/system/js_app/modules/js_math.c.obj
+
+[397/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_notification.dir/__/applications/system/js_app/modules/js_notification.c.obj
+
+[398/1028] Linking C static library esp-idf\u8g2\libu8g2.a
+
+[399/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_storage.dir/__/applications/system/js_app/modules/js_storage.c.obj
+
+[400/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_subghz.dir/__/applications/system/js_app/modules/js_subghz/js_subghz.c.obj
+
+[401/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_subghz.dir/__/applications/system/js_app/modules/js_subghz/radio_device_loader.c.obj
+
+[402/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/radio_device_loader.c.obj
+
+[403/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subbrute_protocols.c.obj
+
+[404/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subbrute_radio_device_loader.c.obj
+
+[405/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subbrute_device.c.obj
+
+[406/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subbrute_settings.c.obj
+
+[407/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subbrute_worker.c.obj
+
+[408/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_chat.c.obj
+
+[409/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_spectrum_worker.c.obj
+
+[410/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_gen_info.c.obj
+
+[411/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_frequency_analyzer_worker.c.obj
+
+[412/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_threshold_rssi.c.obj
+
+[413/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_txrx.c.obj
+
+[414/1028] Linking C static library esp-idf\furi_hal\libfuri_hal.a
+
+[415/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_load_file.c.obj
+
+[416/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_load_select.c.obj
+
+[417/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/helpers/subghz_txrx_create_protocol_key.c.obj
+
+[418/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_save_name.c.obj
+
+[419/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_run_attack.c.obj
+
+[420/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_save_success.c.obj
+
+[421/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_setup_attack.c.obj
+
+[422/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_start.c.obj
+
+[423/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_bf_setup_extra.c.obj
+
+[424/1028] Linking C static library esp-idf\ble_profile\libble_profile.a
+
+[425/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_decode_raw.c.obj
+
+[426/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_delete_raw.c.obj
+
+[427/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_delete.c.obj
+
+[428/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_delete_success.c.obj
+
+[429/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_frequency_analyzer.c.obj
+
+[430/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_jammer.c.obj
+
+[431/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_more_raw.c.obj
+
+[432/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_need_saving.c.obj
+
+[433/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_playlist.c.obj
+
+[434/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_radio_settings.c.obj
+
+[435/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_read_raw.c.obj
+
+[436/1028] Linking C static library esp-idf\datetime\libdatetime.a
+
+[437/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_receiver.c.obj
+
+[438/1028] Linking C static library esp-idf\input\libinput.a
+
+[439/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_receiver_config.c.obj
+
+[440/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_save_name.c.obj
+
+[441/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_save_success.c.obj
+
+[442/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_receiver_info.c.obj
+
+[443/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_button.c.obj
+
+[444/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_rpc.c.obj
+
+[445/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_saved.c.obj
+
+[446/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_saved_menu.c.obj
+
+[447/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_counter.c.obj
+
+[448/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_key.c.obj
+
+[449/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_seed.c.obj
+
+[450/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_serial.c.obj
+
+[451/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_set_type.c.obj
+
+[452/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_show_error.c.obj
+
+[453/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_show_error_sub.c.obj
+
+[454/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_signal_settings.c.obj
+
+[455/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_spectrum.c.obj
+
+[456/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_tpms_edit.c.obj
+
+[457/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz.c.obj
+
+[458/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_transmitter.c.obj
+
+[459/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/scenes/subghz_scene_start.c.obj
+
+[460/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz_cli.c.obj
+
+[461/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz_i.c.obj
+
+[462/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz_history.c.obj
+
+[463/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz_dangerous_freq.c.obj
+
+[464/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/subghz_last_settings.c.obj
+
+[465/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subbrute_attack_view.c.obj
+
+[466/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subbrute_main_view.c.obj
+
+[467/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/receiver.c.obj
+
+[468/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_jammer.c.obj
+
+[469/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_view_tpms_info.c.obj
+
+[470/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/transmitter.c.obj
+
+[471/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_frequency_analyzer.c.obj
+
+[472/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_spectrum.c.obj
+
+[473/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_playlist.c.obj
+
+[474/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz.dir/__/applications/main/subghz/views/subghz_read_raw.c.obj
+
+[475/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_cli_vcp.dir/__/applications/services/cli/cli_vcp.c.obj
+
+[476/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/js_app.c.obj
+
+[477/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/js_value.c.obj
+
+[478/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/js_modules.c.obj
+
+[479/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/js_thread.c.obj
+
+[480/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/modules/js_flipper.c.obj
+
+[481/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/modules/js_tests.c.obj
+
+[482/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/views/console_view.c.obj
+
+[483/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ota_updater.dir/__/applications/system/ota_updater/ota_updater.c.obj
+
+[484/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/power_settings_app.c.obj
+
+[485/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/scenes/power_settings_scene_battery_info.c.obj
+
+[486/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/scenes/power_settings_scene_power_off.c.obj
+
+[487/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/scenes/power_settings_scene_reboot.c.obj
+
+[488/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/scenes/power_settings_scene_reboot_confirm.c.obj
+
+[489/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/scenes/power_settings_scene_start.c.obj
+
+[490/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_settings.dir/__/applications/settings/power_settings_app/views/battery_info.c.obj
+
+[491/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_benchmark_confirm.c.obj
+
+[492/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_benchmark.c.obj
+
+[493/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_factory_reset.c.obj
+
+[494/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_format_confirm.c.obj
+
+[495/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_formatting.c.obj
+
+[496/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_sd_info.c.obj
+
+[497/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_internal_info.c.obj
+
+[498/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_start.c.obj
+
+[499/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_unmount_confirm.c.obj
+
+[500/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/scenes/storage_settings_scene_unmounted.c.obj
+
+[501/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage_settings.dir/__/applications/settings/storage_settings/storage_settings.c.obj
+
+[502/1028] Building CXX object esp-idf/main/CMakeFiles/esp32_fam_app_js_app.dir/__/applications/system/js_app/plugin_api/app_api_table.cpp.obj
+
+[503/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/chameleon/chameleon.c.obj
+
+[504/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/chameleon/chameleon_nfc.c.obj
+
+[505/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/felica_auth.c.obj
+
+[506/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/mf_classic_key_cache.c.obj
+
+[507/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/mf_user_dict.c.obj
+
+[508/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/mf_ultralight_auth.c.obj
+
+[509/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/nfc_detected_protocols.c.obj
+
+[510/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/nfc_emv_parser.c.obj
+
+[511/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/mfkey32_logger.c.obj
+
+[512/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/emv/emv.c.obj
+
+[513/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/felica/felica_render.c.obj
+
+[514/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/nfc_supported_cards.c.obj
+
+[515/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/emv/emv_render.c.obj
+
+[516/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/felica/felica.c.obj
+
+[517/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_3a/iso14443_3a_render.c.obj
+
+[518/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_3b/iso14443_3b_render.c.obj
+
+[519/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_4a/iso14443_4a_render.c.obj
+
+[520/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso15693_3/iso15693_3_render.c.obj
+
+[521/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_3a/iso14443_3a.c.obj
+
+[522/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_4b/iso14443_4b_render.c.obj
+
+[523/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_4a/iso14443_4a.c.obj
+
+[524/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_3b/iso14443_3b.c.obj
+
+[525/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_classic/mf_classic_render.c.obj
+
+[526/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso14443_4b/iso14443_4b.c.obj
+
+[527/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/iso15693_3/iso15693_3.c.obj
+
+[528/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_classic/mf_classic.c.obj
+
+[529/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_plus/mf_plus_render.c.obj
+
+[530/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_desfire/mf_desfire_render.c.obj
+
+[531/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_desfire/mf_desfire.c.obj
+
+[532/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_ultralight/mf_ultralight_render.c.obj
+
+[533/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_plus/mf_plus.c.obj
+
+[534/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/ntag4xx/ntag4xx_render.c.obj
+
+[535/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/mf_ultralight/mf_ultralight.c.obj
+
+[536/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/nfc_protocol_support_gui_common.c.obj
+
+[537/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/nfc_protocol_support_unlock_helper.c.obj
+
+[538/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/ntag4xx/ntag4xx.c.obj
+
+[539/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/nfc_protocol_support.c.obj
+
+[540/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/slix/slix_render.c.obj
+
+[541/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/st25tb/st25tb_render.c.obj
+
+[542/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/slix/slix.c.obj
+
+[543/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/st25tb/st25tb.c.obj
+
+[544/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/slix_unlock.c.obj
+
+[545/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/type_4_tag/type_4_tag_render.c.obj
+
+[546/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/helpers/protocol_support/type_4_tag/type_4_tag.c.obj
+
+[547/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/nfc_app.c.obj
+
+[548/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_chameleon_wipe.c.obj
+
+[549/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_clone_place_blank.c.obj
+
+[550/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_debug.c.obj
+
+[551/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_des_auth_key_input.c.obj
+
+[552/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_delete.c.obj
+
+[553/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_delete_success.c.obj
+
+[554/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_des_auth_unlock_warn.c.obj
+
+[555/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_detect.c.obj
+
+[556/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_emv_transactions.c.obj
+
+[557/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_felica_more_info.c.obj
+
+[558/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_extra_actions.c.obj
+
+[559/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_exit_confirm.c.obj
+
+[560/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_felica_system.c.obj
+
+[561/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_field.c.obj
+
+[562/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_file_select.c.obj
+
+[563/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_generate_info.c.obj
+
+[564/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_detect_reader.c.obj
+
+[565/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_dict_attack.c.obj
+
+[566/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_keys_delete.c.obj
+
+[567/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_keys.c.obj
+
+[568/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_keys_list.c.obj
+
+[569/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_keys_warn_duplicate.c.obj
+
+[570/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_mfkey_complete.c.obj
+
+[571/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_keys_add.c.obj
+
+[572/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_mfkey_nonces_info.c.obj
+
+[573/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_show_keys.c.obj
+
+[574/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_update_initial.c.obj
+
+[575/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_update_initial_success.c.obj
+
+[576/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_classic_update_initial_wrong_card.c.obj
+
+[577/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_desfire_app.c.obj
+
+[578/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_keys.c.obj
+
+[579/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_desfire_more_info.c.obj
+
+[580/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_keys_delete.c.obj
+
+[581/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_keys_add.c.obj
+
+[582/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_keys_list.c.obj
+
+[583/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_dict_attack.c.obj
+
+[584/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_c_keys_warn_duplicate.c.obj
+
+[585/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_capture_pass.c.obj
+
+[586/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_key_input.c.obj
+
+[587/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_unlock_menu.c.obj
+
+[588/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_mf_ultralight_unlock_warn.c.obj
+
+[589/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_restore_original.c.obj
+
+[590/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_read.c.obj
+
+[591/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_select_protocol.c.obj
+
+[592/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_retry_confirm.c.obj
+
+[593/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_save_confirm.c.obj
+
+[594/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_restore_original_confirm.c.obj
+
+[595/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_save_success.c.obj
+
+[596/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_set_sak.c.obj
+
+[597/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_set_atqa.c.obj
+
+[598/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_set_type.c.obj
+
+[599/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_slix_unlock_menu.c.obj
+
+[600/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_set_uid.c.obj
+
+[601/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_slix_key_input.c.obj
+
+[602/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_slix_unlock.c.obj
+
+[603/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_slix_unlock_success.c.obj
+
+[604/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_start.c.obj
+
+[605/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/scenes/nfc_scene_supported_card.c.obj
+
+[606/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/views/detect_reader.c.obj
+
+[607/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nfc.dir/__/applications/main/nfc/views/dict_attack.c.obj
+
+[608/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_ask_back.c.obj
+
+[609/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit.c.obj
+
+[610/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_ask_retry.c.obj
+
+[611/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_debug.c.obj
+
+[612/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/infrared_app.c.obj
+
+[613/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_button_select.c.obj
+
+[614/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/common/infrared_scene_universal_common.c.obj
+
+[615/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/infrared_remote.c.obj
+
+[616/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_delete.c.obj
+
+[617/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_delete_done.c.obj
+
+[618/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_move.c.obj
+
+[619/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_rename.c.obj
+
+[620/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_edit_rename_done.c.obj
+
+[621/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_error_databases.c.obj
+
+[622/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_gpio_settings.c.obj
+
+[623/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_learn.c.obj
+
+[624/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_learn_enter_name.c.obj
+
+[625/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_remote.c.obj
+
+[626/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_learn_success.c.obj
+
+[627/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_learn_done.c.obj
+
+[628/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_remote_list.c.obj
+
+[629/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_rpc.c.obj
+
+[630/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_start.c.obj
+
+[631/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal.c.obj
+
+[632/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_ac.c.obj
+
+[633/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_audio.c.obj
+
+[634/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_fan.c.obj
+
+[635/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/views/infrared_debug_view.c.obj
+
+[636/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_leds.c.obj
+
+[637/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_projector.c.obj
+
+[638/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/views/infrared_progress_view.c.obj
+
+[639/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/scenes/infrared_scene_universal_tv.c.obj
+
+[640/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_infrared.dir/__/applications/main/infrared/views/infrared_move_view.c.obj
+
+[641/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/desktop_settings_app.c.obj
+
+[642/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_change_name.c.obj
+
+[643/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_happy_mode.c.obj
+
+[644/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_favorite.c.obj
+
+[645/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_name_popup.c.obj
+
+[646/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_auth.c.obj
+
+[647/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_disable.c.obj
+
+[648/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_menu.c.obj
+
+[649/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_error.c.obj
+
+[650/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_setup.c.obj
+
+[651/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_setup_done.c.obj
+
+[652/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_setup_howto.c.obj
+
+[653/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_pin_setup_howto2.c.obj
+
+[654/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/scenes/desktop_settings_scene_start.c.obj
+
+[655/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/views/desktop_settings_view_pin_setup_howto.c.obj
+
+[656/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop_settings.dir/__/applications/settings/desktop_settings/views/desktop_settings_view_pin_setup_howto2.c.obj
+
+[657/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_dolphin.dir/__/applications/services/dolphin/helpers/dolphin_deed.c.obj
+
+[658/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_dolphin.dir/__/applications/services/dolphin/dolphin.c.obj
+
+[659/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_service/power_api.c.obj
+
+[660/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_dolphin.dir/__/applications/services/dolphin/helpers/dolphin_state.c.obj
+
+[661/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_service/power_settings.c.obj
+
+[662/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_service/views/power_unplug_usb.c.obj
+
+[663/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_service/views/power_off.c.obj
+
+[664/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_spoofing_settings.dir/__/applications/settings/spoofing_settings/scenes/spoofing_settings_scene_change_name.c.obj
+
+[665/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_cli.c.obj
+
+[666/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power_start.dir/__/applications/services/power/power_service/power.c.obj
+
+[667/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_spoofing_settings.dir/__/applications/settings/spoofing_settings/scenes/spoofing_settings_scene_name_popup.c.obj
+
+[668/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_spoofing_settings.dir/__/applications/settings/spoofing_settings/scenes/spoofing_settings_scene_shell_color.c.obj
+
+[669/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_spoofing_settings.dir/__/applications/settings/spoofing_settings/scenes/spoofing_settings_scene_start.c.obj
+
+[670/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_spoofing_settings.dir/__/applications/settings/spoofing_settings/spoofing_settings_app.c.obj
+
+[671/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/helpers/nrf24_jam_config.c.obj
+
+[672/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/helpers/nrf24_mj_core.c.obj
+
+[673/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/helpers/nrf24_channel_source.c.obj
+
+[674/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/helpers/nrf24_mj_ducky.c.obj
+
+[675/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/nrf24_app.c.obj
+
+[676/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/nrf24_hw.c.obj
+
+[677/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_jam_activity_scan.c.obj
+
+[678/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_jam.c.obj
+
+[679/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_jam_config.c.obj
+
+[680/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_jam_wifi_scan.c.obj
+
+[681/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_menu.c.obj
+
+[682/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_attack.c.obj
+
+[683/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_auto.c.obj
+
+[684/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_menu.c.obj
+
+[685/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_scan.c.obj
+
+[686/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_script_select.c.obj
+
+[687/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_mj_target_list.c.obj
+
+[688/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/scenes/scene_spectrum.c.obj
+
+[689/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/views/nrf24_jam_view.c.obj
+
+[690/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/views/nrf24_mj_attack_view.c.obj
+
+[691/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/views/nrf24_mj_scan_view.c.obj
+
+[692/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/views/nrf24_scan_view.c.obj
+
+[693/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_nrf24.dir/__/applications/main/nrf24/views/nrf24_spectrum_view.c.obj
+
+[694/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_auto_walk_log.c.obj
+
+[695/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_spam_app.c.obj
+
+[696/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_tracker_hal.c.obj
+
+[697/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_spam_hal.c.obj
+
+[698/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_uuid_db.c.obj
+
+[699/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/ble_walk_hal.c.obj
+
+[700/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_auto_walk.c.obj
+
+[701/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_main.c.obj
+
+[702/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_pair_spam_custom.c.obj
+
+[703/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_race_detector.c.obj
+
+[704/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_spam_menu.c.obj
+
+[705/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_running.c.obj
+
+[706/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_tracker_geiger.c.obj
+
+[707/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_tracker_scan.c.obj
+
+[708/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_walk_char_detail.c.obj
+
+[709/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_walk_chars.c.obj
+
+[710/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_walk_scan.c.obj
+
+[711/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/scenes/scene_walk_services.c.obj
+
+[712/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/ble_auto_walk_view.c.obj
+
+[713/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/ble_spam_view.c.obj
+
+[714/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/ble_walk_detail_view.c.obj
+
+[715/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/ble_walk_scan_view.c.obj
+
+[716/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/race_detector_view.c.obj
+
+[717/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/tracker_geiger_view.c.obj
+
+[718/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_ble_spam.dir/__/applications/main/ble_spam/views/tracker_list_view.c.obj
+
+[719/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airprint_config.c.obj
+
+[720/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airprint_hijack.c.obj
+
+[721/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airprint_info.c.obj
+
+[722/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airprint_hijack_scan.c.obj
+
+[723/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airprint_menu.c.obj
+
+[724/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airsnitch_result.c.obj
+
+[725/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airsnitch_probe.c.obj
+
+[726/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_airsnitch_scan.c.obj
+
+[727/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_androidtv_pair.c.obj
+
+[728/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_androidtv_remote.c.obj
+
+[729/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_attack_targets.c.obj
+
+[730/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_client_picker.c.obj
+
+[731/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_androidtv_scan.c.obj
+
+[732/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_connect.c.obj
+
+[733/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_deauth_all.c.obj
+
+[734/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal_bridge_pwd.c.obj
+
+[735/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal_bridge_ssid.c.obj
+
+[736/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal_captured.c.obj
+
+[737/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal.c.obj
+
+[738/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal_menu.c.obj
+
+[739/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_evil_portal_ssid.c.obj
+
+[740/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_fw_update.c.obj
+
+[741/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_handshake_save_path.c.obj
+
+[742/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_handshake.c.obj
+
+[743/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_handshake_settings.c.obj
+
+[744/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_lan.c.obj
+
+[745/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_live_creds.c.obj
+
+[746/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_live_scan.c.obj
+
+[747/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_main.c.obj
+
+[748/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_mitm_inject_code.c.obj
+
+[749/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_mitm_menu.c.obj
+
+[750/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_network_actions.c.obj
+
+[751/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_network_deauth.c.obj
+
+[752/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_network_scanning.c.obj
+
+[753/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_package_sniffer.c.obj
+
+[754/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_smart_deauth.c.obj
+
+[755/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_port_scanner.c.obj
+
+[756/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_smb_download.c.obj
+
+[757/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_smb_browser.c.obj
+
+[758/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_smb_login.c.obj
+
+[759/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_ssid_screen.c.obj
+
+[760/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_ssid_connect.c.obj
+
+[761/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_smb_scan.c.obj
+
+[762/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_ssid_spam.c.obj
+
+[763/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_ssid_spam_custom.c.obj
+
+[764/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_webfs_ap.c.obj
+
+[765/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_ssid_spam_run.c.obj
+
+[766/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_webfs_info.c.obj
+
+[767/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_webfs_input.c.obj
+
+[768/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/scenes/scene_webfs_menu.c.obj
+
+[769/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_androidtv_remote_view.c.obj
+
+[770/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_connect_view.c.obj
+
+[771/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_deauth_all_view.c.obj
+
+[772/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_deauther_view.c.obj
+
+[773/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_evil_portal_captured_view.c.obj
+
+[774/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_evil_portal_view.c.obj
+
+[775/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_fw_update_view.c.obj
+
+[776/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_handshake_channel_view.c.obj
+
+[777/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_lan_view.c.obj
+
+[778/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_live_creds_view.c.obj
+
+[779/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_live_scan_view.c.obj
+
+[780/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_portscan_view.c.obj
+
+[781/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_sd_update_view.c.obj
+
+[782/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_smart_deauth_view.c.obj
+
+[783/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_view_common.c.obj
+
+[784/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/views/wlan_sniffer_view.c.obj
+
+[785/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_app.c.obj
+
+[786/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_airprint.c.obj
+
+[787/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_airsnitch.c.obj
+
+[788/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_client_scanner.c.obj
+
+[789/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_cred_sniff.c.obj
+
+[790/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_evil_portal_templates.c.obj
+
+[791/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_fw_update.c.obj
+
+[792/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_evil_portal_bridge.c.obj
+
+[793/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_lan_cache.c.obj
+
+[794/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_mitm_payloads.c.obj
+
+[795/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_evil_portal.c.obj
+
+[796/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_oui.c.obj
+
+[797/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_pcap.c.obj
+
+[798/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_netscan.c.obj
+
+[799/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_androidtv.c.obj
+
+[800/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_netcut.c.obj
+
+[801/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_pcap_rec.c.obj
+
+[802/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_printhijack.c.obj
+
+[803/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_webfs.c.obj
+
+[804/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_sd_update.c.obj
+
+[805/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/bad_usb_app.c.obj
+
+[806/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_wlan.dir/__/applications/main/wlan_app/wlan_smb.c.obj
+
+[807/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/helpers/bad_usb_hid.c.obj
+
+[808/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/helpers/ble_hid_ext_profile.c.obj
+
+[809/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/helpers/ducky_script.c.obj
+
+[810/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/helpers/ducky_script_commands.c.obj
+
+[811/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/helpers/ducky_script_keycodes.c.obj
+
+[812/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config_usb_name.c.obj
+
+[813/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config_layout.c.obj
+
+[814/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config_ble_name.c.obj
+
+[815/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config_usb_vidpid.c.obj
+
+[816/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config.c.obj
+
+[817/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_confirm_unpair.c.obj
+
+[818/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_config_ble_mac.c.obj
+
+[819/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_done.c.obj
+
+[820/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_file_select.c.obj
+
+[821/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_error.c.obj
+
+[822/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/scenes/bad_usb_scene_work.c.obj
+
+[823/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_bad_usb.dir/__/applications/main/bad_usb/views/bad_usb_view.c.obj
+
+[824/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_notification_settings.dir/__/applications/settings/notification_settings/notification_settings_color_picker.c.obj
+
+[825/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_notification_settings.dir/__/applications/settings/notification_settings/notification_settings_app.c.obj
+
+[826/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_interface_settings.dir/__/applications/settings/interface_settings/interface_settings_app.c.obj
+
+[827/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_passport.dir/__/applications/settings/dolphin_passport/passport.c.obj
+
+[828/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/scenes/u2f_scene_error.c.obj
+
+[829/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/scenes/u2f_scene_main.c.obj
+
+[830/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/u2f_app.c.obj
+
+[831/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/views/u2f_view.c.obj
+
+[832/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/u2f_hid.c.obj
+
+[833/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_clock.dir/__/applications/main/clock_app/clock_app.c.obj
+
+[834/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/airplay_raop.c.obj
+
+[835/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/u2f.c.obj
+
+[836/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/dlna_render.c.obj
+
+[837/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/airplay_mdns.c.obj
+
+[838/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_u2f.dir/__/applications/main/u2f/u2f_data.c.obj
+
+[839/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_action_menu.c.obj
+
+[840/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/mp3_i2s.c.obj
+
+C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/applications/main/streaming/mp3_i2s.c:51:16: warning: 'mp3_i2s_writer_task' defined but not used [-Wunused-function]
+
+   51 | static int32_t mp3_i2s_writer_task(void* ctx) {
+
+      |                ^~~~~~~~~~~~~~~~~~~
+
+[841/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/mp3_decoder.c.obj
+
+[842/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/dlna_ssdp.c.obj
+
+[843/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/cast_client.c.obj
+
+[844/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_browser.c.obj
+
+[845/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_error.c.obj
+
+[846/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_device_scan.c.obj
+
+[847/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_player.c.obj
+
+[848/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_wifi_connect.c.obj
+
+[849/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/scenes/scene_wifi_scan.c.obj
+
+[850/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/stream_player.c.obj
+
+[851/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/views/player_view.c.obj
+
+[852/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_streaming.dir/__/applications/main/streaming/streaming_app.c.obj
+
+[853/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_js_app_start.dir/__/applications/system/js_app/js_app.c.obj
+
+[854/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_cli.c.obj
+
+[855/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_service/power_api.c.obj
+
+[856/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_service/power_settings.c.obj
+
+[857/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/filesystem_api.c.obj
+
+[858/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_service/power.c.obj
+
+[859/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_service/views/power_unplug_usb.c.obj
+
+[860/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_power.dir/__/applications/services/power/power_service/views/power_off.c.obj
+
+[861/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_internal_api.c.obj
+
+[862/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_glue.c.obj
+
+[863/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage.c.obj
+
+[864/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_cli.c.obj
+
+[865/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_processing.c.obj
+
+[866/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_external_api.c.obj
+
+[867/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storage_sd_api.c.obj
+
+[868/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storages/sd_notify.c.obj
+
+[869/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_storage.dir/__/applications/services/storage/storages/storage_ext.c.obj
+
+[870/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/animations/animation_manager.c.obj
+
+[871/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/animations/animation_storage.c.obj
+
+[872/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/animations/views/one_shot_animation_view.c.obj
+
+[873/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/desktop_settings.c.obj
+
+[874/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/animations/views/bubble_animation_view.c.obj
+
+[875/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/mesh_config.c.obj
+
+[876/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/mesh_capture.c.obj
+
+[877/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/pin_code.c.obj
+
+[878/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/mesh_service.c.obj
+
+[879/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/slideshow.c.obj
+
+[880/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/helpers/qflipper_bridge.c.obj
+
+[881/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_debug.c.obj
+
+[882/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_fault.c.obj
+
+[883/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/desktop.c.obj
+
+[884/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_hw_mismatch.c.obj
+
+[885/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_lock_menu.c.obj
+
+[886/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_locked.c.obj
+
+[887/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_main.c.obj
+
+[888/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_action.c.obj
+
+[889/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_clients.c.obj
+
+[890/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_device.c.obj
+
+[891/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_handshake.c.obj
+
+[892/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_pair.c.obj
+
+[893/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_mesh_wifi.c.obj
+
+[894/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_pin_input.c.obj
+
+[895/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_pin_timeout.c.obj
+
+[896/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_secure_enclave.c.obj
+
+[897/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_slideshow.c.obj
+
+[898/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/scenes/desktop_scene_usb_storage.c.obj
+
+[899/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_debug.c.obj
+
+[900/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_lock_menu.c.obj
+
+[901/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_locked.c.obj
+
+[902/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_mesh_action.c.obj
+
+[903/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_mesh_clients.c.obj
+
+[904/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_main.c.obj
+
+[905/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_pin_input.c.obj
+
+[906/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_mesh_device.c.obj
+
+[907/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_mesh_wifi.c.obj
+
+[908/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_pin_timeout.c.obj
+
+[909/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_mesh_handshake.c.obj
+
+[910/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_usb_storage.c.obj
+
+[911/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/desktop_view_slideshow.c.obj
+
+[912/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/views/mesh_view_common.c.obj
+
+[913/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/radio_device_loader.c.obj
+
+[914/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subbrute_protocols.c.obj
+
+[915/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subbrute_settings.c.obj
+
+[916/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subbrute_device.c.obj
+
+[917/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subbrute_radio_device_loader.c.obj
+
+[918/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subbrute_worker.c.obj
+
+[919/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_spectrum_worker.c.obj
+
+[920/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_threshold_rssi.c.obj
+
+[921/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_chat.c.obj
+
+[922/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_load_file.c.obj
+
+[923/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_frequency_analyzer_worker.c.obj
+
+[924/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_gen_info.c.obj
+
+[925/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_txrx_create_protocol_key.c.obj
+
+[926/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/helpers/subghz_txrx.c.obj
+
+[927/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_load_select.c.obj
+
+[928/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_run_attack.c.obj
+
+[929/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_save_name.c.obj
+
+[930/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_save_success.c.obj
+
+[931/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_setup_attack.c.obj
+
+[932/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_start.c.obj
+
+[933/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_bf_setup_extra.c.obj
+
+[934/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_delete.c.obj
+
+[935/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_delete_raw.c.obj
+
+[936/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_delete_success.c.obj
+
+[937/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_decode_raw.c.obj
+
+[938/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_frequency_analyzer.c.obj
+
+[939/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_jammer.c.obj
+
+[940/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_more_raw.c.obj
+
+[941/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_need_saving.c.obj
+
+[942/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_playlist.c.obj
+
+[943/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_radio_settings.c.obj
+
+[944/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_receiver.c.obj
+
+[945/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_receiver_config.c.obj
+
+[946/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_read_raw.c.obj
+
+[947/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_receiver_info.c.obj
+
+[948/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_save_name.c.obj
+
+[949/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_rpc.c.obj
+
+[950/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_save_success.c.obj
+
+[951/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_saved.c.obj
+
+[952/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_saved_menu.c.obj
+
+[953/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_button.c.obj
+
+[954/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_counter.c.obj
+
+[955/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_seed.c.obj
+
+[956/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_key.c.obj
+
+[957/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_serial.c.obj
+
+[958/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_show_error.c.obj
+
+[959/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_set_type.c.obj
+
+[960/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_spectrum.c.obj
+
+[961/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_show_error_sub.c.obj
+
+[962/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_signal_settings.c.obj
+
+[963/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_start.c.obj
+
+[964/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_tpms_edit.c.obj
+
+[965/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/scenes/subghz_scene_transmitter.c.obj
+
+[966/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz.c.obj
+
+[967/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz_dangerous_freq.c.obj
+
+[968/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz_cli.c.obj
+
+[969/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz_history.c.obj
+
+[970/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz_last_settings.c.obj
+
+[971/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subbrute_attack_view.c.obj
+
+[972/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/subghz_i.c.obj
+
+[973/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subbrute_main_view.c.obj
+
+[974/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/receiver.c.obj
+
+[975/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_frequency_analyzer.c.obj
+
+[976/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_jammer.c.obj
+
+[977/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_playlist.c.obj
+
+[978/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_spectrum.c.obj
+
+[979/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/transmitter.c.obj
+
+[980/1028] Building C object esp-idf/desktop_settings/CMakeFiles/__idf_desktop_settings.dir/desktop_settings_app.c.obj
+
+[981/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_read_raw.c.obj
+
+[982/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/lfrfid_dict_file.c.obj
+
+[983/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_subghz_load_dangerous_settings.dir/__/applications/main/subghz/views/subghz_view_tpms_info.c.obj
+
+[984/1028] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_namechanger_srv.dir/__/applications/services/namechanger/namechanger.c.obj
+
+[985/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/lfrfid_raw_file.c.obj
+
+[986/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/lfrfid_raw_worker.c.obj
+
+[987/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/lfrfid_worker.c.obj
+
+[988/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/lfrfid_protocols.c.obj
+
+[989/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_awid.c.obj
+
+[990/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_em4100.c.obj
+
+[991/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_electra.c.obj
+
+[992/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/lfrfid_worker_modes.c.obj
+
+[993/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_fdx_a.c.obj
+
+[994/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_gallagher.c.obj
+
+[995/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_fdx_b.c.obj
+
+[996/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_gproxii.c.obj
+
+[997/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_h10301.c.obj
+
+[998/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_hid_ex_generic.c.obj
+
+[999/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_hid_generic.c.obj
+
+[1000/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_idteck.c.obj
+
+[1001/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_indala224.c.obj
+
+[1002/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_indala26.c.obj
+
+[1003/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_io_prox_xsf.c.obj
+
+[1004/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_jablotron.c.obj
+
+[1005/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_keri.c.obj
+
+[1006/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_nexwatch.c.obj
+
+[1007/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_noralsy.c.obj
+
+[1008/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_pac_stanley.c.obj
+
+[1009/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_paradox.c.obj
+
+[1010/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_pyramid.c.obj
+
+[1011/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_securakey.c.obj
+
+[1012/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/protocols/protocol_viking.c.obj
+
+[1013/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/tools/em4305.c.obj
+
+[1014/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/tools/fsk_demod.c.obj
+
+[1015/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/tools/iso_3166.c.obj
+
+[1016/1028] Building C object esp-idf/lfrfid/CMakeFiles/__idf_lfrfid.dir/__/__/lib/lfrfid/tools/t5577.c.obj
+
+[1017/1028] Building C object esp-idf/music_worker/CMakeFiles/__idf_music_worker.dir/__/__/lib/music_worker/music_worker.c.obj
+
+[1018/1028] Linking C static library esp-idf\desktop_settings\libdesktop_settings.a
+
+[1019/1028] Linking C static library esp-idf\music_worker\libmusic_worker.a
+
+[1020/1028] Performing build step for 'bootloader'
+
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_paradoxt\bootloader\esp-idf\esptool_py" && C:\Espressif\tools\python\v5.4.1\venv\Scripts\python.exe C:/esp/v5.4.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_paradoxt/bootloader/bootloader.bin""
+
+
+Bootloader binary size 0x5190 bytes. 0x2e70 bytes (36%) free.
+
+
+
+[1021/1028] Linking C static library esp-idf\lfrfid\liblfrfid.a
+
+[1022/1028] No install step for 'bootloader'
+
+[1023/1028] Completed 'bootloader'
+
+[1024/1028] Linking C static library esp-idf\main\libmain.a
+
+[1025/1028] Generating ld/sections.ld
+
+[1026/1028] Linking CXX executable furi_esp32.elf
+
+[1027/1028] Generating binary image from built executable
+
+esptool.py v4.12.0
+
+
+Creating esp32s3 image...
+
+
+Merged 3 ELF sections
+
+
+Successfully created esp32s3 image.
+
+
+Generated C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_paradoxt/furi_esp32.bin
+
+[1028/1028] C:\WINDOWS\system32\cmd.exe /C "cd /D "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_paradoxt\esp-idf\esptool_py" && C:\Espressif\tools\python\v5.4.1\venv\Scripts\python.exe C:/esp/v5.4.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_paradoxt/partition_table/partition-table.bin" "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_paradoxt/furi_esp32.bin""
+
+furi_esp32.bin binary size 0x387280 bytes. Smallest app partition is 0x5f0000 bytes. 0x268d80 bytes (41%) free.
+
+
+
+
+Project build complete. To flash, run:
+ idf.py flash
+or
+ idf.py -p PORT flash
+or
+ python -m esptool --chip esp32s3 -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 build_paradoxt\bootloader\bootloader.bin 0x8000 build_paradoxt\partition_table\partition-table.bin 0x10000 build_paradoxt\furi_esp32.bin 0xbf0000 build_paradoxt\ota_data_initial.bin
+or from the "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_paradoxt" directory
+ python -m esptool --chip esp32s3 -b 460800 --before default_reset --after hard_reset write_flash "@flash_args"

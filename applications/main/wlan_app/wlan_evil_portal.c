@@ -869,7 +869,7 @@ typedef struct {
 } KarmaEntry;
 
 static portMUX_TYPE s_karma_mux = portMUX_INITIALIZER_UNLOCKED;
-static KarmaEntry s_karma_tbl[KARMA_MAX_SSIDS];
+static EXT_RAM_BSS_ATTR KarmaEntry s_karma_tbl[KARMA_MAX_SSIDS];
 static volatile uint16_t s_karma_count = 0;
 static volatile bool s_karma_enabled = false;
 static volatile bool s_karma_run = false;

@@ -41,6 +41,11 @@ uint8_t furi_hal_cdc_get_ctrl_line_state(uint8_t if_num);
 void furi_hal_cdc_send(uint8_t if_num, uint8_t* buf, uint16_t len);
 int32_t furi_hal_cdc_receive(uint8_t if_num, uint8_t* buf, uint16_t max_len);
 
+/* QFDIAG: bytes waiting in the CDC RX FIFO, and how long the current
+ * furi_hal_cdc_send() has been running (0 if none). Diagnostic only. */
+uint32_t furi_hal_cdc_rx_available(uint8_t if_num);
+uint32_t furi_hal_cdc_tx_inflight_ms(void);
+
 #ifdef __cplusplus
 }
 #endif

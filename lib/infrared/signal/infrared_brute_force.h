@@ -80,6 +80,17 @@ bool infrared_brute_force_start(
 bool infrared_brute_force_is_started(const InfraredBruteForce* brute_force);
 
 /**
+ * @brief Get the number of signals in the started category.
+ *
+ * Lets a caller tell a failed infrared_brute_force_send() (index below the
+ * count) from the normal end of the sequence (index equal to the count).
+ *
+ * @param[in] brute_force pointer to the instance.
+ * @returns the signal count, or 0 when not started.
+ */
+uint32_t infrared_brute_force_get_signal_count(const InfraredBruteForce* brute_force);
+
+/**
  * @brief Stop transmitting the signals.
  *
  * @param[in] brute_force pointer to the instance to be stopped.

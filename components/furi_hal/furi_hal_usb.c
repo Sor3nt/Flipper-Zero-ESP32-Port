@@ -465,3 +465,12 @@ void furi_hal_usb_reinit_for_owner(const void* owner) {
     furi_hal_usb_reinit_internal();
     furi_hal_usb_operation_finish();
 }
+
+void furi_hal_usb_notify_vbus_absent(void) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    /* Spinlock only, and a no-op unless U2F is mounted with the bus suspended. */
+    if(furi_hal_usb_u2f_backend_detach_if_suspended()) {
+        FURI_LOG_I(TAG, "VBUS lost while suspended: U2F detached");
+    }
+#endif
+}

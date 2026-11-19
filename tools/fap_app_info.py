@@ -154,11 +154,15 @@ def main():
         for rel in _resolve(app_dir, sources):
             out.append(f"APPSOURCE\t{rel.replace(chr(92), chr(47))}")
 
-    # cdefines are emitted whenever the override triggers, so the main app builds
-    # with the same feature flags fbt would pass (e.g. PROTOPIRATE_PROTOCOL_RX_ONLY).
-    if out:
-        for d in main_app.get("cdefines", []) or []:
-            out.append(f"APPCDEFINE\t{d}")
+    # cdefines are always emitted, so the main app builds with the same feature
+    # flags fbt would pass (e.g. PROTOPIRATE_PROTOCOL_RX_ONLY). They used to be
+    # emitted only together with an explicit `sources` list, so a manifest with
+    # cdefines but no sources lost them silently: claude_remote_usb was built
+    # without HID_TRANSPORT_USB, which compiled its whole USB HID lease path out.
+    # buildFap.sh applies APPCDEFINE independently of APPSOURCE (no APPSOURCE
+    # lines -> it keeps the plain source glob).
+    for d in main_app.get("cdefines", []) or []:
+        out.append(f"APPCDEFINE\t{d}")
 
     # fal_embedded plugins: each is compiled to a standalone .fal the main app
     # loads at runtime from APP_ASSETS_PATH("plugins/<appid>.fal"). Emit each

@@ -37,6 +37,11 @@ struct AnimationManager {
     BubbleAnimationView* animation_view;
     FuriTimer* idle_animation_timer;
     StorageAnimation* current_animation;
+    /* Idle animation kept in PSRAM while an app runs (FreezedIdle), so leaving
+     * the app does not read all of its frames from the SD card again on the
+     * desktop thread. Only touched on the desktop thread, never seen by the
+     * view (bubble_animation_freeze() drops the view's reference to it). */
+    StorageAnimation* kept_animation;
     AnimationManagerInteractCallback interact_callback;
     AnimationManagerSetNewIdleAnimationCallback new_idle_callback;
     AnimationManagerSetNewIdleAnimationCallback check_blocking_callback;
@@ -270,10 +275,15 @@ static void animation_manager_start_new_idle(AnimationManager* animation_manager
     /* SD reads share the SPI bus with the LCD. Keep the existing frame static
      * until all frames of its replacement have been loaded. */
     bubble_animation_hold_frame(animation_manager->animation_view);
+    const uint32_t started_at = furi_get_tick();
     StorageAnimation* new_animation = animation_manager_select_idle_animation(animation_manager);
     animation_manager_replace_current_animation(animation_manager, new_animation);
     const BubbleAnimation* bubble_animation =
         animation_storage_get_bubble_animation(animation_manager->current_animation);
+    FURI_LOG_I(
+        TAG,
+        "New idle animation loaded in %lu ms",
+        (unsigned long)((furi_get_tick() - started_at) * 1000U / furi_kernel_get_tick_frequency()));
     animation_manager->state = AnimationManagerStateIdle;
     animation_manager_start_idle_timer(animation_manager, bubble_animation);
     animation_manager_set_animation_paused(animation_manager);
@@ -488,6 +498,9 @@ void animation_manager_free(AnimationManager* animation_manager) {
         storage_get_pubsub(storage), animation_manager->pubsub_subscription_storage);
     furi_record_close(RECORD_STORAGE);
 
+    if(animation_manager->kept_animation) {
+        animation_storage_free_storage_animation(&animation_manager->kept_animation);
+    }
     furi_string_free(animation_manager->freezed_animation_name);
     View* animation_view = bubble_animation_get_view(animation_manager->animation_view);
     view_stack_remove_view(animation_manager->view_stack, animation_view);
@@ -656,7 +669,16 @@ void animation_manager_unload_and_stall_animation(AnimationManager* animation_ma
     furi_string_set(animation_manager->freezed_animation_name, meta->name);
 
     bubble_animation_freeze(animation_manager->animation_view);
-    animation_storage_free_storage_animation(&animation_manager->current_animation);
+    if(animation_manager->kept_animation) {
+        animation_storage_free_storage_animation(&animation_manager->kept_animation);
+    }
+    if(animation_manager->state == AnimationManagerStateFreezedIdle &&
+       animation_storage_can_keep_loaded(animation_manager->current_animation)) {
+        animation_manager->kept_animation = animation_manager->current_animation;
+        animation_manager->current_animation = NULL;
+    } else {
+        animation_storage_free_storage_animation(&animation_manager->current_animation);
+    }
 }
 
 void animation_manager_load_and_continue_animation(AnimationManager* animation_manager) {
@@ -673,6 +695,11 @@ void animation_manager_load_and_continue_animation_ex(
         (animation_manager->state == AnimationManagerStateFreezedIdle) ||
         (animation_manager->state == AnimationManagerStateFreezedBlocked));
 
+    const uint32_t started_at = furi_get_tick();
+    bool restored_from_ram = false;
+    StorageAnimation* kept_animation = animation_manager->kept_animation;
+    animation_manager->kept_animation = NULL;
+
     if(animation_manager->state == AnimationManagerStateFreezedBlocked) {
         StorageAnimation* restore_animation = animation_storage_find_animation(
             furi_string_get_cstr(animation_manager->freezed_animation_name));
@@ -686,9 +713,27 @@ void animation_manager_load_and_continue_animation_ex(
         /* check if we missed some system notifications, and set current_animation */
         bool blocked = animation_manager_check_blocking(animation_manager);
         if(!blocked && !fresh) {
-            /* if no blocking - try restore last one idle */
-            StorageAnimation* restore_animation = animation_storage_find_animation(
-                furi_string_get_cstr(animation_manager->freezed_animation_name));
+            /* if no blocking - try restore last one idle: the copy kept in RAM
+             * when it is that animation and the card it came from is still
+             * mounted (same result as reloading it), else from storage */
+            StorageAnimation* restore_animation = NULL;
+            if(kept_animation &&
+               !strcmp(
+                   animation_storage_get_meta(kept_animation)->name,
+                   furi_string_get_cstr(animation_manager->freezed_animation_name))) {
+                Storage* storage = furi_record_open(RECORD_STORAGE);
+                const bool sd_ok = storage_sd_status(storage) == FSE_OK;
+                furi_record_close(RECORD_STORAGE);
+                if(sd_ok) {
+                    restore_animation = kept_animation;
+                    kept_animation = NULL;
+                    restored_from_ram = true;
+                }
+            }
+            if(!restore_animation) {
+                restore_animation = animation_storage_find_animation(
+                    furi_string_get_cstr(animation_manager->freezed_animation_name));
+            }
             if(restore_animation) {
                 Dolphin* dolphin = furi_record_open(RECORD_DOLPHIN);
                 DolphinStats stats = dolphin_stats(dolphin);
@@ -720,6 +765,10 @@ void animation_manager_load_and_continue_animation_ex(
                             animation_manager->current_animation);
                         animation_manager_start_idle_timer(animation_manager, animation);
                     }
+                } else {
+                    /* no longer valid (level, mood, settings): pick a new one */
+                    animation_storage_free_storage_animation(&restore_animation);
+                    restored_from_ram = false;
                 }
             } else {
                 FURI_LOG_E(
@@ -733,14 +782,22 @@ void animation_manager_load_and_continue_animation_ex(
         furi_crash();
     }
 
+    /* Not reused (fresh selection, blocked, renamed, card gone): release it
+     * before anything new is loaded. */
+    if(kept_animation) {
+        animation_storage_free_storage_animation(&kept_animation);
+    }
+
     /* if can't restore previous animation - select new */
     if(!animation_manager->current_animation) {
         animation_manager_start_new_idle(animation_manager);
     }
     FURI_LOG_I(
         TAG,
-        "Load animation \'%s\'",
-        animation_storage_get_meta(animation_manager->current_animation)->name);
+        "Load animation \'%s\' (%s, %lu ms)",
+        animation_storage_get_meta(animation_manager->current_animation)->name,
+        restored_from_ram ? "RAM" : "storage",
+        (unsigned long)((furi_get_tick() - started_at) * 1000U / furi_kernel_get_tick_frequency()));
 
     bubble_animation_unfreeze(animation_manager->animation_view);
     animation_manager->freezed_animation_time_left = 0;

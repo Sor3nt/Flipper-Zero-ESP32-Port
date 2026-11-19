@@ -1,0 +1,55 @@
+﻿Executing action: all (aliases: build)
+Running ninja in directory 'C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_waveshare_c6'
+Executing "ninja all"...
+[1/9] Performing build step for 'bootloader'
+
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_waveshare_c6\bootloader\esp-idf\esptool_py" && C:\Espressif\tools\python\v5.4.1\venv\Scripts\python.exe C:/esp/v5.4.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_waveshare_c6/bootloader/bootloader.bin""
+
+
+Bootloader binary size 0x55f0 bytes. 0x2a10 bytes (33%) free.
+
+
+
+[2/9] No install step for 'bootloader'
+
+[3/9] Completed 'bootloader'
+
+[4/9] Building C object esp-idf/main/CMakeFiles/esp32_fam_app_desktop.dir/__/applications/services/desktop/animations/animation_storage.c.obj
+
+[5/9] Linking C static library esp-idf\main\libmain.a
+
+[6/9] Generating ld/sections.ld
+
+[7/9] Linking CXX executable furi_esp32.elf
+
+[8/9] Generating binary image from built executable
+
+esptool.py v4.12.0
+
+
+Creating esp32c6 image...
+
+
+Merged 2 ELF sections
+
+
+Successfully created esp32c6 image.
+
+
+Generated C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_waveshare_c6/furi_esp32.bin
+
+[9/9] C:\WINDOWS\system32\cmd.exe /C "cd /D "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_waveshare_c6\esp-idf\esptool_py" && C:\Espressif\tools\python\v5.4.1\venv\Scripts\python.exe C:/esp/v5.4.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_waveshare_c6/partition_table/partition-table.bin" "C:/Users/X1 Carbon/Folder Baru (3)/Flipper-Zero-ESP32-Port/build_waveshare_c6/furi_esp32.bin""
+
+furi_esp32.bin binary size 0x3caf30 bytes. Smallest app partition is 0x600000 bytes. 0x2350d0 bytes (37%) free.
+
+
+
+
+Project build complete. To flash, run:
+ idf.py flash
+or
+ idf.py -p PORT flash
+or
+ python -m esptool --chip esp32c6 -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 8MB --flash_freq 80m 0x0 build_waveshare_c6\bootloader\bootloader.bin 0x8000 build_waveshare_c6\partition_table\partition-table.bin 0x10000 build_waveshare_c6\furi_esp32.bin
+or from the "C:\Users\X1 Carbon\Folder Baru (3)\Flipper-Zero-ESP32-Port\build_waveshare_c6" directory
+ python -m esptool --chip esp32c6 -b 460800 --before default_reset --after hard_reset write_flash "@flash_args"

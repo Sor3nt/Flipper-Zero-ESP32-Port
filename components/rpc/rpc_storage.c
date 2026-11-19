@@ -12,8 +12,17 @@
 #include <storage.pb.h>
 #include <flipper.pb.h>
 #include <esp_log.h>
+#include <furi_hal_qfdiag.h>
 
 #define TAG "RpcStorage"
+
+/* Per-chunk write trace: 2-3 lines per 1 KB upload chunk at INFO, so DEBUG
+ * (compiled out) unless QFDIAG is enabled. */
+#if QFDIAG_ENABLED
+#define RPC_STORAGE_TRACE(...) ESP_LOGI(TAG, __VA_ARGS__)
+#else
+#define RPC_STORAGE_TRACE(...) ESP_LOGD(TAG, __VA_ARGS__)
+#endif
 
 #define MAX_NAME_LENGTH 255
 
@@ -441,8 +450,17 @@ static void rpc_system_storage_write_process(const PB_Main* request, void* conte
         rpc_storage->current_command_id = request->command_id;
         rpc_storage->state = RpcStorageStateWriting;
         const char* path = request->content.storage_write_request.path;
+        const uint32_t qd_o0 = QFDIAG_ENABLED ? furi_get_tick() : 0;
         fs_operation_success =
             storage_file_open(rpc_storage->file, path, FSAM_WRITE, FSOM_CREATE_ALWAYS);
+        if(QFDIAG_ENABLED) { /* QFDIAG: file open latency */
+            ESP_LOGI(
+                TAG,
+                "QD write: open %s ok=%d in %lu ms",
+                path,
+                fs_operation_success,
+                (unsigned long)(furi_get_tick() - qd_o0));
+        }
     }
 
     File* file = rpc_storage->file;
@@ -454,8 +472,41 @@ static void rpc_system_storage_write_process(const PB_Main* request, void* conte
            request->content.storage_write_request.file.data->size) {
             uint8_t* buffer = request->content.storage_write_request.file.data->bytes;
             size_t buffer_size = request->content.storage_write_request.file.data->size;
+            const uint32_t qd_w0 = QFDIAG_ENABLED ? furi_get_tick() : 0;
             size_t written_size = storage_file_write(file, buffer, buffer_size);
+            const uint32_t qd_wd = QFDIAG_ENABLED ? furi_get_tick() - qd_w0 : 0;
             fs_operation_success = (written_size == buffer_size);
+            if(QFDIAG_ENABLED) {
+                /* QFDIAG: one summary line per 100 chunks — throughput and
+                 * per-chunk storage latency, without flooding the log ring. */
+                static uint32_t n, sum_ms, max_ms, bytes, win_start;
+                if(!n) win_start = qd_w0;
+                n++;
+                sum_ms += qd_wd;
+                if(qd_wd > max_ms) max_ms = qd_wd;
+                bytes += (uint32_t)written_size;
+                if(n >= 100) {
+                    const uint32_t span = furi_get_tick() - win_start;
+                    ESP_LOGI(
+                        TAG,
+                        "QD write: 100 chunks %lu B in %lu ms (%lu B/s), store avg %lu max %lu ms",
+                        (unsigned long)bytes,
+                        (unsigned long)span,
+                        (unsigned long)(span ? (uint64_t)bytes * 1000U / span : 0),
+                        (unsigned long)(sum_ms / n),
+                        (unsigned long)max_ms);
+                    n = sum_ms = max_ms = bytes = 0;
+                }
+            }
+            if(QFDIAG_ENABLED && (qd_wd > 300 || !fs_operation_success)) {
+                ESP_LOGW(
+                    TAG,
+                    "QD write: storage_file_write %u/%u bytes took %lu ms (fs_err=%d)",
+                    (unsigned)written_size,
+                    (unsigned)buffer_size,
+                    (unsigned long)qd_wd,
+                    (int)storage_file_get_error(file));
+            }
         }
 
         send_response = !request->has_next;
@@ -471,15 +522,15 @@ static void rpc_system_storage_write_process(const PB_Main* request, void* conte
         }
     }
 
-    ESP_LOGI(TAG, "write: has_next=%d send_response=%d fs_ok=%d status=%d",
+    RPC_STORAGE_TRACE("write: has_next=%d send_response=%d fs_ok=%d status=%d",
         request->has_next, send_response, fs_operation_success, command_status);
 
     if(send_response) {
-        ESP_LOGI(TAG, "write: sending final response cmd_id=%lu status=%d",
+        RPC_STORAGE_TRACE("write: sending final response cmd_id=%lu status=%d",
             (unsigned long)rpc_storage->current_command_id, command_status);
         rpc_send_and_release_empty(session, rpc_storage->current_command_id, command_status);
         rpc_system_storage_reset_state(rpc_storage, session, false);
-        ESP_LOGI(TAG, "write: response sent OK");
+        RPC_STORAGE_TRACE("write: response sent OK");
     }
 }
 
@@ -509,6 +560,51 @@ static bool rpc_system_storage_is_dir_is_empty(Storage* storage, const char* pat
     return is_dir_is_empty;
 }
 
+/* FIX [QF-4]: deleting a big folder (e.g. asset_packs) in qFlipper always
+ *   ended in "Operation timeout" although the device finished the delete.
+ * ROOT CAUSE: a recursive delete of thousands of files takes a minute or more
+ *   (each FatFs unlink = ~4 synchronous single-sector SD writes: dir entry,
+ *   FAT1, FAT2, FSInfo, often 100+ ms each), but qFlipper gives every operation
+ *   a 30 s single-shot timeout (AbstractOperation: setInterval(30000)). It
+ *   re-arms that timer only on a reply with the SAME command_id and
+ *   has_next=true, and finishes only on has_next=false.
+ * FIX: while the delete runs, send an Empty/OK has_next=true keep-alive every
+ *   RPC_STORAGE_DELETE_KEEPALIVE_MS, then the real final reply (has_next=false).
+ *   Deletes shorter than one interval send no keep-alive at all.
+ * WARNING: keep the interval well below 30 s; the callback only runs between
+ *   directory entries, so one slow unlink delays the next keep-alive. The
+ *   keep-alive must be an Empty message (qFlipper's default processResponse
+ *   rejects any other type) and must carry the request's command_id.
+ * FIX [QF-3]: the same callback aborts the delete once the session is closing,
+ *   so a host that left does not keep the global busy_mutex for minutes. */
+#define RPC_STORAGE_DELETE_KEEPALIVE_MS (5000U)
+
+typedef struct {
+    RpcSession* session;
+    uint32_t command_id;
+    uint32_t last_reply_tick;
+    uint32_t keepalives;
+} RpcStorageDeleteProgress;
+
+static bool rpc_system_storage_delete_should_abort(void* context) {
+    RpcStorageDeleteProgress* progress = context;
+    if(rpc_session_is_closing(progress->session)) return true;
+
+    uint32_t now = furi_get_tick();
+    if(now - progress->last_reply_tick >= furi_ms_to_ticks(RPC_STORAGE_DELETE_KEEPALIVE_MS)) {
+        PB_Main keepalive = {
+            .command_id = progress->command_id,
+            .command_status = PB_CommandStatus_OK,
+            .has_next = true,
+            .which_content = PB_Main_empty_tag,
+        };
+        rpc_send_and_release(progress->session, &keepalive);
+        progress->last_reply_tick = now;
+        progress->keepalives++;
+    }
+    return false;
+}
+
 static void rpc_system_storage_delete_process(const PB_Main* request, void* context) {
     furi_assert(request);
     furi_assert(request->which_content == PB_Main_storage_delete_request_tag);
@@ -533,7 +629,26 @@ static void rpc_system_storage_delete_process(const PB_Main* request, void* cont
         if((error_remove == FSE_DENIED) &&
            !rpc_system_storage_is_dir_is_empty(rpc_storage->api, path)) {
             if(request->content.storage_delete_request.recursive) {
-                bool deleted = storage_simply_remove_recursive(rpc_storage->api, path);
+                RpcStorageDeleteProgress progress = {
+                    .session = session,
+                    .command_id = request->command_id,
+                    .last_reply_tick = furi_get_tick(),
+                    .keepalives = 0,
+                };
+                /* FIX [QF-3]/[QF-4]: must stay the abortable variant with the
+                 * keep-alive callback; plain storage_simply_remove_recursive()
+                 * brings both bugs back. */
+                bool deleted = storage_simply_remove_recursive_abortable(
+                    rpc_storage->api, path, rpc_system_storage_delete_should_abort, &progress);
+                if(!deleted && rpc_session_is_closing(session)) {
+                    FURI_LOG_W(TAG, "Delete of %s stopped: session closed", path);
+                } else if(progress.keepalives) {
+                    FURI_LOG_I(
+                        TAG,
+                        "Delete of %s: %lu keep-alive replies sent",
+                        path,
+                        (unsigned long)progress.keepalives);
+                }
                 status = deleted ? PB_CommandStatus_OK : PB_CommandStatus_ERROR;
             } else {
                 status = PB_CommandStatus_ERROR_STORAGE_DIR_NOT_EMPTY;

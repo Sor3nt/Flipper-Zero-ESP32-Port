@@ -12,6 +12,8 @@
 #include <archive/helpers/archive_favorites.h>
 #include <esp_rom_sys.h>
 #include <momentum_settings.h>
+#include <asset_packs.h>
+#include <furi_hal_power.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -19,7 +21,7 @@
 #include "loader_menu.h"
 #include "menu_custom.h"
 
-#define LOADER_ASSET_PACKS_MAX 64
+#define LOADER_ASSET_PACKS_MAX 128
 
 /* Desktop settings mirror: layout-compatible with
  * applications/services/desktop/desktop_settings.h so we can call the
@@ -60,6 +62,11 @@ void desktop_api_set_settings(
 void desktop_api_reload_animation(LoaderMenuDesktop* instance);
 void desktop_api_set_loader_menu_active(LoaderMenuDesktop* instance, bool active);
 void power_trigger_ui_update(LoaderMenuPower* power);
+/* Mirrors PowerBootMode (power.h): PowerBootModeNormal is 0. */
+typedef enum {
+    LoaderMenuPowerBootModeNormal = 0,
+} LoaderMenuPowerBootMode;
+void power_reboot(LoaderMenuPower* power, LoaderMenuPowerBootMode mode);
 void bt_statusbar_refresh(void);
 
 #define LOADER_RECORD_DESKTOP "desktop"
@@ -914,6 +921,53 @@ static void loader_menu_scan_asset_packs(LoaderMenuApp* app) {
     }
 }
 
+/* Pack for which the restart prompt was last shown, so changing another
+ * Graphics option does not ask again for the same pack. */
+static char loader_menu_restart_prompted_pack[ASSET_PACKS_NAME_LEN];
+
+/* Animations of a new asset pack apply immediately. Its icons and fonts are
+ * loaded at boot and never swapped while running, so offer a restart. Runs on
+ * the loader menu thread (view dispatcher event loop), never the GUI thread,
+ * so the blocking dialog is safe. */
+static void loader_menu_offer_asset_pack_restart(void) {
+    char selected[ASSET_PACKS_NAME_LEN];
+    momentum_settings_get_asset_pack(selected, sizeof(selected));
+    if(!asset_packs_restart_required(selected)) {
+        loader_menu_restart_prompted_pack[0] = '\0';
+        return;
+    }
+    if(strcmp(selected, loader_menu_restart_prompted_pack) == 0) return;
+    strlcpy(loader_menu_restart_prompted_pack, selected, sizeof(loader_menu_restart_prompted_pack));
+
+    DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+    DialogMessage* message = dialog_message_alloc();
+    dialog_message_set_header(message, "Restart Required", 64, 2, AlignCenter, AlignTop);
+    dialog_message_set_text(
+        message,
+        "Icons & fonts of this\nasset pack are applied\nafter a restart.",
+        64,
+        32,
+        AlignCenter,
+        AlignCenter);
+    dialog_message_set_buttons(message, "Later", NULL, "Restart");
+    const DialogMessageButton result = dialog_message_show(dialogs, message);
+    dialog_message_free(message);
+    furi_record_close(RECORD_DIALOGS);
+
+    /* Settings were saved by loader_menu_graphics_apply before this point.
+     * Reboot through the power service like every other reboot UI, so its
+     * reboot path (e.g. disarming a pending update) runs. */
+    if(result == DialogMessageButtonRight) {
+        if(furi_record_exists(LOADER_RECORD_POWER)) {
+            LoaderMenuPower* power = furi_record_open(LOADER_RECORD_POWER);
+            power_reboot(power, LoaderMenuPowerBootModeNormal);
+            furi_record_close(LOADER_RECORD_POWER);
+        } else {
+            furi_hal_power_reset();
+        }
+    }
+}
+
 static void loader_menu_graphics_apply(void) {
     if(!loader_menu_graphics_dirty) return;
     loader_menu_graphics_dirty = false;
@@ -923,6 +977,7 @@ static void loader_menu_graphics_apply(void) {
         desktop_api_reload_animation(desktop);
         furi_record_close(LOADER_RECORD_DESKTOP);
     }
+    loader_menu_offer_asset_pack_restart();
 }
 
 static void loader_menu_asset_pack_changed(VariableItem* item) {

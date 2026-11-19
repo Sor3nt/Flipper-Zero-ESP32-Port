@@ -24,6 +24,7 @@ static void weather_station_app_tick_event_callback(void* context) {
 
 WeatherStationApp* weather_station_app_alloc() {
     WeatherStationApp* app = malloc(sizeof(WeatherStationApp));
+    memset(app, 0, sizeof(*app)); // PORT: ESP-IDF malloc does not zero (Flipper's does)
 
     // GUI
     app->gui = furi_record_open(RECORD_GUI);
@@ -86,6 +87,9 @@ WeatherStationApp* weather_station_app_alloc() {
     //init Worker & Protocol & History
     app->lock = WSLockOff;
     app->txrx = malloc(sizeof(WeatherStationTxRx));
+    // PORT: zero it: txrx->radio_device is passed to radio_device_loader_set() below as the
+    // "current device" before it is ever assigned (upstream relied on Flipper's zeroing malloc).
+    memset(app->txrx, 0, sizeof(WeatherStationTxRx));
     app->txrx->preset = malloc(sizeof(SubGhzRadioPreset));
     app->txrx->preset->name = furi_string_alloc();
     ws_preset_init(app, "AM650", subghz_setting_get_default_frequency(app->setting), NULL, 0);
@@ -100,8 +104,12 @@ WeatherStationApp* weather_station_app_alloc() {
 
     subghz_devices_init();
 
+    // PORT: this firmware has no external CC1101. "cc1101_ext" is only an alias that drives the
+    // internal chip and always reports connected, so "prefer external" always picked it: OTG 5 V
+    // boost on for nothing, furi_hal_subghz_init() re-run on begin, and on exit subghz_devices_end()
+    // -> furi_hal_subghz_shutdown() on the internal radio. Use the internal device.
     app->txrx->radio_device =
-        radio_device_loader_set(app->txrx->radio_device, SubGhzRadioDeviceTypeExternalCC1101);
+        radio_device_loader_set(app->txrx->radio_device, SubGhzRadioDeviceTypeInternal);
 
     subghz_devices_reset(app->txrx->radio_device);
     subghz_devices_idle(app->txrx->radio_device);

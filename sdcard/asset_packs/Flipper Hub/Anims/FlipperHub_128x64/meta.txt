@@ -1,0 +1,41 @@
+Filetype: Flipper Animation
+Version: 1
+
+Width: 128
+Height: 64
+Passive frames: 1
+Active frames: 1
+Frames order: 0 1
+Active cycles: 7
+Frame rate: 1
+Duration: 3600
+Active cooldown: 1
+
+Bubble slots: 3
+
+Slot: 0
+X: 18
+Y: 45
+Text: www.flipper-hub.de
+AlignH: Center
+AlignV: Center
+StartFrame: 1
+EndFrame: 7
+
+Slot: 1
+X: 12
+Y: 34
+Text: https://discord.com/\n        invite/jedjVrC9ST
+AlignH: Center
+AlignV: Center
+StartFrame: 1
+EndFrame: 7
+
+Slot: 2
+X: 34
+Y: 45
+Text: by Billi Green
+AlignH: Center
+AlignV: Center
+StartFrame: 1
+EndFrame: 7

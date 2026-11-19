@@ -165,8 +165,8 @@ void elements_button_left(Canvas* canvas, const char* str) {
     const size_t string_width = canvas_string_width(canvas, str);
     const Icon* icon = &I_ButtonLeft_4x7;
     const int32_t icon_h_offset = 3;
-    const int32_t icon_width_with_offset = icon->width + icon_h_offset;
-    const int32_t icon_v_offset = icon->height + vertical_offset;
+    const int32_t icon_width_with_offset = icon_get_width(icon) + icon_h_offset;
+    const int32_t icon_v_offset = icon_get_height(icon) + vertical_offset;
     const size_t button_width = string_width + horizontal_offset * 2 + icon_width_with_offset;
 
     const int32_t x = 0;
@@ -193,8 +193,8 @@ void elements_button_right(Canvas* canvas, const char* str) {
     const size_t string_width = canvas_string_width(canvas, str);
     const Icon* icon = &I_ButtonRight_4x7;
     const int32_t icon_h_offset = 3;
-    const int32_t icon_width_with_offset = icon->width + icon_h_offset;
-    const int32_t icon_v_offset = icon->height + vertical_offset;
+    const int32_t icon_width_with_offset = icon_get_width(icon) + icon_h_offset;
+    const int32_t icon_v_offset = icon_get_height(icon) + vertical_offset;
     const size_t button_width = string_width + horizontal_offset * 2 + icon_width_with_offset;
 
     const int32_t x = canvas_width(canvas);
@@ -208,7 +208,7 @@ void elements_button_right(Canvas* canvas, const char* str) {
     canvas_invert_color(canvas);
     canvas_draw_str(canvas, x - button_width + horizontal_offset, y - vertical_offset, str);
     canvas_draw_icon(
-        canvas, x - horizontal_offset - icon->width, y - icon_v_offset, &I_ButtonRight_4x7);
+        canvas, x - horizontal_offset - icon_get_width(icon), y - icon_v_offset, &I_ButtonRight_4x7);
     canvas_invert_color(canvas);
 }
 
@@ -285,8 +285,8 @@ void elements_button_center(Canvas* canvas, const char* str) {
     const size_t string_width = canvas_string_width(canvas, str);
     const Icon* icon = &I_ButtonCenter_7x7;
     const int32_t icon_h_offset = 3;
-    const int32_t icon_width_with_offset = icon->width + icon_h_offset;
-    const int32_t icon_v_offset = icon->height + vertical_offset;
+    const int32_t icon_width_with_offset = icon_get_width(icon) + icon_h_offset;
+    const int32_t icon_v_offset = icon_get_height(icon) + vertical_offset;
     const size_t button_width = string_width + horizontal_offset * 2 + icon_width_with_offset;
 
     const int32_t x = (canvas_width(canvas) - button_width) / 2;

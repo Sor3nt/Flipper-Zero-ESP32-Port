@@ -309,8 +309,18 @@ static Icon* bubble_animation_clone_first_frame(const Icon* icon_orig) {
      * for compressed header
      */
     size_t max_bitmap_size = ROUND_UP_TO(icon_orig->width, 8) * icon_orig->height + 1;
+    /* Copy only the bitmap itself: an SD frame buffer is exactly its file size,
+     * so a compressed one (0x01 0x00 len16 + len bytes) is shorter than the
+     * maximum and copying max_bitmap_size read past its end. The rest of the
+     * clone stays zeroed (malloc is calloc here). */
+    const uint8_t* src = icon_orig->frames[0];
+    size_t copy_size = max_bitmap_size;
+    if(src[0] == 0x01) {
+        copy_size = 4 + (size_t)(src[2] | (src[3] << 8));
+        if(copy_size > max_bitmap_size) copy_size = max_bitmap_size;
+    }
     FURI_CONST_ASSIGN_PTR(icon_clone->frames[0], malloc(max_bitmap_size));
-    memcpy((void*)icon_clone->frames[0], icon_orig->frames[0], max_bitmap_size);
+    memcpy((void*)icon_clone->frames[0], src, copy_size);
     FURI_CONST_ASSIGN(icon_clone->frame_count, 1);
 
     return icon_clone;

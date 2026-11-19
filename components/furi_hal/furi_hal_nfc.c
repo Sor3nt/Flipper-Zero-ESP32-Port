@@ -27,6 +27,7 @@
 #include <driver/i2c.h>
 #include <driver/gpio.h>
 #include <esp_timer.h>
+#include <esp_attr.h>
 #include <string.h>
 
 /* ──────────────────────────── PN532 Protocol Constants ──────────────────── */
@@ -157,7 +158,7 @@ static size_t listener_rx_len = 0;
  * host round-trip no longer blows the MIFARE-UL FWT). Detected by readers as
  * a generic ISO14443-4 NDEF tag — not a byte-exact NTAG clone — but the NDEF
  * payload transfers reliably. emu_ndef_len == 0 → fall back to raw type-A. */
-static uint8_t emu_ndef_msg[888];
+static EXT_RAM_BSS_ATTR uint8_t emu_ndef_msg[888];
 static size_t emu_ndef_len = 0;
 
 /* FeliCa listener configuration state */

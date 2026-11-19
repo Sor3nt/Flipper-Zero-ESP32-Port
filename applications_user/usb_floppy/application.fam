@@ -1,0 +1,17 @@
+App(
+    appid="usb_floppy",
+    name="USB Floppy",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="usb_floppy_app",
+    requires=[
+        "gui",
+        "dialogs",
+    ],
+    stack_size=4 * 1024,
+    fap_description="Emulate a USB floppy drive from a 720K or 1.44M disk image (.img) on the SD card",
+    fap_category="USB",
+    fap_version="1.0",
+    fap_icon="assets/floppy_10px.png",
+    fap_icon_assets="assets",
+    fap_author="piersroberts (ESP32 port)",
+)

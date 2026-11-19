@@ -8,6 +8,7 @@
 #include <gui/gui_i.h>
 #include <gui/modules/menu.h>
 #include <momentum_settings.h>
+#include <asset_packs.h>
 
 #include <locale/locale.h>
 #include <storage/storage.h>
@@ -138,8 +139,20 @@ static void desktop_power_idle_callback(const void* message, void* context);
 static void desktop_set_idle(Desktop* desktop, bool idle) {
     if(desktop->idle == idle) return;
     desktop->idle = idle;
+    /* FIX [QF-1]: the qFlipper screen mirror froze while the device screen was
+     *   dimmed and only resumed on a key press.
+     * ROOT CAUSE: the qFlipper screen stream is driven by GUI redraws
+     *   (canvas_commit). Dimming the panel publishes a power-idle event, and this
+     *   port pauses the dolphin animation on power-idle (upstream does not), so
+     *   no redraw happens and qFlipper gets no frames.
+     * FIX: while the qFlipper USB bridge is active, keep the animation (and thus
+     *   the stream) running; the panel still dims. Without the bridge the
+     *   original power-saving pause is unchanged.
+     * WARNING: anything else that stops desktop redraws while qFlipper is
+     *   connected (timers, idle pause) freezes the mirror the same way. */
+    const bool pause_animation = idle && !qflipper_bridge_is_active();
     animation_manager_set_pause_reason(
-        desktop->animation_manager, AnimationManagerPauseReasonPowerIdle, idle);
+        desktop->animation_manager, AnimationManagerPauseReasonPowerIdle, pause_animation);
     if(idle) {
         furi_timer_stop(desktop->qflipper_usj_timer);
         furi_timer_stop(desktop->update_clock_timer);
@@ -503,6 +516,10 @@ static void desktop_clock_timer_callback(void* context) {
 static void desktop_apply_settings(Desktop* desktop) {
     desktop->in_transition = true;
 
+    /* Asset pack icons and fonts: loaded once, as soon as the SD card is
+     * mounted (this runs at boot with a card and again on card mount). */
+    asset_packs_init();
+
     gui_set_status_bar_background(
         desktop->gui, desktop->settings.display_status_bar_background != 0);
     desktop_clock_reconfigure(desktop);
@@ -545,6 +562,10 @@ static Desktop* desktop_alloc(void) {
      * before the animation manager picks the first idle animation; otherwise
      * the first animation after boot ignores the selected asset pack. */
     momentum_settings_load();
+    /* Asset pack icons and fonts before any desktop view or IconAnimation is
+     * created (an IconAnimation resolves its icon once, when allocated). A
+     * no-op without a mounted card; desktop_apply_settings retries on mount. */
+    asset_packs_init();
 
     desktop->animation_semaphore = furi_semaphore_alloc(1, 0);
     desktop->animation_manager = animation_manager_alloc();

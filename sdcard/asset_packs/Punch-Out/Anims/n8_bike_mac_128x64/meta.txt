@@ -1,0 +1,42 @@
+Filetype: Flipper Animation
+Version: 1
+
+Width: 128
+Height: 64
+
+Passive frames: 24
+Active frames: 0
+Frames order: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
+Active cycles: 0
+Frame rate: 4
+Duration: 3600
+Active cooldown: 0
+
+Bubble slots: 3
+
+Slot: 0
+X: 43
+Y: 14
+Text: Put some pep\nin ya step, son!
+AlignH: Left
+AlignV: Center
+StartFrame: 15
+EndFrame: 20
+
+Slot: 1
+X: 43
+Y: 14
+Text: Now I know you\naint quittin on me!
+AlignH: Left
+AlignV: Center
+StartFrame: 15
+EndFrame: 20
+
+Slot: 2
+X: 40
+Y: 15
+Text: My knees!
+AlignH: Right
+AlignV: Center
+StartFrame: 4
+EndFrame: 7

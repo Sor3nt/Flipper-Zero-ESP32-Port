@@ -6,6 +6,7 @@
 #include "furi_hal_external_uart.h"
 #include <nvs_flash.h>
 #include <furi_hal_sd.h>
+#include "furi_hal_spi_bus.h"
 
 #include <driver/gpio.h>
 #include <esp_rom_sys.h>
@@ -268,6 +269,10 @@ void furi_hal_init(void) {
     /* GPIO ISRs are allocated on the core that installs the service: do it
      * here, on the boot core, rather than in whichever thread asks first. */
     furi_hal_gpio_init_isr_service();
+    /* Create the shared SPI bus mutex while only the boot thread runs. Every
+     * furi_hal_spi_bus_trx() now takes it, and its lazy allocation in
+     * furi_hal_spi_bus_init() is not safe against two first callers at once. */
+    furi_hal_spi_bus_init();
     furi_hal_uart_shared_init();
     furi_hal_crypto_init();
 
@@ -286,12 +291,43 @@ void furi_hal_init(void) {
     }
 
     furi_hal_rtc_init();
+    /* Needs NVS and the RTC clock (above). Runs on this boot task on purpose:
+     * its internal-RAM stack is what the NVS write requires. Moves a crash
+     * record left in RTC memory by the panic handler into NVS. */
+    furi_hal_diag_init();
     furi_hal_version_init();
     furi_hal_info_init();
     furi_hal_power_init();
 #ifdef BOARD_NFC_EARLY_PROBE
     /* Must run before the SD card and the display bring up SPI2. */
     furi_hal_nfc_early_probe();
+#endif
+#if defined(BOARD_EARLY_SD_INIT) && defined(BOARD_NFC_USE_ST25R3916)
+    /* Shared-SPI boards (Fatal Core): the ST25R3916 hangs off the same SPI2 bus
+     * as the SD card, the LCD and the radios, and has no dedicated reset line,
+     * so it boots in whatever state the previous run left it in. Bring the
+     * front-end up while the bus is still quiet -- before the SD card enters
+     * SPI mode and the LCD/radios start clocking. Doing it afterwards leaves
+     * the chip in the wedged "everything reads 0x00" state seen on this board.
+     * furi_hal_nfc_init() is one-shot, so the generic call below is skipped. */
+
+    /* Bring the shared bus up first (no radio traffic is sent): the bus init
+     * inside the NFC driver would otherwise install its idle pull-up on MISO
+     * and undo the pull-down requested below. */
+    furi_hal_spi_bus_handle_init(&furi_hal_spi_bus_handle_subghz);
+
+    /* Hold MISO low while the front-end is woken and probed, so the line has a
+     * defined level instead of floating while nothing drives it. The driver
+     * gives the chip up to 200 ms to answer and leaves as soon as it does. */
+    gpio_set_pull_mode((gpio_num_t)BOARD_PIN_SD_MISO, GPIO_PULLDOWN_ONLY);
+
+    furi_hal_nfc_init();
+
+    /* Release MISO once the front-end is up: let the line float instead of
+     * leaving our pull-down behind. The chip is probed and idle by now, and
+     * the rest of the bus (SD, LCD, radios) must not fight a forced level. */
+    gpio_set_pull_mode((gpio_num_t)BOARD_PIN_SD_MISO, GPIO_FLOATING);
+#define FURI_HAL_NFC_INITIALIZED 1
 #endif
 #if CONFIG_T_EMBED_PLUS_SD_RECOVERY || defined(BOARD_EARLY_SD_INIT)
     /* Adding the radio handle initializes SPI2 but sends no radio commands.
@@ -308,7 +344,9 @@ void furi_hal_init(void) {
     furi_hal_light_init();
     furi_hal_display_init();
     furi_hal_speaker_init();
+#ifndef FURI_HAL_NFC_INITIALIZED
     furi_hal_nfc_init();
+#endif
     ESP_LOGI(TAG, "Init complete");
 
 #ifdef BOARD_HEARTBEAT_DEBUG

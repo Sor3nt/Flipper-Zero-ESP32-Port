@@ -31,8 +31,53 @@ extern "C" {
  */
 bool furi_hal_usb_msc_start(void);
 
+/**
+ * File/image-backed MSC.
+ *
+ * Instead of exposing the raw SD card, serve blocks from an app-provided
+ * backing — a disk image file on the SD, a CD-ROM ISO, a RAM disk, ...
+ *
+ * Unlike furi_hal_usb_msc_start(), this does NOT unmount the SD and does NOT
+ * require the SD to be released: the backing callbacks run on the TinyUSB task
+ * and typically read the image *through* the mounted filesystem. The caller
+ * owns the image file's lifetime (it must outlive the MSC session) and must
+ * ensure no other task writes the image concurrently.
+ *
+ * The backing struct is copied, so a stack variable may be passed. ctx and the
+ * function pointers must stay valid until furi_hal_usb_msc_stop().
+ *
+ * Only one of furi_hal_usb_msc_start() / _start_backing() can be active.
+ */
+typedef struct {
+    void* ctx;
+    uint32_t block_size; /* bytes per LBA: 512 for disk/floppy, 2048 for CD-ROM */
+    uint32_t block_count; /* total number of addressable LBAs */
+    bool writable; /* false => write-protected / read-only medium */
+    bool is_cdrom; /* CD/DVD-ROM: INQUIRY type 0x05 + the MMC commands (READ TOC,
+                    * GET CONFIGURATION, ...); use block_size 2048, read-only */
+    char vendor_id[8]; /* SCSI INQUIRY vendor  (space-padded, not NUL-terminated) */
+    char product_id[16]; /* SCSI INQUIRY product (space-padded) */
+    char product_rev[4]; /* SCSI INQUIRY revision (space-padded) */
+    /* Read `count` blocks of block_size bytes starting at `lba` into `out`.
+     * Runs on the TinyUSB task. Return true on success, false => MEDIUM ERROR. */
+    bool (*read)(void* ctx, uint32_t lba, uint32_t count, uint8_t* out);
+    /* Write `count` blocks starting at `lba`. Not called when !writable; may be
+     * NULL in that case. Return true on success. */
+    bool (*write)(void* ctx, uint32_t lba, uint32_t count, const uint8_t* buf);
+    /* Host asked to eject (SCSI START STOP UNIT, load_eject). Optional (NULL).
+     * Runs on the TinyUSB task; must not block for long. */
+    void (*eject)(void* ctx);
+} FuriHalUsbMscBacking;
+
+/** Activate the MSC layer backed by `backing` (not the raw SD).
+ * @return true if MSC is now exposing the backing to the host.
+ */
+bool furi_hal_usb_msc_start_backing(const FuriHalUsbMscBacking* backing);
+
 /** Deactivate the MSC layer. Host will see the drive go offline.
- * After this returns, the SD card may be re-mounted by the firmware.
+ * Waits for a SCSI callback that is still running (e.g. a backing read), so
+ * after this returns no callback uses the backing's ctx any more: the app may
+ * close its image file and free ctx, and the SD card may be re-mounted.
  */
 void furi_hal_usb_msc_stop(void);
 

@@ -33,6 +33,9 @@ bool furi_hal_usb_backend_force_reenumeration(void) {
     return true;
 }
 
+void furi_hal_usb_backend_flush_reenumeration(void) {
+}
+
 void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
     (void)inhibited;
 }

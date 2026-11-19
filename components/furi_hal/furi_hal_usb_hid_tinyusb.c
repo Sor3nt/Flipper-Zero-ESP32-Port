@@ -1,6 +1,9 @@
 #include "furi_hal_usb.h"
 #include "furi_hal_usb_hid.h"
 #include "furi_hal_usb_hid_backend.h"
+/* furi_hal_usb_composite_is_installed() / _restore_serial_jtag(): without the prototype the
+ * compiler assumed `int` for a `bool` function (-Wimplicit-function-declaration). */
+#include "furi_hal_usb_tinyusb_composite.h"
 
 #include <furi.h>
 #include <furi_hal_version.h>
@@ -9,6 +12,9 @@
 #include <stdio.h>
 
 #include "sdkconfig.h"
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "tinyusb.h"
 #include "class/hid/hid_device.h"
 #if CONFIG_IDF_TARGET_ESP32S3
@@ -108,7 +114,7 @@ static void hid_publish_mount(bool mounted) {
 void tud_mount_cb(void) {
 #if CONFIG_IDF_TARGET_ESP32S3
     if(furi_hal_usb_u2f_backend_is_active()) {
-        furi_hal_usb_u2f_backend_set_mounted(true);
+        furi_hal_usb_u2f_backend_set_configured();
         return;
     }
 #endif
@@ -133,7 +139,12 @@ void tud_suspend_cb(bool remote_wakeup_en) {
     (void)remote_wakeup_en;
 #if CONFIG_IDF_TARGET_ESP32S3
     if(furi_hal_usb_u2f_backend_is_active()) {
-        furi_hal_usb_u2f_backend_set_mounted(false);
+        /* Hosts suspend an idle security key (HID selective suspend / autosuspend)
+         * while it stays plugged in and configured. Reporting that as a
+         * disconnect showed "Connect me to computer" a few seconds after
+         * enumeration although the host could still use the key. A real unplug
+         * is caught via VBUS (furi_hal_usb_notify_vbus_absent) where sensed. */
+        furi_hal_usb_u2f_backend_suspend();
         return;
     }
 #endif
@@ -213,11 +224,95 @@ void tud_hid_set_report_cb(
 void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
     if(s_light_sleep_inhibited == inhibited) return;
     if(inhibited) {
+        /* NOTE: insomnia only pins the CPU frequency (ESP_PM_CPU_FREQ_MAX); it
+         * does NOT hold the ESP_PM_NO_LIGHT_SLEEP gate, so on its own the chip
+         * could still enter automatic tickless light sleep once the desktop goes
+         * idle (screen dimmed) and releases that gate, stalling the CDC/MSC
+         * endpoints and the SD card mid-transaction during a USB session. Hold
+         * the real light-sleep gate too, so nothing sleeps while USB is active.
+         * First suspected for the qFlipper large-upload failure; it was NOT that
+         * cause (see FIX [QF-2] in furi_hal_usb_cdc.c), but it is a correct
+         * guard on its own. */
         furi_hal_power_insomnia_enter();
+        furi_hal_power_light_sleep_inhibit_enter();
     } else {
+        furi_hal_power_light_sleep_inhibit_exit();
         furi_hal_power_insomnia_exit();
     }
     s_light_sleep_inhibited = inhibited;
+}
+
+/* Forced re-enumeration.
+ *
+ * The host only re-reads the descriptors if it sees the device leave the bus,
+ * so D+ is dropped for USB_REENUMERATE_DISCONNECT_MS. That used to be a
+ * furi_delay_ms() on the caller: every USB app start (HID set_config, composite
+ * reinit, U2F) blocked its own thread - and held the USB HAL mutex - for 300 ms,
+ * which showed as a short freeze (screen stuck, keys ignored) each time a USB app
+ * opened or mounted an image. Now the disconnect happens here and the reconnect
+ * runs from a one-shot esp_timer.
+ *
+ * s_reconnect_lock orders the timer callback against re-arming and flushing. The
+ * callback checks the deadline itself: a timer that already fired and waits on
+ * the lock while the reconnect is re-armed must not reconnect early, or the new
+ * disconnect window would be too short for the host to notice. */
+static esp_timer_handle_t s_reconnect_timer;
+static SemaphoreHandle_t s_reconnect_lock;
+static StaticSemaphore_t s_reconnect_lock_buffer;
+static portMUX_TYPE s_reconnect_init_mux = portMUX_INITIALIZER_UNLOCKED;
+/* 0 = not created, 1 = being created, 2 = ready, 3 = creation failed */
+static volatile uint32_t s_reconnect_state;
+static bool s_reconnect_pending;
+static int64_t s_reconnect_due_us;
+
+static void hid_reconnect_timer_cb(void* arg) {
+    (void)arg;
+    xSemaphoreTake(s_reconnect_lock, portMAX_DELAY);
+    if(s_reconnect_pending) {
+        const int64_t remaining_us = s_reconnect_due_us - esp_timer_get_time();
+        if(remaining_us > 1000) {
+            /* Re-armed while this callback waited on the lock: the new arming
+             * normally has the timer running already and fires on time. */
+            if(!esp_timer_is_active(s_reconnect_timer) &&
+               esp_timer_start_once(s_reconnect_timer, (uint64_t)remaining_us) != ESP_OK) {
+                /* Cannot wait any longer: reconnect now rather than never. */
+                s_reconnect_pending = false;
+                if(tud_inited()) (void)tud_connect();
+            }
+        } else {
+            s_reconnect_pending = false;
+            if(tud_inited() && !tud_connect()) {
+                FURI_LOG_E(TAG, "TinyUSB reconnect request failed");
+            }
+        }
+    }
+    xSemaphoreGive(s_reconnect_lock);
+}
+
+static bool hid_reconnect_ready(void) {
+    if(s_reconnect_state == 2) return true;
+    if(s_reconnect_state == 3) return false;
+    taskENTER_CRITICAL(&s_reconnect_init_mux);
+    const bool mine = (s_reconnect_state == 0);
+    if(mine) s_reconnect_state = 1;
+    taskEXIT_CRITICAL(&s_reconnect_init_mux);
+    if(mine) {
+        s_reconnect_lock = xSemaphoreCreateMutexStatic(&s_reconnect_lock_buffer);
+        const esp_timer_create_args_t args = {
+            .callback = hid_reconnect_timer_cb,
+            .arg = NULL,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "usb_reconnect",
+        };
+        const bool ok = s_reconnect_lock &&
+                        esp_timer_create(&args, &s_reconnect_timer) == ESP_OK;
+        __sync_synchronize();
+        s_reconnect_state = ok ? 2 : 3;
+        if(!ok) FURI_LOG_E(TAG, "Cannot create the USB reconnect timer");
+    } else {
+        while(s_reconnect_state == 1) vTaskDelay(1);
+    }
+    return s_reconnect_state == 2;
 }
 
 bool furi_hal_usb_backend_force_reenumeration(void) {
@@ -225,16 +320,63 @@ bool furi_hal_usb_backend_force_reenumeration(void) {
         FURI_LOG_E(TAG, "Cannot re-enumerate USB before TinyUSB is initialized");
         return false;
     }
+
+    if(!hid_reconnect_ready()) {
+        /* No timer: fall back to the blocking reconnect. */
+        if(!tud_disconnect()) {
+            FURI_LOG_E(TAG, "TinyUSB disconnect request failed");
+            return false;
+        }
+        furi_delay_ms(USB_REENUMERATE_DISCONNECT_MS);
+        if(!tud_connect()) {
+            FURI_LOG_E(TAG, "TinyUSB reconnect request failed");
+            return false;
+        }
+        return true;
+    }
+
+    xSemaphoreTake(s_reconnect_lock, portMAX_DELAY);
+    (void)esp_timer_stop(s_reconnect_timer); /* ESP_ERR_INVALID_STATE if idle */
     if(!tud_disconnect()) {
+        /* Leave the device connected; a pending reconnect from an earlier
+         * request is completed instead of dropped. */
+        if(s_reconnect_pending) {
+            s_reconnect_pending = false;
+            (void)tud_connect();
+        }
+        xSemaphoreGive(s_reconnect_lock);
         FURI_LOG_E(TAG, "TinyUSB disconnect request failed");
         return false;
     }
-    furi_delay_ms(USB_REENUMERATE_DISCONNECT_MS);
-    if(!tud_connect()) {
-        FURI_LOG_E(TAG, "TinyUSB reconnect request failed");
-        return false;
+    s_reconnect_due_us = esp_timer_get_time() + (int64_t)USB_REENUMERATE_DISCONNECT_MS * 1000;
+    s_reconnect_pending = true;
+    if(esp_timer_start_once(s_reconnect_timer, (uint64_t)USB_REENUMERATE_DISCONNECT_MS * 1000) !=
+       ESP_OK) {
+        /* Timer refused: do the wait here as before. */
+        s_reconnect_pending = false;
+        xSemaphoreGive(s_reconnect_lock);
+        furi_delay_ms(USB_REENUMERATE_DISCONNECT_MS);
+        if(!tud_connect()) {
+            FURI_LOG_E(TAG, "TinyUSB reconnect request failed");
+            return false;
+        }
+        return true;
     }
+    xSemaphoreGive(s_reconnect_lock);
     return true;
+}
+
+void furi_hal_usb_backend_flush_reenumeration(void) {
+    if(s_reconnect_state != 2) return;
+    xSemaphoreTake(s_reconnect_lock, portMAX_DELAY);
+    (void)esp_timer_stop(s_reconnect_timer);
+    if(s_reconnect_pending) {
+        s_reconnect_pending = false;
+        /* Leaves the soft-connect state as the old blocking path did, so a
+         * failed uninstall afterwards still keeps a connected device. */
+        if(tud_inited()) (void)tud_connect();
+    }
+    xSemaphoreGive(s_reconnect_lock);
 }
 
 /* Backend start/stop - called from furi_hal_usb.c */
@@ -340,6 +482,7 @@ bool furi_hal_usb_hid_backend_release_stack(void) {
         return false;
     }
 
+    furi_hal_usb_backend_flush_reenumeration();
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         FURI_LOG_E(TAG, "tinyusb_driver_uninstall failed: %d", err);

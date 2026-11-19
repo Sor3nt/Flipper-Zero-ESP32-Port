@@ -10,6 +10,12 @@
 
 #define INFRARED_WORKER_RX_TIMEOUT INFRARED_RAW_RX_TIMING_DELAY_US
 
+/* The shortest raw signal that is reported: Mark, Space, Mark. A lone Mark is
+ * what one spike of noise or of ambient light on the receiver looks like; it
+ * must never pass as a 1-timing raw signal, whatever a HAL delivers after it
+ * (the STM32 capture path delivers a Space only when the next Mark begins). */
+#define INFRARED_WORKER_RX_MIN_RAW_TIMINGS 3
+
 #define INFRARED_WORKER_RX_RECEIVED         0x01
 #define INFRARED_WORKER_RX_TIMEOUT_RECEIVED 0x02
 #define INFRARED_WORKER_OVERRUN             0x04
@@ -99,11 +105,20 @@ static FuriHalInfraredTxGetDataState
 static void infrared_worker_furi_hal_message_sent_isr_callback(void* context);
 static void infrared_worker_furi_hal_error_callback(void* context);
 
+/* Set a worker event from the HAL RX ISRs. Only an error is a failure: the
+ * flags returned by furi_thread_flags_set() are read back separately from
+ * setting them, so on a dual-core ESP32 the worker thread (other core) may
+ * already have consumed the bit in between. The upstream
+ * furi_check(flags_set & events) then crashed the device on a valid event (same
+ * race as in infrared_worker_furi_hal_data_isr_callback). */
+static void infrared_worker_rx_set_event(InfraredWorker* instance, uint32_t events) {
+    uint32_t flags_set = furi_thread_flags_set(furi_thread_get_id(instance->thread), events);
+    furi_check((flags_set & FuriFlagError) == 0);
+}
+
 static void infrared_worker_rx_timeout_callback(void* context) {
     InfraredWorker* instance = context;
-    uint32_t flags_set = furi_thread_flags_set(
-        furi_thread_get_id(instance->thread), INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
-    furi_check(flags_set & INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
+    infrared_worker_rx_set_event(instance, INFRARED_WORKER_RX_TIMEOUT_RECEIVED);
 }
 
 static void infrared_worker_rx_callback(void* context, bool level, uint32_t duration) {
@@ -117,8 +132,7 @@ static void infrared_worker_rx_callback(void* context, bool level, uint32_t dura
     uint32_t events = (ret == sizeof(LevelDuration)) ? INFRARED_WORKER_RX_RECEIVED :
                                                        INFRARED_WORKER_OVERRUN;
 
-    uint32_t flags_set = furi_thread_flags_set(furi_thread_get_id(instance->thread), events);
-    furi_check(flags_set & events);
+    infrared_worker_rx_set_event(instance, events);
 }
 
 static void infrared_worker_process_timeout(InfraredWorker* instance) {
@@ -131,11 +145,14 @@ static void infrared_worker_process_timeout(InfraredWorker* instance) {
         instance->signal.timings_cnt = 0;
         instance->signal.decoded = true;
     } else {
-        instance->signal.decoded = false;
-
+        /* A raw signal ends on a Mark: drop a trailing Space, if any. */
         if((instance->signal.timings_cnt % 2) == 0) {
             --instance->signal.timings_cnt;
         }
+        /* Noise, not a signal: the caller clears the timings. */
+        if(instance->signal.timings_cnt < INFRARED_WORKER_RX_MIN_RAW_TIMINGS) return;
+
+        instance->signal.decoded = false;
     }
     if(instance->rx.received_signal_callback)
         instance->rx.received_signal_callback(

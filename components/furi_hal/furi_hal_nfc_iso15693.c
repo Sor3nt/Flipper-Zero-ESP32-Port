@@ -43,6 +43,7 @@ static FuriHalNfcIso15693Poller* furi_hal_nfc_iso15693_poller = NULL;
 
 static FuriHalNfcIso15693Poller* furi_hal_nfc_iso15693_poller_alloc(void) {
     FuriHalNfcIso15693Poller* instance = malloc(sizeof(FuriHalNfcIso15693Poller));
+    memset(instance, 0, sizeof(*instance)); /* ESP-IDF malloc does not zero */
 
     return instance;
 }

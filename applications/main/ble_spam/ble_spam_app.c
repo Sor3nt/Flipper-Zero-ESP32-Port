@@ -100,6 +100,8 @@ static BleSpamApp* ble_spam_app_alloc(void) {
     // State
     app->attack_type = BleSpamAttackAppleDevice;
     app->running = false;
+    app->hal_ready = false;
+    app->hal_init_failed = false;
     app->packet_count = 0;
     app->delay_ms = 100;
     app->current_index = 0;
