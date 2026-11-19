@@ -114,7 +114,7 @@ static void hid_publish_mount(bool mounted) {
 void tud_mount_cb(void) {
 #if CONFIG_IDF_TARGET_ESP32S3
     if(furi_hal_usb_u2f_backend_is_active()) {
-        furi_hal_usb_u2f_backend_set_mounted(true);
+        furi_hal_usb_u2f_backend_set_configured();
         return;
     }
 #endif
@@ -139,7 +139,12 @@ void tud_suspend_cb(bool remote_wakeup_en) {
     (void)remote_wakeup_en;
 #if CONFIG_IDF_TARGET_ESP32S3
     if(furi_hal_usb_u2f_backend_is_active()) {
-        furi_hal_usb_u2f_backend_set_mounted(false);
+        /* Hosts suspend an idle security key (HID selective suspend / autosuspend)
+         * while it stays plugged in and configured. Reporting that as a
+         * disconnect showed "Connect me to computer" a few seconds after
+         * enumeration although the host could still use the key. A real unplug
+         * is caught via VBUS (furi_hal_usb_notify_vbus_absent) where sensed. */
+        furi_hal_usb_u2f_backend_suspend();
         return;
     }
 #endif

@@ -38,6 +38,19 @@
 
 #define U2F_HID_BROADCAST_CID 0xFFFFFFFF
 
+#define U2F_HID_USB_RELEASE_ATTEMPTS 5
+#define U2F_HID_USB_RELEASE_RETRY_MS 100
+
+// U2F holds the USB port as an exclusive lease while it runs (the USB ownership
+// convention of this port): a lease-less furi_hal_usb_set_config() from another
+// feature is refused instead of silently switching the port away from the key,
+// and a qFlipper composite is paused and resumed through the standard path.
+// The state is static so that after a failed release the next U2F start
+// re-adopts its own lease instead of reporting "USB busy" until reboot.
+static const char u2f_hid_usb_owner[] = "U2F";
+static bool u2f_hid_usb_leased = false;
+static FuriHalUsbInterface* u2f_hid_usb_previous = NULL;
+
 typedef enum {
     WorkerEvtReserved = (1 << 0),
     WorkerEvtStop = (1 << 1),
@@ -57,7 +70,6 @@ struct U2fHid_packet {
 struct U2fHid {
     FuriThread* thread;
     FuriTimer* lock_timer;
-    FuriHalUsbInterface* usb_mode_prev;
     uint8_t seq_id_last;
     uint16_t req_buf_ptr;
     uint32_t req_len_left;
@@ -245,15 +257,15 @@ static int32_t u2f_hid_worker(void* context) {
         if(flags & WorkerEvtStop) break;
         if(flags & (WorkerEvtConnect | WorkerEvtDisconnect)) {
             bool connected = furi_hal_usb_u2f_backend_is_mounted();
-            if(!connected) {
-                u2f_hid->req_len_left = 0;
-                u2f_hid->req_buf_ptr = 0;
-                u2f_hid->seq_id_last = 0;
-                u2f_hid->lock = false;
-                u2f_hid->lock_cid = 0;
-                u2f_hid->lock_expiry_tick = 0;
-                furi_timer_stop(u2f_hid->lock_timer);
-            }
+            // Both edges are session boundaries: a (re)configuration may come
+            // from another host after an unplug that looked like a suspend.
+            u2f_hid->req_len_left = 0;
+            u2f_hid->req_buf_ptr = 0;
+            u2f_hid->seq_id_last = 0;
+            u2f_hid->lock = false;
+            u2f_hid->lock_cid = 0;
+            u2f_hid->lock_expiry_tick = 0;
+            furi_timer_stop(u2f_hid->lock_timer);
             u2f_set_state(u2f_hid->u2f_instance, connected);
             FURI_LOG_D(WORKER_TAG, "%s", connected ? "Connect" : "Disconnect");
         }
@@ -347,12 +359,44 @@ static int32_t u2f_hid_worker(void* context) {
     furi_timer_free(u2f_hid->lock_timer);
 
     furi_hal_hid_u2f_set_callback(NULL, NULL);
-    if(!furi_hal_usb_set_config(u2f_hid->usb_mode_prev, NULL)) {
-        FURI_LOG_E(WORKER_TAG, "Unable to restore the previous USB configuration");
-    }
     FURI_LOG_D(WORKER_TAG, "End");
 
     return 0;
+}
+
+// Hand the lease back: restores the interface that was active before U2F and
+// resumes a paused qFlipper composite. Returns true once the lease is no longer
+// held by U2F.
+static bool u2f_hid_usb_give_back(void) {
+    if(!u2f_hid_usb_leased) return true;
+    if(!furi_hal_usb_is_lease_owner(u2f_hid_usb_owner)) {
+        FURI_LOG_E(TAG, "U2F no longer owns its USB lease");
+    } else if(
+        !furi_hal_usb_lease_release(u2f_hid_usb_owner, u2f_hid_usb_previous) &&
+        furi_hal_usb_is_lease_owner(u2f_hid_usb_owner)) {
+        return false; // still ours: restoring the previous interface failed
+    }
+    // A false return with the lease gone means the paused owner did not resume;
+    // the HAL has logged that and there is nothing left for U2F to retry.
+    u2f_hid_usb_leased = false;
+    u2f_hid_usb_previous = NULL;
+    return true;
+}
+
+// Stop U2F and give the port back. Stopping is idempotent, so a failed attempt
+// is retried; if it keeps failing the lease stays held (nothing else may start
+// on a port U2F may still occupy) and the next U2F start re-adopts it.
+static void u2f_hid_usb_release(void) {
+    for(uint8_t attempt = 0; attempt < U2F_HID_USB_RELEASE_ATTEMPTS; attempt++) {
+        if(attempt) furi_delay_ms(U2F_HID_USB_RELEASE_RETRY_MS);
+        if(!furi_hal_usb_set_config_for_owner(u2f_hid_usb_owner, NULL, NULL)) {
+            FURI_LOG_W(TAG, "Stopping U2F USB failed (attempt %u)", (unsigned)(attempt + 1));
+            continue;
+        }
+        if(u2f_hid_usb_give_back()) return;
+        FURI_LOG_W(TAG, "Releasing the USB lease failed (attempt %u)", (unsigned)(attempt + 1));
+    }
+    FURI_LOG_E(TAG, "Unable to release USB from U2F, keeping the lease");
 }
 
 U2fHid* u2f_hid_start(U2fData* u2f_inst) {
@@ -361,7 +405,6 @@ U2fHid* u2f_hid_start(U2fData* u2f_inst) {
     memset(u2f_hid, 0, sizeof(U2fHid));
 
     u2f_hid->u2f_instance = u2f_inst;
-    u2f_hid->usb_mode_prev = furi_hal_usb_get_config();
     u2f_hid->lock_timer =
         furi_timer_alloc(u2f_hid_lock_timeout_callback, FuriTimerTypeOnce, u2f_hid);
     u2f_hid->thread =
@@ -373,7 +416,21 @@ U2fHid* u2f_hid_start(U2fData* u2f_inst) {
         return NULL;
     }
 
-    if(!furi_hal_usb_set_config(&usb_hid_u2f, NULL)) {
+    // Refused while an RPC session locks USB or another feature holds the lease.
+    bool usb_ready = u2f_hid_usb_leased;
+    if(!usb_ready) {
+        usb_ready = furi_hal_usb_lease_acquire(u2f_hid_usb_owner, &u2f_hid_usb_previous);
+        u2f_hid_usb_leased = usb_ready;
+        if(!usb_ready) FURI_LOG_W(TAG, "USB is busy (locked or used by another feature)");
+    }
+    if(usb_ready && !furi_hal_usb_set_config_for_owner(u2f_hid_usb_owner, &usb_hid_u2f, NULL)) {
+        // set_config rolls the previous interface back itself; only the lease
+        // is left to return, without stopping whatever is current again.
+        FURI_LOG_E(TAG, "Unable to switch USB to U2F");
+        if(!u2f_hid_usb_give_back()) FURI_LOG_E(TAG, "Unable to release the USB lease");
+        usb_ready = false;
+    }
+    if(!usb_ready) {
         furi_timer_free(u2f_hid->lock_timer);
         furi_thread_free(u2f_hid->thread);
         free(u2f_hid);
@@ -387,6 +444,8 @@ void u2f_hid_stop(U2fHid* u2f_hid) {
     furi_assert(u2f_hid);
     furi_thread_flags_set(furi_thread_get_id(u2f_hid->thread), WorkerEvtStop);
     furi_thread_join(u2f_hid->thread);
+    // The worker has detached its HAL callback; now give the port back.
+    u2f_hid_usb_release();
     u2f_shutdown(u2f_hid->u2f_instance);
     furi_thread_free(u2f_hid->thread);
     free(u2f_hid);

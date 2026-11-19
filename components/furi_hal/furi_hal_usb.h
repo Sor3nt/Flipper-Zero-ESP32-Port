@@ -62,6 +62,11 @@ void furi_hal_usb_set_u2f_preemption_callback(
     FuriHalUsbU2fPreemptionCallback cb,
     void* ctx);
 void furi_hal_usb_reinit(void);
+/* Called by the power HAL on every VBUS refresh (once a second) while a charger
+ * IC definitively reports VBUS absent. The USB bus alone cannot tell a pulled
+ * cable from a host that suspended the port (no VBUS monitoring on the OTG PHY),
+ * so backends that keep their mount across suspend drop it here. */
+void furi_hal_usb_notify_vbus_absent(void);
 
 #ifdef __cplusplus
 }

@@ -763,8 +763,10 @@ void u2f_set_state(U2fData* U2F, uint8_t state) {
     U2F->connected = (state != 0);
     furi_mutex_release(U2F->presence_mutex);
 
+    // Every connect/disconnect starts a new host session: a presence approval
+    // or pending prompt from the previous one must not carry over.
+    u2f_cancel_user_presence(U2F);
     if(state == 0) {
-        u2f_cancel_user_presence(U2F);
         if(U2F->callback != NULL) U2F->callback(U2fNotifyDisconnect, U2F->context);
     } else {
         if(U2F->callback != NULL) U2F->callback(U2fNotifyConnect, U2F->context);

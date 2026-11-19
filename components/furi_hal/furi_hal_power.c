@@ -3,6 +3,7 @@
 #include "furi_hal_bq25896.h"
 #include "furi_hal_ina219.h"
 #include "furi_hal_display.h"
+#include "furi_hal_usb.h"
 #include "boards/board.h"
 
 #include <math.h>
@@ -558,6 +559,9 @@ void furi_hal_power_refresh_usb_state(void) {
         if(furi_hal_power.last_sample_ok) state = furi_hal_power_is_usb_present() ? 1 : 0;
     }
     furi_hal_power_vbus_cache = state;
+    /* Same trust rule as furi_hal_power_is_running_on_battery(): only the
+     * charger's VBUS sense is definitive. */
+    if(furi_hal_power_is_running_on_battery()) furi_hal_usb_notify_vbus_absent();
 }
 
 bool furi_hal_power_is_usb_connected(void) {
