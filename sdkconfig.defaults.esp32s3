@@ -64,6 +64,12 @@ CONFIG_SPIRAM_RODATA=y
 # Allow .bss to live in PSRAM. Auto-maps lwip/net80211/pp/bt BSS to SPIRAM,
 # and exposes the `extram_bss` linker scheme for our own mappings (see main/main.lf).
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# Deliberately NOT set: CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP. It forces the WiFi
+# TX buffers to "Static", which are internal DMA buffers allocated for as long
+# as WiFi is up (16 x ~1.6 KB by default; wlan_hal does not override
+# static_tx_buf_num), and raises RX_BA_WIN 6 -> 16. That costs more idle
+# internal RAM than the dynamic buffers it moves to PSRAM. See the "Using PSRAM"
+# section of the IDF wifi.rst guide before enabling it.
 
 # NFC needs 3DES (felica, mf_ultralight)
 CONFIG_MBEDTLS_DES_C=y
@@ -121,3 +127,18 @@ CONFIG_PM_ENABLE=y
 # lets IDF step the FreeRTOS tick across sleep so there's no clock drift.
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048
+
+# --- Tier 1b: WiFi/lwIP buffer trim (shared across ALL esp32s3 boards) ---------
+# Default IDF buffers (static_rx=10, dynamic_rx/tx=32, recvmbox=32) pin a large
+# amount of INTERNAL (DMA-capable) RAM while WiFi is up. On the PSRAM boards the
+# internal heap is the scarce one (BLE controller + lwIP control blocks live
+# there), and on the no-PSRAM Cardputer ADV internal is the ONLY heap — so these
+# counts are trimmed board-wide. Kept conservative so the promiscuous sniffer
+# (wlan_app deauth/handshake capture) still has enough RX headroom:
+#   static_rx 8 >= ESP_WIFI_RX_BA_WIN (6), per the Kconfig recommendation.
+# NOTE: throughput-sensitive paths (Evil-Portal NAPT bridge, SD-update HTTPS)
+# must be smoke-tested on hardware after changing these.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16

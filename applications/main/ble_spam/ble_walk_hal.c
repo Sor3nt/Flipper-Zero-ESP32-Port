@@ -1,4 +1,5 @@
 #include "ble_walk_hal.h"
+#include <esp_attr.h>
 
 #include <esp_bt.h>
 #include <esp_bt_main.h>
@@ -13,15 +14,15 @@
 #define TAG "BleWalkHal"
 #define WALK_GATTC_APP_ID 0
 
-static BleWalkDevice s_devices[BLE_WALK_MAX_DEVICES];
+static EXT_RAM_BSS_ATTR BleWalkDevice s_devices[BLE_WALK_MAX_DEVICES];
 static uint16_t s_device_count = 0;
 static volatile bool s_scanning = false;
 
-static BleWalkService s_services[BLE_WALK_MAX_SERVICES];
+static EXT_RAM_BSS_ATTR BleWalkService s_services[BLE_WALK_MAX_SERVICES];
 static uint16_t s_service_count = 0;
 static volatile bool s_services_ready = false;
 
-static BleWalkChar s_chars[BLE_WALK_MAX_CHARS];
+static EXT_RAM_BSS_ATTR BleWalkChar s_chars[BLE_WALK_MAX_CHARS];
 static uint16_t s_char_count = 0;
 static volatile bool s_chars_ready = false;
 
@@ -299,6 +300,17 @@ bool ble_walk_hal_start(void) {
 }
 
 void ble_walk_hal_stop(void) {
+    /* Idempotent: a scene can request stop from both its Back handler and its
+     * on_exit. Without this guard the second call tears down and restarts the
+     * whole Bluedroid stack a second time, right after the first restart, which
+     * churns internal RAM and callback ownership. Clear the flag up front so any
+     * re-entrant/duplicate call is a no-op. */
+    if(!s_hal_started) {
+        ESP_LOGI(TAG, "BLE Walk HAL already stopped");
+        return;
+    }
+    s_hal_started = false;
+
     ESP_LOGI(TAG, "Stopping BLE Walk HAL...");
 
     if(s_connected) {

@@ -2,6 +2,7 @@
  * Siehe wlan_airprint.h. */
 
 #include "wlan_airprint.h"
+#include <esp_attr.h>
 
 #include <wlan_hal.h>
 #include <furi.h>
@@ -73,7 +74,7 @@ static bool s_name_loaded = false;
 
 /* Spam-Mode: viele Namen aus spam.txt, alle auf dieses Gerät zeigend. */
 static bool s_spam = false;
-static char s_spam_names[WLAN_AIRPRINT_SPAM_MAX][WLAN_AIRPRINT_NAME_MAX + 1];
+static EXT_RAM_BSS_ATTR char s_spam_names[WLAN_AIRPRINT_SPAM_MAX][WLAN_AIRPRINT_NAME_MAX + 1];
 static uint16_t s_spam_count = 0;
 
 /* Transienter Anzeigename-Override (Printer-Hijack „Clone"): der beworbene

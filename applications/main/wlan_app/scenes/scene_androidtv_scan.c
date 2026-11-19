@@ -7,6 +7,7 @@
  * scene, which connects (or routes to pairing if not paired yet). */
 
 #include "../wlan_app.h"
+#include <esp_attr.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -34,7 +35,7 @@ typedef struct {
     char name[WLAN_APP_HOSTNAME_MAX];
 } AtvServer;
 
-static AtvServer s_servers[ATV_SCAN_MAX];
+static EXT_RAM_BSS_ATTR AtvServer s_servers[ATV_SCAN_MAX];
 static volatile uint8_t s_count;
 static volatile bool s_scanning;
 static volatile bool s_scan_complete;

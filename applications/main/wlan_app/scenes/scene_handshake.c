@@ -1,4 +1,5 @@
 #include "../wlan_app.h"
+#include <esp_attr.h>
 #include <wlan_hal.h>
 #include "../wlan_pcap.h"
 #include <wlan_passwords.h>
@@ -87,7 +88,7 @@ typedef struct {
     File* pcap_file;
 } HsChannelTarget;
 
-static HsChannelTarget s_hsc_targets[HSC_MAX_TARGETS];
+static EXT_RAM_BSS_ATTR HsChannelTarget s_hsc_targets[HSC_MAX_TARGETS];
 static uint8_t s_hsc_target_count = 0;
 static char s_latest_hs_ssid[33];
 static bool s_hsc_auto_mode;

@@ -1,4 +1,5 @@
 #include "wlan_smart_deauth.h"
+#include <esp_attr.h>
 #include <wlan_hal.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
@@ -36,8 +37,8 @@ static volatile int8_t     s_pending_select = -1;
 static volatile bool       s_attack_exited = true;
 static SemaphoreHandle_t   s_state_mtx = NULL;
 
-static SdChannelInfo       s_channels_live[13];
-static SdChannelInfo       s_channels_snap[13];
+static EXT_RAM_BSS_ATTR SdChannelInfo       s_channels_live[13];
+static EXT_RAM_BSS_ATTR SdChannelInfo       s_channels_snap[13];
 static volatile bool       s_scanning = false;
 static SdRssiFilter        s_rssi_filters[14];
 
@@ -50,7 +51,7 @@ static volatile uint32_t   s_attack_frames = 0;
 static volatile uint32_t   s_attack_fps = 0;
 static volatile uint32_t   s_attack_beacon_age_ms = 0;
 static volatile uint32_t   s_attack_last_beacon = 0;
-static SdClientEntry       s_attack_clients[SD_MAX_CH_CLIENTS];
+static EXT_RAM_BSS_ATTR SdClientEntry s_attack_clients[SD_MAX_CH_CLIENTS];
 static volatile uint8_t    s_attack_client_count = 0;
 static volatile SdPmfState s_attack_pmf = SD_PMF_NONE;
 
@@ -63,7 +64,7 @@ static volatile uint32_t   s_monitor_beacon_count = 0;
 static volatile uint32_t   s_monitor_data_count = 0;
 static volatile uint32_t   s_monitor_data_bytes = 0;   // akumulator byte data frame (untuk throughput)
 static volatile uint32_t   s_monitor_rate_bps = 0;      // throughput tersampel (byte/detik)
-static SdClientEntry       s_monitor_clients[SD_MAX_CLIENTS];
+static EXT_RAM_BSS_ATTR SdClientEntry s_monitor_clients[SD_MAX_CLIENTS];
 static volatile uint8_t    s_monitor_client_count = 0;
 static SdRssiFilter        s_monitor_rssi_filter;
 

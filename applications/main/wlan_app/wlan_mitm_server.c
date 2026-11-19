@@ -1,4 +1,5 @@
 #include "wlan_mitm_server.h"
+#include <esp_attr.h>
 #include "wlan_cred_sniff.h"
 #include <wlan_hal.h>
 #include "wlan_html_inject.h"
@@ -145,7 +146,7 @@ static esp_err_t handler_code(httpd_req_t* req) {
         return ESP_OK;
     }
     uint32_t my_ip = wlan_hal_get_own_ip();
-    static char rendered[MITM_PAYLOAD_RENDERED_MAX];
+    static EXT_RAM_BSS_ATTR char rendered[MITM_PAYLOAD_RENDERED_MAX];
     int rendered_len = render_payload(
         rendered, (int)sizeof(rendered), raw, (int)raw_len, my_ip, victim_ip);
 

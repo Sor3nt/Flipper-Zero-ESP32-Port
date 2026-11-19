@@ -75,12 +75,12 @@ static struct {
     /* MAC des aktuellen Pair-Requests (für Timeout-Recovery). */
     uint8_t pair_target[MESH_MAC_LEN];
     bool pair_in_progress;
-} s_state;
+}* s_state = NULL;
 
 /* Status-Cache-Eintrag suchen / anlegen (default reported=false → "wait..."). */
 static ClientStatus* status_find(const uint8_t mac[MESH_MAC_LEN]) {
-    for(size_t i = 0; i < s_state.status_count; ++i) {
-        if(memcmp(s_state.status[i].mac, mac, MESH_MAC_LEN) == 0) return &s_state.status[i];
+    for(size_t i = 0; i < s_state->status_count; ++i) {
+        if(memcmp(s_state->status[i].mac, mac, MESH_MAC_LEN) == 0) return &s_state->status[i];
     }
     return NULL;
 }
@@ -88,8 +88,8 @@ static ClientStatus* status_find(const uint8_t mac[MESH_MAC_LEN]) {
 static ClientStatus* status_ensure(const uint8_t mac[MESH_MAC_LEN]) {
     ClientStatus* st = status_find(mac);
     if(st) return st;
-    if(s_state.status_count >= MESH_CLIENTS_MAX) return NULL;
-    st = &s_state.status[s_state.status_count++];
+    if(s_state->status_count >= MESH_CLIENTS_MAX) return NULL;
+    st = &s_state->status[s_state->status_count++];
     memcpy(st->mac, mac, MESH_MAC_LEN);
     st->reported = false;
     st->label[0] = '\0';
@@ -105,42 +105,42 @@ static void desktop_scene_mesh_clients_refresh_view(Desktop* desktop) {
 
     size_t n = 0;
     for(size_t i = 0; i < paired_count && n < MESH_CLIENTS_MAX; ++i) {
-        s_state.all[n] = paired[i];
-        s_state.paired[n] = true;
+        s_state->all[n] = paired[i];
+        s_state->paired[n] = true;
         n++;
     }
-    for(size_t i = 0; i < s_state.discovered_count && n < MESH_CLIENTS_MAX; ++i) {
+    for(size_t i = 0; i < s_state->discovered_count && n < MESH_CLIENTS_MAX; ++i) {
         bool dup = false;
         for(size_t j = 0; j < paired_count; ++j) {
-            if(memcmp(s_state.discovered[i].mac, paired[j].mac, MESH_MAC_LEN) == 0) {
+            if(memcmp(s_state->discovered[i].mac, paired[j].mac, MESH_MAC_LEN) == 0) {
                 dup = true;
                 break;
             }
         }
         if(dup) continue;
-        s_state.all[n] = s_state.discovered[i];
-        s_state.paired[n] = false;
+        s_state->all[n] = s_state->discovered[i];
+        s_state->paired[n] = false;
         n++;
     }
-    s_state.all_count = n;
+    s_state->all_count = n;
 
     const char* status[MESH_CLIENTS_MAX];
     for(size_t i = 0; i < n; ++i) {
         status[i] = NULL;
-        if(s_state.paired[i]) {
-            ClientStatus* st = status_ensure(s_state.all[i].mac);
+        if(s_state->paired[i]) {
+            ClientStatus* st = status_ensure(s_state->all[i].mac);
             status[i] = (st && st->reported) ? st->label : "lookup";
         }
     }
 
     desktop_mesh_clients_set_peers(
-        desktop->mesh_clients_view, s_state.all, s_state.paired, status, n);
+        desktop->mesh_clients_view, s_state->all, s_state->paired, status, n);
 }
 
 /* Status-Query an alle gepairten Clients (Buddy meldet seine running_mask). */
 static void query_all_paired(void) {
-    for(size_t i = 0; i < s_state.all_count; ++i) {
-        if(s_state.paired[i]) mesh_send_feature_query(s_state.all[i].mac);
+    for(size_t i = 0; i < s_state->all_count; ++i) {
+        if(s_state->paired[i]) mesh_send_feature_query(s_state->all[i].mac);
     }
 }
 
@@ -178,15 +178,15 @@ static void status_apply_featurelist(const MeshEventData* ev) {
 
 static void desktop_scene_mesh_clients_add_discovered(const MeshPeer* p) {
     /* Dedup gegen schon-discovered und gegen paired. */
-    for(size_t i = 0; i < s_state.discovered_count; ++i) {
-        if(memcmp(s_state.discovered[i].mac, p->mac, MESH_MAC_LEN) == 0) {
+    for(size_t i = 0; i < s_state->discovered_count; ++i) {
+        if(memcmp(s_state->discovered[i].mac, p->mac, MESH_MAC_LEN) == 0) {
             /* Name evtl. aktualisieren. */
-            s_state.discovered[i] = *p;
+            s_state->discovered[i] = *p;
             return;
         }
     }
-    if(s_state.discovered_count >= MESH_CLIENTS_MAX) return;
-    s_state.discovered[s_state.discovered_count++] = *p;
+    if(s_state->discovered_count >= MESH_CLIENTS_MAX) return;
+    s_state->discovered[s_state->discovered_count++] = *p;
 }
 
 /* Discovery-Sweep: rotiert die WiFi-Kanäle (der Buddy bleibt auf seinem). Pro
@@ -194,21 +194,21 @@ static void desktop_scene_mesh_clients_add_discovered(const MeshPeer* p) {
  * (der Buddy auf diesem Kanal antwortet, RX-Kanal verrät seinen Kanal). */
 static void sweep_tick(void* ctx) {
     (void)ctx;
-    if(s_state.pair_in_progress) return; /* während Pairing nicht weghoppen */
+    if(s_state->pair_in_progress) return; /* während Pairing nicht weghoppen */
     /* Feste Reihenfolge (SWEEP_ORDER), lange Verweildauer (SWEEP_PERIOD_MS) je
      * Kanal, damit der Buddy zuverlässig geantwortet bekommt. */
-    s_state.sweep_ch = SWEEP_ORDER[s_state.sweep_idx];
-    s_state.sweep_idx = (uint8_t)((s_state.sweep_idx + 1) % SWEEP_ORDER_LEN);
-    mesh_service_set_channel(s_state.sweep_ch);
+    s_state->sweep_ch = SWEEP_ORDER[s_state->sweep_idx];
+    s_state->sweep_idx = (uint8_t)((s_state->sweep_idx + 1) % SWEEP_ORDER_LEN);
+    mesh_service_set_channel(s_state->sweep_ch);
     mesh_send_discover();
     query_all_paired();
 }
 
 static void pair_timeout(void* ctx) {
     Desktop* desktop = ctx;
-    if(!s_state.pair_in_progress) return;
+    if(!s_state->pair_in_progress) return;
     FURI_LOG_W(TAG, "pair timeout");
-    s_state.pair_in_progress = false;
+    s_state->pair_in_progress = false;
     desktop_mesh_clients_set_pairing(desktop->mesh_clients_view, false);
 }
 
@@ -222,7 +222,21 @@ static void desktop_scene_mesh_clients_view_cb(DesktopEvent event, void* ctx) {
 void desktop_scene_mesh_clients_on_enter(void* context) {
     Desktop* desktop = context;
 
-    memset(&s_state, 0, sizeof(s_state));
+    /* Tier-2 on-demand: the ~4.7 KB scene state lives on the heap only while
+     * the mesh area is open. Allocated once on first enter and kept across the
+     * handoff to the Action sub-scene (mesh_keep_service); freed on real exit.
+     * With SPIRAM_USE_MALLOC this lands in PSRAM on PSRAM boards and in internal
+     * RAM on the no-PSRAM Cardputer ADV (where it is then returned on close). */
+    if(!s_state) {
+        s_state = malloc(sizeof(*s_state));
+        if(!s_state) {
+            FURI_LOG_E(TAG, "s_state alloc failed");
+            scene_manager_search_and_switch_to_previous_scene(
+                desktop->scene_manager, DesktopSceneLockMenu);
+            return;
+        }
+    }
+    memset(s_state, 0, sizeof(*s_state));
     /* Normales Enter (auch Rückkehr von der Action-Scene): Service soll beim
      * nächsten normalen Verlassen (zurück ins Lock-Menü) gestoppt werden. */
     desktop->mesh_keep_service = false;
@@ -241,10 +255,10 @@ void desktop_scene_mesh_clients_on_enter(void* context) {
 
     /* Sweep-Timer (rotiert Kanäle in SWEEP_ORDER: Discovery + Status je Kanal) +
      * Pair-Timeout. */
-    s_state.sweep_idx = 0; /* erster Tick → SWEEP_ORDER[0] (Kanal 1) */
-    s_state.sweep_timer = furi_timer_alloc(sweep_tick, FuriTimerTypePeriodic, desktop);
-    s_state.pair_timer = furi_timer_alloc(pair_timeout, FuriTimerTypeOnce, desktop);
-    furi_timer_start(s_state.sweep_timer, furi_ms_to_ticks(SWEEP_PERIOD_MS));
+    s_state->sweep_idx = 0; /* erster Tick → SWEEP_ORDER[0] (Kanal 1) */
+    s_state->sweep_timer = furi_timer_alloc(sweep_tick, FuriTimerTypePeriodic, desktop);
+    s_state->pair_timer = furi_timer_alloc(pair_timeout, FuriTimerTypeOnce, desktop);
+    furi_timer_start(s_state->sweep_timer, furi_ms_to_ticks(SWEEP_PERIOD_MS));
     sweep_tick(desktop); /* sofort erster Sweep-Schritt (Anzeige bis dahin: "wait...") */
 
     view_dispatcher_switch_to_view(desktop->view_dispatcher, DesktopViewIdMeshClients);
@@ -253,6 +267,8 @@ void desktop_scene_mesh_clients_on_enter(void* context) {
 bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event) {
     Desktop* desktop = context;
     bool consumed = false;
+
+    if(!s_state) return false;
 
     if(event.type != SceneManagerEventTypeCustom) return false;
 
@@ -265,40 +281,40 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
 
     case DesktopMeshClientsEventPair: {
         int idx = desktop_mesh_clients_get_selected_idx(desktop->mesh_clients_view);
-        if(idx < 0 || (size_t)idx >= s_state.all_count) break;
-        if(s_state.paired[idx]) break; /* schon gepairt */
-        if(s_state.pair_in_progress) break;
+        if(idx < 0 || (size_t)idx >= s_state->all_count) break;
+        if(s_state->paired[idx]) break; /* schon gepairt */
+        if(s_state->pair_in_progress) break;
 
-        memcpy(s_state.pair_target, s_state.all[idx].mac, MESH_MAC_LEN);
+        memcpy(s_state->pair_target, s_state->all[idx].mac, MESH_MAC_LEN);
         /* Auf den Kanal des Buddys tunen (frischer Buddy = ch1) und während des
          * Pairings nicht weghoppen (pair_in_progress pausiert den Sweep). */
-        ClientStatus* pst = status_find(s_state.pair_target);
+        ClientStatus* pst = status_find(s_state->pair_target);
         mesh_service_set_channel(pst && pst->channel ? pst->channel : 1);
-        if(!mesh_send_pair_request(s_state.pair_target)) {
+        if(!mesh_send_pair_request(s_state->pair_target)) {
             FURI_LOG_W(TAG, "pair_request enqueue failed");
             break;
         }
-        s_state.pair_in_progress = true;
+        s_state->pair_in_progress = true;
         desktop_mesh_clients_set_pairing(desktop->mesh_clients_view, true);
-        furi_timer_start(s_state.pair_timer, furi_ms_to_ticks(PAIR_TIMEOUT_MS));
+        furi_timer_start(s_state->pair_timer, furi_ms_to_ticks(PAIR_TIMEOUT_MS));
         consumed = true;
         break;
     }
 
     case DesktopMeshClientsEventOpenAction: {
         int idx = desktop_mesh_clients_get_selected_idx(desktop->mesh_clients_view);
-        if(idx < 0 || (size_t)idx >= s_state.all_count) break;
-        if(!s_state.paired[idx]) break; /* nur gepairte Clients haben Actions */
+        if(idx < 0 || (size_t)idx >= s_state->all_count) break;
+        if(!s_state->paired[idx]) break; /* nur gepairte Clients haben Actions */
 
         /* Nur betretbar, wenn der Buddy diese Session geantwortet hat (erreichbar).
          * Unerreichbar (Liste zeigt "lookup") → OK tut nichts. */
-        ClientStatus* st = status_find(s_state.all[idx].mac);
+        ClientStatus* st = status_find(s_state->all[idx].mac);
         if(!st || !st->reported) {
             consumed = true;
             break;
         }
 
-        desktop->mesh_action_client = s_state.all[idx];
+        desktop->mesh_action_client = s_state->all[idx];
         desktop->mesh_keep_service = true; /* Service über den Scene-Wechsel halten */
 
         /* Bereits bekannte Feature-Liste + Kanal mitgeben; auf den Kanal tunen,
@@ -324,12 +340,12 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
 
     case DesktopMeshClientsEventRemove: {
         int idx = desktop_mesh_clients_get_selected_idx(desktop->mesh_clients_view);
-        if(idx < 0 || (size_t)idx >= s_state.all_count) break;
-        if(!s_state.paired[idx]) break;
+        if(idx < 0 || (size_t)idx >= s_state->all_count) break;
+        if(!s_state->paired[idx]) break;
 
         /* Disconnect stoppt beim Buddy alle Features (auch Capture). */
-        mesh_send_disconnect(s_state.all[idx].mac);
-        mesh_config_remove_client(s_state.all[idx].mac);
+        mesh_send_disconnect(s_state->all[idx].mac);
+        mesh_config_remove_client(s_state->all[idx].mac);
         desktop_scene_mesh_clients_refresh_view(desktop);
         consumed = true;
         break;
@@ -353,16 +369,16 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
     case DesktopMeshEventMasterPairRsp: {
         /* Nur reagieren wenn die Antwort zum aktuell laufenden Pair-Request
          * passt — sonst ist es eine Spät-Antwort eines abgebrochenen Pairs. */
-        if(!s_state.pair_in_progress) {
+        if(!s_state->pair_in_progress) {
             consumed = true;
             break;
         }
-        if(memcmp(desktop->mesh_pending.mac, s_state.pair_target, MESH_MAC_LEN) != 0) {
+        if(memcmp(desktop->mesh_pending.mac, s_state->pair_target, MESH_MAC_LEN) != 0) {
             consumed = true;
             break;
         }
-        furi_timer_stop(s_state.pair_timer);
-        s_state.pair_in_progress = false;
+        furi_timer_stop(s_state->pair_timer);
+        s_state->pair_in_progress = false;
         desktop_mesh_clients_set_pairing(desktop->mesh_clients_view, false);
 
         if(desktop->mesh_pending.accepted) {
@@ -393,15 +409,17 @@ bool desktop_scene_mesh_clients_on_event(void* context, SceneManagerEvent event)
 void desktop_scene_mesh_clients_on_exit(void* context) {
     Desktop* desktop = context;
 
-    if(s_state.sweep_timer) {
-        furi_timer_stop(s_state.sweep_timer);
-        furi_timer_free(s_state.sweep_timer);
-        s_state.sweep_timer = NULL;
+    if(!s_state) return; /* allocation failed in on_enter; nothing to tear down */
+
+    if(s_state->sweep_timer) {
+        furi_timer_stop(s_state->sweep_timer);
+        furi_timer_free(s_state->sweep_timer);
+        s_state->sweep_timer = NULL;
     }
-    if(s_state.pair_timer) {
-        furi_timer_stop(s_state.pair_timer);
-        furi_timer_free(s_state.pair_timer);
-        s_state.pair_timer = NULL;
+    if(s_state->pair_timer) {
+        furi_timer_stop(s_state->pair_timer);
+        furi_timer_free(s_state->pair_timer);
+        s_state->pair_timer = NULL;
     }
 
     /* Handoff zur Action-Scene/Sub-Scenes: Mesh-Service weiterlaufen lassen — beim
@@ -414,4 +432,8 @@ void desktop_scene_mesh_clients_on_exit(void* context) {
      * Buddy capturet AUTONOM weiter und hält die Ergebnisse durabel (NVS) — beim
      * Zurückkommen werden sie zuverlässig nachgeliefert. */
     mesh_service_stop();
+
+    /* Mesh area fully left -> return the on-demand state. */
+    free(s_state);
+    s_state = NULL;
 }

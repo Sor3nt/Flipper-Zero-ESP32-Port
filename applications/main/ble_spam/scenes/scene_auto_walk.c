@@ -1,4 +1,5 @@
 #include "../ble_spam_app.h"
+#include <esp_attr.h>
 #include "../ble_walk_hal.h"
 #include "../ble_auto_walk_log.h"
 #include "../views/ble_auto_walk_view.h"
@@ -20,7 +21,7 @@
 
 static FuriThread* s_thread = NULL;
 static volatile bool s_stop = false;
-static BleAutoWalkSeenSet s_seen;
+static EXT_RAM_BSS_ATTR BleAutoWalkSeenSet s_seen;
 static BleAutoWalkLog* s_log = NULL;
 
 // Worker → UI status (simple shared struct, written by worker, read by UI tick)
