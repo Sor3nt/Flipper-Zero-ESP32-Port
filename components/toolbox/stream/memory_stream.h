@@ -11,12 +11,13 @@ extern "C" {
  * Allocate a read-only stream over an existing memory buffer.
  *
  * The stream does NOT copy or take ownership of @p data: the buffer must stay
- * valid and unmodified until the stream is freed. Write, clean and
- * delete_and_insert operations are rejected, so the buffer is never modified
- * through the stream.
+ * valid and unmodified until the stream is freed. The buffer is never modified
+ * through the stream: write returns 0, delete_and_insert returns false and
+ * clean is a no-op (content and position are left unchanged).
  *
- * Seek/tell/eof semantics match string_stream, so any parser that works on a
- * string-backed FlipperFormat works identically on this one.
+ * Read/seek/tell/eof semantics match string_stream (seek out of range clamps
+ * and returns false, eof is position >= size), so a parser that works on a
+ * string-backed FlipperFormat reads this one identically.
  *
  * @param data pointer to the buffer
  * @param size buffer size in bytes
