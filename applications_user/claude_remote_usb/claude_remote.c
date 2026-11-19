@@ -3442,7 +3442,10 @@ static int32_t claude_remote_main(void* p) {
 
     /* Cleanup USB HID — release the lease, retrying a failed release. */
 #ifdef HID_TRANSPORT_USB
-    furi_hal_hid_kb_release_all();
+    /* PORT: only while the HID lease is ours. When it was refused (BadUSB or
+     * another HID owner is running), an all-keys-up report here would land in
+     * that owner's session and break its key sequence. */
+    if(state->usb_lease) furi_hal_hid_kb_release_all();
     for(uint8_t attempt = 0; attempt < 5; attempt++) {
         if(cremote_usb_release(state)) break;
         furi_delay_ms(100);
