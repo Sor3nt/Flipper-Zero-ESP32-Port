@@ -60,6 +60,18 @@ uint16_t tpms_diff_manchester_decode(
     uint8_t first;
     uint8_t second = 0;
 
+    /* PORT FIX: rtl_433's bitbuffer_differential_manchester_decode() starts with
+     * this limit, and the port had dropped it. The clock-sync loop below
+     * appends a 0 for every short-short pair WITHOUT checking max_bits, so an
+     * alternating run (the 0x55/0xAA preamble every TPMS sensor sends) wrote
+     * up to ~len/2 bits into the caller's few-byte stack buffer (smartire: 7
+     * bytes for 48 bits, input up to TPMS_CAPTURE_MAX_BITS) and smashed the
+     * RX thread's stack. With len capped at start + 2*max_bits, both loops
+     * together emit at most max_bits. */
+    if(max_bits && (uint32_t)len > (uint32_t)start + 2u * max_bits) {
+        len = (uint16_t)(start + 2u * max_bits);
+    }
+
     /* The first long pulse sets the clock; a short one before it is
      * skipped to get into step. */
     while(pos + 2 < len) {

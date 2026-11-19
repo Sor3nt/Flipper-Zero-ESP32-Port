@@ -73,6 +73,19 @@ typedef struct {
     FuriThread* local_thread;
 } TpmsBridgeApp;
 
+/** Stable context handed to the CLI command instead of the app pointer itself.
+ *
+ * The CLI dispatcher copies this context and releases its registry lock BEFORE
+ * the command thread runs, so there is a window between dispatch and the command
+ * marking itself busy (cli_sessions++) in which the app could free itself. This
+ * handle is allocated once and never freed, so dereferencing it after the app is
+ * gone is safe; `lock` serialises the cli_sessions increment with clearing `app`
+ * on teardown, which fully closes that window. */
+typedef struct {
+    FuriMutex* lock;
+    TpmsBridgeApp* app; /**< NULL once the app is tearing down */
+} TpmsCliHandle;
+
 /** Store a received frame in the shared state (for the screen). */
 void tpms_bridge_report_frame(TpmsBridgeApp* app, const TpmsFrame* frame, float rssi_dbm);
 

@@ -63,7 +63,10 @@ static void tpms_bridge_draw_callback(Canvas* canvas, void* context) {
 
 static void tpms_bridge_input_callback(InputEvent* event, void* context) {
     TpmsBridgeApp* app = context;
-    furi_message_queue_put(app->input_queue, event, FuriWaitForever);
+    /* PORT FIX: runs on the GUI thread - never block it. With FuriWaitForever a
+     * full queue (main loop parked in the exit_blocked wait, which no longer
+     * reads input) froze the whole GUI after 8 key presses. */
+    furi_message_queue_put(app->input_queue, event, 0);
 }
 
 /** Lets the app be closed from the outside: `loader close`, `ufbt launch`.
@@ -349,6 +352,11 @@ static void tpms_bridge_handle_input(TpmsBridgeApp* app, const InputEvent* event
     furi_mutex_release(app->state_mutex);
 }
 
+/* Stable CLI context (see TpmsCliHandle). Allocated once, never freed: the tpms
+ * app is a single-instance .fap, so one static handle (with a one-time mutex) is
+ * reused across launches and can safely outlive any app instance. */
+static TpmsCliHandle s_cli_handle = {0};
+
 static TpmsBridgeApp* tpms_bridge_app_alloc(void) {
     TpmsBridgeApp* app = malloc(sizeof(TpmsBridgeApp));
     memset(app, 0, sizeof(TpmsBridgeApp));
@@ -366,6 +374,16 @@ static TpmsBridgeApp* tpms_bridge_app_alloc(void) {
 
     furi_thread_set_signal_callback(furi_thread_get_current(), tpms_bridge_signal_callback, app);
 
+    /* Publish this app via the stable CLI handle BEFORE the command is registered,
+     * so any dispatch sees a valid app. The handle lock serialises this with the
+     * cli_sessions bookkeeping and the teardown that clears app (closes the UAF
+     * window where the dispatcher handed out the context before the command marked
+     * itself busy). */
+    if(!s_cli_handle.lock) s_cli_handle.lock = furi_mutex_alloc(FuriMutexTypeNormal);
+    furi_mutex_acquire(s_cli_handle.lock, FuriWaitForever);
+    s_cli_handle.app = app;
+    furi_mutex_release(s_cli_handle.lock);
+
     app->cli_registry = furi_record_open(RECORD_CLI);
     /* Set the stack explicitly: the command formats strings and holds a
      * FuriString, and the default CLI command stack is rather small. */
@@ -374,14 +392,15 @@ static TpmsBridgeApp* tpms_bridge_app_alloc(void) {
         TPMS_CLI_COMMAND_NAME,
         CliCommandFlagParallelSafe,
         tpms_cli_command,
-        app,
+        &s_cli_handle,
         TPMS_CLI_STACK_SIZE);
 
     return app;
 }
 
 static void tpms_bridge_app_free(TpmsBridgeApp* app) {
-    cli_registry_delete_command(app->cli_registry, TPMS_CLI_COMMAND_NAME);
+    /* The command was unregistered in tpms_bridge_app() before waiting for the
+     * running sessions. */
     furi_record_close(RECORD_CLI);
 
     gui_remove_view_port(app->gui, app->view_port);
@@ -442,8 +461,19 @@ int32_t tpms_bridge_app(void* p) {
      * reason, staying on screen with a clear message beats pulling the
      * code out from under a running thread. */
     app->stop_requested = true;
+    /* PORT FIX: unregister first, so no new tpms_rx can start between the end
+     * of the wait below and freeing the app. */
+    cli_registry_delete_command(app->cli_registry, TPMS_CLI_COMMAND_NAME);
+    /* Clear the published app under the handle lock. Combined with the matching
+     * lock in tpms_cli_command(), this guarantees that any dispatch which already
+     * captured the context either marked itself busy before this point (so the
+     * wait below sees it) or will observe app==NULL and return without touching
+     * freed memory — closing the dispatch/increment UAF window. */
+    furi_mutex_acquire(s_cli_handle.lock, FuriWaitForever);
+    s_cli_handle.app = NULL;
+    furi_mutex_release(s_cli_handle.lock);
     uint32_t waited_ms = 0;
-    while(app->cli_sessions > 0) {
+    while(__atomic_load_n(&app->cli_sessions, __ATOMIC_SEQ_CST) > 0) {
         furi_delay_ms(20);
         waited_ms += 20;
         if(waited_ms > TPMS_CLI_STOP_TIMEOUT_MS) {

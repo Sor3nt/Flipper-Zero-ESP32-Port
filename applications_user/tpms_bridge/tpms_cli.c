@@ -164,9 +164,44 @@ static void tpms_cli_collect_raw(bool level, uint32_t duration, void* context) {
     }
 }
 
-void tpms_cli_command(PipeSide* pipe, FuriString* args, void* context) {
-    TpmsBridgeApp* app = context;
+static void tpms_cli_command_body(PipeSide* pipe, FuriString* args, TpmsBridgeApp* app);
 
+/* PORT FIX: the app may only free itself (and be unloaded) while no command is
+ * inside this .fap. Upstream counted a session only after the radio had been
+ * acquired - up to TPMS_RADIO_YIELD_TIMEOUT_MS later - and still touched
+ * app->radio_mutex after the decrement, so closing the app at the wrong moment
+ * freed the mutex/app under a running command.
+ *
+ * The context is a never-freed TpmsCliHandle, not the app itself: the CLI
+ * dispatcher copies the context and drops its registry lock before this runs, so
+ * the app could otherwise be freed in the gap before we mark ourselves busy.
+ * Take handle->lock, read app and bump cli_sessions atomically with the teardown
+ * that clears handle->app; from there the busy count keeps app alive until the
+ * decrement below (its very last access). If the app is already gone, return
+ * without touching it. */
+void tpms_cli_command(PipeSide* pipe, FuriString* args, void* context) {
+    TpmsCliHandle* handle = context;
+
+    furi_mutex_acquire(handle->lock, FuriWaitForever);
+    TpmsBridgeApp* app = handle->app;
+    if(app && !app->stop_requested) {
+        __atomic_fetch_add(&app->cli_sessions, 1, __ATOMIC_SEQ_CST);
+    } else {
+        app = NULL;
+    }
+    furi_mutex_release(handle->lock);
+
+    if(!app) {
+        tpms_cli_emit_direct(pipe, "{\"error\":\"app closing\"}\r\n");
+        return;
+    }
+
+    tpms_cli_command_body(pipe, args, app);
+
+    __atomic_fetch_sub(&app->cli_sessions, 1, __ATOMIC_SEQ_CST);
+}
+
+static void tpms_cli_command_body(PipeSide* pipe, FuriString* args, TpmsBridgeApp* app) {
     const uint8_t current_slot =
         app->config == TpmsConfigScan ? app->active_slot : (uint8_t)(app->config % TPMS_SLOT_COUNT);
 
@@ -249,6 +284,7 @@ void tpms_cli_command(PipeSide* pipe, FuriString* args, void* context) {
 
     bool radio_acquired = false;
     for(uint32_t waited = 0; waited <= TPMS_RADIO_YIELD_TIMEOUT_MS; waited += 50) {
+        if(app->stop_requested) break; // app closing: do not keep it waiting
         if(furi_mutex_acquire(app->radio_mutex, 50) == FuriStatusOk) {
             radio_acquired = true;
             break;
@@ -281,7 +317,6 @@ void tpms_cli_command(PipeSide* pipe, FuriString* args, void* context) {
     }
     if(!pinned_frequency) app->active_slot = (uint8_t)(band * 2 + (modulation == TpmsModulationOok ? 1 : 0));
 
-    app->cli_sessions++;
     furi_mutex_acquire(app->state_mutex, FuriWaitForever);
     app->usb_streaming = true;
     furi_mutex_release(app->state_mutex);
@@ -359,9 +394,9 @@ void tpms_cli_command(PipeSide* pipe, FuriString* args, void* context) {
     furi_mutex_acquire(app->state_mutex, FuriWaitForever);
     app->usb_streaming = false;
     furi_mutex_release(app->state_mutex);
-    app->cli_sessions--;
 
     furi_mutex_release(app->radio_mutex);
     /* The radio is free now — local reception will come back on its own. */
     app->radio_yield_requested = false;
+    /* cli_sessions is decremented by tpms_cli_command() after this returns. */
 }
