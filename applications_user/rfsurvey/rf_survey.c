@@ -3050,11 +3050,20 @@ static bool spectrum_input(InputEvent* event, void* context) {
         uint16_t tb[4];
         numeric_top4(app, tv, tb);
         if(tv[app->num_sel] <= -200) return true; // empty slot -> nothing to capture
+#ifdef RFS_LAB
+        // PORT FIX: while the lab carrier transmits (page 7), carrier_start() has stopped the
+        // sweep worker (app->worker == NULL) and the carrier thread owns the radio. Going to this
+        // page and pressing OK used to call furi_thread_join(NULL) -> furi_check crash, and would
+        // have started a capture on a radio that is transmitting. Stop the carrier first.
+        if(app->carrier_worker) return true;
+#endif
         app->recording = false; // the survey worker will close any open CSV as it stops
         app->running = false;
-        furi_thread_join(app->worker);
-        furi_thread_free(app->worker);
-        app->worker = NULL;
+        if(app->worker) {
+            furi_thread_join(app->worker);
+            furi_thread_free(app->worker);
+            app->worker = NULL;
+        }
         app->cap_freq = app->f_start + (uint32_t)tb[app->num_sel] * app->f_step;
         app->cap_preset = app->preset_idx;
         app->capturing = false;
