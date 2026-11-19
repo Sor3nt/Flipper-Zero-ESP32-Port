@@ -635,7 +635,7 @@ static void sending_view_draw(Canvas* canvas, void* model) {
 static bool sending_view_input(InputEvent* event, void* context) {
     MorseApp* app = context;
     if(event->type == InputTypeShort && event->key == InputKeyBack) {
-        cw_radio_abort(app->radio);
+        cw_radio_cancel(app->radio); // PORT FIX: one-shot send, a pre-start Back must stick
         return true;
     }
     return false;
@@ -712,12 +712,8 @@ static bool morse_radio_acquire(MorseApp* app) {
     // and furi_hal_subghz_shutdown() on the internal radio. Always use the internal device (a
     // settings file saved with "External" by an older build is overridden here too).
     app->config.external_radio = false;
-    if(cw_radio_open(app->radio, app->config.external_radio)) return true;
-    morse_log("radio: acquire failed (external=%d)", app->config.external_radio ? 1 : 0);
-    if(app->config.external_radio) {
-        // fall back to the built-in CC1101 so the app still works
-        return cw_radio_open(app->radio, false);
-    }
+    if(cw_radio_open(app->radio, false)) return true;
+    morse_log("radio: acquire failed (internal CC1101)");
     return false;
 }
 
@@ -777,6 +773,7 @@ static void morse_start_text_tx(MorseApp* app, const char* text) {
     }
 
     app->tx_running = true;
+    cw_radio_resume(app->radio); // PORT FIX: clear a previous session's cancel
     app->tx_thread = furi_thread_alloc_ex("MorseTx", 4096, morse_tx_thread, app);
     furi_thread_start(app->tx_thread);
 
@@ -822,6 +819,7 @@ static void morse_link_line_received(const char* line, void* context) {
 }
 
 static void morse_link_enter(MorseApp* app) {
+    cw_radio_resume(app->radio); // PORT FIX: clear a previous session's cancel
     bool radio_ok = morse_radio_acquire(app);
     bool link_ok = radio_ok && morse_link_start(
                                    app->link,
@@ -851,7 +849,10 @@ static void morse_link_enter(MorseApp* app) {
 }
 
 static void morse_link_leave(MorseApp* app) {
-    cw_radio_abort(app->radio);
+    // PORT FIX: sticky cancel. A plain abort set while the link worker was between
+    // dequeuing a line and entering cw_radio_send() was re-armed there, so the join in
+    // morse_link_stop() froze the GUI for the whole line (and every queued line after it).
+    cw_radio_cancel(app->radio);
     morse_link_stop(app->link);
     morse_radio_release(app);
 }
@@ -1387,7 +1388,7 @@ static bool morse_navigation_callback(void* context) {
         break;
     case MorseViewSending:
         if(app->tx_running) {
-            cw_radio_abort(app->radio);
+            cw_radio_cancel(app->radio); // PORT FIX: must survive a not-yet-started send
             return true; // the thread will post MorseEventTxDone
         }
         morse_finish_text_tx(app);

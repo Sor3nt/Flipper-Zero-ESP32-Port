@@ -131,6 +131,9 @@ static bool link_start_ble(MorseLink* link) {
     if(!link->profile) {
         FURI_LOG_E(TAG, "failed to start the BLE serial profile");
         bt_set_status_changed_callback(link->bt, NULL, NULL);
+        // PORT FIX: a failed swap leaves the bt service with no profile at all; put the
+        // default one back so BLE (RPC / qFlipper) still works after leaving this screen.
+        bt_profile_restore_default(link->bt);
         furi_record_close(RECORD_BT);
         link->bt = NULL;
         return false;

@@ -66,6 +66,13 @@ struct CwRadio {
     uint32_t total_us;
     CwPhase phase;
     volatile bool abort;
+    /* PORT FIX: sticky session cancel. `abort` is re-armed by every
+     * cw_radio_send(), so an abort requested just before a worker entered
+     * cw_radio_send() was silently lost and the owner's furi_thread_join()
+     * then waited for the whole message (seconds..minutes at low WPM).
+     * `cancel` is only set by the session owner on stop and only cleared by
+     * the owner when it starts a new session (cw_radio_resume). */
+    volatile bool cancel;
     volatile bool sending;
 };
 
@@ -156,7 +163,7 @@ static LevelDuration cw_radio_async_callback(void* context) {
     }
 
     while(true) {
-        if(radio->abort) return level_duration_reset();
+        if(radio->abort || radio->cancel) return level_duration_reset();
 
         if(radio->remaining_us == 0) {
             if(radio->idx >= radio->count) {
@@ -304,6 +311,10 @@ void cw_radio_idle(CwRadio* radio) {
 
 bool cw_radio_send(CwRadio* radio, const MorseStream* stream, const CwRadioParams* params) {
     furi_check(radio);
+    if(radio->cancel) {
+        morse_log("send: session cancelled, not keying");
+        return false;
+    }
     if(!radio->device || !stream || stream->count == 0) {
         morse_log("send: no device or empty stream");
         return false;
@@ -379,6 +390,16 @@ bool cw_radio_send(CwRadio* radio, const MorseStream* stream, const CwRadioParam
 
 void cw_radio_abort(CwRadio* radio) {
     if(radio) radio->abort = true;
+}
+
+void cw_radio_cancel(CwRadio* radio) {
+    if(!radio) return;
+    radio->cancel = true;
+    radio->abort = true;
+}
+
+void cw_radio_resume(CwRadio* radio) {
+    if(radio) radio->cancel = false;
 }
 
 uint8_t cw_radio_progress(const CwRadio* radio) {

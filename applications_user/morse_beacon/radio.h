@@ -67,8 +67,18 @@ void cw_radio_idle(CwRadio* radio);
 /** Blocking transmit of a rendered stream. Leaves the radio idle. */
 bool cw_radio_send(CwRadio* radio, const MorseStream* stream, const CwRadioParams* params);
 
-/** Cut a transmission short at the next element boundary. */
+/** Cut a transmission short at the next element boundary. Only affects the
+ * send in flight: the next cw_radio_send() re-arms it. */
 void cw_radio_abort(CwRadio* radio);
+
+/** Session stop: abort the send in flight AND refuse every later send until
+ * cw_radio_resume(). Use this before joining a worker that may be about to
+ * call cw_radio_send(), so the stop cannot be lost. */
+void cw_radio_cancel(CwRadio* radio);
+
+/** Clear a previous cw_radio_cancel(). Call from the session owner when it
+ * starts a new session, before the worker thread is started. */
+void cw_radio_resume(CwRadio* radio);
 
 /** 0..100 progress of the transmission in flight, for the UI thread. */
 uint8_t cw_radio_progress(const CwRadio* radio);

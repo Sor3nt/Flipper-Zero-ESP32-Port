@@ -68,13 +68,20 @@ void morse_config_validate(MorseConfig* config) {
     if(config->rx_bw >= CwRxBwCount) config->rx_bw = CwRxBw101;
     if(config->link_source >= LinkSourceCount) config->link_source = LinkSourceBle;
 
-    // snap to the step each settings row iterates over, then bound it
-    config->tone_hz = 400 + clamp_u32((config->tone_hz - 400) / 50, 0, 16) * 50;
-    config->wpm = 5 + clamp_u32((uint32_t)config->wpm - 5, 0, 35);
+    // snap to the step each settings row iterates over, then bound it.
+    // PORT FIX: clamp the LOW side before subtracting the base. The unsigned
+    // `value - base` wrapped for a value below the base, so a stored 300 Hz tone
+    // became 1200 Hz, 3 WPM became 40 WPM and a -120 dBm squelch became -50 dBm
+    // (the top of each range instead of the bottom).
+    const uint32_t tone = config->tone_hz < 400 ? 400u : config->tone_hz;
+    config->tone_hz = 400 + clamp_u32((tone - 400) / 50, 0, 16) * 50;
+    const uint32_t wpm = config->wpm < 5 ? 5u : (uint32_t)config->wpm;
+    config->wpm = 5 + clamp_u32(wpm - 5, 0, 35);
     if(config->farnsworth && (config->farnsworth < 5 || config->farnsworth > 20)) {
         config->farnsworth = 0;
     }
-    config->squelch_dbm = -110 + (int8_t)(clamp_u32((uint32_t)(config->squelch_dbm + 110), 0, 60) / 5 * 5);
+    const int32_t squelch = config->squelch_dbm < -110 ? -110 : (int32_t)config->squelch_dbm;
+    config->squelch_dbm = -110 + (int8_t)(clamp_u32((uint32_t)(squelch + 110), 0, 60) / 5 * 5);
     config->courtesy_delay_ms = clamp_u32(config->courtesy_delay_ms, 0, 5000) / 500 * 500;
     config->preamble_ms = clamp_u32(config->preamble_ms, 0, 1000) / 100 * 100;
     config->tail_ms = clamp_u32(config->tail_ms, 0, 1000) / 100 * 100;

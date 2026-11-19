@@ -314,6 +314,7 @@ void beacon_start(Beacon* beacon, const MorseConfig* config) {
     beacon->manual_id = false;
     beacon->running = true;
 
+    cw_radio_resume(beacon->radio); // PORT FIX: clear a previous session's cancel
     beacon->thread = furi_thread_alloc_ex("BeaconWorker", 4096, beacon_worker, beacon);
     furi_thread_start(beacon->thread);
 }
@@ -329,7 +330,9 @@ void beacon_stop(Beacon* beacon) {
         return;
     }
     beacon->running = false;
-    cw_radio_abort(beacon->radio);
+    // PORT FIX: sticky cancel, so an ID the worker is just about to key is refused too
+    // (a plain abort was re-armed by cw_radio_send and the join waited for the whole ID).
+    cw_radio_cancel(beacon->radio);
     furi_thread_join(beacon->thread);
     furi_thread_free(beacon->thread);
     beacon->thread = NULL;
