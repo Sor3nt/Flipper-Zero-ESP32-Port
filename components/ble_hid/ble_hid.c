@@ -6,6 +6,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <esp_bt.h>
 #include <esp_bt_defs.h>
@@ -73,6 +74,12 @@ typedef struct {
     bool rand_addr_enabled;
     bool advertising_requested;
     bool advertising;
+    /* Number of HID GATTS apps (battery/DIS/HID) currently registered in
+     * Bluedroid. esp_hidd registers 3 on init and unregisters them on deinit,
+     * but the unregister only completes asynchronously (UNREG events). We count
+     * REG/UNREG via a thin wrapper around esp_hidd_gatts_event_handler so free()
+     * can wait for the teardown to actually drain before the next profile starts. */
+    int gatts_app_count;
     SemaphoreHandle_t mutex;
     BleHid* active;
     esp_ble_adv_params_t adv_params;
@@ -403,6 +410,27 @@ static void ble_hid_device_event_handler(
     }
 }
 
+/* Thin wrapper around the IDF HID GATTS handler that tracks how many HID GATTS
+ * apps are registered, so ble_hid_free() can wait for an async teardown to drain
+ * before the next BLE profile registers its own app on the shared callback. */
+static void ble_hid_gatts_event_wrapper(
+    esp_gatts_cb_event_t event,
+    esp_gatt_if_t gatts_if,
+    esp_ble_gatts_cb_param_t* param) {
+    if(event == ESP_GATTS_REG_EVT) {
+        if(param->reg.status == ESP_GATT_OK) {
+            ble_hid_lock_global();
+            ble_hid_state.gatts_app_count++;
+            ble_hid_unlock_global();
+        }
+    } else if(event == ESP_GATTS_UNREG_EVT) {
+        ble_hid_lock_global();
+        if(ble_hid_state.gatts_app_count > 0) ble_hid_state.gatts_app_count--;
+        ble_hid_unlock_global();
+    }
+    esp_hidd_gatts_event_handler(event, gatts_if, param);
+}
+
 static esp_err_t ble_hid_stack_init_once(void) {
     esp_err_t err = ESP_OK;
 
@@ -469,7 +497,7 @@ static esp_err_t ble_hid_stack_init_once(void) {
     }
 
     if(!ble_hid_state.gatts_registered) {
-        err = esp_ble_gatts_register_callback(esp_hidd_gatts_event_handler);
+        err = esp_ble_gatts_register_callback(ble_hid_gatts_event_wrapper);
         if(err != ESP_OK) {
             ble_hid_unlock_global();
             return err;
@@ -644,6 +672,17 @@ BleHid* ble_hid_alloc(const BleHidConfig* config) {
         return NULL;
     }
 
+    /* Bluedroid keeps a SINGLE global GAP callback and a SINGLE global GATTS
+     * callback, shared with ble_serial. Whichever component allocated last must
+     * own them. ble_hid_stack_init_once() registers them only on first init
+     * (gated by `initialized`), so after a serial<->HID switch the stale serial
+     * handlers would keep this profile's GATTS events — its app_register REG_EVT
+     * would be misrouted into the serial handler, so esp_hidd never gets its
+     * services (freeze) and the crossed attribute tables corrupt handles (crash).
+     * Re-register unconditionally here, symmetrically to ble_serial_alloc(). */
+    esp_ble_gap_register_callback(ble_hid_gap_event_handler);
+    esp_ble_gatts_register_callback(ble_hid_gatts_event_wrapper);
+
     BleHid* ble_hid = calloc(1, sizeof(BleHid));
     if(!ble_hid) {
         return NULL;
@@ -685,6 +724,8 @@ BleHid* ble_hid_alloc(const BleHidConfig* config) {
     ble_hid_state.hidd_started = false;
     ble_hid_state.rand_addr_pending = false;
     ble_hid_state.rand_addr_enabled = false;
+    /* Fresh session: esp_hidd_dev_init() below will register its 3 GATTS apps. */
+    ble_hid_state.gatts_app_count = 0;
     ble_hid_unlock_global();
 
     err = ble_hid_apply_security_config(&ble_hid->config);
@@ -749,6 +790,27 @@ void ble_hid_free(BleHid* ble_hid) {
 
     if(ble_hid->dev) {
         esp_hidd_dev_deinit(ble_hid->dev);
+
+        /* esp_hidd_dev_deinit() only QUEUES esp_ble_gatts_stop/delete/app_unregister;
+         * they complete asynchronously as UNREG events. The GATTS callback is a single
+         * global slot shared with ble_serial, so if the next profile registers its app
+         * before these drain, the two interleave on that callback and the new profile's
+         * startup (serial's ready_sem) times out -> intermittent BLE freeze on the
+         * USB<->BLE switch. Wait (bounded) for every HID GATTS app to actually emit
+         * UNREG before returning, matching the previous firmware's teardown barrier. */
+        TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(2000);
+        while(true) {
+            ble_hid_lock_global();
+            int remaining = ble_hid_state.gatts_app_count;
+            ble_hid_unlock_global();
+            if(remaining <= 0) break;
+            if((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
+                ESP_LOGE(
+                    TAG, "HID GATTS teardown timeout, %d app(s) still registered", remaining);
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
 
     if(ble_hid->mutex) {
@@ -1026,6 +1088,15 @@ bool ble_hid_is_active(void) {
     ble_hid_unlock_global();
 
     return active;
+}
+
+void ble_hid_reset_initialized(void) {
+    if(!ble_hid_state.mutex) return; // stack never initialized (BT off)
+    ble_hid_lock_global();
+    ble_hid_state.initialized = false;
+    ble_hid_state.gap_registered = false;
+    ble_hid_state.gatts_registered = false;
+    ble_hid_unlock_global();
 }
 
 bool ble_hid_remove_pairing(void) {

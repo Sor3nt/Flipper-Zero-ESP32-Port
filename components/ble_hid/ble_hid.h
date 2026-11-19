@@ -61,6 +61,12 @@ bool ble_hid_is_active(void);
 
 bool ble_hid_remove_pairing(void);
 
+/* Clear the "stack already initialized" latch so the next ble_hid_alloc() re-runs
+ * controller/bluedroid bring-up. Must be called whenever the BLE stack is torn
+ * down from outside this component (bt_handle_stop_stack), mirroring
+ * ble_serial_reset_initialized(). Safe to call when BT is off. */
+void ble_hid_reset_initialized(void);
+
 #ifdef __cplusplus
 }
 #endif
