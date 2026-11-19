@@ -63,7 +63,11 @@ typedef struct {
     volatile bool drag_lock; /* owned by the motion thread, read here */
 
     /* Requests handed to the motion thread, which owns all USB traffic. The
-       input service thread must never block on a HID report. */
+       input service thread must never block on a HID report.
+       PORT: running totals written ONLY by the input thread (it increments them);
+       the motion thread keeps how many it has served in BmMouse::req_done and never
+       writes these. The old ++ here / -- there was a read-modify-write from two
+       threads (on two cores of the S3) that could lose or repeat a click. */
     volatile uint8_t click_left;
     volatile uint8_t click_right;
     volatile uint8_t toggle_scroll;
@@ -107,6 +111,15 @@ struct BmMouse {
     bool is_encoder;
     int32_t enc_x_done;
     int32_t enc_y_done;
+
+    /* PORT: request totals already served (motion thread only), see BmInput. */
+    struct {
+        uint8_t click_left;
+        uint8_t click_right;
+        uint8_t toggle_scroll;
+        uint8_t drag_press;
+        uint8_t drag_release;
+    } req_done;
 };
 
 /* ------------------------------------------------------------------ drawing */
@@ -355,12 +368,21 @@ static void bm_mouse_vibro(BmMouse* bm_mouse) {
     }
 }
 
+/* PORT: how many requests arrived since the last call. The input thread is the
+   only writer of *total; uint8_t wrap-around keeps the difference right. */
+static uint8_t bm_take_requests(const volatile uint8_t* total, uint8_t* done) {
+    const uint8_t now = *total;
+    const uint8_t count = (uint8_t)(now - *done);
+    *done = now;
+    return count;
+}
+
 /* Act on everything the input thread asked for. All USB traffic happens here. */
 static void bm_mouse_service_requests(BmMouse* bm_mouse, bool connected) {
     BmInput* in = &bm_mouse->input;
 
-    while(in->click_left > 0) {
-        in->click_left--;
+    for(uint8_t n = bm_take_requests(&in->click_left, &bm_mouse->req_done.click_left); n > 0;
+        n--) {
         if(connected) {
             furi_hal_hid_mouse_press(HID_MOUSE_BTN_LEFT);
             furi_hal_hid_mouse_release(HID_MOUSE_BTN_LEFT);
@@ -368,8 +390,8 @@ static void bm_mouse_service_requests(BmMouse* bm_mouse, bool connected) {
         bm_mouse_vibro(bm_mouse);
     }
 
-    while(in->click_right > 0) {
-        in->click_right--;
+    for(uint8_t n = bm_take_requests(&in->click_right, &bm_mouse->req_done.click_right); n > 0;
+        n--) {
         if(connected) {
             furi_hal_hid_mouse_press(HID_MOUSE_BTN_RIGHT);
             furi_hal_hid_mouse_release(HID_MOUSE_BTN_RIGHT);
@@ -377,21 +399,23 @@ static void bm_mouse_service_requests(BmMouse* bm_mouse, bool connected) {
         bm_mouse_vibro(bm_mouse);
     }
 
-    while(in->drag_press > 0) {
-        in->drag_press--;
+    for(uint8_t n = bm_take_requests(&in->drag_press, &bm_mouse->req_done.drag_press); n > 0;
+        n--) {
         if(connected) furi_hal_hid_mouse_press(HID_MOUSE_BTN_LEFT);
         in->drag_lock = true;
         bm_mouse_vibro(bm_mouse);
     }
 
-    while(in->drag_release > 0) {
-        in->drag_release--;
+    for(uint8_t n = bm_take_requests(&in->drag_release, &bm_mouse->req_done.drag_release);
+        n > 0;
+        n--) {
         if(connected) furi_hal_hid_mouse_release(HID_MOUSE_BTN_LEFT);
         in->drag_lock = false;
     }
 
-    while(in->toggle_scroll > 0) {
-        in->toggle_scroll--;
+    for(uint8_t n = bm_take_requests(&in->toggle_scroll, &bm_mouse->req_done.toggle_scroll);
+        n > 0;
+        n--) {
         bm_mouse->scroll_mode = !bm_mouse->scroll_mode;
     }
 }
@@ -654,6 +678,7 @@ static void bm_mouse_enter_callback(void* context) {
     bm_mouse->exit_requested = false;
     bm_mouse->enc_x_done = 0; /* PORT: matches the zeroed BmInput totals */
     bm_mouse->enc_y_done = 0;
+    memset(&bm_mouse->req_done, 0, sizeof(bm_mouse->req_done)); /* PORT: same */
 
     with_view_model(
         bm_mouse->view,

@@ -271,6 +271,7 @@ bool furi_hal_usb_u2f_backend_stop(void) {
     portEXIT_CRITICAL(&s_state_lock);
     furi_hal_usb_u2f_callback_wait_idle();
 
+    furi_hal_usb_backend_flush_reenumeration();
     esp_err_t err = tinyusb_driver_uninstall();
     if(err != ESP_OK) {
         portENTER_CRITICAL(&s_state_lock);
