@@ -80,7 +80,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # =============================================================================
 # RMT (Infrared)
 # =============================================================================
-CONFIG_RMT_ISR_IRAM_SAFE=y
+# Not IRAM-safe: the IR RX done callback and the Sub-GHz TX encoder call into
+# flash (infrared worker, gptimer, rmt_receive, protocol encoders). With the
+# ISR IRAM-safe they could run during a flash write and crash the device.
+# CONFIG_RMT_ISR_IRAM_SAFE is not set
 CONFIG_RMT_SUPPRESS_DEPRECATE_WARN=y
 
 # =============================================================================

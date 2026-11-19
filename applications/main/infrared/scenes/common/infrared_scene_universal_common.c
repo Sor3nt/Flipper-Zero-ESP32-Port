@@ -126,8 +126,14 @@ static void infrared_scene_universal_common_handle_popup_input(
         InfraredSceneState scene_state = {
             .packed_value = scene_manager_get_scene_state(scene_manager, scene_id)};
         infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStartSend);
-        infrared_brute_force_send(infrared->brute_force, scene_state.signal_index);
+        const bool sent = infrared_brute_force_send(infrared->brute_force, scene_state.signal_index);
         infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStop);
+        if(!sent) {
+            infrared_show_error_message(
+                infrared,
+                "Signal %u could not be\nread correctly.\nNothing was sent.",
+                (unsigned)scene_state.signal_index + 1);
+        }
         break;
     }
 
@@ -150,6 +156,11 @@ bool infrared_scene_universal_common_on_event(void* context, SceneManagerEvent e
 
             if(!scene_state.is_paused) {
                 bool success = infrared_brute_force_send(brute_force, scene_state.signal_index);
+                // send() also returns false at the normal end of the list;
+                // an index below the count means this signal really failed
+                const bool send_failed =
+                    !success && (scene_state.signal_index <
+                                 infrared_brute_force_get_signal_count(brute_force));
                 if(success) {
                     success = infrared_progress_view_set_progress(
                         infrared->progress, scene_state.signal_index + 1);
@@ -160,6 +171,12 @@ bool infrared_scene_universal_common_on_event(void* context, SceneManagerEvent e
                 if(!success) {
                     infrared_brute_force_stop(brute_force);
                     infrared_scene_universal_common_hide_popup(infrared);
+                    if(send_failed) {
+                        infrared_show_error_message(
+                            infrared,
+                            "Signal %u could not be\nread correctly.\nStopped, nothing\ncorrupted was sent.",
+                            (unsigned)scene_state.signal_index + 1);
+                    }
                 }
                 consumed = true;
             }

@@ -18,6 +18,8 @@
 #include <driver/gptimer.h>
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
+#include <esp_attr.h>
 
 #include BOARD_INCLUDE
 
@@ -69,19 +71,76 @@
 #define IR_RMT_TX_RESOLUTION_HZ     1000000 /* 1 MHz = 1 us per tick */
 #define IR_RMT_RX_MAX_SYMBOLS       1024
 
-/* When the RX line returns to idle, RMT ends the burst and records the
- * terminating space as a zero-duration "end marker" — so the long inter-frame
- * space that trails every burst is never delivered to the decoder. The STM32
- * capture path delivers that space naturally (when the next burst's leading
- * edge arrives), and min_split_time protocols (NEC, Samsung, RC5/6, SIRC,
- * Kaseikyo, RCA, Pioneer) rely on it to finish decoding mid-stream. Without it
- * they can only complete via the silence timeout — which never fires while a
- * button is HELD, because the ~110 ms repeat bursts keep restarting it, so a
- * held remote is never learned. We therefore synthesise the trailing space at
- * the end of each idle-terminated burst. Its duration must exceed the largest
- * protocol min_split_time (Pioneer = 26000 us) yet stay below NEC's repeat
- * pause max (150000 us) and the silence timeout, so 50 ms is a safe choice. */
-#define IR_RX_FRAME_END_SPACE_US 50000
+/* RMT hardware glitch filter: input pulses shorter than this never reach the
+ * receiver. It counts RMT group clock cycles (80 MHz APB) in an 8-bit
+ * register, so 255 cycles = 3.18 us is the most the hardware can do. */
+#define IR_RX_HW_FILTER_NS 3000
+
+/* Software glitch filter on top of it. A demodulating IR receiver cannot output
+ * a level this short (its shortest pulse is ~100 us); such a level is EMI
+ * coupled into the RX line (display, radio, supply) and is merged into the
+ * level around it instead of being delivered as a Mark/Space of its own. Still
+ * below the 13 us half period of a 38 kHz carrier, so even a non-demodulating
+ * sensor would keep its waveform. */
+#define IR_RX_GLITCH_US 10
+
+/* RMT idle threshold: a level unchanged for longer than this ends a burst. At
+ * 1 MHz the hardware register holds at most 32767 ticks. */
+#define IR_RX_IDLE_MAX_US 32000
+
+#if CONFIG_RMT_ISR_IRAM_SAFE
+/* The RMT ISR may then run while the flash cache is off (any flash write), but
+ * the RX done callback calls into flash: the capture callback (infrared worker),
+ * gptimer and rmt_receive(). The same holds for the Sub-GHz TX encoder. A burst
+ * ending during a flash write would crash the device. */
+#warning "CONFIG_RMT_ISR_IRAM_SAFE=y: the infrared RX / Sub-GHz RMT callbacks are not IRAM-safe; disable it"
+#endif
+
+/* The Space between two bursts. RMT only reports a burst once the line has
+ * been idle for the idle threshold, and records neither the idle that ended it
+ * (a zero-duration end marker) nor the one before it. The STM32 capture path
+ * delivers that Space when the next Mark begins, and min_split_time protocols
+ * (NEC, Samsung, RC5/6, SIRC, Kaseikyo, RCA, Pioneer) need it to finish
+ * decoding while a held remote keeps repeating (the silence timeout never fires
+ * then). It is rebuilt from timestamps instead: a burst's done ISR runs one idle
+ * threshold after its last edge, and the symbols give the time from its first
+ * edge to its last, so
+ *   first Mark of B - last Mark of A = (done B - span B + lead B) - (done A - tail A)
+ * where lead/tail are the bits trimmed off the burst ends. The ISR latency is
+ * in both done times and cancels out; only its jitter remains (us, against
+ * gaps of 32..150 ms). It is delivered as the leading Space of the next burst,
+ * as on STM32, but only within a signal: once the silence timeout has ended
+ * one, the next burst starts a new signal without it. */
+#define IR_RX_GAP_MAX_US 0x3FFFFFFFU /* LevelDuration holds 30 bits */
+
+/* Silence timeout vs. a burst in progress: RMT says nothing about a burst until
+ * it has ended, so the timeout alarm alone would fire in the middle of a long
+ * burst that started within the timeout and cut the signal in two. A one-shot
+ * GPIO interrupt on the RX pin, armed only while a signal waits for its
+ * timeout, notes that the line has moved since the last burst ended; the alarm
+ * then looks again one idle threshold (+ margin) later instead of ending the
+ * signal. By then either the burst has ended (its done callback restarts the
+ * timeout) or the line has been quiet for a whole idle threshold, so no burst
+ * can be in progress. One interrupt per check at most, never an interrupt per
+ * edge. Not with CONFIG_FREERTOS_CHECK_PORT_CRITICAL_COMPLIANCE: arming it from
+ * an ISR takes the GPIO driver's spinlock with portENTER_CRITICAL(). */
+#if BOARD_HAS_IR && !CONFIG_FREERTOS_CHECK_PORT_CRITICAL_COMPLIANCE
+#define IR_RX_ACTIVITY_DETECTOR 1
+#include <furi_hal_gpio.h>
+#else
+#define IR_RX_ACTIVITY_DETECTOR 0
+#endif
+/* invert_in=true: the receiver output is active-low, so the pad idles high. */
+#define IR_RX_PAD_IDLE_LEVEL 1
+/* An edge seen with the pad already back at idle was a spike shorter than the
+ * RMT filter: it starts no burst and needs no recheck. Only this many per check,
+ * so a noise storm on the pin cannot become an interrupt storm. */
+#define IR_RX_GLITCH_EDGES_MAX 8
+/* The recheck comes this long after the idle threshold: room for the done ISR. */
+#define IR_RX_RECHECK_MARGIN_US 5000
+/* Rechecks stop after this long; a signal still ends under endless noise. A
+ * burst longer than this (beyond any IR frame) would still be cut. */
+#define IR_RX_POSTPONE_MAX_US 1500000
 
 /* ---- State ---- */
 
@@ -98,18 +157,50 @@ typedef enum {
     InfraredStateMAX,
 } InfraredState;
 
-/* RX state */
+/* RX state. The RMT done ISR and the timeout alarm ISR can run on the other
+ * core than the task that starts/stops RX (dual-core boards), so everything
+ * they share with task context is read and written under ir_state_lock: the
+ * callback/context pairs (never torn), the timer handle (published only fully
+ * set up, unpublished before it is deleted), timer_running, rx_config and the
+ * burst timing / activity detector fields below. */
 static struct {
     rmt_channel_handle_t channel;
     rmt_receive_config_t rx_config;
-    rmt_symbol_word_t symbols[IR_RMT_RX_MAX_SYMBOLS];
     FuriHalInfraredRxCaptureCallback capture_callback;
     void* capture_context;
     FuriHalInfraredRxTimeoutCallback timeout_callback;
     void* timeout_context;
     gptimer_handle_t timeout_timer;
+    gptimer_alarm_config_t alarm; /* internal RAM, as gptimer_set_alarm_action() may require */
+    bool timer_running; /* the timer counts towards the alarm */
     uint32_t timeout_us;
+
+    /* Burst timing, see IR_RX_GAP_MAX_US. */
+    uint32_t armed_idle_us; /* idle threshold of the receive currently armed */
+    bool signal_open; /* a burst was delivered and the silence timeout has not ended it */
+    int64_t prev_mark_end; /* esp_timer time the last delivered Mark ended (estimate) */
+    uint32_t prev_idle_us; /* idle threshold that ended that burst */
+
+    /* Activity detector, see IR_RX_ACTIVITY_DETECTOR. */
+    bool detector_ok; /* interrupt set up for this RX session */
+    bool detector_armed; /* interrupt enabled, waiting for the first edge */
+    bool activity; /* the line moved since the detector was armed */
+    uint8_t glitch_edges; /* spikes seen since then */
+    uint32_t postponed_us; /* rechecks of the current silence timeout so far */
 } ir_rx;
+
+/* RMT RX symbol buffer (4 KiB), kept out of ir_rx so it can live in PSRAM
+ * (plain .bss without PSRAM). The RX channel runs without DMA (with_dma =
+ * false), so the RMT driver copies symbols into it with the CPU; IDF only
+ * demands an internal buffer for DMA channels. The RX done ISR reads it, which
+ * is fine: CONFIG_RMT_ISR_IRAM_SAFE is off, so that ISR never runs while the
+ * flash cache is disabled. Turning on RMT_ISR_IRAM_SAFE or DMA requires moving
+ * this back to internal RAM. */
+static EXT_RAM_BSS_ATTR rmt_symbol_word_t ir_rx_symbols[IR_RMT_RX_MAX_SYMBOLS];
+
+#if IR_RX_ACTIVITY_DETECTOR
+static const GpioPin ir_rx_gpio = {.port = NULL, .pin = IR_RX_GPIO};
+#endif
 
 /* TX state */
 static struct {
@@ -298,79 +389,298 @@ static void ir_tx_ext_release(void) {
 
 /* ---- RX Implementation ---- */
 
-static void ir_rx_restart_timeout(void) {
-    if(ir_rx.timeout_timer) {
-        gptimer_stop(ir_rx.timeout_timer);
-        gptimer_set_raw_count(ir_rx.timeout_timer, 0);
-        gptimer_start(ir_rx.timeout_timer);
-    }
+/* RMT idle threshold for a silence timeout: a burst never outlasts the
+ * timeout, and the hardware limit is IR_RX_IDLE_MAX_US. Compared in us, so a
+ * long timeout cannot overflow the ns value. */
+static uint32_t ir_rx_idle_ns(uint32_t timeout_us) {
+    uint32_t idle_us = IR_RX_IDLE_MAX_US;
+    if(timeout_us > 0 && timeout_us < idle_us) idle_us = timeout_us;
+    return idle_us * 1000U;
 }
+
+/* (Re)start the silence timer to alarm alarm_us from now. ir_state_lock held
+ * (ISR or task). gptimer_stop() on a stopped timer is an error that logs from
+ * the ISR, so only a running timer is stopped. */
+static void ir_rx_timer_arm_locked(uint32_t alarm_us) {
+    gptimer_handle_t timer = ir_rx.timeout_timer;
+    /* 0: async_rx_set_timeout(0) is about to delete the timer. */
+    if(!timer || alarm_us == 0) return;
+    if(ir_rx.timer_running) gptimer_stop(timer);
+    ir_rx.alarm = (gptimer_alarm_config_t){.alarm_count = alarm_us};
+    gptimer_set_alarm_action(timer, &ir_rx.alarm);
+    gptimer_set_raw_count(timer, 0);
+    ir_rx.timer_running = (gptimer_start(timer) == ESP_OK);
+}
+
+/* ir_state_lock held. Disabling also drops an edge latched meanwhile. */
+static void ir_rx_detector_disarm_locked(void) {
+#if IR_RX_ACTIVITY_DETECTOR
+    if(ir_rx.detector_armed) furi_hal_gpio_disable_int_callback(&ir_rx_gpio);
+    ir_rx.detector_armed = false;
+#endif
+}
+
+/* Watch for the next edge. ir_state_lock held. Enabling clears an edge latched
+ * while disabled, so only edges from now on count. */
+static void ir_rx_detector_arm_locked(void) {
+    ir_rx.activity = false;
+    ir_rx.glitch_edges = 0;
+#if IR_RX_ACTIVITY_DETECTOR
+    if(!ir_rx.detector_ok) return;
+    ir_rx.detector_armed = true;
+    furi_hal_gpio_enable_int_callback(&ir_rx_gpio);
+#endif
+}
+
+#if IR_RX_ACTIVITY_DETECTOR
+/* GPIO interrupt (any edge) on the RX pin, see IR_RX_ACTIVITY_DETECTOR. */
+static void ir_rx_activity_isr(void* context) {
+    (void)context;
+    portENTER_CRITICAL_ISR(&ir_state_lock);
+    if(!ir_rx.detector_armed) {
+        /* A late edge of a detector already disarmed. */
+        furi_hal_gpio_disable_int_callback(&ir_rx_gpio);
+    } else if(
+        gpio_get_level(IR_RX_GPIO) == IR_RX_PAD_IDLE_LEVEL &&
+        ir_rx.glitch_edges < IR_RX_GLITCH_EDGES_MAX) {
+        /* Back at idle already: a spike shorter than the RMT filter, which
+         * starts no burst. Keep watching. A real burst opens with a Mark of
+         * ~100 us and more: the pad is still active when this runs. */
+        ir_rx.glitch_edges++;
+    } else {
+        ir_rx.activity = true;
+        ir_rx_detector_disarm_locked();
+    }
+    portEXIT_CRITICAL_ISR(&ir_state_lock);
+}
+#endif
 
 static bool IRAM_ATTR ir_rx_timeout_isr(gptimer_handle_t timer,
                                          const gptimer_alarm_event_data_t* edata,
                                          void* user_ctx) {
-    (void)timer;
     (void)edata;
     (void)user_ctx;
-    gptimer_stop(timer);
-    if(ir_rx.timeout_callback) {
-        ir_rx.timeout_callback(ir_rx.timeout_context);
+    FuriHalInfraredRxTimeoutCallback callback = NULL;
+    void* context = NULL;
+
+    portENTER_CRITICAL_ISR(&ir_state_lock);
+    /* Only a live alarm of the published timer counts: not the late alarm of a
+     * timer being torn down, nor one that a burst restarted (on the other core)
+     * between the alarm and this handler; its count is back near zero then. */
+    uint64_t count = 0;
+    if(timer == ir_rx.timeout_timer && ir_rx.timer_running &&
+       gptimer_get_raw_count(timer, &count) == ESP_OK && count >= ir_rx.alarm.alarm_count) {
+        gptimer_stop(timer);
+        ir_rx.timer_running = false;
+        const uint32_t recheck_us = ir_rx.armed_idle_us + IR_RX_RECHECK_MARGIN_US;
+        if(ir_state != InfraredStateAsyncRx) {
+            /* Being stopped: no timeout, no recheck. */
+            ir_rx_detector_disarm_locked();
+        } else if(ir_rx.activity && ir_rx.postponed_us < IR_RX_POSTPONE_MAX_US) {
+            /* The line moved since the last burst ended: a burst is most likely
+             * being received and RMT reports it only at its end. Look again once
+             * the line can have been idle for a whole idle threshold. */
+            ir_rx.postponed_us += recheck_us;
+            ir_rx_detector_arm_locked();
+            ir_rx_timer_arm_locked(recheck_us);
+        } else {
+            /* Silence: the signal is over. The next burst starts a new one. */
+            ir_rx_detector_disarm_locked();
+            ir_rx.signal_open = false;
+            callback = ir_rx.timeout_callback;
+            context = ir_rx.timeout_context;
+        }
     }
+    portEXIT_CRITICAL_ISR(&ir_state_lock);
+
+    if(callback) callback(context);
     return false; /* no high-priority task woken */
+}
+
+/* Turns the RMT symbols of one burst into the levels handed to the capture
+ * callback:
+ * - a level shorter than IR_RX_GLITCH_US is noise: it is merged into the level
+ *   around it (and the two halves around it into one), never delivered alone;
+ * - the delivered levels start and end on a Mark. A Space before the first
+ *   Mark or after the last one is part of the silence around the burst.
+ *   Within a signal, the first Mark is preceded by the rebuilt Space since the
+ *   previous burst (IR_RX_GAP_MAX_US), so consecutive bursts still alternate
+ *   Mark/Space and the raw timings stay in step.
+ * A burst made of glitches only delivers nothing at all.
+ * Times are offsets from the burst's first edge, in us (RMT ticks). */
+typedef struct {
+    FuriHalInfraredRxCaptureCallback callback;
+    void* context;
+    uint32_t duration; /* pending level, 0 = none */
+    uint32_t pending_start; /* offset where the pending level began */
+    uint32_t elapsed; /* offset after the last fed phase */
+    uint32_t last_mark_end; /* offset where the last delivered Mark ended */
+    bool level;
+    bool delivered; /* a Mark has been delivered in this burst */
+    bool gap_pending; /* within a signal: deliver the Space before the first Mark */
+    int64_t start; /* esp_timer time of the first edge (estimate) */
+    int64_t prev_mark_end; /* esp_timer time the previous burst's last Mark ended */
+    uint32_t prev_idle_us; /* that burst ended by being idle at least this long */
+} IrRxBurst;
+
+static void IRAM_ATTR ir_rx_burst_flush(IrRxBurst* burst) {
+    if(burst->duration == 0) return;
+    /* Leading Space: silence, see above. */
+    if(burst->level || burst->delivered) {
+        if(!burst->delivered && burst->gap_pending) {
+            int64_t gap = burst->start + burst->pending_start - burst->prev_mark_end;
+            /* ISR latency jitter can only make it look shorter than the idle
+             * that ended the previous burst, never really so. */
+            if(gap < (int64_t)burst->prev_idle_us) gap = burst->prev_idle_us;
+            if(gap > (int64_t)IR_RX_GAP_MAX_US) gap = IR_RX_GAP_MAX_US;
+            burst->callback(burst->context, false, (uint32_t)gap);
+        }
+        burst->callback(burst->context, burst->level, burst->duration);
+        if(burst->level) burst->last_mark_end = burst->pending_start + burst->duration;
+        burst->delivered = true;
+    }
+    burst->duration = 0;
+}
+
+static void IRAM_ATTR ir_rx_burst_feed(IrRxBurst* burst, bool level, uint32_t duration) {
+    if(duration == 0) return; /* end marker: the idle that terminated the burst */
+    const uint32_t at = burst->elapsed;
+    burst->elapsed += duration;
+    if(duration < IR_RX_GLITCH_US) {
+        /* Absorbed by the pending level; a glitch before any level is dropped. */
+        if(burst->duration) burst->duration += duration;
+        return;
+    }
+    if(burst->duration && burst->level != level) ir_rx_burst_flush(burst);
+    if(burst->duration == 0) {
+        burst->level = level;
+        burst->pending_start = at;
+    }
+    burst->duration += duration;
+}
+
+static void IRAM_ATTR ir_rx_burst_end(IrRxBurst* burst) {
+    /* A trailing Mark is delivered, a trailing Space is silence. Nothing else:
+     * the Space after this burst is delivered with the next one, or never if
+     * the silence timeout ends the signal first (as on STM32). */
+    if(burst->level) ir_rx_burst_flush(burst);
+    burst->duration = 0;
 }
 
 static bool IRAM_ATTR ir_rmt_rx_done_callback(rmt_channel_handle_t channel,
                                                 const rmt_rx_done_event_data_t* edata,
                                                 void* user_ctx) {
-    (void)channel;
     (void)user_ctx;
+    /* First: the time the burst ended, one idle threshold after its last edge. */
+    const int64_t now = esp_timer_get_time();
+    IrRxBurst burst = {0};
 
-    bool last_level_mark = false; /* level of the last edge we delivered */
-    bool any_edge = false;
+    portENTER_CRITICAL_ISR(&ir_state_lock);
+    const bool running = (ir_state == InfraredStateAsyncRx);
+    const uint32_t idle_us = ir_rx.armed_idle_us;
+    burst.callback = ir_rx.capture_callback;
+    burst.context = ir_rx.capture_context;
+    burst.gap_pending = ir_rx.signal_open;
+    burst.prev_mark_end = ir_rx.prev_mark_end;
+    burst.prev_idle_us = ir_rx.prev_idle_us;
+    portEXIT_CRITICAL_ISR(&ir_state_lock);
 
-    /* Process received symbols and call capture callback for each edge */
+    /* RX is being stopped: deliver nothing and do not re-arm. */
+    if(!running) return false;
+
+    /* Time from the first edge to the last (the end marker adds nothing). */
+    uint32_t span = 0;
     for(size_t i = 0; i < edata->num_symbols; i++) {
-        const rmt_symbol_word_t* sym = &edata->received_symbols[i];
+        span += edata->received_symbols[i].duration0 + edata->received_symbols[i].duration1;
+    }
+    burst.start = now - (int64_t)idle_us - span;
 
+    if(burst.callback) {
         /* Each RMT symbol has two phases: duration0/level0 then duration1/level1.
          * invert_in=true on the RX channel already converts the active-low IR
-         * receiver output to logical mark=1/space=0, so pass sym->level through
-         * unchanged. Negating here would drop the leader mark via the worker's
-         * "skip first space" rule. */
-        if(sym->duration0 > 0 && ir_rx.capture_callback) {
-            ir_rx.capture_callback(
-                ir_rx.capture_context, sym->level0, sym->duration0);
-            ir_rx_restart_timeout();
-            last_level_mark = sym->level0;
-            any_edge = true;
+         * receiver output to logical mark=1/space=0, so the levels are used as
+         * they are. */
+        for(size_t i = 0; i < edata->num_symbols; i++) {
+            const rmt_symbol_word_t* sym = &edata->received_symbols[i];
+            ir_rx_burst_feed(&burst, sym->level0, sym->duration0);
+            ir_rx_burst_feed(&burst, sym->level1, sym->duration1);
         }
-        if(sym->duration1 > 0 && ir_rx.capture_callback) {
-            ir_rx.capture_callback(
-                ir_rx.capture_context, sym->level1, sym->duration1);
-            ir_rx_restart_timeout();
-            last_level_mark = sym->level1;
-            any_edge = true;
-        }
+        ir_rx_burst_end(&burst);
     }
 
-    /* A burst always ends on a Mark (the trailing Space is the idle that
-     * terminated reception, dropped above as a zero-duration end marker).
-     * Deliver that trailing Space synthetically so min_split_time protocols
-     * decode immediately, instead of waiting for a silence timeout that never
-     * arrives while a held remote keeps repeating. See IR_RX_FRAME_END_SPACE_US.
-     * Decoded protocols consume it (the worker resets its timing count, so no
-     * stray raw timing); raw signals just gain a trailing gap. */
-    if(any_edge && last_level_mark && ir_rx.capture_callback) {
-        ir_rx.capture_callback(ir_rx.capture_context, false, IR_RX_FRAME_END_SPACE_US);
-        ir_rx_restart_timeout();
-    }
-
-    /* Re-start receiving for next burst */
+    portENTER_CRITICAL_ISR(&ir_state_lock);
+    /* Nothing is armed once async_rx_stop() has begun: it changes the state
+     * under this lock, so it also never tears the channel down while
+     * rmt_receive() is half-way. */
     if(ir_state == InfraredStateAsyncRx) {
-        rmt_receive(channel, ir_rx.symbols, sizeof(ir_rx.symbols), &ir_rx.rx_config);
+        if(burst.delivered) {
+            ir_rx.signal_open = true;
+            ir_rx.prev_mark_end = burst.start + burst.last_mark_end;
+            ir_rx.prev_idle_us = idle_us;
+            /* The silence timeout counts from the last delivered level. A
+             * burst of glitches only does not restart it: noise must not keep
+             * a received signal from ever ending. */
+            ir_rx.postponed_us = 0;
+            ir_rx_timer_arm_locked(ir_rx.timeout_us);
+        }
+        /* Whatever moved the line has ended now. While a signal waits for its
+         * silence timeout, watch for the next burst. */
+        if(ir_rx.timer_running) {
+            ir_rx_detector_arm_locked();
+        } else {
+            ir_rx_detector_disarm_locked();
+        }
+        rmt_receive(channel, ir_rx_symbols, sizeof(ir_rx_symbols), &ir_rx.rx_config);
+        ir_rx.armed_idle_us = ir_rx.rx_config.signal_range_max_ns / 1000U;
     }
+    portEXIT_CRITICAL_ISR(&ir_state_lock);
 
     return false;
+}
+
+/* Create the silence timer and publish it only once it is fully set up: the
+ * RMT ISR starts it as soon as it sees the handle. Task context. Its one-shot
+ * alarm is set each time it is started (ir_rx_timer_arm_locked()). */
+static void ir_rx_timer_create(void) {
+    const gptimer_config_t timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000, /* 1 MHz = 1us */
+    };
+    const gptimer_event_callbacks_t timer_cbs = {
+        .on_alarm = ir_rx_timeout_isr,
+    };
+    gptimer_handle_t timer = NULL;
+    esp_err_t err = gptimer_new_timer(&timer_config, &timer);
+    if(err == ESP_OK) err = gptimer_register_event_callbacks(timer, &timer_cbs, NULL);
+    if(err == ESP_OK) err = gptimer_enable(timer);
+    if(err != ESP_OK) {
+        FURI_LOG_E("IR", "RX timeout timer setup failed: %s", esp_err_to_name(err));
+        if(timer) gptimer_del_timer(timer);
+        return;
+    }
+
+    portENTER_CRITICAL(&ir_state_lock);
+    ir_rx.timer_running = false;
+    ir_rx.timeout_timer = timer;
+    portEXIT_CRITICAL(&ir_state_lock);
+}
+
+/* Unpublish the silence timer, then delete it. Task context. Once unpublished
+ * no ISR of ours touches it; gptimer_del_timer() frees the interrupt on the
+ * core it belongs to (IPC), so an alarm handler running there has finished. */
+static void ir_rx_timer_delete(void) {
+    portENTER_CRITICAL(&ir_state_lock);
+    gptimer_handle_t timer = ir_rx.timeout_timer;
+    const bool running = ir_rx.timer_running;
+    ir_rx.timeout_timer = NULL;
+    ir_rx.timer_running = false;
+    portEXIT_CRITICAL(&ir_state_lock);
+
+    if(!timer) return;
+    if(running) gptimer_stop(timer);
+    gptimer_disable(timer);
+    gptimer_del_timer(timer);
 }
 
 void furi_hal_infrared_async_rx_start(void) {
@@ -393,112 +703,136 @@ void furi_hal_infrared_async_rx_start(void) {
             .with_dma = false,
         },
     };
-    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_chan_config, &ir_rx.channel));
-
-    /* Register RX done callback */
-    rmt_rx_event_callbacks_t rx_cbs = {
+    const rmt_rx_event_callbacks_t rx_cbs = {
         .on_recv_done = ir_rmt_rx_done_callback,
     };
-    ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(ir_rx.channel, &rx_cbs, NULL));
 
-    /* Enable channel */
-    ESP_ERROR_CHECK(rmt_enable(ir_rx.channel));
-
-    /* Configure receive parameters */
-    ir_rx.rx_config.signal_range_min_ns = 1250;  /* glitch filter: ignore < 1.25us */
-    /* RMT idle threshold: silence longer than this ends the frame.
-       Max at 1 MHz resolution is ~32.7 ms (RMT_LL_MAX_IDLE_VALUE=32767).
-       Use 20 ms default which covers all common IR protocols. */
-    uint32_t max_ns = ir_rx.timeout_us > 0 ? ir_rx.timeout_us * 1000 : 20000 * 1000;
-    if(max_ns > 32000 * 1000) max_ns = 32000 * 1000; /* clamp to RMT HW limit */
-    ir_rx.rx_config.signal_range_max_ns = max_ns;
+    /* No ISR runs before the first rmt_receive(): plain writes are fine here. */
+    ir_rx.rx_config.signal_range_min_ns = IR_RX_HW_FILTER_NS;
+    ir_rx.rx_config.signal_range_max_ns = ir_rx_idle_ns(ir_rx.timeout_us);
     ir_rx.rx_config.flags.en_partial_rx = false;
+
+    /* A failure (e.g. no free RMT channel) leaves RX dead but the device up:
+     * the state stays AsyncRx, so the caller's async_rx_stop() still pairs. */
+    rmt_channel_handle_t channel = NULL;
+    esp_err_t err = rmt_new_rx_channel(&rx_chan_config, &channel);
+    if(err == ESP_OK) err = rmt_rx_register_event_callbacks(channel, &rx_cbs, NULL);
+    if(err == ESP_OK) err = rmt_enable(channel);
+    if(err != ESP_OK) {
+        FURI_LOG_E("IR", "RMT RX setup on GPIO%d failed: %s", (int)IR_RX_GPIO, esp_err_to_name(err));
+        if(channel) rmt_del_channel(channel);
+        return;
+    }
+    ir_rx.channel = channel;
+
+    /* A new session: no signal yet, so no Space before the first burst. */
+    ir_rx.signal_open = false;
+    ir_rx.prev_mark_end = 0;
+    ir_rx.prev_idle_us = 0;
+    ir_rx.postponed_us = 0;
+    ir_rx.activity = false;
+    ir_rx.glitch_edges = 0;
+    ir_rx.detector_armed = false;
+    ir_rx.detector_ok = false;
+#if IR_RX_ACTIVITY_DETECTOR
+    /* After the RMT channel has made the pad an input. Registering enables the
+     * pin interrupt: disable it at once, it is enabled only while armed. A
+     * failure leaves detector_ok false: no rechecks, the timeout alone ends a
+     * signal (as before). */
+    furi_hal_gpio_add_int_callback(&ir_rx_gpio, ir_rx_activity_isr, NULL);
+    furi_hal_gpio_disable_int_callback(&ir_rx_gpio);
+    ir_rx.detector_ok = (gpio_set_intr_type(IR_RX_GPIO, GPIO_INTR_ANYEDGE) == ESP_OK);
+#endif
+
+    /* The silence timer, when a timeout is already known (from an earlier
+     * session); async_rx_set_timeout() creates it otherwise. */
+    if(ir_rx.timeout_us > 0) ir_rx_timer_create();
 
     /* ir_state is already InfraredStateAsyncRx (claimed above), which the RX
      * done callback needs in order to re-arm itself. */
-
-    /* Start receiving */
-    ESP_ERROR_CHECK(rmt_receive(ir_rx.channel, ir_rx.symbols, sizeof(ir_rx.symbols), &ir_rx.rx_config));
+    ir_rx.armed_idle_us = ir_rx.rx_config.signal_range_max_ns / 1000U;
+    err = rmt_receive(channel, ir_rx_symbols, sizeof(ir_rx_symbols), &ir_rx.rx_config);
+    if(err != ESP_OK) {
+        FURI_LOG_E("IR", "RMT RX start failed: %s", esp_err_to_name(err));
+    }
 }
 
 void furi_hal_infrared_async_rx_stop(void) {
-    furi_check(ir_state == InfraredStateAsyncRx);
+    /* Leave AsyncRx first, atomically, so the done callback neither delivers
+     * nor re-arms the receiver while the channel is torn down. The peripheral
+     * is only offered to a TX claim again once the channel is gone (state set
+     * at the end). */
+    furi_check(ir_state_transition(InfraredStateAsyncRx, InfraredStateStoppingRx));
 
-    /* Leave AsyncRx first so the done callback stops re-arming the receiver
-     * while the channel is torn down. The peripheral is only offered to a TX
-     * claim again once the channel is gone (state set at the end). */
-    ir_state_set(InfraredStateStoppingRx);
+#if IR_RX_ACTIVITY_DETECTOR
+    /* No ISR arms it again from here on (they check the state under the
+     * lock). Removing the callback returns only once no handler is running. */
+    bool detector_was_set_up;
+    portENTER_CRITICAL(&ir_state_lock);
+    ir_rx_detector_disarm_locked();
+    detector_was_set_up = (ir_rx.channel != NULL);
+    ir_rx.detector_ok = false;
+    portEXIT_CRITICAL(&ir_state_lock);
+    if(detector_was_set_up) {
+        gpio_set_intr_type(IR_RX_GPIO, GPIO_INTR_DISABLE);
+        furi_hal_gpio_remove_int_callback(&ir_rx_gpio);
+    }
+#endif
 
     if(ir_rx.channel) {
+        /* rmt_del_channel() frees the interrupt on the core it belongs to
+         * (IPC), so a done callback still running there has finished when it
+         * returns: nothing calls the capture callback afterwards. */
         rmt_disable(ir_rx.channel);
-        rmt_del_channel(ir_rx.channel);
+        const esp_err_t del_err = rmt_del_channel(ir_rx.channel);
+        if(del_err != ESP_OK) {
+            FURI_LOG_E("IR", "RMT RX channel delete failed: %s", esp_err_to_name(del_err));
+        }
         ir_rx.channel = NULL;
     }
 
-    /* Stop and delete timeout timer if active */
-    if(ir_rx.timeout_timer) {
-        gptimer_stop(ir_rx.timeout_timer);
-        gptimer_disable(ir_rx.timeout_timer);
-        gptimer_del_timer(ir_rx.timeout_timer);
-        ir_rx.timeout_timer = NULL;
-    }
+    ir_rx_timer_delete();
 
     ir_state_set(InfraredStateIdle);
 }
 
 void furi_hal_infrared_async_rx_set_timeout(uint32_t timeout_us) {
+    portENTER_CRITICAL(&ir_state_lock);
     ir_rx.timeout_us = timeout_us;
+    /* Read by the RMT ISR when it re-arms: takes effect from the next burst. */
+    ir_rx.rx_config.signal_range_max_ns = ir_rx_idle_ns(timeout_us);
+    const bool running = (ir_state == InfraredStateAsyncRx);
+    /* A live timer is kept, never replaced under the ISRs: the new timeout
+     * applies from the next time it is started. */
+    const bool have_timer = (ir_rx.timeout_timer != NULL);
+    portEXIT_CRITICAL(&ir_state_lock);
 
-    /* If RX is already running, create/update the GPTimer for timeout */
-    if(ir_state == InfraredStateAsyncRx || ir_state == InfraredStateIdle) {
-        /* Delete existing timer */
-        if(ir_rx.timeout_timer) {
-            gptimer_stop(ir_rx.timeout_timer);
-            gptimer_disable(ir_rx.timeout_timer);
-            gptimer_del_timer(ir_rx.timeout_timer);
-            ir_rx.timeout_timer = NULL;
-        }
-
-        if(timeout_us == 0) return;
-
-        /* Create a one-shot alarm timer */
-        gptimer_config_t timer_config = {
-            .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-            .direction = GPTIMER_COUNT_UP,
-            .resolution_hz = 1000000, /* 1 MHz = 1us */
-        };
-        ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &ir_rx.timeout_timer));
-
-        gptimer_alarm_config_t alarm_config = {
-            .alarm_count = timeout_us,
-            .reload_count = 0,
-            .flags = {
-                .auto_reload_on_alarm = false,
-            },
-        };
-        ESP_ERROR_CHECK(gptimer_set_alarm_action(ir_rx.timeout_timer, &alarm_config));
-
-        gptimer_event_callbacks_t timer_cbs = {
-            .on_alarm = ir_rx_timeout_isr,
-        };
-        ESP_ERROR_CHECK(gptimer_register_event_callbacks(ir_rx.timeout_timer, &timer_cbs, NULL));
-        ESP_ERROR_CHECK(gptimer_enable(ir_rx.timeout_timer));
-        /* Timer will be started when first edge is received */
+    if(timeout_us == 0) {
+        ir_rx_timer_delete();
+    } else if(!have_timer && running && ir_rx.channel) {
+        ir_rx_timer_create();
     }
+    /* Not receiving: the timer is created by the next async_rx_start(). */
 }
 
 void furi_hal_infrared_async_rx_set_capture_isr_callback(
     FuriHalInfraredRxCaptureCallback callback,
     void* ctx) {
+    /* Callback and context change together: an ISR on the other core never
+     * sees a new callback with an old (or NULL) context. */
+    portENTER_CRITICAL(&ir_state_lock);
     ir_rx.capture_callback = callback;
     ir_rx.capture_context = ctx;
+    portEXIT_CRITICAL(&ir_state_lock);
 }
 
 void furi_hal_infrared_async_rx_set_timeout_isr_callback(
     FuriHalInfraredRxTimeoutCallback callback,
     void* ctx) {
+    portENTER_CRITICAL(&ir_state_lock);
     ir_rx.timeout_callback = callback;
     ir_rx.timeout_context = ctx;
+    portEXIT_CRITICAL(&ir_state_lock);
 }
 
 /* ---- TX Implementation ---- */
