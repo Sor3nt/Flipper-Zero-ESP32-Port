@@ -11,6 +11,7 @@
 #include "furi_hal_resources.h"
 #include "furi_hal_spi.h"
 #include "furi_hal_spi_bus.h"
+#include "furi_hal_qfdiag.h"
 #include <sdkconfig.h>
 #include <driver/gpio.h>
 
@@ -113,6 +114,74 @@ static bool sd_ensure_bounce_buf(void) {
         return false;
     }
     return true;
+}
+
+/* QFDIAG -------------------------------------------------------------------
+ * Diagnostic-only bookkeeping for the qFlipper large-transfer stall. Records
+ * what the diskio layer is doing so the USB bridge can snapshot it, and splits
+ * a slow request into "waiting for the shared SPI bus lock" vs "the card
+ * transaction itself". Does not change behaviour. Counters and the bus-holder
+ * lookup run only with CONFIG_FURI_QFDIAG; the lock/xfer split in the
+ * "slow read/write" warnings is always on (two esp_timer reads). */
+static volatile uint8_t sd_dbg_op; /* 0 idle, 1 read, 2 write */
+static volatile uint32_t sd_dbg_op_since_ms;
+static volatile uint32_t sd_dbg_lock_since_ms;
+static volatile uint32_t sd_dbg_writes, sd_dbg_reads, sd_dbg_errors;
+static volatile uint32_t sd_dbg_max_write_ms, sd_dbg_max_lockwait_ms;
+static volatile int32_t sd_dbg_last_err;
+static volatile uint32_t sd_dbg_write_sectors, sd_dbg_write_busy_ms;
+static volatile uint32_t sd_dbg_read_sectors, sd_dbg_read_busy_ms;
+
+static inline uint32_t sd_dbg_now_ms(void) {
+    const uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return ms ? ms : 1; /* 0 means "not running" */
+}
+
+/* furi_hal_spi_bus_lock() with timing; returns how long we waited (us). */
+static int64_t sd_dbg_bus_lock(const char* what, DWORD sector) {
+    char holder[16] = "?";
+    if(QFDIAG_ENABLED) {
+        furi_hal_spi_bus_owner_name(holder, sizeof(holder));
+        sd_dbg_lock_since_ms = sd_dbg_now_ms();
+    }
+    const int64_t t0 = esp_timer_get_time();
+    furi_hal_spi_bus_lock();
+    const int64_t waited_us = esp_timer_get_time() - t0;
+    if(!QFDIAG_ENABLED) return waited_us;
+    sd_dbg_lock_since_ms = 0;
+    const uint32_t waited_ms = (uint32_t)(waited_us / 1000);
+    if(waited_ms > sd_dbg_max_lockwait_ms) sd_dbg_max_lockwait_ms = waited_ms;
+    if(waited_us > SD_SLOW_OP_US) {
+        ESP_LOGW(
+            TAG,
+            "QD %s @%lu: SPI bus lock wait %lu ms (holder when wait began: %s)",
+            what,
+            (unsigned long)sector,
+            (unsigned long)waited_ms,
+            holder);
+    }
+    return waited_us;
+}
+
+void furi_hal_sd_debug_get(FuriHalSdDebug* out) {
+    if(!out) return;
+    const uint32_t now = sd_dbg_now_ms();
+    const uint8_t op = sd_dbg_op;
+    const uint32_t since = sd_dbg_op_since_ms;
+    const uint32_t lsince = sd_dbg_lock_since_ms;
+    out->inflight_op = op;
+    out->inflight_ms = (op && since) ? now - since : 0;
+    out->lockwait_ms = lsince ? now - lsince : 0;
+    out->writes = sd_dbg_writes;
+    out->reads = sd_dbg_reads;
+    out->errors = sd_dbg_errors;
+    out->max_write_ms = sd_dbg_max_write_ms;
+    out->max_lockwait_ms = sd_dbg_max_lockwait_ms;
+    out->last_err = sd_dbg_last_err;
+    out->write_sectors = sd_dbg_write_sectors;
+    out->write_busy_ms = sd_dbg_write_busy_ms;
+    out->read_sectors = sd_dbg_read_sectors;
+    out->read_busy_ms = sd_dbg_read_busy_ms;
 }
 
 static bool sd_buf_is_dma_capable(const void* buf) {
@@ -521,6 +590,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
     int64_t lock_wait_us = 0;
     int64_t xfer_us = 0;
     esp_err_t err = ESP_OK;
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_op_since_ms = sd_dbg_now_ms();
+        sd_dbg_op = 1;
+    }
     /* Do NOT hold furi_hal_spi_bus_lock() across the whole transfer. SD reads
      * can take hundreds of milliseconds and the display commit path also needs
      * this lock for its SPI transactions; holding it here made the UI
@@ -534,12 +607,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         BYTE* cur_dst = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            const int64_t lock_start_us = esp_timer_get_time();
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("read", cur_sector); /* QFDIAG */
             const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_read_sectors(sd_card, cur_dst, cur_sector, chunk);
             xfer_us += esp_timer_get_time() - xfer_start_us;
-            lock_wait_us += xfer_start_us - lock_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_dst += block_size * chunk;
@@ -554,8 +625,10 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         BYTE* cur_dst = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("read", cur_sector); /* QFDIAG */
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_read_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             memcpy(cur_dst, sd_bounce_buf, block_size * chunk);
@@ -567,7 +640,17 @@ static DRESULT sd_fatfs_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
         err = ESP_ERR_NO_MEM;
     }
 
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_reads++;
+        sd_dbg_read_sectors += count;
+        sd_dbg_read_busy_ms += (uint32_t)((esp_timer_get_time() - op_start_us) / 1000);
+        sd_dbg_op = 0;
+    }
     if(err != ESP_OK) {
+        if(QFDIAG_ENABLED) {
+            sd_dbg_errors++;
+            sd_dbg_last_err = err;
+        }
         ESP_LOGE(TAG, "SD read failed: %s", esp_err_to_name(err));
         return RES_ERROR;
     }
@@ -593,7 +676,13 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
     }
 
     const int64_t op_start_us = esp_timer_get_time();
+    int64_t lock_wait_us = 0; /* QFDIAG */
+    int64_t xfer_us = 0;
     esp_err_t err = ESP_OK;
+    if(QFDIAG_ENABLED) {
+        sd_dbg_op_since_ms = sd_dbg_now_ms();
+        sd_dbg_op = 2;
+    }
     if(sd_buf_is_dma_capable(buff)) {
         const size_t block_size = sd_card->csd.sector_size;
         UINT remaining = count;
@@ -601,8 +690,10 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         const BYTE* cur_src = buff;
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("write", cur_sector);
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_write_sectors(sd_card, cur_src, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
@@ -617,8 +708,10 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         while(remaining > 0) {
             UINT chunk = remaining > SD_BOUNCE_SECTORS ? SD_BOUNCE_SECTORS : remaining;
             memcpy(sd_bounce_buf, cur_src, block_size * chunk);
-            furi_hal_spi_bus_lock();
+            lock_wait_us += sd_dbg_bus_lock("write", cur_sector);
+            const int64_t xfer_start_us = esp_timer_get_time();
             err = sdmmc_write_sectors(sd_card, sd_bounce_buf, cur_sector, chunk);
+            xfer_us += esp_timer_get_time() - xfer_start_us;
             furi_hal_spi_bus_unlock();
             if(err != ESP_OK) break;
             cur_src += block_size * chunk;
@@ -629,19 +722,42 @@ static DRESULT sd_fatfs_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT co
         err = ESP_ERR_NO_MEM;
     }
 
+    const int64_t op_us = esp_timer_get_time() - op_start_us;
+    const uint32_t op_ms = (uint32_t)(op_us / 1000);
+    if(QFDIAG_ENABLED) { /* QFDIAG */
+        sd_dbg_writes++;
+        sd_dbg_write_sectors += count;
+        sd_dbg_write_busy_ms += op_ms;
+        if(op_ms > sd_dbg_max_write_ms) sd_dbg_max_write_ms = op_ms;
+        sd_dbg_op = 0;
+    }
+
     if(err != ESP_OK) {
-        ESP_LOGE(TAG, "SD write failed: %s", esp_err_to_name(err));
+        if(QFDIAG_ENABLED) {
+            sd_dbg_errors++;
+            sd_dbg_last_err = err;
+        }
+        ESP_LOGE(
+            TAG,
+            "SD write failed: %s (%u sect @%lu after %lu ms, lock=%lld xfer=%lld)",
+            esp_err_to_name(err),
+            (unsigned)count,
+            (unsigned long)sector,
+            (unsigned long)op_ms,
+            (long long)(lock_wait_us / 1000),
+            (long long)(xfer_us / 1000));
         return RES_ERROR;
     }
 
-    const int64_t op_us = esp_timer_get_time() - op_start_us;
     if(op_us > SD_SLOW_OP_US) {
         ESP_LOGW(
             TAG,
-            "slow write: %u sect @%lu took %lld ms",
+            "slow write: %u sect @%lu took %lld ms (lock=%lld xfer=%lld)",
             (unsigned)count,
             (unsigned long)sector,
-            (long long)(op_us / 1000));
+            (long long)(op_us / 1000),
+            (long long)(lock_wait_us / 1000),
+            (long long)(xfer_us / 1000));
     }
 
     return RES_OK;

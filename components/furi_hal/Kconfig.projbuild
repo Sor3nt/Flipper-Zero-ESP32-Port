@@ -50,3 +50,27 @@ menu "Forced reboot combo"
             (BOARD_REBOOT_COMBO_PIN_A/B). Enabled per board in
             sdkconfig.defaults.<board>.
 endmenu
+
+menu "qFlipper / RPC diagnostics (QFDIAG)"
+    config FURI_QFDIAG
+        bool "Enable QFDIAG transfer diagnostics"
+        default n
+        help
+            Debug-only instrumentation of the qFlipper USB path:
+            USB CDC -> qflipper_bridge -> RPC session/handlers -> storage ->
+            FatFs diskio (SPI bus lock vs card time) -> USB TX.
+
+            While qFlipper mode owns the USB PHY the USB-Serial-JTAG console
+            is dead, so every ESP_LOG line is copied into a 256 KB PSRAM ring
+            and appended to /ext/qfdiag.log (capped at 768 KB) when the host
+            disconnects; download it with qFlipper. Also adds 1 s pipeline
+            stats, an RX byte trace that hexdumps a failing protobuf message,
+            per-message RPC trace logs, SD/SPI-lock timing and ping/write
+            throughput lines.
+
+            Logging only, no behaviour change. Costs ~266 KB PSRAM, a log
+            hook on every ESP_LOG line, and a 1-2 s SD write on each
+            disconnect, so keep it OFF in normal builds. Enable with
+            idf.py -B build-<board> menuconfig, or add CONFIG_FURI_QFDIAG=y
+            to sdkconfig.defaults.<board>, then rebuild.
+endmenu

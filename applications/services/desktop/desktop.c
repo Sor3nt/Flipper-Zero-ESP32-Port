@@ -139,8 +139,20 @@ static void desktop_power_idle_callback(const void* message, void* context);
 static void desktop_set_idle(Desktop* desktop, bool idle) {
     if(desktop->idle == idle) return;
     desktop->idle = idle;
+    /* FIX [QF-1]: the qFlipper screen mirror froze while the device screen was
+     *   dimmed and only resumed on a key press.
+     * ROOT CAUSE: the qFlipper screen stream is driven by GUI redraws
+     *   (canvas_commit). Dimming the panel publishes a power-idle event, and this
+     *   port pauses the dolphin animation on power-idle (upstream does not), so
+     *   no redraw happens and qFlipper gets no frames.
+     * FIX: while the qFlipper USB bridge is active, keep the animation (and thus
+     *   the stream) running; the panel still dims. Without the bridge the
+     *   original power-saving pause is unchanged.
+     * WARNING: anything else that stops desktop redraws while qFlipper is
+     *   connected (timers, idle pause) freezes the mirror the same way. */
+    const bool pause_animation = idle && !qflipper_bridge_is_active();
     animation_manager_set_pause_reason(
-        desktop->animation_manager, AnimationManagerPauseReasonPowerIdle, idle);
+        desktop->animation_manager, AnimationManagerPauseReasonPowerIdle, pause_animation);
     if(idle) {
         furi_timer_stop(desktop->qflipper_usj_timer);
         furi_timer_stop(desktop->update_clock_timer);

@@ -18,6 +18,8 @@
 #include <furi.h>
 #include <furi_hal.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <furi_hal_qfdiag.h>
 #include <momentum_settings.h>
 
 #include <stdint.h>
@@ -27,6 +29,16 @@
 #include <bt/bt_service/bt.h>
 
 #define TAG "RpcSrv"
+
+/* Per-message trace (every decoded RPC message, every handler call). At INFO
+ * these cost 2-3 log lines per 1 KB upload chunk, so they are DEBUG (compiled
+ * out at CONFIG_LOG_MAXIMUM_LEVEL=INFO) unless QFDIAG is enabled, where they
+ * are part of the captured transfer trace. */
+#if QFDIAG_ENABLED
+#define RPC_TRACE(...) ESP_LOGI(TAG, __VA_ARGS__)
+#else
+#define RPC_TRACE(...) ESP_LOGD(TAG, __VA_ARGS__)
+#endif
 
 typedef enum {
     RpcEvtNewData = (1 << 0),
@@ -75,6 +87,16 @@ struct RpcSession {
     FuriStreamBuffer* stream;
     PB_Main* decoded_message;
     bool terminate;
+    /* FIX [QF-3]: RPC sessions piled up (one status-bar RPC icon each) and
+     *   qFlipper could not reconnect until power was removed.
+     * ROOT CAUSE: rpc_session_close() only sets a thread flag that the worker
+     *   cannot see while it is inside a handler, and every handler runs under
+     *   the GLOBAL rpc->busy_mutex. A recursive delete of a big tree runs for
+     *   minutes, so each new session blocked at its first command.
+     * WARNING: set atomically by rpc_session_close(); long-running handlers
+     *   must poll rpc_session_is_closing() and return early. Do not remove, and
+     *   do not add a long handler that ignores it. */
+    volatile bool closing;
     void** system_contexts;
     bool decode_error;
 
@@ -90,6 +112,124 @@ struct RpcSession {
 struct Rpc {
     FuriMutex* busy_mutex;
 };
+
+/* QFDIAG: which message handler the worker is running, and since when. */
+static volatile uint32_t rpc_dbg_handler_tag;
+static volatile uint32_t rpc_dbg_handler_since_ms;
+
+void rpc_debug_get_handler(uint32_t* tag, uint32_t* running_ms) {
+    const uint32_t since = rpc_dbg_handler_since_ms;
+    if(tag) *tag = since ? rpc_dbg_handler_tag : 0;
+    if(running_ms) *running_ms = since ? furi_get_tick() - since : 0;
+}
+
+/* QFDIAG byte trace -------------------------------------------------------
+ * Keeps two copies of the RX byte stream, indexed by absolute stream offset:
+ * what the transport FED (rpc_session_feed) and what nanopb CONSUMED
+ * (rpc_pb_stream_read). On a decode failure they are compared at the same
+ * offsets: MATCH => the bytes were already wrong when they entered the stream
+ * (USB / TinyUSB / bridge); MISMATCH => they changed inside the stream buffer.
+ * The failing message is hexdumped so the corruption pattern (bytes lost,
+ * duplicated, zeroed, a missing 64-byte USB packet, ...) is visible.
+ * Diagnostic only; buffers are allocated only with CONFIG_FURI_QFDIAG. */
+#define QD_PROD_SIZE 8192u
+#define QD_CONS_SIZE 2048u
+#define QD_FEEDLOG   64u
+static uint8_t* qd_prod;
+static uint8_t* qd_cons;
+static volatile uint32_t qd_prod_off;
+static volatile uint32_t qd_cons_off;
+static uint32_t qd_msg_start;
+static struct {
+    uint32_t off;
+    uint32_t len;
+} qd_feedlog[QD_FEEDLOG];
+static volatile uint32_t qd_feedlog_n;
+
+static void qd_trace_reset(void) {
+    if(!QFDIAG_ENABLED) return; /* buffers stay NULL: all trace paths no-op */
+    if(!qd_prod) qd_prod = heap_caps_malloc(QD_PROD_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(!qd_cons) qd_cons = heap_caps_malloc(QD_CONS_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    qd_prod_off = 0;
+    qd_cons_off = 0;
+    qd_msg_start = 0;
+    qd_feedlog_n = 0;
+}
+
+static void qd_ring_put(uint8_t* ring, uint32_t size, uint32_t off, const uint8_t* src, size_t len) {
+    for(size_t i = 0; i < len; i++) {
+        ring[(off + i) % size] = src[i];
+    }
+}
+
+static void qd_hexdump(const char* label, const uint8_t* ring, uint32_t size, uint32_t from, uint32_t to) {
+    for(uint32_t off = from; off < to; off += 32) {
+        char line[32 * 3 + 1];
+        size_t n = 0;
+        for(uint32_t i = off; i < to && i < off + 32; i++) {
+            n += snprintf(line + n, sizeof(line) - n, "%02x ", ring[i % size]);
+        }
+        line[n] = '\0';
+        ESP_LOGE(TAG, "QD %s %06lx: %s", label, (unsigned long)off, line);
+    }
+}
+
+static void qd_dump_decode_failure(const char* err) {
+    if(!qd_prod || !qd_cons) return;
+    const uint32_t cons = qd_cons_off;
+    const uint32_t prod = qd_prod_off;
+    uint32_t from = qd_msg_start > 64 ? qd_msg_start - 64 : 0;
+    if(cons - from > QD_CONS_SIZE - 64) from = cons - (QD_CONS_SIZE - 64);
+
+    /* Length prefix of the failing message (varint at msg_start). */
+    uint32_t msg_len = 0;
+    for(uint32_t i = 0, shift = 0; i < 5 && qd_msg_start + i < cons; i++, shift += 7) {
+        const uint8_t b = qd_cons[(qd_msg_start + i) % QD_CONS_SIZE];
+        msg_len |= (uint32_t)(b & 0x7F) << shift;
+        if(!(b & 0x80)) break;
+    }
+    ESP_LOGE(
+        TAG,
+        "QD DECODE FAIL '%s': msg_start=%lu len=%lu fail_at=%lu (+%lu into msg) fed=%lu",
+        err,
+        (unsigned long)qd_msg_start,
+        (unsigned long)msg_len,
+        (unsigned long)cons,
+        (unsigned long)(cons - qd_msg_start),
+        (unsigned long)prod);
+
+    if(prod - from <= QD_PROD_SIZE) {
+        long mismatch = -1;
+        for(uint32_t o = from; o < cons; o++) {
+            if(qd_cons[o % QD_CONS_SIZE] != qd_prod[o % QD_PROD_SIZE]) {
+                mismatch = (long)o;
+                break;
+            }
+        }
+        ESP_LOGE(
+            TAG,
+            "QD stream integrity %lu..%lu: %s (first mismatch %ld)",
+            (unsigned long)from,
+            (unsigned long)cons,
+            mismatch < 0 ? "MATCH (bytes were bad on arrival)" : "MISMATCH (changed in stream buffer)",
+            mismatch);
+    }
+
+    /* Transport feeds that delivered the bytes around the failure. */
+    const uint32_t nfeed = qd_feedlog_n;
+    const uint32_t first = nfeed > QD_FEEDLOG ? nfeed - QD_FEEDLOG : 0;
+    for(uint32_t i = first; i < nfeed; i++) {
+        const uint32_t off = qd_feedlog[i % QD_FEEDLOG].off;
+        const uint32_t len = qd_feedlog[i % QD_FEEDLOG].len;
+        if(off + len >= from && off <= cons + 256) {
+            ESP_LOGE(TAG, "QD feed @%lu len %lu", (unsigned long)off, (unsigned long)len);
+        }
+    }
+
+    qd_hexdump("cons", qd_cons, QD_CONS_SIZE, from, cons);
+    const uint32_t next_end = (prod - cons > 160) ? cons + 160 : prod;
+    if(prod - cons <= QD_PROD_SIZE) qd_hexdump("next", qd_prod, QD_PROD_SIZE, cons, next_end);
+}
 
 static bool rpc_owner_is_allowed(RpcOwner owner) {
     if(!furi_hal_rtc_is_flag_set(FuriHalRtcFlagLock)) return true;
@@ -180,6 +320,16 @@ size_t rpc_session_feed(
 
     size_t bytes_sent = furi_stream_buffer_send(session->stream, encoded_bytes, size, timeout);
 
+    if(qd_prod && bytes_sent) { /* QFDIAG */
+        const uint32_t off = qd_prod_off;
+        qd_ring_put(qd_prod, QD_PROD_SIZE, off, encoded_bytes, bytes_sent);
+        const uint32_t n = qd_feedlog_n;
+        qd_feedlog[n % QD_FEEDLOG].off = off;
+        qd_feedlog[n % QD_FEEDLOG].len = (uint32_t)bytes_sent;
+        qd_feedlog_n = n + 1;
+        qd_prod_off = off + (uint32_t)bytes_sent;
+    }
+
     furi_thread_flags_set(furi_thread_get_id(session->thread), RpcEvtNewData);
 
     return bytes_sent;
@@ -205,8 +355,13 @@ bool rpc_pb_stream_read(pb_istream_t* istream, pb_byte_t* buf, size_t count) {
     size_t bytes_received = 0;
 
     while(1) {
-        bytes_received += furi_stream_buffer_receive(
+        const size_t qd_got = furi_stream_buffer_receive(
             session->stream, buf + bytes_received, count - bytes_received, 0);
+        if(qd_cons && qd_got && !session->decode_error) { /* QFDIAG */
+            qd_ring_put(qd_cons, QD_CONS_SIZE, qd_cons_off, buf + bytes_received, qd_got);
+            qd_cons_off += (uint32_t)qd_got;
+        }
+        bytes_received += qd_got;
         if(furi_stream_buffer_is_empty(session->stream)) {
             if(session->buffer_is_empty_callback) {
                 session->buffer_is_empty_callback(session->context);
@@ -269,20 +424,41 @@ static int32_t rpc_session_worker(void* context) {
 
         bool message_decode_failed = false;
 
+        qd_msg_start = qd_cons_off; /* QFDIAG */
         if(pb_decode_ex(&istream, &PB_Main_msg, session->decoded_message, PB_DECODE_DELIMITED)) {
             RpcHandler* handler =
                 RpcHandlerDict_get(session->handlers, session->decoded_message->which_content);
 
-            ESP_LOGI(TAG, "Decoded msg: cmd_id=%lu which=%lu has_next=%d",
+            RPC_TRACE("Decoded msg: cmd_id=%lu which=%lu has_next=%d",
                 (unsigned long)session->decoded_message->command_id,
                 (unsigned long)session->decoded_message->which_content,
                 session->decoded_message->has_next);
 
             const bool owner_allowed = rpc_owner_is_allowed(session->owner);
             if(handler && handler->message_handler && owner_allowed) {
-                ESP_LOGI(TAG, "Handler found, executing...");
+                RPC_TRACE("Handler found, executing...");
+                const uint32_t qd_bw0 = QFDIAG_ENABLED ? furi_get_tick() : 0;
                 furi_check(furi_mutex_acquire(rpc->busy_mutex, FuriWaitForever) == FuriStatusOk);
+                uint32_t qd_h0 = 0;
+                if(QFDIAG_ENABLED) { /* QFDIAG: lock wait + running handler */
+                    const uint32_t qd_bw = furi_get_tick() - qd_bw0;
+                    if(qd_bw > 100) ESP_LOGW(TAG, "QD busy_mutex wait %lu ms", (unsigned long)qd_bw);
+                    qd_h0 = furi_get_tick();
+                    rpc_dbg_handler_tag = session->decoded_message->which_content;
+                    rpc_dbg_handler_since_ms = qd_h0 ? qd_h0 : 1;
+                }
                 handler->message_handler(session->decoded_message, handler->context);
+                if(QFDIAG_ENABLED) { /* QFDIAG: slow handler */
+                    rpc_dbg_handler_since_ms = 0;
+                    const uint32_t qd_hd = furi_get_tick() - qd_h0;
+                    if(qd_hd > 300) {
+                        ESP_LOGW(
+                            TAG,
+                            "QD handler which=%lu took %lu ms",
+                            (unsigned long)rpc_dbg_handler_tag,
+                            (unsigned long)qd_hd);
+                    }
+                }
                 furi_check(furi_mutex_release(rpc->busy_mutex) == FuriStatusOk);
             } else if(handler && handler->message_handler) {
                 rpc_send_and_release_empty(
@@ -303,6 +479,7 @@ static int32_t rpc_session_worker(void* context) {
         }
 
         if(message_decode_failed) {
+            if(!session->terminate) qd_dump_decode_failure(PB_GET_ERROR(&istream)); /* QFDIAG */
             furi_stream_buffer_reset(session->stream);
             if(!session->terminate) {
                 ESP_LOGE(TAG, "Decode FAILED: '%s'", PB_GET_ERROR(&istream));
@@ -380,7 +557,9 @@ RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner) {
     session->stream = furi_stream_buffer_alloc(RPC_BUFFER_SIZE, 1);
     session->rpc = rpc;
     session->terminate = false;
+    session->closing = false;
     session->decode_error = false;
+    qd_trace_reset(); /* QFDIAG */
     session->owner = owner;
     RpcHandlerDict_init(session->handlers);
 
@@ -416,10 +595,20 @@ void rpc_session_close(RpcSession* session) {
     furi_check(session);
     furi_check(session->rpc);
 
+    /* FIX [QF-3]: publish "host gone" BEFORE anything else so a handler that is
+     * running right now (e.g. recursive delete) stops and releases busy_mutex.
+     * WARNING: keep this first; the thread flag below is only seen between
+     * handlers. */
+    __atomic_store_n(&session->closing, true, __ATOMIC_RELEASE);
     rpc_session_set_send_bytes_callback(session, NULL);
     rpc_session_set_close_callback(session, NULL);
     rpc_session_set_buffer_is_empty_callback(session, NULL);
     furi_thread_flags_set(furi_thread_get_id(session->thread), RpcEvtDisconnect);
+}
+
+bool rpc_session_is_closing(RpcSession* session) {
+    furi_check(session);
+    return __atomic_load_n(&session->closing, __ATOMIC_ACQUIRE);
 }
 
 void rpc_init(void) {

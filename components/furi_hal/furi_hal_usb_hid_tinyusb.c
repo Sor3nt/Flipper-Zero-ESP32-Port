@@ -216,8 +216,19 @@ void tud_hid_set_report_cb(
 void furi_hal_usb_backend_set_light_sleep_inhibited(bool inhibited) {
     if(s_light_sleep_inhibited == inhibited) return;
     if(inhibited) {
+        /* NOTE: insomnia only pins the CPU frequency (ESP_PM_CPU_FREQ_MAX); it
+         * does NOT hold the ESP_PM_NO_LIGHT_SLEEP gate, so on its own the chip
+         * could still enter automatic tickless light sleep once the desktop goes
+         * idle (screen dimmed) and releases that gate, stalling the CDC/MSC
+         * endpoints and the SD card mid-transaction during a USB session. Hold
+         * the real light-sleep gate too, so nothing sleeps while USB is active.
+         * First suspected for the qFlipper large-upload failure; it was NOT that
+         * cause (see FIX [QF-2] in furi_hal_usb_cdc.c), but it is a correct
+         * guard on its own. */
         furi_hal_power_insomnia_enter();
+        furi_hal_power_light_sleep_inhibit_enter();
     } else {
+        furi_hal_power_light_sleep_inhibit_exit();
         furi_hal_power_insomnia_exit();
     }
     s_light_sleep_inhibited = inhibited;

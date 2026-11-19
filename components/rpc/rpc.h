@@ -75,6 +75,14 @@ RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner);
  */
 void rpc_session_close(RpcSession* session);
 
+/** True once rpc_session_close() has been called. Long-running handlers poll
+ * this to stop early: handlers run under a global lock, so one that keeps going
+ * after its host left blocks every newer session.
+ *
+ * @param   session     pointer to RpcSession descriptor
+ */
+bool rpc_session_is_closing(RpcSession* session);
+
 /** Set session context for callbacks to pass
  *
  * @param   session     pointer to RpcSession descriptor
@@ -135,6 +143,10 @@ size_t rpc_session_feed(RpcSession* session, const uint8_t* buffer, size_t size,
  * @return              bytes available in buffer
  */
 size_t rpc_session_get_available_size(RpcSession* session);
+
+/* QFDIAG: message handler currently running in an RPC worker (which_content
+ * tag) and for how long; both 0 when idle. Diagnostic only. */
+void rpc_debug_get_handler(uint32_t* tag, uint32_t* running_ms);
 
 /** Initialize the RPC service (creates RECORD_RPC).
  *  Must be called once before any rpc_session_open(). */

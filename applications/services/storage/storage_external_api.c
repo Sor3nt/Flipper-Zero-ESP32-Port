@@ -970,10 +970,19 @@ FuriPubSub* storage_get_pubsub(Storage* storage) {
 }
 
 bool storage_simply_remove_recursive(Storage* storage, const char* path) {
+    return storage_simply_remove_recursive_abortable(storage, path, NULL, NULL);
+}
+
+bool storage_simply_remove_recursive_abortable(
+    Storage* storage,
+    const char* path,
+    StorageRemoveAbortCallback abort_cb,
+    void* abort_context) {
     furi_check(storage);
     furi_check(path);
     FileInfo fileinfo;
     bool result = false;
+    bool aborted = false;
     FuriString* fullname;
     FuriString* cur_dir;
 
@@ -993,6 +1002,17 @@ bool storage_simply_remove_recursive(Storage* storage, const char* path) {
         }
 
         while(storage_dir_read(dir, &fileinfo, name, MAX_NAME_LENGTH)) {
+            /* FIX [QF-3]/[QF-4]: polled once per entry. A big tree takes a
+             * minute or more to remove; the RPC delete handler uses this hook
+             * to stop when its host is gone (QF-3) and to send qFlipper
+             * keep-alive replies so its 30 s timeout does not fire (QF-4).
+             * WARNING: keep it inside the per-entry loop; polling less often
+             * (e.g. once per directory) starves the keep-alive on a directory
+             * with thousands of files. */
+            if(abort_cb && abort_cb(abort_context)) {
+                aborted = true;
+                break;
+            }
             if(file_info_is_dir(&fileinfo)) {
                 furi_string_cat_printf(cur_dir, "/%s", name); //-V576
                 go_deeper = true;
@@ -1005,6 +1025,10 @@ bool storage_simply_remove_recursive(Storage* storage, const char* path) {
             furi_string_free(fullname);
         }
         storage_dir_close(dir);
+
+        if(aborted) {
+            break;
+        }
 
         if(go_deeper) {
             go_deeper = false;
